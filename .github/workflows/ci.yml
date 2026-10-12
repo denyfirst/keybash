@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Private-repository checkout: the short-lived job token is supplied only to
+# fetch, not persisted in git configuration. There are no third-party actions.
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact event commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            fetch -q --depth 1 origin "${GITHUB_SHA}"
+          unset auth
+          git checkout -q FETCH_HEAD
+
+      - name: Verify the pinned toolchain and module files
+        run: |
+          set -eu
+          expected="$(awk '$1 == "go" {print "go" $2}' go.mod)"
+          test "$(go env GOVERSION)" = "${expected}"
+          go mod tidy
+          test -z "$(git status --porcelain)"
+          go mod verify
+
+      - name: Check formatting and invariant citations
+        run: |
+          set -eu
+          test -z "$(gofmt -l internal)"
+          grep -ohE '`(Test|Fuzz)[A-Za-z0-9_]+' docs/SECURITY-INVARIANTS.md \
+            | tr -d '`' | sort -u > "${RUNNER_TEMP}/cited"
+          grep -rhoE '^func (Test|Fuzz)[A-Za-z0-9_]+' --include='*_test.go' internal \
+            | sed -E 's/^func //' | sort -u > "${RUNNER_TEMP}/defined"
+          test -z "$(comm -23 "${RUNNER_TEMP}/cited" "${RUNNER_TEMP}/defined")"
+
+      - name: Vet, race-test and build
+        run: |
+          set -eu
+          go vet ./...
+          go test -race -shuffle=on -count=1 -timeout=5m ./...
+          go build -trimpath ./...
+          for platform in linux darwin windows; do
+            GOOS="${platform}" go vet ./...
+            GOOS="${platform}" go build -trimpath ./...
+          done
+
+  analysis:
+    name: Static and vulnerability analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact event commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            fetch -q --depth 1 origin "${GITHUB_SHA}"
+          unset auth
+          git checkout -q FETCH_HEAD
+
+      - name: Install pinned analysis tools outside the repository
+        run: |
+          set -eu
+          export GOBIN="${RUNNER_TEMP}/keybash-tools"
+          mkdir -p "${GOBIN}"
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Run static, security, vulnerability and workflow checks
+        run: |
+          set -eu
+          tools="${RUNNER_TEMP}/keybash-tools"
+          "${tools}/staticcheck" ./...
+          "${tools}/gosec" -severity medium -confidence medium ./...
+          "${tools}/govulncheck" ./...
+          "${tools}/actionlint"
+
+  commit-signatures:
+    name: Commit signatures
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Fetch PR history without executing its code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            fetch -q --no-tags --filter=blob:none origin "${GITHUB_SHA}"
+          unset auth
+          git update-ref refs/merge FETCH_HEAD
+          read -r -a parents <<< "$(git rev-list --parents -n 1 refs/merge)"
+          test "${#parents[@]}" -eq 3
+          git update-ref refs/base "${parents[1]}"
+          git update-ref refs/head "${parents[2]}"
+          # The next step authenticates any lazy fetch of the base signer blob.
+
+      - name: Verify commits against the base signer list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          signers="${RUNNER_TEMP}/keybash-commit-signers"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            show refs/base:.github/commit-signers > "${signers}"
+          unset auth
+          test -s "${signers}"
+          git config gpg.format ssh
+          git config gpg.ssh.allowedSignersFile "${signers}"
+          checked=0
+          for commit in $(git rev-list refs/base..refs/head); do
+            checked=$((checked + 1))
+            git verify-commit "${commit}"
+          done
+          test "${checked}" -gt 0

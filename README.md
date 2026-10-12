@@ -2,12 +2,44 @@
 
 A Denyfirst self-hosted SSH and RDP workspace, in development.
 
-Keybash is a separate product and repository from Porch and Rootwell. No
-application or production release is present in this bootstrap commit.
+Keybash will let individuals and small teams keep their own credentials and
+work on servers from a browser. Deployment is exclusively self-hosted, with
+bundled local assets and no required vendor relay, cloud account, or telemetry.
+Security comes before convenience; comfortable clipboard and keyboard behavior
+are designed and tested alongside the security boundaries.
 
-This root commit establishes the maintainer's public signing identities so
-subsequent pull requests can verify commits against trusted base history.
-Private signing material is not stored in this repository or CI.
+**Current status:** repository foundation and tested outbound IP target guard.
+There is no login, vault, terminal, RDP gateway, deployment, or production
+release yet. The guard has not been integrated into a connection worker.
 
-Development priorities: security, correctness, privacy, recoverability, and
-comfortable everyday browser access. Deployment is exclusively self-hosted.
+## Start here
+
+- [Product plan (Azerbaijani)](docs/PRODUCT-PLAN-AZ.md)
+- [Current status (Azerbaijani)](docs/STATUS-AZ.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Engineering and signing workflow](docs/ENGINEERING.md)
+- [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
+
+## Development checks
+
+Go selects the toolchain pinned in `go.mod`. The first package uses only the
+standard library. PowerShell:
+
+```powershell
+./scripts/check.ps1
+```
+
+CI also runs Linux race tests, supported compilation checks, pinned static
+analysis, vulnerability checking and commit signature verification. Analysis
+tools and source dependencies are not part of the product runtime.
+
+## Independence and trust
+
+Porch and Rootwell remain separate, read-only references. Keybash changes are
+made only in this repository. It uses the existing Denyfirst public commit/tag
+and separate release signer identities; private keys are never copied here.
+
+The maintainer authorized public repository development. A source license and
+production release have not yet been selected. No independent audit is
+claimed. The self-hosted gateway will need access to active credentials; the
+planned vault is not a zero-knowledge guarantee against host compromise.
