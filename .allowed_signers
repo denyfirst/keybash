@@ -1,0 +1,3 @@
+# Denyfirst release signing identity. Public key only; no CI signing key.
+# Release manifests use the file namespace and releases@denyfirst.dev identity.
+releases@denyfirst.dev namespaces="file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDD7Ie9zRf76RynH052/Abkv5k2nzosQd2DihyQMixVR denyfirst releases

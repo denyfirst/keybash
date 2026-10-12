@@ -1,0 +1,3 @@
+# Denyfirst commit and tag signing identity. This is a public key only.
+# Pull requests verify against this file from the trusted base commit.
+106975655+cyberbihan@users.noreply.github.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHNpNbqkeNwzoNFxmAXL+GwHVauYxxLmvodNZDQIuTt9
