@@ -191,3 +191,59 @@ This remains maintainer self-review, not an independent security audit. Lab
 capability authentication is not production auth/vault/ownership. Real network
 hosts, load, vim/nano/tmux/htop, native Windows/macOS clipboard and Safari/Firefox
 remain future evidence. No product deployment or release is created here.
+
+## Protocol lab slice 4a: credential-free RDP boundaries (2026-10-13)
+
+Fresh in-memory certificate/key loopback fixtures perform initial RDP HYBRID
+negotiation and real Go TLS 1.2/1.3 handshakes, then observe closure without
+application data. Ed25519, RSA and ECDSA succeed; changed/expired/future/client-
+purpose/CA/missing-usage certificates, weak RSA and old TLS fail. Fixed-size
+confirmation tests refuse downgrade, missing negotiation, malformed framing,
+failure responses and remote lengths. Cancellation during negotiation and TLS,
+stalled-write deadlines, late dial success and failed-dial cleanup are covered.
+These are not CredSSP, Windows account or native FreeRDP interoperability tests.
+
+Private wire/text tests cover split UTF-8/emoji, CRLF/LF and arbitrary text bytes,
+both directions and distinct sessions, exact 32 KiB success/overquota refusal,
+canonical base64, MIME/type/stream/replay refusal and buffer clearing. HTML is
+not a permitted clipboard format. No browser/OS clipboard or desktop is used.
+Local ten-second fuzz runs cover confirmation and combined instruction/text
+parsing; CI requires fifteen-second runs plus Linux race/shuffle and cross-vet/
+build. Standard Go/Node/static/security/vulnerability/workflow gates still apply.
+No new module or vendored native/browser dependency.
+
+Behavioral mutations compiled and failed their intended assertions:
+
+1. Skip digest mismatch refusal: changed-pin identity test failed.
+2. Refuse matching digest: valid TLS 1.2/1.3 probe tests failed.
+3. Accept TLS/legacy selection along with HYBRID: downgrade test failed.
+4. Admit HTML clipboard: HTML refusal test failed.
+5. Refuse text/plain: valid Unicode stream test failed.
+6. Skip cumulative text quota: overquota test failed.
+
+Original source bytes were restored after each mutation, then affected tests
+reran successfully. Mutations and diagnostic outputs are not tracked.
+
+Required CI's tagged worker experiment creates a transient empty netns, drops
+UID/GID/groups/all capabilities and sets no-new-privileges, then runs the fixed
+test child with an empty environment apart from synthetic test metadata. Child
+assertions verify the namespace/interface/identity and refused loopback/IPv4/
+IPv6 TCP and DNS UDP. The host loopback sentinel observes no connection. The
+same child run without namespace creation must fail the namespace assertion;
+there is no skip on setup failure. This is test-only network isolation, not a
+native worker, filesystem sandbox or approved-target broker.
+
+Separate adversarial maintainer self-review inspected raw transport ownership,
+cancellation/timer order, remote-size allocation, independent DER pin trust,
+TLS cipher floor, usage/key/critical-extension policy, no credential or returned
+connection, per-direction buffer ownership, poisoned-stream cleanup and tagged
+root setup/privilege drop. Added explicit AEAD TLS 1.2 suites and refusal of
+unhandled critical extensions. Checked that probe success is documented as
+incapable of authorizing a later native connection, and that the code exposes
+no guacd launcher, browser tunnel or raw instruction forwarding entry point.
+
+This is maintainer self-review, not independent audit. Native source/build/CVE
+inventory, actual pin and CredSSP behavior, usable approved-only egress and
+filesystem/resource sandbox, desktop/browser clipboard, ownership/vault and
+production packaging remain gates in ADR 0003. No real credentials, deployment
+or release are used/created. Porch and Rootwell remain untouched.

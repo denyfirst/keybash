@@ -1,7 +1,7 @@
 # Implemented Keybash security invariants
 
 This file describes only code that exists. Planned login, vault,
-RDP certificate, clipboard and deployment controls are in the product
+native RDP authentication, browser clipboard and deployment controls are in the product
 plan and roadmap, not claims of this lab. Tests use synthetic targets,
 in-memory connections and ephemeral loopback SSH/browser fixtures. They perform
 no external server dials and load no real credentials.
@@ -43,6 +43,13 @@ no external server dials and load no real credentials.
 | Malformed/oversized/unknown or duplicate control fields do not reach SSH operations | bounded strict control decoding and WebSocket limit | `TestLabMalformedOversizedAndUnexpectedAckCloseStream`, `TestLabInvalidConfigurationAndControlBounds`, `FuzzTerminalControl` |
 | Browser transport preserves input and bounded resize | binary input and typed resize control | `TestLabInputResizeOutputCreditAndLogoutRevocation` |
 | Real Linux PTY handles Unicode, Ctrl+C and applied kernel resize | fresh-key SSH fixture, test-only Bash PTY | `TestSSHLinuxBashPTYUnicodeInterruptAndKernelResize` |
+| RDP probe requires HYBRID and fixed-size valid confirmation | bounded X.224/TPKT experiment, no downgrade | `TestRDPNegotiationRejectsDowngradeMalformedAndOversized`, `FuzzRDPConfirmation` |
+| Credential-free probe requires the approved current leaf and TLS >=1.2 | mandatory exact DER pin, usage/key checks | `TestRDPHybridTLSProbeVerifiesPinWithoutCredentialsAndCloses`, `TestRDPChangedExpiredAndWrongPurposeCertificatesRefused`, `TestRDPProbeRSAAndECDSAHandshakeAndWeakRSARefusal`, `TestRDPPinCertificateKeyAndCriticalExtensionConstraints` |
+| Probe returns no live stream and timeout/cancellation close I/O | owned transport close, five-second budget | `TestRDPInvalidConfigurationCanceledAndFailedDialClose`, `TestRDPProbeCancellationUnblocksNegotiationAndTLS`, `TestRDPProbeDeadlineClosesStalledConnection` |
+| Private text prototype preserves fragmented Unicode and isolates sessions/directions | owned per-direction accumulator; completed end only | `TestRDPClipboardUnicodeFragmentedBothDirectionsAndSessionIsolation` |
+| Prototype refuses nontext types, malformed base64/UTF-8, wrong IDs, replay and excess text | clipboard/blob/end only, strict encoding, 32 KiB total | `TestRDPClipboardRejectsTypesReplayMalformedAndQuota`, `TestRDPClipboardExactQuotaAndRevocation` |
+| Guacamole prototype bounds lengths and rejects invalid UTF-8 | 48 KiB per instruction, 16 elements, codepoint lengths | `TestRDPWireCodepointsBoundsAndMalformed`, `FuzzRDPWireAndClipboard` |
+| Empty test netns denies host/network TCP and DNS UDP without capabilities | CI fixed child; removed namespace must fail | `TestRDPEmptyWorkerNamespaceDeniesEgress`, `TestRDPWorkerNamespaceChild` |
 
 Browser evidence is additionally enforced by `web/paste.test.mjs` and the
 `browserlab` tagged `TestBrowserTerminalLab`: paste review/cancel/approve, byte
@@ -52,6 +59,13 @@ after logout. Linux adds native headless clipboard, bracketed Bash paste and
 kernel resize. Windows uses a mocked clipboard to protect the workstation.
 
 ## Limits
+
+RDP evidence is a pre-credential experiment and private text prototype. The
+probe checks its own TLS, closes it, and never sends CredSSP; it cannot authorize
+guacd's connection. DER pins replace CA/hostname trust here. Native version,
+identity/NLA behavior, allowed-target broker and filesystem/resource sandbox
+are not implemented. The empty Linux test namespace denies approved destinations
+too. Codec tests are not desktop/browser clipboard evidence. See ADR 0003.
 
 The IP guard accepts parsed IP/port pairs. `NamedTarget` adds ASCII hostname
 resolution with independently approved per-host pins and a five-second total

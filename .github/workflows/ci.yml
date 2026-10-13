@@ -91,7 +91,15 @@ jobs:
           go test ./internal/targetguard -run='^$' -fuzz='^FuzzCanonicalHostname$' -fuzztime=15s
           go test ./internal/sshtransport -run='^$' -fuzz='^FuzzSSHHostKeyConfig$' -fuzztime=15s
           go test ./internal/terminalweb -run='^$' -fuzz='^FuzzTerminalControl$' -fuzztime=15s
+          go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPConfirmation$' -fuzztime=15s
+          go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPWireAndClipboard$' -fuzztime=15s
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
+          # Test-only empty netns; root setup drops to UID/GID 65534 with no
+          # effective capabilities before the fixed child runs. No guacd yet.
+          go test -c -tags=workerlab -race -o "${RUNNER_TEMP}/keybash-rdp-isolation.test" ./internal/rdplab
+          go vet -tags=workerlab ./internal/rdplab
+          chmod 755 "${RUNNER_TEMP}/keybash-rdp-isolation.test"
+          "${RUNNER_TEMP}/keybash-rdp-isolation.test" -test.run='^TestRDPEmptyWorkerNamespaceDeniesEgress$' -test.timeout=15s -test.v
           go build -trimpath ./...
           for platform in linux darwin windows; do
             GOOS="${platform}" go vet ./...
