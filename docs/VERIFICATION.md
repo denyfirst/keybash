@@ -90,3 +90,56 @@ This remains implementation-session maintainer self-review, not an independent
 audit. It proves a library boundary under synthetic transports, not integration
 with SSH, guacd, a browser, installation DNS or network isolation. Outstanding
 protocol adoption and identity checks are recorded in `PROTOCOL-LAB.md`.
+
+## Protocol lab slice 2: SSH host identity and PTY (2026-10-13)
+
+Scope: reviewed/pinned SSH dependency, guarded stream integration, host identity,
+key authentication and one remote session channel. A synthetic echo server uses
+fresh Ed25519 keys and an ephemeral loopback TCP listener. Only tests listen;
+the production library has no listener, local process, credential import or
+browser route. No external server or real user credential is contacted/loaded.
+
+Tests demonstrate changed-key refusal before server authentication callbacks or
+user signatures; refusal of none-auth, authentication/PTY/shell failures and
+legacy negotiation; exact Unicode/control-byte input/output; resize and extended
+output; frame/dimension limits; unsolicited forwarding refusal; deadline cleanup;
+active cancellation of readers and backpressured output. They exercise the SSH
+wire protocol, not a real Bash/OS PTY or browser clipboard. Host-key configuration
+fuzzing ran locally for ten seconds without a failure; CI runs it for fifteen.
+
+Compiled security mutations, all followed by byte-for-byte source restoration:
+
+1. Added `&& false` to host pin mismatch refusal:
+   `TestSSHChangedHostKeyStopsBeforeAuthentication` failed.
+2. Reversed host pin comparison to reject the approved key:
+   `TestSSHVerifiedKeyOpensRemotePTYWithExactUnicodeInputAndResize` failed.
+3. Disabled signed-key enforcement with `&& false`: the none-auth subtest in
+   `TestSSHRefusesNoneAuthAndAuthenticationOrPTYFailure` failed.
+4. Removed active context cancellation's close call:
+   `TestSSHSessionCancellationUnblocksReadersAndClosesRemote` failed.
+5. Added a temporary blank OpenPGP import. The source compiled; the local
+   dependency gate refused it before application tests. Removed the import and
+   verified original source bytes. CI applies the same dependency exclusion.
+
+Restored local format/module/vet/tests/build/analysis gates and platform builds
+apply as before. Dependency scan detail matters: zero imported-package and
+reachable-symbol vulnerabilities, with the excluded module-only OpenPGP advisory
+recorded in `DEPENDENCIES.md`. Do not describe the entire module as clean.
+Linux race/fuzz evidence comes from CI; Windows compilation is not race evidence.
+
+Separate adversarial maintainer self-review inspected final trust and cleanup
+paths: trusted per-target host pin, no second dial, Ed25519-only identities,
+supported algorithms/SHA-2 MACs, signer gating, no fallback, none-auth refusal,
+setup deadline transfer, close on failures, context watcher shutdown, channel
+request denial, and bounded input/size. Fixed EOF normalization so wrapped EOF
+diagnostics cannot cross the public error boundary. Reviewed parser/queue/channel
+limits from the pinned dependency, graph/license notices, and excluded OpenPGP.
+Shuffled gates exposed a transport/context timer ordering race: raw deadline
+could expire while context Err remained nil. Added elapsed-deadline classification
+and deterministic evidence, then reran the restored gates.
+
+This is implementation-session self-review, not an independent audit. Host-key
+rotation UI, ownership/auth/vault, actual Linux shell/browser matrix, worker
+isolation, aggregate quotas, idle/revocation policy, SSH exit-status UX and RDP
+remain unimplemented. Buffered output already received before close can still
+be read; a future application must enforce revocation on its output path too.

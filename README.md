@@ -10,8 +10,10 @@ are designed and tested alongside the security boundaries.
 
 **Current status:** repository foundation, tested outbound IP target guard,
 and hostname-scoped DNS pins with literal-IP dialing.
-There is no login, vault, terminal, RDP gateway, deployment, or production
-release yet. The guard has not been integrated into a connection worker.
+An SSH library lab now verifies an approved Ed25519 host key before key
+authentication and opens a bounded remote PTY with cancellation and resize.
+There is no login, vault, browser terminal, RDP gateway, deployment, or production
+release yet. SSH tests use a synthetic server, not a real Linux shell/browser.
 
 ## Start here
 
@@ -21,11 +23,12 @@ release yet. The guard has not been integrated into a connection worker.
 - [Engineering and signing workflow](docs/ENGINEERING.md)
 - [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
 - [Protocol lab scope and next gates](docs/PROTOCOL-LAB.md)
+- [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
 ## Development checks
 
-Go selects the toolchain pinned in `go.mod`. The first package uses only the
-standard library. PowerShell:
+Go selects the toolchain pinned in `go.mod`. The target guard uses the standard
+library; SSH uses the reviewed dependency pinned in `go.mod`. PowerShell:
 
 ```powershell
 ./scripts/check.ps1

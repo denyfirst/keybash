@@ -16,20 +16,29 @@ There is no listener, secret file, local shell or browser route. Tests use
 synthetic in-memory transports. This slice adds no runtime dependency.
 See ADR 0002 for availability tradeoffs and deployment limits.
 
-## Slice 2: SSH identity and remote PTY (next)
+## Slice 2: SSH identity and remote PTY (library lab implemented)
 
-Review and pin a maintained `golang.org/x/crypto/ssh` version before adoption:
-official license, module graph, vulnerability scan against the exact selected
-version, parser/resource limits, and update owner. The candidate is maintained
-under Go's extended crypto module; it is not approved by this document alone.
-Pass the guard's connection to `ssh.NewClientConn`; do not use `ssh.Dial` to
-re-resolve the name. Require an independently supplied host public key or
-explicit trust record. Unknown/changed keys fail without password fallback.
+Adopted `golang.org/x/crypto v0.58.0`; exact graph, licenses, vulnerability
+scope, limits and update owner are recorded in `DEPENDENCIES.md`. The public
+`sshtransport.Connect` receives a guarded `NamedTarget` and trusted per-target
+configuration, then passes its connection to `ssh.NewClientConn` without
+re-resolution. The approved host key is copied and checked before key
+authentication. The initial lab accepts Ed25519 host/user keys only; no automatic
+trust, password, agent, or keyboard-interactive fallback.
 
-Use a synthetic SSH server fixture to show authentication, remote PTY, resize,
-Unicode input/output, handshake timeout and cancellation. Verify that a bad
-host key prevents sending authentication credentials. No host local shell and
-no user's real SSH agent, private keys, passwords or server inventory.
+A synthetic SSH echo server uses fresh in-memory keys and an ephemeral loopback
+test listener. It shows real SSH authentication, PTY/shell request negotiation,
+resize, exact Unicode/control-byte streams, extended output, setup timeout and
+active cancellation. Bad host keys stop before user authentication; a server
+accepting `none` cannot open a PTY. Input is capped at 32 KiB per write and
+dimensions at 500 columns/200 rows. Both stdout and stderr must be consumed by
+the owner; channel windows provide backpressure. No forwarding API is exposed.
+
+The fixture does not execute Bash, allocate an OS PTY or prove vim/tmux behavior.
+Production `NamedTarget` dialing and synthetic SSH transport are tested at their
+separate boundaries; the fixture's private test seam does not relax the guard's
+loopback ban. There is no browser entry point, vault, credential import or
+application user authorization. No user's real SSH keys/agent or server inventory.
 
 Primary API reference: [Go SSH package](https://pkg.go.dev/golang.org/x/crypto/ssh).
 Exact dependency versions and test evidence belong in the adoption PR.
