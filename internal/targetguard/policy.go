@@ -1,5 +1,6 @@
 // Package targetguard binds outbound TCP dials to approved IP/port pairs.
-// DNS and credential ownership are separate, not-yet-implemented boundaries.
+// NamedTarget also binds DNS results to an independently approved pin set.
+// Credential ownership and protocol authentication are separate boundaries.
 package targetguard
 
 import (
@@ -93,6 +94,10 @@ func (p *Policy) DialContext(ctx context.Context, endpoint netip.AddrPort) (net.
 	}
 	if conn == nil {
 		return nil, ErrUnavailable
+	}
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		_ = conn.Close()
+		return nil, cancelErr
 	}
 	return conn, nil
 }

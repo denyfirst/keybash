@@ -204,3 +204,22 @@ func TestPolicyCopiesInputsAndSupportsConcurrentReads(t *testing.T) {
 	}
 	group.Wait()
 }
+
+func TestCanceledSuccessfulDialClosesConnection(t *testing.T) {
+	p := testPolicy(t, []netip.AddrPort{endpoint("10.20.30.40:22")}, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	p.dial = func(context.Context, string, string) (net.Conn, error) {
+		cancel()
+		return client, nil
+	}
+	if conn, err := p.DialContext(ctx, endpoint("10.20.30.40:22")); conn != nil || !errors.Is(err, context.Canceled) {
+		t.Fatal("late successful dial survived cancellation")
+	}
+	if _, err := server.Write([]byte("synthetic data")); err == nil {
+		t.Fatal("late successful dial leaked a connection")
+	}
+}

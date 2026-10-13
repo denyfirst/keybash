@@ -8,7 +8,8 @@ bundled local assets and no required vendor relay, cloud account, or telemetry.
 Security comes before convenience; comfortable clipboard and keyboard behavior
 are designed and tested alongside the security boundaries.
 
-**Current status:** repository foundation and tested outbound IP target guard.
+**Current status:** repository foundation, tested outbound IP target guard,
+and hostname-scoped DNS pins with literal-IP dialing.
 There is no login, vault, terminal, RDP gateway, deployment, or production
 release yet. The guard has not been integrated into a connection worker.
 
@@ -19,6 +20,7 @@ release yet. The guard has not been integrated into a connection worker.
 - [Roadmap](docs/ROADMAP.md)
 - [Engineering and signing workflow](docs/ENGINEERING.md)
 - [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
+- [Protocol lab scope and next gates](docs/PROTOCOL-LAB.md)
 
 ## Development checks
 
@@ -29,7 +31,7 @@ standard library. PowerShell:
 ./scripts/check.ps1
 ```
 
-CI also runs Linux race tests, supported compilation checks, pinned static
+CI also runs Linux race tests, bounded hostname fuzzing, compilation checks, pinned static
 analysis, vulnerability checking and commit signature verification. Analysis
 tools and source dependencies are not part of the product runtime.
 

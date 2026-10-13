@@ -1,7 +1,7 @@
 # Implemented Keybash security invariants
 
 This file describes only code that exists. Planned login, vault, SSH host-key,
-RDP certificate, DNS, clipboard and deployment controls are in the product
+RDP certificate, clipboard and deployment controls are in the product
 plan and roadmap, not claims of this foundation. Tests use synthetic targets
 and in-memory connections; they perform no external network dials.
 
@@ -17,13 +17,28 @@ and in-memory connections; they perform no external network dials.
 | Already-canceled requests perform no network activity | pre-dial context check | `TestCanceledContextPerformsNoDial` |
 | Dial errors do not reveal the target or underlying diagnostics | fixed public error | `TestDialErrorsDoNotExposeTargetOrDiagnostics` |
 | A failed dial cannot leak an unexpected connection | close before returning a fixed error | `TestFailedDialClosesUnexpectedConnection` |
+| A late successful dial cannot escape an observed cancellation | close before returning cancellation | `TestCanceledSuccessfulDialClosesConnection` |
+| DNS is not a target approval authority, including other globally approved servers | per-target copied IP pins | `TestNamedTargetRebindingDoesNotApproveAnotherServer`, `TestNamedTargetCopiesPinsAndSupportsConcurrentReads` |
+| The entire DNS result is checked before any target TCP activity | policy and pin checks for every answer, maximum 16 answers | `TestNamedTargetRejectsWholeAnswerBeforeAnyTCP` |
+| One logical lookup, exact rooted hostname, literal-IP TCP dial | `NamedTarget.DialContext` | `TestNamedTargetResolvesOnceAndDialsPinnedLiteral` |
+| Failure does not silently switch to another address | one selected literal endpoint | `TestNamedTargetUsesFirstPinnedAnswerWithoutFallback` |
+| Bad hostname, missing pins, wrong port or missing policy cannot create a named target | `NewNamedTarget` | `TestNamedTargetConfigurationFailsClosed`, `FuzzCanonicalHostname` |
+| Resolver errors and partial answers disclose no diagnostics and cause no TCP dial | fixed errors and shared deadline | `TestNamedTargetDNSFailureAndCancellationPerformNoTCP` |
 
 ## Limits
 
-The guard accepts parsed IP/port pairs, not hostnames. It is not yet wired into
-an SSH/RDP worker. Integration must approve and dial the same resolved address
-without asking guacd or another library to resolve the hostname again. A
-resolver's returned IP still needs the same protection and exact-target checks.
+The IP guard accepts parsed IP/port pairs. `NamedTarget` adds ASCII hostname
+resolution with independently approved per-host pins and a five-second total
+resolution/dial budget (a shorter caller deadline wins). Search suffixes are
+disabled by looking up a rooted name. All answers must pass policy and pin
+checks. The first returned address is selected; address fallback, IDNA
+conversion, automated approval and DNS discovery are not implemented.
+
+Neither path is wired into an SSH/RDP worker. Integration must use the returned
+connection without another hostname dial. In particular, guacd has its own
+network path; this Go guard does not constrain it. The configured DNS resolver
+is trusted infrastructure and may itself require network access. This is not
+a DNS sandbox, DNSSEC guarantee or proof of target identity.
 
 The operator must supply the installation's database/control networks; the
 guard cannot infer them. Revocation will create new policy snapshots and stop
