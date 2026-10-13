@@ -80,7 +80,29 @@ unmeasured. No full browser matrix or offline egress-capture claim is made.
 The [xterm.js security guide](https://xtermjs.org/docs/guides/security/)
 informs these integration gates; using the renderer alone does not secure SSH.
 
-## Slice 4: RDP transport and clipboard
+## Slice 4a: credential-free RDP boundaries (lab implemented)
+
+`rdplab.Probe` performs fixed-size initial RDP negotiation and an actual TLS
+handshake with Go's standard library, an imported approved leaf, standard TLS
+name/certificate verification and an additional exact DER SHA-256 pin. Only
+HYBRID, TLS >=1.2 and the checked pinned leaf are accepted. It accepts no
+credential and closes every outcome. Fresh-key loopback fixtures cover valid
+Ed25519/RSA/ECDSA, old TLS, changed/expired/future/purpose certs, weak keys,
+malformed/downgrade responses, cancellation and timeouts. This proves neither
+account authentication nor CredSSP/NLA interoperability; the fixture only speaks
+negotiation and TLS. Probe success cannot authorize a different connection.
+
+A private bounded Guacamole text prototype preserves split Unicode, controls
+and line endings both ways. It admits only text/plain with 32 KiB total decoded
+text, isolates session buffers, refuses malformed/replayed/wrong-stream data
+and clears on close. No desktop, browser or OS clipboard is connected.
+
+Required Linux CI proves an empty unnamed network namespace, UID/GID/capability
+drop and failed network attempts, with a no-namespace sabotage check. The child
+still sees the host filesystem; no guacd or authorized egress route exists.
+This is not a production sandbox. See [ADR 0003](adr/0003-rdp-precredential-boundaries.md).
+
+## Slice 4b: native RDP and desktop clipboard (next gate)
 
 Guacamole JS/guacd and FreeRDP remain candidates. Before adoption, record exact
 versions, licenses, transitive/native build inventory, security reports, resource

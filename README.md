@@ -14,7 +14,10 @@ An SSH library lab now verifies an approved Ed25519 host key before key
 authentication and opens a bounded remote PTY with cancellation and resize.
 A loopback-only HTTPS browser lab adds local xterm rendering, bounded WebSocket
 transport and paste review. It uses a synthetic SSH fixture; Linux CI exercises
-a real Bash PTY inside the test fixture. There is no product login/MFA, vault,
+a real Bash PTY inside the test fixture. A credential-free RDP lab now tests
+HYBRID negotiation, pinned TLS and bounded Unicode text streams; Linux CI tests
+an empty worker network namespace. It has no CredSSP authentication or desktop.
+There is no product login/MFA, vault,
 RDP gateway, installable deployment or production release yet.
 
 ## Start here
@@ -25,6 +28,7 @@ RDP gateway, installable deployment or production release yet.
 - [Engineering and signing workflow](docs/ENGINEERING.md)
 - [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
 - [Protocol lab scope and next gates](docs/PROTOCOL-LAB.md)
+- [RDP boundaries and remaining native gates](docs/adr/0003-rdp-precredential-boundaries.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
 ## Development checks

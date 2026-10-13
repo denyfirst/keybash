@@ -18,6 +18,11 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 - Lokal xterm ilə brauzer terminal lab-ı, məhdud WSS axını və paste preview.
 - TLS 1.3/loopback/Origin/owner sərhədi, tək socket, logout və expiry ləğvi.
 - Edge-də sintetik SSH; Linux CI-də Chromium və real Bash PTY sınağı.
+- Credential qəbul etməyən RDP başlanğıc/TLS lab-ı: SHA-256 sertifikat pini,
+  zəif rejim/TLS və yanlış sertifikatların rəddi.
+- Unicode mətn clipboard protokolunun 32 KiB limitli, ayrıca sessiya/buffer sınağı.
+- Linux CI-də boş şəbəkə namespace-i, səlahiyyətlərin endirilməsi və egress rəddi;
+  guacd üçün işlək sandbox və icazəli bağlantı yolu hələ hazırlanmayıb.
 - Guard üçün müsbət, rədd, yanlış konfiqurasiya və abuse testləri.
 - Private checkout, signature verification və Go yoxlamaları üçün CI.
 
@@ -34,8 +39,10 @@ Docker deployment və release automation.
 ## Növbəti mərhələ
 
 Ayrıca laboratoriyada yalnız sintetik açar və hesablarla SSH/RDP texniki sınağı.
-SSH/brauzer lab sərhədi və dependency review hazırdır. Növbəti iş RDP transport,
-NLA/TLS server kimliyi, izolyasiya və mətn clipboard sınağıdır. Detallar
+SSH/brauzer lab sərhədi və dependency review hazırdır. RDP ilkin negotiation/TLS
+və mətn protokol lab-ı əlavə olunub; bu, NLA login və ya RDP masaüstü deyil.
+Növbəti iş native guacd/FreeRDP build review-si, worker-in öz bağlantısında
+sertifikat/NLA yoxlaması və yalnız icazəli hədəfə izolyasiya olunmuş çıxışdır. Detallar
 `PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
 Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
 Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər
