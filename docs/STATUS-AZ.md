@@ -15,6 +15,9 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 - Ed25519 host açarı təsdiqindən sonra SSH key authentication; remote PTY/shell
   sorğuları, Unicode axını, resize və aktiv bağlantının ləğvi üçün kitabxana.
 - Sintetik SSH serveri və host-key/authentication/forwarding mənfi sınaqları.
+- Lokal xterm ilə brauzer terminal lab-ı, məhdud WSS axını və paste preview.
+- TLS 1.3/loopback/Origin/owner sərhədi, tək socket, logout və expiry ləğvi.
+- Edge-də sintetik SSH; Linux CI-də Chromium və real Bash PTY sınağı.
 - Guard üçün müsbət, rədd, yanlış konfiqurasiya və abuse testləri.
 - Private checkout, signature verification və Go yoxlamaları üçün CI.
 
@@ -24,16 +27,17 @@ Bu, işlək brauzer remote-access məhsulu və production təhlükəsizlik zəma
 ## Hələ hazırlanmayıb
 
 Login/MFA, vault və credential importu, hostname/IP/host-key təsdiqi üçün UI,
-brauzer terminalı, real Linux shell sınağı, RDP/guacd inteqrasiyası, clipboard, persistence, backup/restore,
+məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
+RDP/guacd inteqrasiyası, persistence, backup/restore,
 Docker deployment və release automation.
 
 ## Növbəti mərhələ
 
 Ayrıca laboratoriyada yalnız sintetik açar və hesablarla SSH/RDP texniki sınağı.
-SSH kitabxana sərhədi və dependency review hazırdır. Növbəti iş browser terminal
-lab-ıdır: lokal xterm.js, məhdud transport, paste/keyboard və real Linux PTY
-sınağı. Daha sonra RDP certificate/clipboard sınağı gəlir. Detallar
-`PROTOCOL-LAB.md`-dədir. Kitabxana sınağı vim/tmux və browser rahatlığının sübutu deyil.
+SSH/brauzer lab sərhədi və dependency review hazırdır. Növbəti iş RDP transport,
+NLA/TLS server kimliyi, izolyasiya və mətn clipboard sınağıdır. Detallar
+`PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
+Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
 Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər
 istifadə edilmir. Tam brauzer və performance dəstəyi ölçüləndən sonra elan edilir.
 

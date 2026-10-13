@@ -4,6 +4,9 @@ Read `docs/ENGINEERING.md`, `docs/PRODUCT-PLAN-AZ.md`, and
 `docs/SECURITY-INVARIANTS.md` before changing code.
 
 Keybash is exclusively self-hosted. Security comes before convenience.
+This priority applies to every milestone, including UI, clipboard, transport,
+identity, dependencies, packaging and releases. A lab must not relax production
+target or SSH identity checks; unsafe fixture seams belong in test files only.
 Document trust boundaries and limits. Security changes need observable success,
 refusal, malformed-input, and relevant abuse tests. Sabotage both directions
 and demonstrate that the intended tests fail, then restore and rerun gates.

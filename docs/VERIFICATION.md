@@ -143,3 +143,51 @@ rotation UI, ownership/auth/vault, actual Linux shell/browser matrix, worker
 isolation, aggregate quotas, idle/revocation policy, SSH exit-status UX and RDP
 remain unimplemented. Buffered output already received before close can still
 be read; a future application must enforce revocation on its output path too.
+
+## Protocol lab slice 3: local browser terminal (2026-10-13)
+
+Edge verified locally against fresh-key synthetic SSH, with clipboard APIs
+mocked so the workstation clipboard is not read or changed. Native Linux
+Chromium clipboard/Bash PTY, Unicode, bracketed paste, no appended Enter,
+Ctrl+C and kernel resize are required CI gates. The test harness has no lasting
+service; its private bootstrap code travels on child stdin and is never printed.
+Only the isolated browser test accepts the fixture's self-signed HTTPS certificate.
+The handler still enforces TLS 1.3, loopback peer, Host and exact Origin.
+
+Local Node paste/frame tests, ten-second control fuzzing, Go format/module/vet/
+shuffled tests/build/analysis, dependency audits and platform compilation apply.
+Vendor reconstruction from locked xterm bytes must produce a clean Git tree.
+Browser requests are checked for external origins; this is page-level evidence,
+not a complete installation egress capture or full browser/OS matrix.
+
+Behavioral mutations all compiled/loaded and failed the intended assertions:
+
+1. Removed owner-cookie refusal: `TestLabSocketRequiresExactOriginOwnerAndSingleSession` failed.
+2. Reversed owner-cookie refusal to deny a valid owner:
+   `TestLabInputResizeOutputCreditAndLogoutRevocation` failed.
+3. Disabled mandatory Origin comparison: missing-Origin owner socket test failed.
+4. Replaced output-credit wait with an immediate timer:
+   `TestLabOutputWaitsForMatchingCredit` failed.
+5. Forced paste review false: Node control/multiline review assertions failed.
+6. Refused every otherwise allowed paste: Node allowed-input assertions failed.
+
+Restored original source bytes after every mutation and reran the affected
+gates. No mutated code, traces, credentials or diagnostic artifacts are tracked.
+
+Separate adversarial maintainer self-review checked grant replay/expiry, cookie
+flags, exact origin and host, loopback peer enforcement, one active slot,
+cancel/close ordering, bounded render credit/rate and strict unique control
+fields. Added peer checks to prevent accidental externally bound lab exposure;
+disposed the renderer and dropped late frames on logout. Clipboard failure
+callbacks cannot reopen a panel after revocation. Reviewed test-only shell
+environment, temporary working directory, process-group/FD cleanup, JS graph,
+vendor bytes, CSP style tradeoff and absence of remote asset/HTML rendering.
+The first Linux race run found that a parent-shell readiness marker could
+precede foreground-group assignment for the sleeping child. The interrupt test
+now waits for a marker emitted by that foreground child itself; no timeout,
+assertion or required gate was weakened.
+
+This remains maintainer self-review, not an independent security audit. Lab
+capability authentication is not production auth/vault/ownership. Real network
+hosts, load, vim/nano/tmux/htop, native Windows/macOS clipboard and Safari/Firefox
+remain future evidence. No product deployment or release is created here.

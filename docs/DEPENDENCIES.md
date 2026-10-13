@@ -60,10 +60,53 @@ store, banner renderer or terminal escape parser is introduced in this slice.
 Runtime connections use the guard's already-open stream, not `ssh.Dial`.
 No forwarding handlers, local process or raw SSH client is exposed to callers.
 
+## Browser lab adoption (2026-10-13)
+
+- `github.com/coder/websocket v1.8.15`: Coder-maintained Go WebSocket library,
+  ISC license, no additional module requirements. Reviewed accept/origin rules,
+  context closure, message limits and disabled compression. Our exact Origin,
+  owner, TLS 1.3 and loopback checks precede upgrade; library defaults alone are
+  insufficient because missing Origin is accepted by default. License retained.
+- `github.com/creack/pty v1.1.24`: MIT, no additional module requirements;
+  Linux test fixture only. Reviewed PTY creation, controlling session, resize and
+  close/process cleanup. It is not imported by shipped runtime packages. Fixed
+  Bash executable/arguments, a temporary directory and a minimal environment
+  are confined to `_linux_test.go`; never expose this as a product worker.
+- `@xterm/xterm 6.0.0`: MIT, no runtime dependencies. Exact registry integrity
+  is locked in `web/pnpm-lock.yaml`; JS/CSS/license are served locally and their
+  SHA-256 inventory is in `web/vendor/manifest.json`. `vendor.mjs` reconstructs
+  them from the locked package; CI refuses differences. No CDN or attach addon.
+- Playwright/core `1.64.0`: Apache-2.0, browser-test tooling only. Node `24.19.0`
+  and pnpm `11.25.0` are CI tools; Node's official Linux archive SHA-256 is pinned
+  before extraction. Install scripts are disabled; browser installation is an
+  explicit test setup step. These are not runtime product requirements.
+
+Go call/package scanning found no affected imported packages/reachable symbols;
+the excluded OpenPGP module advisory above still applies. The locked JS graph
+audit reported no known advisories. These dated scans do not replace review.
+
+The lab caps WebSocket input at 32 KiB, control JSON at 1 KiB, and outgoing
+frames at 8 KiB plus sequence. One outgoing frame awaits render credit, with
+an 8 MiB total output ceiling per lab socket (also checked by the client),
+two queued chunks and bounded stream reader buffers. Duplicate/wrong credit
+and unknown/duplicate control fields close the stream. Rate caps and absolute
+expiry are lab controls, not an installation capacity or production login claim.
+
+The browser certificate exception exists only in an isolated automated context
+against a synthetic loopback TLS server; no system trust is modified. Windows
+clipboard APIs are mocked so tests do not read/overwrite the user's clipboard.
+Linux headless CI exercises native Clipboard API separately. Neither is a
+full browser/OS permission matrix. Application code has no TLS-ignore option.
+
+Sources: [xterm security](https://xtermjs.org/docs/guides/security/),
+[Coder WebSocket](https://github.com/coder/websocket/tree/v1.8.15),
+[PTY fixture library](https://github.com/creack/pty/tree/v1.1.24),
+[Node checksums](https://nodejs.org/dist/v24.19.0/SHASUMS256.txt).
+
 ## Remaining adoptions
 
-xterm.js, browser transport, Guacamole/FreeRDP, database and vault dependencies
-remain unapproved. Review their exact versions, full graph, license, advisories,
+Guacamole/FreeRDP, database and vault dependencies remain unapproved. Review
+their exact versions, full graph, license, advisories,
 resource limits and update process before adding them.
 
 Primary references: [SSH API at the pinned version](https://pkg.go.dev/golang.org/x/crypto@v0.58.0/ssh),

@@ -7,8 +7,8 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    product/threat plan, engineering workflow, fail-closed IP target guard,
    negative and mutation evidence, reproducible local/CI checks.
 2. **Protocol lab (started):** hostname-scoped pinned DNS dialing and SSH
-   identity/key-auth/PTY library lab implemented; next prove real shell/browser and
-   RDP transport with synthetic credentials. DNS/SSH host pins are implemented;
+   identity/key-auth/PTY library and browser lab implemented, with Linux Bash
+   fixture checks; next prove RDP transport with synthetic credentials. DNS/SSH host pins are implemented;
    verify RDP certificates and isolated egress, and measure copy/paste
    and keyboard behavior. No production credential custody at this stage.
 3. **Identity and custody:** local login/MFA, server-side ownership checks,

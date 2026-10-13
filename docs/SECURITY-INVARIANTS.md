@@ -2,8 +2,8 @@
 
 This file describes only code that exists. Planned login, vault,
 RDP certificate, clipboard and deployment controls are in the product
-plan and roadmap, not claims of this library lab. Tests use synthetic targets,
-in-memory connections and an ephemeral loopback SSH echo fixture. They perform
+plan and roadmap, not claims of this lab. Tests use synthetic targets,
+in-memory connections and ephemeral loopback SSH/browser fixtures. They perform
 no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
@@ -35,6 +35,21 @@ no external server dials and load no real credentials.
 | Transport timeout remains a timeout if the context timer is scheduled later | elapsed-deadline classification | `TestSSHTransportDeadlinePrecedesContextTimer` |
 | Active cancellation closes the stream and releases blocked I/O | per-session context watcher and idempotent close | `TestSSHSessionCancellationUnblocksReadersAndClosesRemote`, `TestSSHCancellationStopsBackpressuredRemoteOutput` |
 | Public SSH errors do not reflect network or server diagnostic text | fixed errors and normalized EOF | `TestSSHUnconfiguredTerminalAndErrorsAreSafe`, `TestSSHRefusesNoneAuthAndAuthenticationOrPTYFailure` |
+| Browser lab requires TLS 1.3, loopback peer/Host and exact Origin | `terminalweb.Lab` before grant/upgrade | `TestLabHTTPSHostOriginAndOneUseGrant`, `TestLabSocketRequiresExactOriginOwnerAndSingleSession` |
+| One-use lab grant yields restricted cookie and one active owner stream | hashed random tokens, Secure/HttpOnly/Strict cookie, active slot | `TestLabHTTPSHostOriginAndOneUseGrant`, `TestLabSocketRequiresExactOriginOwnerAndSingleSession` |
+| Logout, expiry and excess input revoke the stream | shared cancellation and stream close | `TestLabInputResizeOutputCreditAndLogoutRevocation`, `TestLabExpiryAndRateCloseOwnedStream` |
+| Output cannot advance without matching, nonduplicate render credit | sequence, one pending output frame, bounded queue | `TestLabOutputWaitsForMatchingCredit`, `TestLabInvalidConfigurationAndControlBounds` |
+| Lab output has a total 8 MiB ceiling, beyond bounded queues/scrollback | total byte counter before transmission, client ceiling | `TestLabOutputQuotaClosesBeforeExtraData` |
+| Malformed/oversized/unknown or duplicate control fields do not reach SSH operations | bounded strict control decoding and WebSocket limit | `TestLabMalformedOversizedAndUnexpectedAckCloseStream`, `TestLabInvalidConfigurationAndControlBounds`, `FuzzTerminalControl` |
+| Browser transport preserves input and bounded resize | binary input and typed resize control | `TestLabInputResizeOutputCreditAndLogoutRevocation` |
+| Real Linux PTY handles Unicode, Ctrl+C and applied kernel resize | fresh-key SSH fixture, test-only Bash PTY | `TestSSHLinuxBashPTYUnicodeInterruptAndKernelResize` |
+
+Browser evidence is additionally enforced by `web/paste.test.mjs` and the
+`browserlab` tagged `TestBrowserTerminalLab`: paste review/cancel/approve, byte
+limits, invisible/bidi preview, copy/fallback, HTML/OSC clipboard isolation,
+no persistent browser storage, same-origin page requests and renderer removal
+after logout. Linux adds native headless clipboard, bracketed Bash paste and
+kernel resize. Windows uses a mocked clipboard to protect the workstation.
 
 ## Limits
 
@@ -55,13 +70,22 @@ a DNS sandbox or DNSSEC guarantee. SSH identity is a separate approved host pin.
 
 SSH currently accepts Ed25519 host/user keys only, with a ten-second setup
 budget and parent-context session lifetime. There is no host-key trust UI,
-private key import, password/certificate auth, browser terminal, worker process,
-or sandbox. The synthetic echo fixture proves SSH protocol requests and exact
-byte transport, not Bash/OS PTY, vim/tmux, browser paste or clipboard behavior.
+private key import, password/certificate auth, production workspace, worker
+process or sandbox. Browser and real Bash evidence is confined to the laboratory;
+vim/tmux and full browser/OS behavior remain unmeasured.
 Channel windows impose backpressure; both output streams need consumption.
 Aggregate connection quotas, worker isolation, application revocation, idle
 limits, exit-status presentation and independent security review remain future
 gates. Closing a stream does not guarantee killing all remote processes.
+
+The lab is not product login/MFA or ownership authorization. Its bootstrap code
+is passed via test process stdin, never URLs/environment/logs; it accepts no
+browser-selected target or credential. No test shell implementation is compiled
+into runtime packages. Automated browser contexts accept only the fixture's
+self-signed certificate for testing; production TLS trust is still a deployment
+gate. The xterm stylesheet needs inline style support, while scripts remain
+self-only without eval/inline script permissions. This tradeoff is reviewed in
+the dependency document; terminal text is never inserted as application HTML.
 
 The operator must supply the installation's database/control networks; the
 guard cannot infer them. Revocation will create new policy snapshots and stop
