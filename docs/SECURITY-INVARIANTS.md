@@ -1,9 +1,10 @@
 # Implemented Keybash security invariants
 
-This file describes only code that exists. Planned login, vault, SSH host-key,
+This file describes only code that exists. Planned login, vault,
 RDP certificate, clipboard and deployment controls are in the product
-plan and roadmap, not claims of this foundation. Tests use synthetic targets
-and in-memory connections; they perform no external network dials.
+plan and roadmap, not claims of this library lab. Tests use synthetic targets,
+in-memory connections and an ephemeral loopback SSH echo fixture. They perform
+no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
@@ -24,6 +25,16 @@ and in-memory connections; they perform no external network dials.
 | Failure does not silently switch to another address | one selected literal endpoint | `TestNamedTargetUsesFirstPinnedAnswerWithoutFallback` |
 | Bad hostname, missing pins, wrong port or missing policy cannot create a named target | `NewNamedTarget` | `TestNamedTargetConfigurationFailsClosed`, `FuzzCanonicalHostname` |
 | Resolver errors and partial answers disclose no diagnostics and cause no TCP dial | fixed errors and shared deadline | `TestNamedTargetDNSFailureAndCancellationPerformNoTCP` |
+| Changed server host keys stop before user authentication | copied approved host pin callback; signer gate | `TestSSHChangedHostKeyStopsBeforeAuthentication`, `TestSSHHostPinIsCopiedAndSignerCannotRunBeforeVerification` |
+| Invalid or missing host/user identity cannot reach the network | bounded config validation before dial | `TestSSHInvalidConfigurationAndCanceledRequestsNeverDial`, `FuzzSSHHostKeyConfig` |
+| A session requires configured key authentication, with no fallback | only verified key signer, refuse successful none-auth | `TestSSHRefusesNoneAuthAndAuthenticationOrPTYFailure` |
+| Legacy key exchange cannot reach authentication | supported algorithm list, SHA-2 MACs | `TestSSHRefusesLegacyAlgorithmBeforeAuthentication` |
+| Remote PTY input is forwarded exactly and resize is bounded | only session/pty/shell/window requests, no appended Enter | `TestSSHVerifiedKeyOpensRemotePTYWithExactUnicodeInputAndResize`, `TestSSHInputAndResizeBoundsDoNotSendRequests` |
+| Server-initiated forwarding does not create channels | no exposed client or forwarding handler | `TestSSHRejectsUnsolicitedForwardingChannels` |
+| Setup timeout/cancellation and failed setup close owned transports | deadline, close callback, ownership cleanup | `TestSSHHandshakeDeadlineAndCancellationCloseStalledTransport`, `TestSSHFailedDialAndDeadlineSetupCloseTransports` |
+| Transport timeout remains a timeout if the context timer is scheduled later | elapsed-deadline classification | `TestSSHTransportDeadlinePrecedesContextTimer` |
+| Active cancellation closes the stream and releases blocked I/O | per-session context watcher and idempotent close | `TestSSHSessionCancellationUnblocksReadersAndClosesRemote`, `TestSSHCancellationStopsBackpressuredRemoteOutput` |
+| Public SSH errors do not reflect network or server diagnostic text | fixed errors and normalized EOF | `TestSSHUnconfiguredTerminalAndErrorsAreSafe`, `TestSSHRefusesNoneAuthAndAuthenticationOrPTYFailure` |
 
 ## Limits
 
@@ -34,11 +45,23 @@ disabled by looking up a rooted name. All answers must pass policy and pin
 checks. The first returned address is selected; address fallback, IDNA
 conversion, automated approval and DNS discovery are not implemented.
 
-Neither path is wired into an SSH/RDP worker. Integration must use the returned
-connection without another hostname dial. In particular, guacd has its own
+The public SSH library path accepts `NamedTarget` and uses its returned stream
+without another hostname dial. Configuration/pins must be supplied by a trusted,
+authorized owner; no application login or ownership system exists yet.
+In particular, guacd has its own
 network path; this Go guard does not constrain it. The configured DNS resolver
 is trusted infrastructure and may itself require network access. This is not
-a DNS sandbox, DNSSEC guarantee or proof of target identity.
+a DNS sandbox or DNSSEC guarantee. SSH identity is a separate approved host pin.
+
+SSH currently accepts Ed25519 host/user keys only, with a ten-second setup
+budget and parent-context session lifetime. There is no host-key trust UI,
+private key import, password/certificate auth, browser terminal, worker process,
+or sandbox. The synthetic echo fixture proves SSH protocol requests and exact
+byte transport, not Bash/OS PTY, vim/tmux, browser paste or clipboard behavior.
+Channel windows impose backpressure; both output streams need consumption.
+Aggregate connection quotas, worker isolation, application revocation, idle
+limits, exit-status presentation and independent security review remain future
+gates. Closing a stream does not guarantee killing all remote processes.
 
 The operator must supply the installation's database/control networks; the
 guard cannot infer them. Revocation will create new policy snapshots and stop

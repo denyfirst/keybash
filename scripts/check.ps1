@@ -7,6 +7,9 @@ try {
     if ($LASTEXITCODE -ne 0 -or $taskUnformatted.Count -ne 0) { throw 'format check failed' }
     go mod verify
     if ($LASTEXITCODE -ne 0) { throw 'module verification failed' }
+    $taskDependencies = @(go list -deps -test ./...)
+    if ($LASTEXITCODE -ne 0) { throw 'dependency inventory failed' }
+    if ($taskDependencies -match '^golang.org/x/crypto/openpgp($|/)') { throw 'unmaintained OpenPGP dependency is forbidden' }
     go vet ./...
     if ($LASTEXITCODE -ne 0) { throw 'vet failed' }
     go test -shuffle=on -count=1 ./...

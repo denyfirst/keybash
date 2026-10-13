@@ -43,6 +43,13 @@ jobs:
           go mod tidy
           test -z "$(git status --porcelain)"
           go mod verify
+          # The SSH module also contains unmaintained OpenPGP code. It is not
+          # part of Keybash; prohibit importing it (including through tests).
+          go list -deps -test ./... > "${RUNNER_TEMP}/keybash-dependencies"
+          if grep -qE '^golang.org/x/crypto/openpgp($|/)' "${RUNNER_TEMP}/keybash-dependencies"; then
+            echo 'unmaintained OpenPGP dependency is forbidden' >&2
+            exit 1
+          fi
 
       - name: Check formatting and invariant citations
         run: |
@@ -60,6 +67,7 @@ jobs:
           go vet ./...
           go test -race -shuffle=on -count=1 -timeout=5m ./...
           go test ./internal/targetguard -run='^$' -fuzz='^FuzzCanonicalHostname$' -fuzztime=15s
+          go test ./internal/sshtransport -run='^$' -fuzz='^FuzzSSHHostKeyConfig$' -fuzztime=15s
           go build -trimpath ./...
           for platform in linux darwin windows; do
             GOOS="${platform}" go vet ./...

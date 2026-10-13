@@ -59,9 +59,9 @@ Git config. Untrusted PR code receives no signing or production secrets.
 
 ## Dependencies
 
-The first target guard uses the Go standard library only. xterm.js, the SSH
-library, Guacamole/FreeRDP, database drivers, and password hashing libraries
-are planned dependencies, not installed or approved by this foundation.
+The target guard uses the Go standard library. SSH adopts the pinned dependency
+reviewed in `DEPENDENCIES.md`. xterm.js, Guacamole/FreeRDP, database drivers and
+password hashing libraries remain planned, not installed or approved.
 Each adoption needs a review of maintenance, license, transitive dependencies,
 vulnerabilities, parser limits, and update policy. Runtime assets will be
 bundled and locally served; external CDN and telemetry are not required.
