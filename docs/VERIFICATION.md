@@ -50,3 +50,43 @@ Remaining limits are recorded in `SECURITY-INVARIANTS.md`, the product plan
 and ADR 0001. Private branch protection was unavailable on the current GitHub
 plan; the maintainer authorized public visibility so protection can be enforced.
 Successful checks alone do not prove the server protection settings.
+
+## Protocol lab slice 1: hostname-scoped pins (2026-10-13)
+
+Scope: standard-library hostname selection and the TCP guard, with no SSH/RDP
+implementation, credential or external server connection. The same local
+analysis/build gates apply. Tests use only injected resolvers/dialers and
+`net.Pipe`. Added a bounded hostname fuzz target; CI runs it for fifteen seconds
+and local fuzzing ran for ten seconds without a failure. Linux race evidence
+is obtained from CI, not inferred from local Windows tests.
+
+Deliberate mutations of `named.go`:
+
+1. Changed the per-target pin refusal condition to `!pinned && false`.
+   Source compiled; `TestNamedTargetRebindingDoesNotApproveAnotherServer`
+   failed when DNS rebound to a different globally approved server.
+2. Replaced the final allowed TCP call with `return nil, ErrDenied`.
+   Source compiled; `TestNamedTargetResolvesOnceAndDialsPinnedLiteral`
+   failed for the usable private IPv4/IPv6 and mapped targets on SSH/RDP ports.
+3. Disabled the late-success cancellation branch in `policy.go` with an
+   always-false conjunction. Source compiled;
+   `TestCanceledSuccessfulDialClosesConnection` failed. Restored original bytes.
+
+Restored original source bytes after each mutation, checked byte equality,
+and reran the suite successfully. Statement coverage was 100% for the package;
+coverage alone is not evidence of complete security or browser usability.
+
+Separate adversarial maintainer self-review: checked hostname bounds, label
+syntax, root-dot/search-domain handling in pinned Go resolver source, copied
+pins, global-policy versus per-target approval, full-answer refusal, mapped
+IPv4, cancellation before/after resolution, sanitized DNS errors and lack of
+second hostname resolution. Found that the pre-existing guard could return
+a connection after the dialer reported late success with a canceled context.
+Added close-and-refuse handling and a behavioral test. Reviewed the restored
+final source and the first-answer/no-fallback availability tradeoff separately
+from implementation. No dependency or real credential was introduced.
+
+This remains implementation-session maintainer self-review, not an independent
+audit. It proves a library boundary under synthetic transports, not integration
+with SSH, guacd, a browser, installation DNS or network isolation. Outstanding
+protocol adoption and identity checks are recorded in `PROTOCOL-LAB.md`.

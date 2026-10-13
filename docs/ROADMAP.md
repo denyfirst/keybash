@@ -2,11 +2,12 @@
 
 Stages are evidence gates, not delivery dates. Update decisions as we learn.
 
-1. **Foundation (current PR):** independent signed repository with the
+1. **Foundation (completed):** independent signed repository with the
    maintainer-authorized public visibility and enforced branch protection,
    product/threat plan, engineering workflow, fail-closed IP target guard,
    negative and mutation evidence, reproducible local/CI checks.
-2. **Protocol lab:** review candidate dependencies; prove SSH remote PTY and
+2. **Protocol lab (started):** hostname-scoped pinned DNS dialing implemented;
+   review candidate dependencies; prove SSH remote PTY and
    RDP transport with synthetic credentials. Integrate pinned DNS resolution
    with the guard, verify SSH host keys/RDP certificates, and measure copy/paste
    and keyboard behavior. No production credential custody at this stage.
