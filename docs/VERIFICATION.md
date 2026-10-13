@@ -182,6 +182,10 @@ disposed the renderer and dropped late frames on logout. Clipboard failure
 callbacks cannot reopen a panel after revocation. Reviewed test-only shell
 environment, temporary working directory, process-group/FD cleanup, JS graph,
 vendor bytes, CSP style tradeoff and absence of remote asset/HTML rendering.
+The first Linux race run found that a parent-shell readiness marker could
+precede foreground-group assignment for the sleeping child. The interrupt test
+now waits for a marker emitted by that foreground child itself; no timeout,
+assertion or required gate was weakened.
 
 This remains maintainer self-review, not an independent security audit. Lab
 capability authentication is not production auth/vault/ownership. Real network

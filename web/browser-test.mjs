@@ -114,7 +114,7 @@ try {
     await command('stty size');
     const size = (await page.locator('#size').innerText()).split(' × ').map(Number);
     await visible(`${size[1]} ${size[0]}`);
-    await command("stty -echo; printf 'KB_%s\\n' 'INTERRUPT'; sleep 30");
+    await command("stty -echo; bash --noprofile --norc -c 'printf \"KB_%s\\n\" INTERRUPT; exec sleep 30'");
     await visible('KB_INTERRUPT');
     await page.locator('.xterm-helper-textarea').focus(); await page.keyboard.press('Control+c');
     await command("printf 'KB_%s\\n' 'AFTER_INTERRUPT'"); await visible('KB_AFTER_INTERRUPT');

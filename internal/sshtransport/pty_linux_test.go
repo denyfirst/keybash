@@ -115,7 +115,9 @@ func TestSSHLinuxBashPTYUnicodeInterruptAndKernelResize(t *testing.T) {
 	_, _ = terminal.Write([]byte("printf '\\u0259\\u0131\\u00f6\\u00fc\\u00e7\\u015f\\u011f'; printf '\\n'; stty size\r"))
 	wait("əıöüçşğ")
 	wait("45 140")
-	_, _ = terminal.Write([]byte("stty -echo; printf 'KI_%s\\n' 'READY'; sleep 30\r"))
+	// Readiness is emitted by the foreground child, after Bash has assigned
+	// its process group to the PTY. A marker from the parent shell is too early.
+	_, _ = terminal.Write([]byte("stty -echo; bash --noprofile --norc -c 'printf \"KI_%s\\n\" READY; exec sleep 30'\r"))
 	wait("KI_READY")
 	_, _ = terminal.Write([]byte{3})
 	wait("keybash-lab> ")
