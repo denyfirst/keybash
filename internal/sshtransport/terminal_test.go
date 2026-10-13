@@ -56,6 +56,8 @@ type fixtureOptions struct {
 	rejectShell                   bool
 	legacyKEX                     bool
 	openUnsolicited               string
+	shellFixture                  func(ssh.Channel)
+	resizeFixture                 func([]byte)
 }
 
 type sshFixture struct {
@@ -143,9 +145,18 @@ func newFixture(t *testing.T, options fixtureOptions) *sshFixture {
 						_ = request.Reply(!options.rejectShell, nil)
 						if !options.rejectShell {
 							fixture.session <- channel
-							group.Go(func() { _, _ = io.Copy(channel, channel) })
+							group.Go(func() {
+								if options.shellFixture != nil {
+									options.shellFixture(channel)
+								} else {
+									_, _ = io.Copy(channel, channel)
+								}
+							})
 						}
 					case "window-change":
+						if options.resizeFixture != nil {
+							options.resizeFixture(request.Payload)
+						}
 						if request.WantReply {
 							_ = request.Reply(false, nil)
 						}

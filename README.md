@@ -12,8 +12,10 @@ are designed and tested alongside the security boundaries.
 and hostname-scoped DNS pins with literal-IP dialing.
 An SSH library lab now verifies an approved Ed25519 host key before key
 authentication and opens a bounded remote PTY with cancellation and resize.
-There is no login, vault, browser terminal, RDP gateway, deployment, or production
-release yet. SSH tests use a synthetic server, not a real Linux shell/browser.
+A loopback-only HTTPS browser lab adds local xterm rendering, bounded WebSocket
+transport and paste review. It uses a synthetic SSH fixture; Linux CI exercises
+a real Bash PTY inside the test fixture. There is no product login/MFA, vault,
+RDP gateway, installable deployment or production release yet.
 
 ## Start here
 
@@ -37,6 +39,12 @@ library; SSH uses the reviewed dependency pinned in `go.mod`. PowerShell:
 CI also runs Linux race tests, bounded hostname fuzzing, compilation checks, pinned static
 analysis, vulnerability checking and commit signature verification. Analysis
 tools and source dependencies are not part of the product runtime.
+
+Browser lab verification requires locked test dependencies in `web/` and
+Playwright's test browser. Run `go test -tags=browserlab -run
+TestBrowserTerminalLab ./internal/sshtransport`. On Windows, set
+`KEYBASH_BROWSER_CHANNEL=msedge` for the installed Edge binary. This creates
+and tears down an isolated test session; it is not an install/serve command.
 
 ## Independence and trust
 

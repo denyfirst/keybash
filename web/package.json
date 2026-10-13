@@ -1,0 +1,13 @@
+{
+  "name": "keybash-terminal-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vendor": "node vendor.mjs",
+    "test": "node --test paste.test.mjs"
+  },
+  "devDependencies": {
+    "@xterm/xterm": "6.0.0",
+    "playwright": "1.64.0"
+  }
+}

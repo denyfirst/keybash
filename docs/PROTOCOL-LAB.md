@@ -43,16 +43,40 @@ application user authorization. No user's real SSH keys/agent or server inventor
 Primary API reference: [Go SSH package](https://pkg.go.dev/golang.org/x/crypto/ssh).
 Exact dependency versions and test evidence belong in the adoption PR.
 
-## Slice 3: browser terminal
+## Slice 3: browser terminal (lab implemented)
 
-Review and pin xterm.js and any transport dependency, including transitive
-packages and licenses. Bundle assets locally. Treat remote output and escape
-sequences as untrusted; isolate terminal state from application credentials.
-Disable unsolicited OSC clipboard writes. A WebSocket route requires explicit
-lab isolation and later authentication/origin/authorization/lifecycle gates.
+Local xterm `6.0.0`, bounded Coder WebSocket transport and test-only PTY tooling
+are reviewed in `DEPENDENCIES.md`. Runtime page requests use local bundled
+assets. Remote output stays in the terminal renderer; title/link hooks are not
+reflected into application HTML. OSC 52 and OSC 8 are explicitly consumed.
 
-Measure selection/copy, paste, multiline preview, Ctrl+C, resize and Unicode
-in Chrome/Edge first. Never announce a full browser matrix before measuring it.
+The handler requires TLS 1.3, numeric loopback origin/peer and exact Host/Origin.
+A cryptographically random five-minute one-use bootstrap grants a fifteen-minute
+Secure/HttpOnly/SameSite=Strict owner cookie. Only one socket is active; logout
+and absolute expiry cancel the stream. No target/credential choice is accepted
+from the browser. This is a lab capability boundary, not product login/MFA.
+
+Output is sequenced, limited to 8 KiB chunks and paced by xterm render callbacks.
+Input is limited to 32 KiB; control JSON to 1 KiB, with unique known fields.
+Multiline, control and bidi/invisible text needs a visible paste review. Cancel
+transmits nothing; approve forwards through xterm's paste semantics, without
+appending Enter. Bracketed paste is not a universal guarantee against execution.
+Clipboard requires a user action and has a fallback panel; buffers are cleared
+on close. Logout disposes the renderer and drops late output.
+
+Edge verification uses synthetic SSH echo and a mocked clipboard to protect the
+workstation clipboard. Linux CI uses Chromium, native headless Clipboard API,
+and a real Bash OS PTY through the synthetic SSH server: Unicode, approved paste,
+no added Enter, bracketed multiline paste, Ctrl+C and kernel resize. The fixed
+Bash process exists only in test files, with fresh keys, a temporary directory,
+minimal environment and process-group cleanup. No production local shell path.
+
+The test seam does not weaken the production target guard's loopback ban. Browser
+TLS certificate acceptance is confined to the isolated synthetic test context;
+it is not production TLS verification. No permanent preview service is left
+running. vim/nano/tmux/htop, real network hosts, performance, Safari/Firefox,
+native Windows/macOS clipboard and a complete keyboard/layout matrix remain
+unmeasured. No full browser matrix or offline egress-capture claim is made.
 The [xterm.js security guide](https://xtermjs.org/docs/guides/security/)
 informs these integration gates; using the renderer alone does not secure SSH.
 

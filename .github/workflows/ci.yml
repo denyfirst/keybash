@@ -18,7 +18,7 @@ jobs:
   build:
     name: Build and test
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -34,6 +34,28 @@ jobs:
             fetch -q --depth 1 origin "${GITHUB_SHA}"
           unset auth
           git checkout -q FETCH_HEAD
+
+      - name: Verify local browser assets and test dependencies
+        run: |
+          set -eu
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
+            https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz \
+            --output "${RUNNER_TEMP}/keybash-node.tar.xz"
+          printf '%s  %s\n' 14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647 \
+            "${RUNNER_TEMP}/keybash-node.tar.xz" | sha256sum -c -
+          tar -xf "${RUNNER_TEMP}/keybash-node.tar.xz" -C "${RUNNER_TEMP}"
+          node_bin="${RUNNER_TEMP}/node-v24.19.0-linux-x64/bin"
+          echo "${node_bin}" >> "${GITHUB_PATH}"
+          export PATH="${node_bin}:${PATH}"
+          test "$(node --version)" = v24.19.0
+          npm install --prefix "${RUNNER_TEMP}/keybash-node-tools" pnpm@11.25.0 --ignore-scripts --no-audit --no-fund
+          pnpm="${RUNNER_TEMP}/keybash-node-tools/node_modules/.bin/pnpm"
+          "${pnpm}" --dir web install --frozen-lockfile --ignore-scripts
+          "${pnpm}" --dir web audit
+          node web/vendor.mjs
+          test -z "$(git status --porcelain)"
+          node --test web/paste.test.mjs
+          "${pnpm}" --dir web exec playwright install --with-deps chromium
 
       - name: Verify the pinned toolchain and module files
         run: |
@@ -54,7 +76,7 @@ jobs:
       - name: Check formatting and invariant citations
         run: |
           set -eu
-          test -z "$(gofmt -l internal)"
+          test -z "$(gofmt -l internal web)"
           grep -ohE '`(Test|Fuzz)[A-Za-z0-9_]+' docs/SECURITY-INVARIANTS.md \
             | tr -d '`' | sort -u > "${RUNNER_TEMP}/cited"
           grep -rhoE '^func (Test|Fuzz)[A-Za-z0-9_]+' --include='*_test.go' internal \
@@ -68,6 +90,8 @@ jobs:
           go test -race -shuffle=on -count=1 -timeout=5m ./...
           go test ./internal/targetguard -run='^$' -fuzz='^FuzzCanonicalHostname$' -fuzztime=15s
           go test ./internal/sshtransport -run='^$' -fuzz='^FuzzSSHHostKeyConfig$' -fuzztime=15s
+          go test ./internal/terminalweb -run='^$' -fuzz='^FuzzTerminalControl$' -fuzztime=15s
+          go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
           go build -trimpath ./...
           for platform in linux darwin windows; do
             GOOS="${platform}" go vet ./...

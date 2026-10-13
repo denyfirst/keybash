@@ -3,8 +3,10 @@ $ErrorActionPreference = 'Stop'
 $taskRepoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $taskRepoRoot
 try {
-    $taskUnformatted = @(gofmt -l internal)
+    $taskUnformatted = @(gofmt -l internal web)
     if ($LASTEXITCODE -ne 0 -or $taskUnformatted.Count -ne 0) { throw 'format check failed' }
+    node --test web/paste.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'paste tests failed' }
     go mod verify
     if ($LASTEXITCODE -ne 0) { throw 'module verification failed' }
     $taskDependencies = @(go list -deps -test ./...)
