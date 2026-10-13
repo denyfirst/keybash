@@ -107,8 +107,9 @@ Sources: [xterm security](https://xtermjs.org/docs/guides/security/),
 
 The credential-free RDP probe/private text codec introduces no module, native
 binary or browser dependency. TLS uses the pinned Go standard library. Its
-explicit DER pin replaces CA/name validation in this experiment only, with
-mandatory validity/usage/key constraints; no credentials or live stream are
+imported leaf is the only trust anchor; standard TLS/name checks remain enabled,
+along with the mandatory exact DER pin and validity/usage/key constraints.
+No credentials or live stream are
 returned. It is not Guacamole's native certificate implementation. The tagged
 Linux isolation fixture uses runner-provided util-linux unshare/setpriv and
 sudo, and only a temporary fixed test child. This does not package a sandbox.

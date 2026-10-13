@@ -203,6 +203,18 @@ failure responses and remote lengths. Cancellation during negotiation and TLS,
 stalled-write deadlines, late dial success and failed-dial cleanup are covered.
 These are not CredSSP, Windows account or native FreeRDP interoperability tests.
 
+The first PR scan flagged the custom-pin TLS configuration's disabled standard
+certificate verification. The final model imports a copied bounded approved
+leaf as the only trust anchor, keeps standard TLS/name verification enabled,
+and additionally requires the exact DER pin. Tests refuse hostname mismatch,
+missing roots, invalid imports/CN-only names, and changed pins even when a
+broader test-only trust pool would otherwise accept the certificate. No scan
+finding was dismissed and no rule was disabled. The first Linux worker run
+also found that UID 65534 could not traverse the runner's private temporary
+directory. The final test binary lives in its own temporary /tmp directory;
+only that directory/binary is executable by the fixed child, with cleanup.
+Runner directory permissions and child privilege restrictions remain intact.
+
 Private wire/text tests cover split UTF-8/emoji, CRLF/LF and arbitrary text bytes,
 both directions and distinct sessions, exact 32 KiB success/overquota refusal,
 canonical base64, MIME/type/stream/replay refusal and buffer clearing. HTML is
@@ -214,7 +226,8 @@ No new module or vendored native/browser dependency.
 
 Behavioral mutations compiled and failed their intended assertions:
 
-1. Skip digest mismatch refusal: changed-pin identity test failed.
+1. Skip digest mismatch refusal: changed-pin identity tests failed, including
+   a changed certificate otherwise accepted by a test-only broader trust pool.
 2. Refuse matching digest: valid TLS 1.2/1.3 probe tests failed.
 3. Accept TLS/legacy selection along with HYBRID: downgrade test failed.
 4. Admit HTML clipboard: HTML refusal test failed.
@@ -223,6 +236,7 @@ Behavioral mutations compiled and failed their intended assertions:
 
 Original source bytes were restored after each mutation, then affected tests
 reran successfully. Mutations and diagnostic outputs are not tracked.
+Pin mutations were repeated after enabling standard TLS/name verification.
 
 Required CI's tagged worker experiment creates a transient empty netns, drops
 UID/GID/groups/all capabilities and sets no-new-privileges, then runs the fixed

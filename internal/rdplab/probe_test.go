@@ -24,6 +24,83 @@ import (
 
 var hybridConfirmation = [19]byte{3, 0, 0, 19, 14, 0xd0, 0, 0, 0, 1, 0, 2, 0, 8, 0, 2, 0, 0, 0}
 
+func labIdentity(t *testing.T) *Identity {
+	t.Helper()
+	cert, _ := labCertificate(t, nil)
+	identity, err := NewIdentity("synthetic-rdp.invalid", cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
+// Test-only seam also exercises malformed trust that the constructor refuses.
+// The TLS hook must independently reject invalid pinned leaves.
+func labTestIdentity(t *testing.T, cert tls.Certificate, pin [32]byte) *Identity {
+	t.Helper()
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	return &Identity{name: "synthetic-rdp.invalid", pin: pin, roots: roots}
+}
+
+func TestRDPIdentityImportNameBoundsAndCopiedCertificate(t *testing.T) {
+	cert, pin := labCertificate(t, nil)
+	original := bytes.Clone(cert.Certificate[0])
+	identity, err := NewIdentity("synthetic-rdp.invalid", cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(cert.Certificate[0])
+	cert.Certificate[0] = original
+	dial, done := tlsFixture(t, cert, tls.VersionTLS13)
+	if err := probe(context.Background(), dial, identity); err != nil {
+		t.Fatal("caller mutation changed trust")
+	}
+	awaitFixture(t, done, true)
+	if identity.pin != pin {
+		t.Fatal("wrong DER fingerprint")
+	}
+	for _, tc := range []struct {
+		name string
+		der  []byte
+	}{{"", original}, {"different.invalid", original}, {"synthetic-rdp.invalid", nil}, {"synthetic-rdp.invalid", []byte("bad certificate")}, {"synthetic-rdp.invalid", make([]byte, 32769)}} {
+		if _, err := NewIdentity(tc.name, tc.der); err != ErrConfiguration {
+			t.Fatal("invalid certificate/name configuration accepted")
+		}
+	}
+	for _, change := range []func(*x509.Certificate){func(c *x509.Certificate) { c.DNSNames = nil }, func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Minute) }, func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} }} {
+		bad, _ := labCertificate(t, change)
+		if _, err := NewIdentity("synthetic-rdp.invalid", bad.Certificate[0]); err != ErrConfiguration {
+			t.Fatal("bad approved identity imported")
+		}
+	}
+}
+
+func TestRDPPinRequiredEvenForOtherwiseTrustedCertificate(t *testing.T) {
+	approved, _ := labCertificate(t, nil)
+	changed, _ := labCertificate(t, nil)
+	identity, err := NewIdentity("synthetic-rdp.invalid", approved.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A broader CA-like trust situation is confined to this negative fixture:
+	// standard verification can succeed but the exact target pin still refuses.
+	leaf, err := x509.ParseCertificate(changed.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity.roots.AddCert(leaf)
+	dial, done := tlsFixture(t, changed, tls.VersionTLS13)
+	if err := probe(context.Background(), dial, identity); err != ErrIdentity {
+		t.Fatalf("trusted changed certificate escaped pin: %v", err)
+	}
+	awaitFixture(t, done, false)
+}
+
 func labCertificate(t *testing.T, change func(*x509.Certificate), supplied ...crypto.Signer) (tls.Certificate, [sha256.Size]byte) {
 	t.Helper()
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -38,7 +115,7 @@ func labCertificate(t *testing.T, change func(*x509.Certificate), supplied ...cr
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "synthetic-rdp.invalid"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
+		BasicConstraintsValid: true, DNSNames: []string{"synthetic-rdp.invalid"},
 	}
 	if change != nil {
 		change(cert)
@@ -48,6 +125,25 @@ func labCertificate(t *testing.T, change func(*x509.Certificate), supplied ...cr
 		t.Fatal(err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: signer}, sha256.Sum256(der)
+}
+
+func TestRDPProbeRefusesNameMismatchAndMissingApprovedRoot(t *testing.T) {
+	for _, tc := range []string{"name", "root"} {
+		t.Run(tc, func(t *testing.T) {
+			cert, pin := labCertificate(t, nil)
+			identity := labTestIdentity(t, cert, pin)
+			if tc == "name" {
+				identity.name = "different.invalid"
+			} else {
+				identity.roots = x509.NewCertPool()
+			}
+			dial, done := tlsFixture(t, cert, tls.VersionTLS13)
+			if err := probe(context.Background(), dial, identity); err != ErrIdentity {
+				t.Fatalf("name/trust verification bypassed: %v", err)
+			}
+			awaitFixture(t, done, false)
+		})
+	}
 }
 
 // A private loopback fixture seam never relaxes targetguard's production ban.
@@ -128,7 +224,7 @@ func TestRDPHybridTLSProbeVerifiesPinWithoutCredentialsAndCloses(t *testing.T) {
 		t.Run(tls.VersionName(version), func(t *testing.T) {
 			cert, pin := labCertificate(t, nil)
 			dial, done := tlsFixture(t, cert, version)
-			if err := probe(context.Background(), dial, pin); err != nil {
+			if err := probe(context.Background(), dial, labTestIdentity(t, cert, pin)); err != nil {
 				t.Fatal(err)
 			}
 			awaitFixture(t, done, true)
@@ -157,7 +253,7 @@ func TestRDPProbeRSAAndECDSAHandshakeAndWeakRSARefusal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cert, pin := labCertificate(t, nil, tc.key)
 			dial, done := tlsFixture(t, cert, tls.VersionTLS12)
-			err := probe(context.Background(), dial, pin)
+			err := probe(context.Background(), dial, labTestIdentity(t, cert, pin))
 			if tc.accept && err != nil || !tc.accept && err != ErrIdentity {
 				t.Fatalf("unexpected identity decision: %v", err)
 			}
@@ -193,7 +289,7 @@ func TestRDPChangedExpiredAndWrongPurposeCertificatesRefused(t *testing.T) {
 				pin[0] ^= 1
 			}
 			dial, done := tlsFixture(t, cert, tls.VersionTLS13)
-			if err := probe(context.Background(), dial, pin); err != ErrIdentity {
+			if err := probe(context.Background(), dial, labTestIdentity(t, cert, pin)); err != ErrIdentity {
 				t.Fatalf("wanted fixed identity error, got %v", err)
 			}
 			awaitFixture(t, done, false)
@@ -201,7 +297,7 @@ func TestRDPChangedExpiredAndWrongPurposeCertificatesRefused(t *testing.T) {
 	}
 	cert, pin := labCertificate(t, nil)
 	dial, done := tlsFixture(t, cert, tls.VersionTLS11)
-	if err := probe(context.Background(), dial, pin); err != ErrIdentity {
+	if err := probe(context.Background(), dial, labTestIdentity(t, cert, pin)); err != ErrIdentity {
 		t.Fatalf("old TLS accepted: %v", err)
 	}
 	awaitFixture(t, done, false)
@@ -235,7 +331,7 @@ func TestRDPNegotiationRejectsDowngradeMalformedAndOversized(t *testing.T) {
 			_, _ = io.ReadFull(server, request[:])
 			_, _ = server.Write(response)
 		}()
-		pin := sha256.Sum256([]byte("synthetic"))
+		pin := labIdentity(t)
 		if err := probe(context.Background(), func(context.Context) (net.Conn, error) { return client, nil }, pin); err != ErrNegotiation {
 			t.Fatalf("bad confirmation accepted: %v", err)
 		}
@@ -244,10 +340,10 @@ func TestRDPNegotiationRejectsDowngradeMalformedAndOversized(t *testing.T) {
 }
 
 func TestRDPInvalidConfigurationCanceledAndFailedDialClose(t *testing.T) {
-	pin := sha256.Sum256([]byte("synthetic"))
+	pin := labIdentity(t)
 	calls := 0
 	dial := func(context.Context) (net.Conn, error) { calls++; return nil, errors.New("private diagnostic") }
-	if probe(context.Background(), dial, [32]byte{}) != ErrConfiguration || calls != 0 {
+	if probe(context.Background(), dial, nil) != ErrConfiguration || calls != 0 {
 		t.Fatal("missing pin dialed")
 	}
 	if Probe(context.Background(), nil, pin) != ErrConfiguration {
@@ -305,7 +401,7 @@ func TestRDPProbeCancellationUnblocksNegotiationAndTLS(t *testing.T) {
 				close(ready)
 			}()
 			go func() {
-				done <- probe(ctx, func(context.Context) (net.Conn, error) { return client, nil }, sha256.Sum256([]byte("synthetic")))
+				done <- probe(ctx, func(context.Context) (net.Conn, error) { return client, nil }, labIdentity(t))
 			}()
 			<-ready
 			cancel()
@@ -361,9 +457,10 @@ func TestRDPPinCertificateKeyAndCriticalExtensionConstraints(t *testing.T) {
 func TestRDPProbeDeadlineClosesStalledConnection(t *testing.T) {
 	client, server := net.Pipe()
 	defer server.Close()
+	identity := labIdentity(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
-	if err := probe(ctx, func(context.Context) (net.Conn, error) { return client, nil }, sha256.Sum256([]byte("synthetic"))); err != context.DeadlineExceeded {
+	if err := probe(ctx, func(context.Context) (net.Conn, error) { return client, nil }, identity); err != context.DeadlineExceeded {
 		t.Fatalf("deadline lost: %v", err)
 	}
 	if _, err := server.Read(make([]byte, 1)); err == nil {

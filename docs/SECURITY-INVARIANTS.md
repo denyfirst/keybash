@@ -44,7 +44,7 @@ no external server dials and load no real credentials.
 | Browser transport preserves input and bounded resize | binary input and typed resize control | `TestLabInputResizeOutputCreditAndLogoutRevocation` |
 | Real Linux PTY handles Unicode, Ctrl+C and applied kernel resize | fresh-key SSH fixture, test-only Bash PTY | `TestSSHLinuxBashPTYUnicodeInterruptAndKernelResize` |
 | RDP probe requires HYBRID and fixed-size valid confirmation | bounded X.224/TPKT experiment, no downgrade | `TestRDPNegotiationRejectsDowngradeMalformedAndOversized`, `FuzzRDPConfirmation` |
-| Credential-free probe requires the approved current leaf and TLS >=1.2 | mandatory exact DER pin, usage/key checks | `TestRDPHybridTLSProbeVerifiesPinWithoutCredentialsAndCloses`, `TestRDPChangedExpiredAndWrongPurposeCertificatesRefused`, `TestRDPProbeRSAAndECDSAHandshakeAndWeakRSARefusal`, `TestRDPPinCertificateKeyAndCriticalExtensionConstraints` |
+| Credential-free probe requires the approved current leaf, name and TLS >=1.2 | standard TLS verification, exact DER pin, usage/key checks | `TestRDPHybridTLSProbeVerifiesPinWithoutCredentialsAndCloses`, `TestRDPChangedExpiredAndWrongPurposeCertificatesRefused`, `TestRDPProbeRSAAndECDSAHandshakeAndWeakRSARefusal`, `TestRDPPinCertificateKeyAndCriticalExtensionConstraints`, `TestRDPIdentityImportNameBoundsAndCopiedCertificate`, `TestRDPPinRequiredEvenForOtherwiseTrustedCertificate`, `TestRDPProbeRefusesNameMismatchAndMissingApprovedRoot` |
 | Probe returns no live stream and timeout/cancellation close I/O | owned transport close, five-second budget | `TestRDPInvalidConfigurationCanceledAndFailedDialClose`, `TestRDPProbeCancellationUnblocksNegotiationAndTLS`, `TestRDPProbeDeadlineClosesStalledConnection` |
 | Private text prototype preserves fragmented Unicode and isolates sessions/directions | owned per-direction accumulator; completed end only | `TestRDPClipboardUnicodeFragmentedBothDirectionsAndSessionIsolation` |
 | Prototype refuses nontext types, malformed base64/UTF-8, wrong IDs, replay and excess text | clipboard/blob/end only, strict encoding, 32 KiB total | `TestRDPClipboardRejectsTypesReplayMalformedAndQuota`, `TestRDPClipboardExactQuotaAndRevocation` |
@@ -62,7 +62,8 @@ kernel resize. Windows uses a mocked clipboard to protect the workstation.
 
 RDP evidence is a pre-credential experiment and private text prototype. The
 probe checks its own TLS, closes it, and never sends CredSSP; it cannot authorize
-guacd's connection. DER pins replace CA/hostname trust here. Native version,
+guacd's connection. Its imported leaf is the only trust anchor; standard TLS/name
+verification remains enabled with an extra exact DER pin. Native version,
 identity/NLA behavior, allowed-target broker and filesystem/resource sandbox
 are not implemented. The empty Linux test namespace denies approved destinations
 too. Codec tests are not desktop/browser clipboard evidence. See ADR 0003.

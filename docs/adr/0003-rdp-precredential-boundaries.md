@@ -9,15 +9,19 @@ TLS identity, bounded text-stream codec and an empty Linux network namespace
 experiment before giving a native worker credentials. None is a production
 RDP connection or authorization for another connection.
 
-`rdplab.Probe` accepts a guarded `NamedTarget` and an independently approved
-SHA-256 digest of the complete leaf certificate DER. It advertises TLS/HYBRID,
+`rdplab.NewIdentity` copies an independently approved leaf certificate DER
+(maximum 32 KiB), checks validity and its DNS name, and creates a private trust
+pool containing only that leaf. `Probe` binds it to the guarded `NamedTarget`'s
+logical name and requires its exact SHA-256 digest. It advertises TLS/HYBRID,
 accepts only HYBRID, performs TLS >=1.2 with AEAD/ECDHE TLS 1.2 suites, and closes
 the connection. No username, password, cookie, CredSSP, desktop or returned
-transport. Its five-second budget includes dial and setup. The exact DER pin
-replaces CA/hostname validation in this experiment; no automatic first-use
-trust or configurable certificate-ignore option. The pinned leaf must be
+transport. Its five-second budget includes dial and setup. Standard TLS
+certificate/name verification remains enabled, with the imported leaf as its
+only trust anchor, plus a mandatory exact pin hook. No system roots, automatic
+first-use trust or certificate-ignore option. The pinned leaf must be
 current, non-CA, explicitly server-auth/digital-signature capable, have no
-unhandled critical extensions, and use Ed25519, RSA >=2048 or ECDSA >=256.
+unhandled critical extensions, have a matching DNS SAN (CN alone is refused),
+and use Ed25519, RSA >=2048 or ECDSA >=256.
 Renewal changes DER and needs a new independent approval.
 
 HYBRID selection precedes TLS and is not itself authenticated. The experiment

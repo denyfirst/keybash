@@ -83,7 +83,8 @@ informs these integration gates; using the renderer alone does not secure SSH.
 ## Slice 4a: credential-free RDP boundaries (lab implemented)
 
 `rdplab.Probe` performs fixed-size initial RDP negotiation and an actual TLS
-handshake with Go's standard library and an approved DER SHA-256 pin. Only
+handshake with Go's standard library, an imported approved leaf, standard TLS
+name/certificate verification and an additional exact DER SHA-256 pin. Only
 HYBRID, TLS >=1.2 and the checked pinned leaf are accepted. It accepts no
 credential and closes every outcome. Fresh-key loopback fixtures cover valid
 Ed25519/RSA/ECDSA, old TLS, changed/expired/future/purpose certs, weak keys,
