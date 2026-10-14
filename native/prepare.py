@@ -57,6 +57,7 @@ post_connect = '''static BOOL keybash_post_connect(freerdp* instance) {
     rdpContext* context = GUAC_RDP_CONTEXT(instance);
     rdpGraphics* graphics = context->graphics;
 ''' + gdi_block + '''
+    puts("KB_STAGE_POST_READY"); fflush(stdout);
     return TRUE;
 }
 
@@ -65,6 +66,7 @@ replace_once(rdp, "static BOOL rdp_freerdp_pre_connect(freerdp* instance) {",
              post_connect + "static BOOL rdp_freerdp_pre_connect(freerdp* instance) {")
 replace_once(rdp, "rdp_inst->PreConnect = rdp_freerdp_pre_connect;",
              "rdp_inst->PreConnect = rdp_freerdp_pre_connect;\n    rdp_inst->PostConnect = keybash_post_connect;")
+replace_once(rdp, "/* Connection complete */", 'puts("KB_STAGE_CONNECTED"); fflush(stdout);\n    /* Connection complete */')
 for old, stage in [
     ("if (!freerdp_context_new(rdp_inst)) {", "CONTEXT"),
     ("if (!freerdp_connect(rdp_inst)) {", "NETWORK"),

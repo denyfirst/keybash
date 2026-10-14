@@ -43,6 +43,9 @@ func TestNativePlanEnforcesNLAChannelsAndRedactsCredentials(t *testing.T) {
 	if values["disable-copy"] != "true" || values["disable-paste"] != "true" {
 		t.Fatal("unverified native clipboard enabled")
 	}
+	if values["resize-method"] != "" || values["enable-touch"] != "false" || values["disable-gfx"] != "true" {
+		t.Fatal("unverified dynamic display channels enabled")
+	}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
 		formatted := fmt.Sprintf(verb, p)
 		if strings.Contains(formatted, p.user) || strings.Contains(formatted, p.password) {

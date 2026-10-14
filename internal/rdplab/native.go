@@ -64,7 +64,9 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 		// Native clipboard stays off until the bounded text adapter and browser
 		// actions are connected and measured; the separate codec is not enough.
 		"disable-copy": "true", "disable-paste": "true", "normalize-clipboard": "preserve",
-		"resize-method": "display-update", "client-name": "Keybash-lab", "disable-gfx": "true", "force-lossless": "true",
+		// Fixed lab viewport. Dynamic display channels need their own native
+		// callback/resize evidence before enabling them in a browser workspace.
+		"resize-method": "", "client-name": "Keybash-lab", "disable-gfx": "true", "force-lossless": "true",
 	}
 	result := instruction{"connect", "VERSION_1_5_0"}
 	for _, name := range args[2:] {
