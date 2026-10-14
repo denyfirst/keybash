@@ -9,12 +9,12 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
 2. **Protocol lab (started):** hostname-scoped pinned DNS dialing and SSH
    identity/key-auth/PTY library and browser lab implemented, with Linux Bash
    fixture checks. Credential-free RDP negotiation/pinned TLS, bounded text codec
-   and an empty Linux netns experiment are implemented. Next prove the native
-   RDP worker's own TLS/NLA authentication and usable isolated egress with
-   synthetic credentials, and measure actual desktop copy/paste
-   and keyboard behavior. No production credential custody at this stage.
-   The native build/broker candidate and required success/refusal/mutation
-   fixtures are tracked in `NATIVE-RDP-LAB.md`; passing Go codec tests alone
+   and an empty Linux netns experiment are implemented. A pinned native lab adds
+   actual TLS identity enforcement, synthetic NLA login, decoded desktop images,
+   a one-use guarded broker and isolated worker/revocation checks. Next measure
+   actual browser desktop copy/paste, keyboard, resize and reconnect behavior. No production credential custody at this stage.
+   The native build/broker and required success/refusal/mutation fixtures are
+   tracked in `NATIVE-RDP-LAB.md`; passing Go codec tests alone
    cannot complete its native acceptance gate.
 3. **Identity and custody:** local login/MFA, server-side ownership checks,
    encrypted credential persistence, safe import/export, recovery and session

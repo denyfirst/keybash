@@ -1,7 +1,7 @@
 # Implemented Keybash security invariants
 
 This file describes only code that exists. Planned login, vault,
-native RDP authentication, browser clipboard and deployment controls are in the product
+production RDP access, browser RDP clipboard and deployment controls are in the product
 plan and roadmap, not claims of this lab. Tests use synthetic targets,
 in-memory connections and ephemeral loopback SSH/browser fixtures. They perform
 no external server dials and load no real credentials.
@@ -50,6 +50,15 @@ no external server dials and load no real credentials.
 | Prototype refuses nontext types, malformed base64/UTF-8, wrong IDs, replay and excess text | clipboard/blob/end only, strict encoding, 32 KiB total | `TestRDPClipboardRejectsTypesReplayMalformedAndQuota`, `TestRDPClipboardExactQuotaAndRevocation` |
 | Guacamole prototype bounds lengths and rejects invalid UTF-8 | 48 KiB per instruction, 16 elements, codepoint lengths | `TestRDPWireCodepointsBoundsAndMalformed`, `FuzzRDPWireAndClipboard` |
 | Empty test netns denies host/network TCP and DNS UDP without capabilities | CI fixed child; removed namespace must fail | `TestRDPEmptyWorkerNamespaceDeniesEgress`, `TestRDPWorkerNamespaceChild` |
+| Native parameters require NLA and closed auxiliary channels; credentials are redacted | private exact-schema plan and refusal-only authentication callback | `TestNativePlanEnforcesNLAChannelsAndRedactsCredentials`, `TestNativeArgumentsRejectUnknownDuplicateMissingAndVersion` |
+| Unknown native argument schemas refuse before credentials; context closure owns IPC | bounded setup and transport cleanup | `TestNativeHandshakeStrictSchemaReadyAndContextCleanup` |
+| Unsolicited native files/pipes/clipboard/prompts and excess output are refused | fixed opcode boundary, 8 MiB/8192 instruction ceiling | `TestNativeStreamRefusesUnsolicitedStreamsAndBoundsOutput` |
+| A broker binds the logical identity to its guarded target and cannot be reused | private name-bound single-use raw transport capability | `TestNativeBrokerBindsIdentityToGuardedTarget`, `TestNativeBrokerRawUnicodeSingleUseAndCancellation` |
+| Broker quotas, failed/late/canceled dials close both streams | 16 MiB per direction, cancellation/EOF cleanup | `TestNativeBrokerQuotaClosesBothDirections`, `TestNativeBrokerFailedAndCanceledDialsCloseOwnedConnections` |
+| Native TLS refuses changed/invalid certificates and downgrade before any CredSSP data | mandatory OpenSSL exact-leaf/name/usage/time/critical/key hook; no TOFU/ignore | `TestNativeRDPCertificateRefusalBeforeCredentials` |
+| Synthetic correct NLA password yields decoded desktop images; wrong password refuses; cancellation stops worker/broker | actual pinned native peer, bounded PNG decode, test-only process supervision | `TestNativeRDPAuthenticationRenderingAndRevocation` |
+| Native worker has private network/filesystem/PID boundaries and no groups/capabilities; cannot replace trust or independently dial | test-only Bubblewrap/setpriv/read-only mounts and resource limits | `TestNativeRDPSandboxPreparation`, `TestNativeRDPChild` |
+| Reaching private IPC does not authorize a process with the wrong host UID | Unix peer credential check before accepting the capability | `TestNativeRDPControlIPCRejectsWrongUID` |
 
 Browser evidence is additionally enforced by `web/paste.test.mjs` and the
 `browserlab` tagged `TestBrowserTerminalLab`: paste review/cancel/approve, byte
@@ -60,13 +69,19 @@ kernel resize. Windows uses a mocked clipboard to protect the workstation.
 
 ## Limits
 
-RDP evidence is a pre-credential experiment and private text prototype. The
+The initial RDP probe is a pre-credential experiment and private text prototype. The
 probe checks its own TLS, closes it, and never sends CredSSP; it cannot authorize
 guacd's connection. Its imported leaf is the only trust anchor; standard TLS/name
-verification remains enabled with an extra exact DER pin. Native version,
-identity/NLA behavior, allowed-target broker and filesystem/resource sandbox
-are not implemented. The empty Linux test namespace denies approved destinations
-too. Codec tests are not desktop/browser clipboard evidence. See ADR 0003.
+verification remains enabled with an extra exact DER pin. A separate pinned
+native Linux lab enforces its own TLS identity before CredSSP, authenticates a
+synthetic account and decodes desktop images through a one-use broker and
+test-only worker sandbox. Both actual C callback mutations must fail before
+restoration and a full rerun. Refusal timeouts are failures, not proof. Native
+clipboard/touch/dynamic display are disabled. There is no browser RDP tunnel,
+application ownership/vault, production launcher, aggregate cgroup quotas or
+minimal runtime filesystem/syscall filter. The empty earlier namespace also
+denies approved destinations. Codec tests are not desktop/browser clipboard
+evidence. See ADR 0003 and `NATIVE-RDP-LAB.md`.
 
 The IP guard accepts parsed IP/port pairs. `NamedTarget` adds ASCII hostname
 resolution with independently approved per-host pins and a five-second total
@@ -78,8 +93,8 @@ conversion, automated approval and DNS discovery are not implemented.
 The public SSH library path accepts `NamedTarget` and uses its returned stream
 without another hostname dial. Configuration/pins must be supplied by a trusted,
 authorized owner; no application login or ownership system exists yet.
-In particular, guacd has its own
-network path; this Go guard does not constrain it. The configured DNS resolver
+The native lab constrains guacd with a private netns and a single broker stream;
+the guard alone cannot constrain an independently launched guacd. The configured DNS resolver
 is trusted infrastructure and may itself require network access. This is not
 a DNS sandbox or DNSSEC guarantee. SSH identity is a separate approved host pin.
 

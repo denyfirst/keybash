@@ -22,31 +22,36 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
   zəif rejim/TLS və yanlış sertifikatların rəddi.
 - Unicode mətn clipboard protokolunun 32 KiB limitli, ayrıca sessiya/buffer sınağı.
 - Linux CI-də boş şəbəkə namespace-i, səlahiyyətlərin endirilməsi və egress rəddi;
-  guacd üçün işlək sandbox və icazəli bağlantı yolu hələ hazırlanmayıb.
-- Native RDP üçün ayrıca namizəd: worker-in öz TLS sertifikat yoxlaması,
-  NLA-only parametr siyasəti, birdəfəlik bağlantı broker-i və sintetik Linux
-  sandbox sınaqları yazılıb. Qəbul üçün native CI nəticəsi tələb olunur;
-  bu hissə hələ brauzer RDP workspace-i və ya hazır copy/paste deyil.
+  bu ilkin sınaq bütün bağlantıları rədd edir.
+- Pinned Guacamole/FreeRDP ilə ayrıca native Linux lab-ı: worker-in öz TLS
+  sertifikat yoxlaması, NLA hesab doğrulaması və məhdud PNG masaüstü axını.
+- Birdəfəlik bağlantı broker-i, ayrıca filesystem/network/PID mühiti,
+  səlahiyyətlərin endirilməsi, yanlış IPC istifadəçisinin rəddi və sessiya ləğvi.
+- Native sertifikat yoxlamasını hər iki istiqamətdə qəsdən pozan sınaqlar;
+  original kod bərpa edilir və bütün native sınaqlar təkrar keçir.
+- Native clipboard və dinamik ekran kanalları bağlıdır; brauzer RDP
+  workspace-i və hazır RDP copy/paste hələ hazırlanmayıb.
 - Guard üçün müsbət, rədd, yanlış konfiqurasiya və abuse testləri.
 - Private checkout, signature verification və Go yoxlamaları üçün CI.
 
-Guard SSH kitabxanasının girişinə bağlanıb; RDP worker-ə inteqrasiya edilməyib.
+Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağlıdır.
+Native sınaqlarda yalnız test fayllarına aid sintetik loopback bağlantısı var.
 Bu, işlək brauzer remote-access məhsulu və production təhlükəsizlik zəmanəti deyil.
 
 ## Hələ hazırlanmayıb
 
 Login/MFA, vault və credential importu, hostname/IP/host-key təsdiqi üçün UI,
 məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
-RDP/guacd inteqrasiyası, persistence, backup/restore,
+brauzer RDP inteqrasiyası, persistence, backup/restore,
 Docker deployment və release automation.
 
 ## Növbəti mərhələ
 
 Ayrıca laboratoriyada yalnız sintetik açar və hesablarla SSH/RDP texniki sınağı.
 SSH/brauzer lab sərhədi və dependency review hazırdır. RDP ilkin negotiation/TLS
-və mətn protokol lab-ı əlavə olunub; bu, NLA login və ya RDP masaüstü deyil.
-Növbəti iş native guacd/FreeRDP build review-si, worker-in öz bağlantısında
-sertifikat/NLA yoxlaması və yalnız icazəli hədəfə izolyasiya olunmuş çıxışdır. Detallar
+və mətn protokol lab-ına native TLS/NLA, masaüstü görüntüsü və izolyasiya olunmuş
+worker/broker sınaqları əlavə olunub. Növbəti iş brauzer RDP görüntüsü, klaviatura,
+resize və ayrıca sessiyaya bağlı məhdud mətn copy/paste-in faktiki sınağıdır. Detallar
 `PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
 Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
 Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər

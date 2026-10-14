@@ -1,6 +1,6 @@
-# Native RDP laboratory candidate
+# Native RDP laboratory
 
-14 October 2026. Candidate under required Linux CI verification; not a release
+14 October 2026. Synthetic lab with a required Linux CI gate; not a release
 or production entry point. No real remote account or credential is used.
 
 The lab builds Guacamole server 1.6.0 and FreeRDP 3.32.2 from upstream release
@@ -52,7 +52,12 @@ peer tests, not Windows interoperability or full desktop/clipboard evidence.
 
 The private Go adapter accepts the exact reviewed Guacamole argument schema;
 unknown, duplicate, missing or changed-version fields refuse before credentials
-are sent. Browser-selected params, target/gateway selection, drive, file transfer,
+are sent. Native clipboard, touch and dynamic display channels stay disabled. The lab
+uses a fixed 1024x768 viewport and classic NSCodec bitmap updates; PNG is the
+only advertised image format. Image evidence bounds eight concurrent streams,
+256 KiB each/1 MiB aggregate, dimensions and layer count before decoding. It is
+not a general browser drawing-instruction validator. Browser-selected params,
+target/gateway selection, drive, file transfer,
 SFTP, arbitrary channels, programs, audio, printing and recording are unavailable.
 Credentials travel on private Unix control IPC, never command arguments, URLs or
 environment. Formatting the plan redacts credentials. Streams have instruction,
@@ -84,9 +89,25 @@ authorization, small runtime filesystem, aggregate resource/egress abuse tests,
 real Windows/browser clipboard/keyboard and reconnect matrix, credential custody,
 packaging and independent security review. No production service is deployed.
 
+Integration initializes GDI and its drawing callbacks in PostConnect, following
+the pinned FreeRDP lifecycle and the upstream Guacamole fix. Native event errors
+abort immediately; batches are limited to 64 events before display/input work.
+Missing/rejected credentials cannot prompt or retry. Cleartext account hints in
+the initial negotiation cookie are disabled. CI prints only fixed phase markers
+and bounded numeric native error codes, never native/session diagnostic text.
+Temporary stack debugger tooling was removed after diagnosis.
+
+The required builder compiles our identity callback with warnings as errors and
+runs Clang static analysis separately. Go/JS/actions CodeQL coverage is separate;
+C CodeQL coverage is not claimed until GitHub confirms its language selection.
+Actual native allow-all and deny-all callback mutations must fail the changed-
+certificate and valid-account assertions respectively; original bytes are then
+restored and the full native matrix reruns. A refusal timeout alone fails.
+
 Primary references: [FreeRDP release](https://github.com/FreeRDP/FreeRDP/releases/tag/3.32.2),
 [FreeRDP advisories](https://github.com/FreeRDP/FreeRDP/security/advisories),
 [Guacamole source/checksums](https://guacamole.apache.org/releases/1.6.0/),
 [Guacamole security](https://guacamole.apache.org/security/),
 [OpenSSL verification](https://docs.openssl.org/3.0/man3/X509_verify_cert/),
-[Bubblewrap](https://github.com/containers/bubblewrap).
+[Bubblewrap](https://github.com/containers/bubblewrap), and
+[Guacamole GDI lifecycle fix](https://github.com/apache/guacamole-server/commit/ab36756b596520ae2a94cd4d25e406e0b5aa820b).

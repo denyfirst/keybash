@@ -16,7 +16,10 @@ A loopback-only HTTPS browser lab adds local xterm rendering, bounded WebSocket
 transport and paste review. It uses a synthetic SSH fixture; Linux CI exercises
 a real Bash PTY inside the test fixture. A credential-free RDP lab now tests
 HYBRID negotiation, pinned TLS and bounded Unicode text streams; Linux CI tests
-an empty worker network namespace. It has no CredSSP authentication or desktop.
+an empty worker network namespace. A separate native Linux lab builds pinned
+Guacamole/FreeRDP, verifies identity on its own TLS before CredSSP, authenticates
+a synthetic NLA account and decodes desktop images through an isolated worker.
+Its one-use broker and actual native identity mutations are required CI gates.
 There is no product login/MFA, vault,
 RDP gateway, installable deployment or production release yet.
 
@@ -29,6 +32,7 @@ RDP gateway, installable deployment or production release yet.
 - [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
 - [Protocol lab scope and next gates](docs/PROTOCOL-LAB.md)
 - [RDP boundaries and remaining native gates](docs/adr/0003-rdp-precredential-boundaries.md)
+- [Native RDP lab evidence and limits](docs/NATIVE-RDP-LAB.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
 ## Development checks

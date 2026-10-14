@@ -551,6 +551,9 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 						t.Logf("bounded display instruction counts: %v", seen)
 						t.Fatalf("native RDP did not render (%s)", stream.failure)
 					}
+					if ctx.Err() != nil {
+						t.Fatal("native password refusal timed out without evidence")
+					}
 					break
 				}
 				seen[in[0]]++ // next admits only fixed opcode constants
@@ -776,6 +779,9 @@ func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 			for {
 				in, err := stream.next()
 				if err != nil {
+					if ctx.Err() != nil {
+						t.Fatal("native certificate refusal timed out without evidence")
+					}
 					break
 				}
 				if in[0] == "img" && len(in) == 7 && in[3] == "0" {

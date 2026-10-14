@@ -261,3 +261,67 @@ inventory, actual pin and CredSSP behavior, usable approved-only egress and
 filesystem/resource sandbox, desktop/browser clipboard, ownership/vault and
 production packaging remain gates in ADR 0003. No real credentials, deployment
 or release are used/created. Porch and Rootwell remain untouched.
+
+
+## Protocol lab slice 4b: isolated native RDP (2026-10-14)
+
+The pinned Guacamole 1.6.0/FreeRDP 3.32.2 Linux source builder verifies archives
+before extraction, preserves license/NOTICE and records OS/native inventory.
+The actual C callback compiles with warnings as errors and passes separate
+Clang analysis. Native CI at `88abfb4` passed synthetic correct/incorrect NLA
+password, decoded primary-surface PNG output, broker/worker revocation, wrong
+IPC UID, sandbox/removed-netns checks and the full certificate/downgrade matrix.
+The final refusal cases additionally require closure before context expiry;
+a timeout alone must fail. No real remote accounts or production service.
+
+Both directions of actual native identity sabotage compiled and failed their
+intended assertions in required CI:
+
+1. Replace the native C callback with unconditional acceptance: the changed-leaf
+   peer observed CredSSP data and failed "native worker sent CredSSP before
+   certificate refusal".
+2. Replace it with unconditional refusal: the valid account failed "native
+   account did not authenticate".
+
+The disposable callback was restored byte-for-byte against the repository's
+source, rebuilt, and the full native matrix passed again. Mutated code and CI
+inventories/diagnostics are not tracked. Earlier Go mutations also failed valid
+and refusal assertions: NLA-to-legacy parameters, deny-all valid plan/broker,
+reusable broker, excess per-direction quota and both permissive/restrictive
+paste-review behavior. Original bytes were restored and affected tests rerun.
+
+Separate adversarial maintainer self-review examined actual TLS-before-CredSSP
+ordering, independent name/pin binding, read-only trust/IPC capabilities,
+SO_PEERCRED, real host UID/capability drop after trusted mount setup, process
+lifetime and raw-stream cancellation/quotas. Checked exact argument-schema drift
+refusal, no credential retry/TOFU/cleartext account cookie, GDI PostConnect
+lifecycle and first native event error retention. Continuous event batches are
+bounded before display/input work. Native clipboard, touch, dynamic display,
+files, arbitrary channels, audio, gateway, drive and recording stay disabled.
+Concurrent PNG test streams have individual/aggregate, dimension and layer
+limits; that test consumer is not a browser instruction validation boundary.
+Temporary GDB stack tooling was removed after the rendering diagnosis.
+
+The Linux browser gate exposed queued dialog-close events clearing a newly
+reopened paste preview. Close handlers now check whether the dialog is still
+closed; an atomic close/reopen regression preserves the new preview/pending
+input and confirms canceled text does not transmit. Local Edge evidence uses
+its existing mocked clipboard; required Linux Chromium/real-Bash evidence
+remains part of the final CI gate.
+
+The full CI run then hit a duration-fuzz cancellation failure with no reported
+crashing input. The pinned Go source retains the parent/child cancellation
+window described in [Go #75804](https://github.com/golang/go/issues/75804).
+CI now uses the documented count budget: every fuzz target must complete two
+million executions with a hard three-minute timeout. No error is suppressed,
+no failed run is treated as success and no check is disabled. This preserves
+the pinned toolchain and supplies explicit fuzz work instead of duration-only
+termination. The final CI gate must pass with this policy.
+
+This remains maintainer self-review, not independent audit. Go/JS/actions
+CodeQL and native Clang are separate evidence; C CodeQL is not claimed without
+confirmed GitHub language coverage. Browser RDP/clipboard/keyboard/resize,
+real Windows interoperability, production launcher/authorization/vault,
+minimal runtime filesystem/syscall filtering, aggregate cgroup quotas,
+packaging and independent candidate review remain required before production.
+Porch and Rootwell remain untouched; no deployment or release was created.

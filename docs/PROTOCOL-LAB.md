@@ -102,16 +102,17 @@ drop and failed network attempts, with a no-namespace sabotage check. The child
 still sees the host filesystem; no guacd or authorized egress route exists.
 This is not a production sandbox. See [ADR 0003](adr/0003-rdp-precredential-boundaries.md).
 
-## Slice 4b: native RDP (candidate under verification)
+## Slice 4b: native RDP (synthetic lab implemented)
 
 The private native adapter, one-use guarded stream broker, actual TLS identity
-hook and test-only Linux worker/peer launcher are implemented as a candidate.
-`NATIVE-RDP-LAB.md` records the exact pinned sources and boundaries. Required
-native success/refusal, image decode, cancellation and callback sabotage tests
-must pass before acceptance. There is no browser RDP tunnel or desktop
+hook and test-only Linux worker/peer launcher are implemented.
+`NATIVE-RDP-LAB.md` records pinned sources and boundaries. Required native CI
+proves synthetic NLA login, bounded decoded desktop images, actual certificate
+refusal before CredSSP, sandbox/broker cancellation and callback sabotage in
+both directions. Native clipboard/dynamic display remain disabled. There is no browser RDP tunnel or desktop
 clipboard evidence yet; those remain the next protocol-lab gate.
 
-Guacamole JS/guacd and FreeRDP remain candidates. Before adoption, record exact
+Guacamole JS and production guacd/FreeRDP remain candidates. Before adoption, record exact
 versions, licenses, transitive/native build inventory, security reports, resource
 limits and update policy. guacd stays on an isolated unpublished worker network.
 It must receive a validated literal destination and have independently enforced

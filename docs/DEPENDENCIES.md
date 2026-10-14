@@ -105,10 +105,11 @@ Sources: [xterm security](https://xtermjs.org/docs/guides/security/),
 
 ## Remaining adoptions
 
-The native RDP candidate uses test-only source builds of Guacamole 1.6.0 and
+The native RDP lab uses test-only source builds of Guacamole 1.6.0 and
 FreeRDP 3.32.2. Exact archives, integration changes, upstream/OS review, license
-inventory and limits are recorded in `NATIVE-RDP-LAB.md`; required Linux CI must
-prove them before this candidate is considered verified. They are not adopted
+inventory and limits are recorded in `NATIVE-RDP-LAB.md`; required Linux CI
+checks native success, refusal, decoded images, cancellation and actual C
+callback sabotage in both directions, followed by restored-source verification. They are not adopted
 as a production runtime or packaged/deployed service. The Go module graph adds
 no version; x/sys becomes a direct test dependency for Unix peer credentials.
 NTLM's MD4 SAM hash is confined to a synthetic `_linux_test.go` peer, not a vault

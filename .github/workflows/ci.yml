@@ -91,11 +91,14 @@ jobs:
           set -eu
           go vet ./...
           go test -race -shuffle=on -count=1 -timeout=5m ./...
-          go test ./internal/targetguard -run='^$' -fuzz='^FuzzCanonicalHostname$' -fuzztime=15s
-          go test ./internal/sshtransport -run='^$' -fuzz='^FuzzSSHHostKeyConfig$' -fuzztime=15s
-          go test ./internal/terminalweb -run='^$' -fuzz='^FuzzTerminalControl$' -fuzztime=15s
-          go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPConfirmation$' -fuzztime=15s
-          go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPWireAndClipboard$' -fuzztime=15s
+          # Count budgets avoid Go #75804's duration-cancellation race.
+          # Every fuzz target must complete two million executions; no failure
+          # is suppressed or retried. The hard timeout still detects hangs.
+          go test ./internal/targetguard -run='^$' -fuzz='^FuzzCanonicalHostname$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/sshtransport -run='^$' -fuzz='^FuzzSSHHostKeyConfig$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/terminalweb -run='^$' -fuzz='^FuzzTerminalControl$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPConfirmation$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPWireAndClipboard$' -fuzztime=2000000x -timeout=3m
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
           # Test-only empty netns; root setup drops to UID/GID 65534 with no
           # effective capabilities before the fixed child runs. No guacd yet.
