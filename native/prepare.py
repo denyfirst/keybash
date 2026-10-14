@@ -30,6 +30,7 @@ anchor = "static int guac_rdp_handle_events(guac_rdp_client* rdp_client) {"
 callback = '''static int keybash_verify_x509(freerdp* instance, const BYTE* pem,
         size_t length, const char* hostname, UINT16 port, DWORD flags) {
     (void)instance; (void)hostname; (void)port;
+    puts("KB_STAGE_IDENTITY"); fflush(stdout);
     if (flags != 0) return 0;
     return keybash_verify_identity((const char*)pem, length);
 }
@@ -39,6 +40,13 @@ callback = '''static int keybash_verify_x509(freerdp* instance, const BYTE* pem,
 replace_once(rdp, anchor, callback + anchor)
 replace_once(rdp, '#include "rdp.h"', '#include "rdp.h"\n#include <freerdp/version.h>\n_Static_assert(FREERDP_VERSION_MAJOR == 3, "Keybash lab requires FreeRDP 3");\n#include "keybash_identity.c"')
 (rdp.parent / "keybash_identity.c").write_bytes(identity_source.read_bytes())
+for old, stage in [
+    ("if (!freerdp_context_new(rdp_inst)) {", "CONTEXT"),
+    ("if (!freerdp_connect(rdp_inst)) {", "NETWORK"),
+    ("guac_rdp_push_settings(client, settings, instance);", "SETTINGS"),
+    ("if (!gdi_init(instance, guac_rdp_get_native_pixel_format(FALSE)))", "GDI"),
+]:
+    replace_once(rdp, old, f'puts("KB_STAGE_{stage}"); fflush(stdout);\n    ' + old)
 # Supplied credentials are immutable for this one-use session. Missing/rejected
 # credentials must abort, never prompt, retry or switch authentication modes.
 rdp_text = rdp.read_text()

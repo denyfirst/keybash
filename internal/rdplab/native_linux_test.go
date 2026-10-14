@@ -80,6 +80,26 @@ func (d *nativeSetupErrors) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Only generated integration-stage constants can reach CI. Native diagnostic
+// lines, credential values and remote text are discarded, not reflected.
+type nativeStages struct{ pending string }
+
+func (s *nativeStages) Write(p []byte) (int, error) {
+	for _, b := range p {
+		if b == '\n' {
+			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_IDENTITY"} {
+				if s.pending == stage {
+					fmt.Fprintln(os.Stdout, stage)
+				}
+			}
+			s.pending = ""
+		} else if len(s.pending) < 256 {
+			s.pending += string(b)
+		}
+	}
+	return len(p), nil
+}
+
 func runSandbox(t *testing.T, ctx context.Context, args []string, stdout io.Writer) *nativeProcess {
 	t.Helper()
 	launch := append([]string{"--clear-groups", "--no-new-privs", "--", "/usr/bin/bwrap"}, args...)
@@ -369,7 +389,7 @@ func TestNativeRDPChild(t *testing.T) {
 	}
 	prefix := os.Getenv("KEYBASH_NATIVE_PREFIX")
 	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--core=0", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-p", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
-	guacd.Stdout = io.Discard
+	guacd.Stdout = &nativeStages{}
 	guacd.Stderr = io.Discard
 	if guacd.Start() != nil {
 		t.Fatal("guacd launch failed")
@@ -443,7 +463,10 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			address, authenticated := nativePeer(t, ctx, prefix, cert, "Synthetic-NLA-password")
-			control, process, brokerDone := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) { return (&net.Dialer{}).DialContext(c, "tcp", address) })
+			control, process, brokerDone := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
+				fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
+				return (&net.Dialer{}).DialContext(c, "tcp", address)
+			})
 			password := "wrong-synthetic-password"
 			if valid {
 				password = "Synthetic-NLA-password"
@@ -644,7 +667,10 @@ func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 			address, noCredentials := nativeTLSRefusalPeer(t, serverCert, version, selected)
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
-			control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) { return (&net.Dialer{}).DialContext(c, "tcp", address) })
+			control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
+				fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
+				return (&net.Dialer{}).DialContext(c, "tcp", address)
+			})
 			plan, err := newNativePlan(identity, "synthetic-user", "must-not-be-sent")
 			if err != nil {
 				t.Fatal(err)
