@@ -67,6 +67,15 @@ replace_once(rdp, "static BOOL rdp_freerdp_pre_connect(freerdp* instance) {",
 replace_once(rdp, "rdp_inst->PreConnect = rdp_freerdp_pre_connect;",
              "rdp_inst->PreConnect = rdp_freerdp_pre_connect;\n    rdp_inst->PostConnect = keybash_post_connect;")
 replace_once(rdp, "/* Connection complete */", 'puts("KB_STAGE_CONNECTED"); fflush(stdout);\n    /* Connection complete */')
+# A continuously-ready native handle must not starve display flushing/input.
+# Preserve the first native event failure instead of overwriting it with the
+# next wait result (also fixed by current upstream Guacamole).
+replace_once(rdp, "        int connection_closing;\n        do {",
+             "        int connection_closing = 0;\n        unsigned keybash_event_batch = 0;\n        do {")
+replace_once(rdp, "            if (!guac_rdp_handle_events(rdp_client))\n                wait_result = -1;",
+             "            if (!guac_rdp_handle_events(rdp_client)) {\n                wait_result = -1;\n                break;\n            }")
+replace_once(rdp, "        } while (!connection_closing &&\n                (wait_result = rdp_guac_client_wait_for_events(client, 0)) > 0);",
+             "        } while (!connection_closing && ++keybash_event_batch < 64 &&\n                (wait_result = rdp_guac_client_wait_for_events(client, 0)) > 0);")
 for old, stage in [
     ("if (!freerdp_context_new(rdp_inst)) {", "CONTEXT"),
     ("if (!freerdp_connect(rdp_inst)) {", "NETWORK"),
