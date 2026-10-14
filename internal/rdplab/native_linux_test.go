@@ -10,11 +10,14 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -394,12 +397,19 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				}
 			}
 			cancel()
-			_ = process.Process.Kill()
 			stream.close()
 			select {
 			case <-brokerDone:
 			case <-time.After(time.Second):
 				t.Fatal("revoked target broker stayed open")
+			}
+			// Context revocation must stop the sandbox without a manual kill.
+			stopped := make(chan struct{})
+			go func() { _ = process.Wait(); close(stopped) }()
+			select {
+			case <-stopped:
+			case <-time.After(time.Second):
+				t.Fatal("revoked worker stayed alive")
 			}
 		})
 	}
@@ -446,14 +456,24 @@ func nativeTLSRefusalPeer(t *testing.T, cert tls.Certificate, version uint16, se
 			return
 		}
 		server := tls.Server(raw, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: version, MaxVersion: version})
-		if server.Handshake() != nil {
+		if err := server.Handshake(); err != nil {
+			var timeout net.Error
+			if errors.As(err, &timeout) && timeout.Timeout() {
+				done <- errors.New("native TLS refusal timed out without evidence")
+				return
+			}
 			done <- nil
 			return
 		}
 		var b [1]byte
-		n, _ := server.Read(b[:])
+		n, err := server.Read(b[:])
 		if n != 0 {
 			done <- errors.New("native worker sent CredSSP before certificate refusal")
+			return
+		}
+		var timeout net.Error
+		if err == nil || errors.As(err, &timeout) && timeout.Timeout() {
+			done <- errors.New("native credential refusal lacked connection closure")
 			return
 		}
 		done <- nil
@@ -463,7 +483,7 @@ func nativeTLSRefusalPeer(t *testing.T, cert tls.Certificate, version uint16, se
 
 func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 	prefix := nativePrefix(t)
-	for _, reason := range []string{"changed", "expired", "name", "TLS11", "TLS-only", "plain-RDP"} {
+	for _, reason := range []string{"changed", "expired", "name", "purpose", "critical", "TLS11", "TLS-only", "plain-RDP"} {
 		t.Run(reason, func(t *testing.T) {
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
 			if err != nil {
@@ -479,12 +499,20 @@ func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 			selected := byte(2)
 			switch reason {
 			case "changed":
-				serverCert, _ = labCertificate(t, nil, key)
+				serverCert, _ = labCertificate(t, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(2) }, key)
 			case "expired":
 				serverCert, _ = labCertificate(t, func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Minute) }, key)
 				identity.der = bytes.Clone(serverCert.Certificate[0])
 			case "name":
 				identity.name = "different.invalid"
+			case "purpose":
+				serverCert, _ = labCertificate(t, func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} }, key)
+				identity.der = bytes.Clone(serverCert.Certificate[0])
+			case "critical":
+				serverCert, _ = labCertificate(t, func(c *x509.Certificate) {
+					c.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 2, 3, 4, 5}, Critical: true, Value: []byte{5, 0}}}
+				}, key)
+				identity.der = bytes.Clone(serverCert.Certificate[0])
 			case "TLS11":
 				version = tls.VersionTLS11
 			case "TLS-only":

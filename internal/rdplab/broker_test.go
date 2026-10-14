@@ -2,6 +2,7 @@ package rdplab
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/netip"
@@ -60,6 +61,10 @@ func TestNativeBrokerRawUnicodeSingleUseAndCancellation(t *testing.T) {
 	if <-writeDone != nil {
 		t.Fatal("write failed")
 	}
+	go func() { _, err := server.Write(text); writeDone <- err }()
+	if _, err := io.ReadFull(worker, got); err != nil || string(got) != string(text) || <-writeDone != nil {
+		t.Fatal("broker changed reverse bytes")
+	}
 	cancel()
 	select {
 	case <-done:
@@ -70,5 +75,49 @@ func TestNativeBrokerRawUnicodeSingleUseAndCancellation(t *testing.T) {
 	defer second.Close()
 	if broker.serve(context.Background(), secondWorker) != errNative || calls != 1 {
 		t.Fatal("single-use broker dialed again")
+	}
+}
+
+func TestNativeBrokerFailedAndCanceledDialsCloseOwnedConnections(t *testing.T) {
+	for _, reason := range []string{"failed", "late-cancel", "already-canceled"} {
+		t.Run(reason, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			worker, bridge := net.Pipe()
+			target, server := net.Pipe()
+			defer worker.Close()
+			defer target.Close()
+			defer server.Close()
+			calls := 0
+			broker := &nativeBroker{dial: func(context.Context) (net.Conn, error) {
+				calls++
+				if reason == "late-cancel" {
+					cancel()
+					return target, nil
+				}
+				return target, errors.New("private network diagnostics")
+			}}
+			if reason == "already-canceled" {
+				cancel()
+			}
+			if err := broker.serve(ctx, bridge); err != errNative {
+				t.Fatal("failed/canceled dial accepted or disclosed diagnostics")
+			}
+			if reason == "already-canceled" {
+				if calls != 0 {
+					t.Fatal("canceled broker dialed")
+				}
+			} else {
+				_ = server.SetReadDeadline(time.Now().Add(time.Second))
+				var b [1]byte
+				if _, err := server.Read(b[:]); err != io.EOF {
+					t.Fatal("owned target leaked")
+				}
+			}
+			var b [1]byte
+			if _, err := worker.Read(b[:]); err != io.EOF {
+				t.Fatal("owned worker leaked")
+			}
+		})
 	}
 }

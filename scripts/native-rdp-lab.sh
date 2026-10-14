@@ -57,3 +57,38 @@ go test -c -tags=nativelab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=3m -test.v
+
+# Both directions must detect sabotage on the ACTUAL native TLS callback.
+# All mutations stay in this disposable extracted tree, never repository files.
+guac="${lab}/guacamole-server-1.6.0"
+identity="${guac}/src/protocols/rdp/keybash_identity.c"
+cp "${identity}" "${lab}/identity.original"
+rebuild_identity() {
+  touch "${guac}/src/protocols/rdp/rdp.c"
+  make -C "${guac}/src/protocols/rdp" -j4
+  make -C "${guac}/src/protocols/rdp" install
+}
+expect_mutation_failure() {
+  if sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
+    "${prefix}/bin/lab.test" "-test.run=$1" -test.timeout=45s -test.v > "${lab}/mutation.log" 2>&1; then
+    echo 'native security mutation escaped its test' >&2
+    exit 1
+  fi
+  cat "${lab}/mutation.log"
+  grep -F "$2" "${lab}/mutation.log"
+}
+printf '%s\n' '#include <stddef.h>' \
+  'int keybash_verify_identity(const char* p, size_t n) { (void)p; (void)n; return 1; }' > "${identity}"
+rebuild_identity
+expect_mutation_failure '^TestNativeRDPCertificateRefusalBeforeCredentials$/changed$' \
+  'native worker sent CredSSP before certificate refusal'
+printf '%s\n' '#include <stddef.h>' \
+  'int keybash_verify_identity(const char* p, size_t n) { (void)p; (void)n; return 0; }' > "${identity}"
+rebuild_identity
+expect_mutation_failure '^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' \
+  'native RDP did not render'
+cp "${lab}/identity.original" "${identity}"
+cmp "${identity}" "${repo}/native/identity.c"
+rebuild_identity
+sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=3m -test.v
