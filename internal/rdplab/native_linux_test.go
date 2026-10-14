@@ -130,7 +130,7 @@ func nativePeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certi
 	args = append(args, "--dir", "/run/fixture", "--ro-bind", filepath.Join(dir, "cert.pem"), "/run/fixture/cert.pem",
 		"--ro-bind", filepath.Join(dir, "key.pem"), "/run/fixture/key.pem", "--ro-bind", filepath.Join(dir, "SAM"), "/run/fixture/SAM",
 		"--ro-bind", prefix+"/share/lab/test_icon.bmp", "/tmp/test_icon.bmp", "--chdir", "/tmp",
-		prefix+"/bin/sfreerdp", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
+		prefix+"/bin/sfreerdp-server", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
 	marker := &nativeMarker{ready: make(chan struct{})}
 	runSandbox(t, ctx, args, marker)
 	address := fmt.Sprintf("127.0.0.1:%d", port)
