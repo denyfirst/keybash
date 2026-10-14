@@ -63,7 +63,7 @@ func TestViewerValidatedPNGGroupingInputAndRevocation(t *testing.T) {
 	data := fixturePNG(t)
 	instructions := []instruction{{"img", "0", "14", "-1", "image/png", "0", "0"}, {"img", "1", "14", "-2", "image/png", "0", "0"},
 		{"blob", "0", base64.StdEncoding.EncodeToString(data)}, {"blob", "1", base64.StdEncoding.EncodeToString(data)},
-		{"end", "1"}, {"end", "0"}, {"copy", "-1", "0", "0", "2", "2", "14", "0", "4", "4"}, {"sync", "123", "1"}}
+		{"end", "1"}, {"end", "0"}, {"copy", "-1", "0", "0", "2", "2", "14", "0", "4", "4"}, {"mouse", "0", "0", "0", "0"}, {"sync", "123", "1"}}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

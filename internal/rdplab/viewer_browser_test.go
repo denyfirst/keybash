@@ -40,7 +40,10 @@ func browserViewer(t *testing.T, ctx context.Context, node string, factory termi
 	if env != nil {
 		command.Env = env
 	}
-	data, _ := json.Marshal(struct{ Origin, Code, Screenshot string }{server.URL, code, screenshot})
+	data, _ := json.Marshal(struct {
+		Origin, Code, Screenshot string
+		Native                   bool
+	}{server.URL, code, screenshot, env != nil})
 	command.Stdin = bytes.NewReader(data)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
@@ -53,10 +56,12 @@ func TestBrowserRDPViewerLab(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	png := fixturePNG(t)
+	inputs := make(chan (<-chan instruction), 1)
 	// Synthetic rendering/transport on any test workstation; the real native
 	// Linux case is separately required. No native worker or user account here.
 	factory := func(c context.Context) (terminalweb.Stream, error) {
-		s, remote, _ := viewerFixture(t)
+		s, remote, input := viewerFixture(t)
+		inputs <- input
 		go func() { <-c.Done(); _ = s.Close() }()
 		go func() {
 			for _, in := range []instruction{{"size", "0", "1024", "768"}, {"rect", "0", "0", "0", "1024", "768"}, {"cfill", "14", "0", "160", "160", "160", "255"},
@@ -69,4 +74,16 @@ func TestBrowserRDPViewerLab(t *testing.T) {
 		return s, nil
 	}
 	browserViewer(t, ctx, "node", factory, os.Getenv("KEYBASH_DESKTOP_SCREENSHOT"), nil)
+	var key, mouse bool
+	for in := range <-inputs {
+		if len(in) == 3 && in[0] == "key" && in[1] == "97" && in[2] == "1" {
+			key = true
+		}
+		if len(in) == 4 && in[0] == "mouse" {
+			mouse = true
+		}
+	}
+	if !key || !mouse {
+		t.Fatal("focused browser input was not delivered")
+	}
 }

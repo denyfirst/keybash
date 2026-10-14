@@ -28,7 +28,7 @@ func TestNativeRDPBrowserDesktopAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	address, authenticated := nativePeer(t, ctx, prefix, cert, "Synthetic-NLA-password")
+	address, marker := nativePeerWithInput(t, ctx, prefix, cert, "Synthetic-NLA-password")
 	var revoked atomic.Bool
 	factory := func(c context.Context) (terminalweb.Stream, error) {
 		control, process, brokerDone := launchNativeWorker(t, c, prefix, identity, func(d context.Context) (net.Conn, error) { return (&net.Dialer{}).DialContext(d, "tcp", address) })
@@ -41,7 +41,7 @@ func TestNativeRDPBrowserDesktopAndRevocation(t *testing.T) {
 			return nil, e
 		}
 		select {
-		case <-authenticated:
+		case <-marker.ready:
 		case <-c.Done():
 			stream.close()
 			return nil, errNative
@@ -63,6 +63,13 @@ func TestNativeRDPBrowserDesktopAndRevocation(t *testing.T) {
 	}
 	env := []string{"PATH=/usr/bin:/bin", "LANG=C", "PLAYWRIGHT_BROWSERS_PATH=" + os.Getenv("KEYBASH_NATIVE_BROWSER_CACHE")}
 	browserViewer(t, ctx, prefix+"/bin/node", factory, "", env)
+	for _, received := range []<-chan struct{}{marker.keys, marker.mouse} {
+		select {
+		case <-received:
+		default:
+			t.Fatal("browser input did not reach the authenticated native peer")
+		}
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	for !revoked.Load() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

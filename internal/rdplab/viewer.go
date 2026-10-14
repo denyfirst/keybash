@@ -262,7 +262,9 @@ func (s *viewerStream) drawing(in instruction) bool {
 	case "mouse":
 		_, a := num(1, 0, 1023)
 		_, b := num(2, 0, 767)
-		return len(in) == 3 && a && b
+		_, c := num(3, 0, 31)
+		_, d := num(4, 0, 1<<53-1)
+		return len(in) == 5 && a && b && c && d
 	case "sync":
 		if len(in) != 2 && len(in) != 3 {
 			return false

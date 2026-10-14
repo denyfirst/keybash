@@ -32,6 +32,14 @@ try {
   const box=await page.locator('#display').boundingBox(); assert(box);
   await page.mouse.move(box.x+120,box.y+120,{steps:3});
   await page.mouse.down(); await page.mouse.up();
+  if(config.Native) await page.waitForFunction(()=>{
+    return [...document.querySelectorAll('#display canvas')].some(canvas=>{
+      if(canvas.width<1024||canvas.height<768) return false;
+      const data=canvas.getContext('2d').getImageData(130,120,40,40).data;
+      for(let i=0;i<data.length;i+=4) if(data[i+3]&&Math.abs(data[i]-160)>15) return true;
+      return false;
+    });
+  },undefined,{timeout:10000});
   await page.waitForTimeout(150);
   const cookies=await context.cookies();
   assert(cookies.some(c=>c.name==='__Host-keybash-lab'&&c.secure&&c.httpOnly&&c.sameSite==='Strict'));
