@@ -480,6 +480,18 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				t.Fatal("native control handshake failed")
 			}
 			defer stream.close()
+			if valid {
+				select {
+				case <-authenticated:
+				case <-ctx.Done():
+					t.Fatal("native account did not authenticate")
+				}
+				// The sample's initial solid background can become a cfill. Its
+				// mouse handler paints the nonuniform fixture icon onto layer 0.
+				if writeInstruction(control, instruction{"mouse", "120", "120", "0"}) != nil {
+					t.Fatal("authenticated native mouse input failed")
+				}
+			}
 			image := false
 			imageID := ""
 			var pixels []byte
