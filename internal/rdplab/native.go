@@ -183,10 +183,15 @@ func (s *nativeStream) next() (instruction, error) {
 				(len(in) == 4 && in[1] == "1" && in[3] == "" || len(in) == 3 && in[1] == "2") {
 			continue
 		}
+		if len(in) == 4 && in[0] == "set" && in[2] == "multi-touch" && in[3] == "0" {
+			if layer, err := strconv.ParseUint(in[1], 10, 16); err == nil && layer <= 32767 {
+				continue // fixed disabled-touch metadata; no arbitrary property setter
+			}
+		}
 		// No files, pipes, audio/video, mutable args, credential prompts or remote
 		// messages escape to a future viewer. There is no browser tunnel yet.
 		allowed := false
-		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line move name path pop push rect reset shade size start sync transfer transform") {
+		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line mouse move name path pop push rect reset shade size start sync transfer transform") {
 			allowed = allowed || op == in[0]
 		}
 		if !allowed {

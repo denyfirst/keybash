@@ -183,7 +183,7 @@ func TestNativeStreamRefusesUnsolicitedStreamsAndBoundsOutput(t *testing.T) {
 	stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true }}
 	defer stream.close()
 	go func() {
-		for _, in := range []instruction{{"nop"}, {"msg", "1", "private-owner-id", ""}, {"msg", "2", "private-owner-id"}, {"sync", "123"}} {
+		for _, in := range []instruction{{"nop"}, {"msg", "1", "private-owner-id", ""}, {"msg", "2", "private-owner-id"}, {"set", "0", "multi-touch", "0"}, {"sync", "123"}} {
 			_ = writeInstruction(server, in)
 		}
 		_ = server.Close()

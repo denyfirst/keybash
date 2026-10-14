@@ -468,10 +468,10 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 					}
 					break
 				}
-				if in[0] == "sync" && len(in) == 2 {
+				if in[0] == "sync" && (len(in) == 2 || len(in) == 3) {
 					_ = writeInstruction(control, in)
 				}
-				if in[0] == "img" && len(in) == 7 && in[4] == "image/png" {
+				if in[0] == "img" && len(in) == 7 && in[3] == "0" && in[4] == "image/png" {
 					if imageID != "" {
 						t.Fatal("overlapping native image streams")
 					}
