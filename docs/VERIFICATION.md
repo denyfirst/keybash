@@ -325,3 +325,63 @@ real Windows interoperability, production launcher/authorization/vault,
 minimal runtime filesystem/syscall filtering, aggregate cgroup quotas,
 packaging and independent candidate review remain required before production.
 Porch and Rootwell remain untouched; no deployment or release was created.
+
+## Protocol lab slice 4c: bounded browser RDP (2026-10-14)
+
+The desktop profile reuses loopback TLS 1.3, exact Host/Origin, owner grant,
+cookie, one-active-socket and expiry/logout controls. Official Apache JS is
+bundled reproducibly with its source digest, per-module manifest and licenses;
+the isolated public release-key verification is recorded in BROWSER-RDP-LAB.md.
+The browser cannot select a target, credential, native argument or auxiliary
+stream. The server adapter validates exact drawing/input shapes and state.
+
+Local tests cover concurrent images and drawing order, preserved decoded pixels,
+malformed/truncated PNGs, static normalization stripping ancillary/APNG metadata
+and trailing content, SVG refusal, layer/canvas/stack/image/work limits, unsafe
+or replayed input and blocked/late operations after cancellation. Local Edge
+also measures pixels, actual key/mouse input, held Shift release on blur,
+cookie flags, local asset requests, untouched clipboard/storage and display
+removal after logout. Portable synthetic rendering alone is not native evidence.
+
+The native/browser baseline at 8372713 passed required CI 38564471070: Chromium
+rendered actual isolated native NLA output, the authenticated peer observed the
+'a' key and mouse, changed icon pixels reached the browser, and logout stopped
+worker/broker. The actual C identity acceptance/refusal mutations and restored
+full native/browser matrix passed. All required checks and confirmed CodeQL
+actions/C-C++/Go/Python/JavaScript-TypeScript checks passed that baseline.
+The final static-PNG normalization and cumulative work limits require those
+same gates again before merge. No native success is inferred from a ready UI.
+
+Nine temporary, compiling behavioral mutations failed their intended assertions:
+
+1. Allow header-only/truncated PNGs: invalid image reached the viewer.
+2. Reject every drawing operation: valid native drawing refused.
+3. Accept browser clipboard: unsafe opcode accepted.
+4. Reject every browser input: valid viewer input refused.
+5. Raise aggregate canvas quota: quota assertion failed.
+6. Permit SVG image starts: unsafe drawing accepted.
+7. Remove cumulative rendering cap: excess render work accepted.
+8. Remove cumulative decoding cap: excess decoded pixels accepted.
+9. Forward original PNG instead of normalized pixels: remote ancillary/animation/
+   trailing content reached the browser.
+
+The original source was restored byte-for-byte and all affected viewer tests
+passed. Mutation diagnostics remain outside the repository. The new schema fuzz
+target joins the existing targets at two million executions with a hard timeout;
+no check or failure is suppressed.
+
+Separate adversarial maintainer self-review examined upstream image/task ordering,
+canvas rounding/autosizing, PNG-versus-browser decoder differences, compressed
+amplification, cumulative work, interleaved-image deadlock, native/browser blob
+ack ownership and display-sync credits, focus and held-key state, and revocation.
+Findings produced static PNG re-encoding and lifetime work caps. The test-only
+native peer now records exact input markers and independently authenticates;
+the five-field native mouse metadata follows the pinned actual protocol shape.
+Remote names/diagnostics never become application HTML. The reviewed CSP adds
+Blob images only to the desktop profile; terminal permissions stay unchanged.
+
+This is maintainer self-review, not independent audit. Native clipboard and
+remote resize remain disabled; layouts/reconnect, real Windows/browser matrix,
+login/MFA, ownership/vault, production worker packaging/quotas, restore and
+independent candidate review remain gates. No real credential, installer,
+deployment or release is introduced. Porch and Rootwell remain untouched.

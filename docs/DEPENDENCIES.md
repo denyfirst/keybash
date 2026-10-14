@@ -133,3 +133,33 @@ resource limits and update process before adding them.
 Primary references: [SSH API at the pinned version](https://pkg.go.dev/golang.org/x/crypto@v0.58.0/ssh),
 [upstream source](https://github.com/golang/crypto/tree/v0.58.0/ssh), and
 [Go vulnerability management](https://go.dev/doc/security/vuln/).
+
+
+## Browser RDP lab: Apache guacamole-common-js 1.6.0
+
+The official client source archive is pinned to SHA-256
+`81f9fd5a7b4377fb0ee295d0d4fec92e9667f2aafaa3d0ed8937f535deabdee4`.
+Its release signature verified with Apache's published public signing key
+`F467E54ACC52F1D2778826865B2977AEE5E4518F` in a separate temporary public keyring.
+The source/security reports and JS display/parser/input code were reviewed on
+14 October 2026. No blanket vulnerability-free or independent-audit claim.
+
+`scripts/vendor-guacamole.py` verifies the archive before reading named members,
+concatenates 35 unmodified modules deterministically and preserves LICENSE/NOTICE.
+The manifest contains each module/file hash; required CI regenerates exact bytes.
+No npm wrapper, new runtime package, Maven/Java application or CDN is adopted.
+The existing xterm/pnpm assets remain unchanged. Node is copied into the disposable
+native test prefix solely to run the verified headless browser harness.
+
+The app uses a restricted custom tunnel and only the allowed drawing/input
+subset. Auxiliary tunnel/audio/video helpers defined by the package are not
+constructed or enabled. Only bounded, completely decoded and statically re-encoded PNGs can reach the
+Blob-image renderer. Unsupported source URLs, SVG, streams, transforms and
+clipboard are refused by the server adapter. CSP stays self-only for scripts
+with the existing reviewed inline-style allowance; the desktop profile adds
+`img-src blob:`. It does not loosen the terminal profile. Source requests,
+clipboard/storage absence and revocation are measured in the browser gates.
+
+Native/browser text clipboard, remote resize/layout/reconnect, real Windows,
+production packaging and independent audit remain gates. Limits and API/source
+references are in [the browser RDP lab](BROWSER-RDP-LAB.md).

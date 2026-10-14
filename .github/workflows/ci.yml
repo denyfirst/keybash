@@ -100,6 +100,7 @@ jobs:
           go test ./internal/terminalweb -run='^$' -fuzz='^FuzzTerminalControl$' -fuzztime=2000000x -timeout=3m
           go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPConfirmation$' -fuzztime=2000000x -timeout=3m
           go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPWireAndClipboard$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/rdplab -run='^$' -fuzz='^FuzzViewerDrawingSchemas$' -fuzztime=2000000x -timeout=3m
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
           go test -tags=browserlab -race -run='^TestBrowserRDPViewerLab$' -timeout=1m ./internal/rdplab
           # Test-only empty netns; root setup drops to UID/GID 65534 with no

@@ -25,9 +25,12 @@ try {
   await page.waitForFunction(()=>{
     const canvases=[...document.querySelectorAll('#display canvas')];
     return canvases.some(canvas=>canvas.width>=1024&&canvas.height>=768&&canvas.getContext('2d').getImageData(500,500,1,1).data[0]>=150);
-  },{timeout:10000});
+  },undefined,{timeout:10000});
   await page.locator('#desktop').focus();
   await page.keyboard.press('a'); await page.keyboard.press('ArrowLeft');
+  await page.keyboard.down('Shift');
+  await page.locator('#special').focus();
+  await page.keyboard.up('Shift');
   await page.getByRole('button',{name:'Ctrl+Alt+Del',exact:true}).click();
   const box=await page.locator('#display').boundingBox(); assert(box);
   await page.mouse.move(box.x+120,box.y+120,{steps:3});

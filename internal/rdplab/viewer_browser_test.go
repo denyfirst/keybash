@@ -74,7 +74,7 @@ func TestBrowserRDPViewerLab(t *testing.T) {
 		return s, nil
 	}
 	browserViewer(t, ctx, "node", factory, os.Getenv("KEYBASH_DESKTOP_SCREENSHOT"), nil)
-	var key, mouse bool
+	var key, mouse, shiftDown, shiftUp bool
 	for in := range <-inputs {
 		if len(in) == 3 && in[0] == "key" && in[1] == "97" && in[2] == "1" {
 			key = true
@@ -82,8 +82,16 @@ func TestBrowserRDPViewerLab(t *testing.T) {
 		if len(in) == 4 && in[0] == "mouse" {
 			mouse = true
 		}
+		if len(in) == 3 && in[0] == "key" && in[1] == "65505" {
+			if in[2] == "1" {
+				shiftDown = true
+			}
+			if in[2] == "0" {
+				shiftUp = true
+			}
+		}
 	}
-	if !key || !mouse {
+	if !key || !mouse || !shiftDown || !shiftUp {
 		t.Fatal("focused browser input was not delivered")
 	}
 }

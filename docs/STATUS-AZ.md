@@ -29,8 +29,10 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
   səlahiyyətlərin endirilməsi, yanlış IPC istifadəçisinin rəddi və sessiya ləğvi.
 - Native sertifikat yoxlamasını hər iki istiqamətdə qəsdən pozan sınaqlar;
   original kod bərpa edilir və bütün native sınaqlar təkrar keçir.
-- Native clipboard və dinamik ekran kanalları bağlıdır; brauzer RDP
-  workspace-i və hazır RDP copy/paste hələ hazırlanmayıb.
+- Brauzer RDP lab-ı: yoxlanmış PNG görüntüsü, klaviatura/siçan, fokus itəndə
+  basılı düymələrin buraxılması, lokal fullscreen və logout zamanı görüntünün silinməsi.
+- Linux-da faktiki NLA worker-dən Chromium-a görüntü və input sınaqları;
+  native clipboard və dinamik ekran kanalları hələ bağlıdır.
 - Guard üçün müsbət, rədd, yanlış konfiqurasiya və abuse testləri.
 - Private checkout, signature verification və Go yoxlamaları üçün CI.
 
@@ -42,7 +44,7 @@ Bu, işlək brauzer remote-access məhsulu və production təhlükəsizlik zəma
 
 Login/MFA, vault və credential importu, hostname/IP/host-key təsdiqi üçün UI,
 məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
-brauzer RDP inteqrasiyası, persistence, backup/restore,
+hazır RDP workspace/copy-paste, persistence, backup/restore,
 Docker deployment və release automation.
 
 ## Növbəti mərhələ
@@ -50,8 +52,9 @@ Docker deployment və release automation.
 Ayrıca laboratoriyada yalnız sintetik açar və hesablarla SSH/RDP texniki sınağı.
 SSH/brauzer lab sərhədi və dependency review hazırdır. RDP ilkin negotiation/TLS
 və mətn protokol lab-ına native TLS/NLA, masaüstü görüntüsü və izolyasiya olunmuş
-worker/broker sınaqları əlavə olunub. Növbəti iş brauzer RDP görüntüsü, klaviatura,
-resize və ayrıca sessiyaya bağlı məhdud mətn copy/paste-in faktiki sınağıdır. Detallar
+worker/broker və brauzer görüntü/input sınaqları əlavə olunub. Növbəti protokol işi
+resize, keyboard layout, reconnect və ayrıca sessiyaya bağlı məhdud mətn
+copy/paste-in faktiki sınağıdır. Login/MFA və vault ayrıca mərhələdir. Detallar
 `PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
 Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
 Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər

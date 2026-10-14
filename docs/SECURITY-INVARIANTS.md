@@ -59,6 +59,12 @@ no external server dials and load no real credentials.
 | Synthetic correct NLA password yields decoded desktop images; wrong password refuses; cancellation stops worker/broker | actual pinned native peer, bounded PNG decode, test-only process supervision | `TestNativeRDPAuthenticationRenderingAndRevocation` |
 | Native worker has private network/filesystem/PID boundaries and no groups/capabilities; cannot replace trust or independently dial | test-only Bubblewrap/setpriv/read-only mounts and resource limits | `TestNativeRDPSandboxPreparation`, `TestNativeRDPChild` |
 | Reaching private IPC does not authorize a process with the wrong host UID | Unix peer credential check before accepting the capability | `TestNativeRDPControlIPCRejectsWrongUID` |
+| Desktop profile keeps the existing TLS/owner/Origin boundary and exposes a fixed local asset set | immutable desktop profile, self-only scripts/Blob-only images | `TestDesktopProfileKeepsOwnerOriginAndClosedAssetBoundary` |
+| Browser drawing is typed/bounded and decoded PNGs normalize before ordered forwarding | private viewer state, static PNG re-encoding/staging, layer/geometry/stack limits | `TestViewerValidatedPNGGroupingInputAndRevocation`, `TestViewerNormalizesPNGWithoutMetadataAnimationOrTrailingData`, `TestViewerRefusesMalformedAndExcessDrawing`, `TestViewerInvalidPNGIsNeverForwarded`, `FuzzViewerDrawingSchemas` |
+| Compressed images and drawing cannot spend unbounded pixel work | lifetime decode/render work counters before expensive operations | `TestViewerTotalDecodeAndRenderWorkAreBounded` |
+| Browser input cannot select targets/credentials/streams or replay credits | one bounded instruction, opcode/state/keysym/coordinate limits | `TestViewerInputRefusesArbitraryParametersReplayAndBounds` |
+| Revocation closes partial image reads and refuses late input/output | atomic closed state and native transport teardown | `TestViewerPartialImageAndCancellationCloseReaders`, `TestViewerValidatedPNGGroupingInputAndRevocation` |
+| Browser pixels and input are independently measured; logout removes the display and native stream | isolated Edge/Chromium fixture and actual native NLA peer markers | `TestBrowserRDPViewerLab`, `TestNativeRDPBrowserDesktopAndRevocation` |
 
 Browser evidence is additionally enforced by `web/paste.test.mjs` and the
 `browserlab` tagged `TestBrowserTerminalLab`: paste review/cancel/approve, byte
@@ -77,8 +83,11 @@ native Linux lab enforces its own TLS identity before CredSSP, authenticates a
 synthetic account and decodes desktop images through a one-use broker and
 test-only worker sandbox. Both actual C callback mutations must fail before
 restoration and a full rerun. Refusal timeouts are failures, not proof. Native
-clipboard/touch/dynamic display are disabled. There is no browser RDP tunnel,
-application ownership/vault, production launcher, aggregate cgroup quotas or
+clipboard/touch/dynamic display are disabled. A loopback browser RDP lab now
+uses the bounded viewer adapter, local Apache JS and existing owner transport.
+It is fixed-viewport and has finite memory/work/output quotas. It is not a
+general Guacamole tunnel or product entry point. There is no application
+ownership/vault, production launcher, aggregate cgroup quotas or
 minimal runtime filesystem/syscall filter. The empty earlier namespace also
 denies approved destinations. Codec tests are not desktop/browser clipboard
 evidence. See ADR 0003 and `NATIVE-RDP-LAB.md`.

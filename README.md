@@ -20,6 +20,9 @@ an empty worker network namespace. A separate native Linux lab builds pinned
 Guacamole/FreeRDP, verifies identity on its own TLS before CredSSP, authenticates
 a synthetic NLA account and decodes desktop images through an isolated worker.
 Its one-use broker and actual native identity mutations are required CI gates.
+A loopback browser RDP viewer adds bounded PNG/canvas rendering, focused mouse/
+keyboard, local fullscreen and native revocation checks. RDP clipboard and
+remote resize remain disabled.
 There is no product login/MFA, vault,
 RDP gateway, installable deployment or production release yet.
 
@@ -33,6 +36,8 @@ RDP gateway, installable deployment or production release yet.
 - [Protocol lab scope and next gates](docs/PROTOCOL-LAB.md)
 - [RDP boundaries and remaining native gates](docs/adr/0003-rdp-precredential-boundaries.md)
 - [Native RDP lab evidence and limits](docs/NATIVE-RDP-LAB.md)
+- [Browser RDP lab evidence and limits](docs/BROWSER-RDP-LAB.md)
+- [Remaining product steps (Azerbaijani)](docs/READY-CHECKLIST-AZ.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
 ## Development checks

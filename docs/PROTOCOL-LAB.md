@@ -109,10 +109,15 @@ hook and test-only Linux worker/peer launcher are implemented.
 `NATIVE-RDP-LAB.md` records pinned sources and boundaries. Required native CI
 proves synthetic NLA login, bounded decoded desktop images, actual certificate
 refusal before CredSSP, sandbox/broker cancellation and callback sabotage in
-both directions. Native clipboard/dynamic display remain disabled. There is no browser RDP tunnel or desktop
-clipboard evidence yet; those remain the next protocol-lab gate.
+both directions. Native clipboard/dynamic display remain disabled. A separate loopback browser
+viewer now validates the drawing/input subset, locally renders PNGs, forwards
+focused mouse/keyboard input and revokes the native stream. Native Chromium
+checks authenticate the peer independently and observe input/pixel changes.
+See `BROWSER-RDP-LAB.md`. Desktop text clipboard, remote resize and the wider
+keyboard/reconnect matrix remain the next protocol-lab gate.
 
-Guacamole JS and production guacd/FreeRDP remain candidates. Before adoption, record exact
+Guacamole JS is pinned and bundled for this lab; production guacd/FreeRDP remain
+candidates. Before production adoption, record exact
 versions, licenses, transitive/native build inventory, security reports, resource
 limits and update policy. guacd stays on an isolated unpublished worker network.
 It must receive a validated literal destination and have independently enforced

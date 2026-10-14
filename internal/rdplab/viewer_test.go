@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -74,9 +76,24 @@ func TestViewerValidatedPNGGroupingInputAndRevocation(t *testing.T) {
 		}
 	}()
 	got := bufio.NewReader(s)
-	for _, expected := range instructions {
+	// Image bodies are normalized when their own end arrives. Drawing starts,
+	// ends and operations retain their order even when image streams interleave.
+	for _, index := range []int{0, 1, 3, 4, 2, 5, 6, 7, 8} {
+		expected := instructions[index]
 		in, err := readInstruction(got)
-		if err != nil || !bytes.Equal(encodedInstruction(t, in), encodedInstruction(t, expected)) {
+		if err != nil || len(in) != len(expected) || in[0] != expected[0] {
+			t.Fatal("valid native drawing changed/refused")
+		}
+		if in[0] == "blob" {
+			if in[1] != expected[1] {
+				t.Fatal("normalized image changed stream")
+			}
+			body, err := base64.StdEncoding.Strict().DecodeString(in[2])
+			if err != nil {
+				t.Fatal("normalized image encoding invalid")
+			}
+			assertViewerPixels(t, data, body)
+		} else if !bytes.Equal(encodedInstruction(t, in), encodedInstruction(t, expected)) {
 			t.Fatal("valid native drawing changed/refused")
 		}
 	}
@@ -115,6 +132,75 @@ func TestViewerValidatedPNGGroupingInputAndRevocation(t *testing.T) {
 		t.Fatal("late input escaped revocation")
 	}
 }
+
+func assertViewerPixels(t *testing.T, want, got []byte) {
+	t.Helper()
+	a, err := png.Decode(bytes.NewReader(want))
+	if err != nil {
+		t.Fatal("fixture image decode failed")
+	}
+	b, err := png.Decode(bytes.NewReader(got))
+	if err != nil || a.Bounds() != b.Bounds() {
+		t.Fatal("normalized image dimensions changed/refused")
+	}
+	for y := a.Bounds().Min.Y; y < a.Bounds().Max.Y; y++ {
+		for x := a.Bounds().Min.X; x < a.Bounds().Max.X; x++ {
+			if color.NRGBAModel.Convert(a.At(x, y)) != color.NRGBAModel.Convert(b.At(x, y)) {
+				t.Fatal("normalized image pixels changed")
+			}
+		}
+	}
+}
+
+func TestViewerNormalizesPNGWithoutMetadataAnimationOrTrailingData(t *testing.T) {
+	data := fixturePNG(t)
+	var untrusted bytes.Buffer
+	untrusted.Write(data[:33]) // signature and complete IHDR
+	for _, chunk := range []struct {
+		kind string
+		body []byte
+	}{{"tEXt", []byte("Comment\x00private remote metadata")}, {"acTL", []byte{0, 0, 0, 2, 0, 0, 0, 0}}} {
+		_ = binary.Write(&untrusted, binary.BigEndian, uint32(len(chunk.body)))
+		untrusted.WriteString(chunk.kind)
+		untrusted.Write(chunk.body)
+		crc := crc32.NewIEEE()
+		_, _ = crc.Write([]byte(chunk.kind))
+		_, _ = crc.Write(chunk.body)
+		_ = binary.Write(&untrusted, binary.BigEndian, crc.Sum32())
+	}
+	untrusted.Write(data[33:])
+	untrusted.WriteString("<script>trailing remote payload</script>")
+	s, remote, _ := viewerFixture(t)
+	_, _ = s.Read(make([]byte, 128))
+	go func() {
+		for _, in := range []instruction{{"img", "0", "14", "0", "image/png", "0", "0"}, {"blob", "0", base64.StdEncoding.EncodeToString(untrusted.Bytes())}, {"end", "0"}} {
+			if writeInstruction(remote, in) != nil {
+				return
+			}
+		}
+	}()
+	r := bufio.NewReader(s)
+	var normalized bytes.Buffer
+	for _, op := range []string{"img", "blob", "end"} {
+		in, err := readInstruction(r)
+		if err != nil || in[0] != op {
+			t.Fatal("valid annotated PNG refused")
+		}
+		if op == "blob" {
+			body, err := base64.StdEncoding.Strict().DecodeString(in[2])
+			if err != nil {
+				t.Fatal("normalized PNG encoding invalid")
+			}
+			normalized.Write(body)
+		}
+	}
+	for _, marker := range []string{"tEXt", "private remote metadata", "acTL", "trailing remote payload"} {
+		if bytes.Contains(normalized.Bytes(), []byte(marker)) {
+			t.Fatal("untrusted PNG metadata/animation/trailing content reached browser")
+		}
+	}
+	assertViewerPixels(t, data, normalized.Bytes())
+}
 func TestViewerRefusesMalformedAndExcessDrawing(t *testing.T) {
 	for _, in := range []instruction{{"dispose"}, {"size", "0", "999999", "1"}, {"size", "0", "800", "600"}, {"size", "33", "1", "1"},
 		{"img", "0", "14", "0", "image/svg+xml", "0", "0"}, {"img", "0", "14", "0", "image/png", "NaN", "0"},
@@ -139,18 +225,43 @@ func TestViewerRefusesMalformedAndExcessDrawing(t *testing.T) {
 	}
 }
 func TestViewerInvalidPNGIsNeverForwarded(t *testing.T) {
-	s, remote, _ := viewerFixture(t)
-	_, _ = s.Read(make([]byte, 128))
-	go func() {
-		for _, in := range []instruction{{"img", "0", "14", "0", "image/png", "0", "0"}, {"blob", "0", base64.StdEncoding.EncodeToString([]byte("bad png"))}, {"end", "0"}} {
-			if writeInstruction(remote, in) != nil {
-				return
+	for _, payload := range [][]byte{[]byte("bad png"), fixturePNG(t)[:33]} {
+		s, remote, _ := viewerFixture(t)
+		_, _ = s.Read(make([]byte, 128))
+		go func() {
+			for _, in := range []instruction{{"img", "0", "14", "0", "image/png", "0", "0"}, {"blob", "0", base64.StdEncoding.EncodeToString(payload)}, {"end", "0"}} {
+				if writeInstruction(remote, in) != nil {
+					return
+				}
 			}
+		}()
+		if n, err := s.Read(make([]byte, 4096)); n != 0 || err != errNative {
+			t.Fatal("invalid PNG reached the viewer")
 		}
-	}()
-	if n, err := s.Read(make([]byte, 4096)); n != 0 || err != errNative {
-		t.Fatal("invalid PNG reached the viewer")
 	}
+}
+
+func FuzzViewerDrawingSchemas(f *testing.F) {
+	for _, in := range []instruction{{"dispose"}, {"img", "0", "14", "-1", "image/png", "0", "0"}, {"size", "0", "1024", "768"}, {"mouse", "0", "0", "0", "0"}, {"copy", "-1", "0", "0", "1024", "768", "14", "0", "0", "0"}, {"sync", "123"}} {
+		var data bytes.Buffer
+		if writeInstruction(&data, in) != nil {
+			f.Fatal("fuzz seed encoding failed")
+		}
+		f.Add(data.Bytes())
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		in, err := readInstruction(bufio.NewReader(bytes.NewReader(data)))
+		if err != nil {
+			return
+		}
+		// Each fuzz case has fresh state. Blob/end cannot exist without an image
+		// start, so this schema pass performs no transport I/O or native launch.
+		viewer := newViewerStream(nil)
+		_ = viewer.drawing(in)
+		if len(viewer.layers) > 32 || len(viewer.images) > 8 {
+			t.Fatal("viewer state quota escaped")
+		}
+	})
 }
 func TestViewerInputRefusesArbitraryParametersReplayAndBounds(t *testing.T) {
 	for _, in := range []instruction{{"select", "rdp"}, {"connect", "private-password"}, {"clipboard", "0", "text/plain"}, {"size", "1", "1"},
@@ -184,5 +295,22 @@ func TestViewerPartialImageAndCancellationCloseReaders(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("closed viewer reader stayed blocked")
+	}
+}
+
+func TestViewerTotalDecodeAndRenderWorkAreBounded(t *testing.T) {
+	s, _, _ := viewerFixture(t)
+	s.renderPixels = 128*1024*1024 - 4
+	if !s.drawing(instruction{"copy", "0", "0", "0", "2", "2", "14", "0", "0", "0"}) {
+		t.Fatal("exact render work budget refused")
+	}
+	if s.drawing(instruction{"copy", "0", "0", "0", "1", "1", "14", "0", "0", "0"}) {
+		t.Fatal("excess render work accepted")
+	}
+	s, _, _ = viewerFixture(t)
+	s.decodedPixels = 64*1024*1024 - 3
+	s.images["0"] = &viewerImage{layer: 0, pixels: fixturePNG(t)}
+	if s.drawing(instruction{"end", "0"}) {
+		t.Fatal("excess decoded pixels accepted")
 	}
 }

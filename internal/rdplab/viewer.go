@@ -19,18 +19,20 @@ type viewerImage struct {
 	pixels      []byte
 }
 type viewerStream struct {
-	native     *nativeStream
-	layers     map[int]viewerLayer // owned by the single output reader
-	images     map[string]*viewerImage
-	imageBytes int
-	pending    bytes.Buffer
-	ready      bytes.Reader
-	writeMu    sync.Mutex
-	metaMu     sync.Mutex
-	acks       map[string]int
-	syncs      map[string]bool
-	keys       map[uint32]bool
-	closed     atomic.Bool
+	native        *nativeStream
+	layers        map[int]viewerLayer // owned by the single output reader
+	images        map[string]*viewerImage
+	imageBytes    int
+	decodedPixels int
+	renderPixels  int
+	pending       bytes.Buffer
+	ready         bytes.Reader
+	writeMu       sync.Mutex
+	metaMu        sync.Mutex
+	acks          map[string]int
+	syncs         map[string]bool
+	keys          map[uint32]bool
+	closed        atomic.Bool
 }
 
 func newViewerStream(native *nativeStream) *viewerStream {
@@ -58,6 +60,26 @@ func canonicalNumber(raw string, low, high int) (int, bool) {
 	n, err := strconv.Atoi(raw)
 	return n, err == nil && n >= low && n <= high && strconv.Itoa(n) == raw
 }
+
+func (s *viewerStream) renderWork(pixels int) bool {
+	if pixels < 0 || pixels > 128*1024*1024-s.renderPixels {
+		return false
+	}
+	s.renderPixels += pixels
+	return true
+}
+
+type viewerBoundedWriter struct {
+	buffer *bytes.Buffer
+	limit  int
+}
+
+func (w viewerBoundedWriter) Write(data []byte) (int, error) {
+	if len(data) > w.limit-w.buffer.Len() {
+		return 0, errNative
+	}
+	return w.buffer.Write(data)
+}
 func (s *viewerStream) layer(raw string) (int, bool) {
 	id, ok := canonicalNumber(raw, -32, 32)
 	if !ok {
@@ -79,6 +101,9 @@ func (s *viewerStream) fit(id, x, y, w, h int, exact bool) bool {
 	}
 	layer := s.layers[id]
 	if exact {
+		if !s.renderWork(w * h) {
+			return false
+		}
 		layer.width, layer.height = w, h
 	} else if id < 0 {
 		layer.width, layer.height = max(layer.width, x+w), max(layer.height, y+h)
@@ -149,13 +174,6 @@ func (s *viewerStream) drawing(in instruction) bool {
 		s.imageBytes += len(data)
 		// Acknowledge the native blob to prevent a staged image from deadlocking.
 		// Browser acks are checked separately and never forwarded a second time.
-		s.metaMu.Lock()
-		if len(s.acks) >= 128 && s.acks[in[1]] == 0 || s.acks[in[1]] >= 128 {
-			s.metaMu.Unlock()
-			return false
-		}
-		s.acks[in[1]]++
-		s.metaMu.Unlock()
 		return s.send(instruction{"ack", in[1], "OK", "0"}) == nil
 	case "end":
 		if len(in) != 2 || s.images[in[1]] == nil {
@@ -166,8 +184,35 @@ func (s *viewerStream) drawing(in instruction) bool {
 		if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > 1024 || cfg.Height > 768 || !s.fit(image.layer, image.x, image.y, cfg.Width, cfg.Height, false) {
 			return false
 		}
-		if _, err := png.Decode(bytes.NewReader(image.pixels)); err != nil {
+		pixels := cfg.Width * cfg.Height
+		if pixels > 64*1024*1024-s.decodedPixels || !s.renderWork(pixels) {
 			return false
+		}
+		s.decodedPixels += pixels
+		decoded, err := png.Decode(bytes.NewReader(image.pixels))
+		if err != nil {
+			return false
+		}
+		// Re-encode only the decoded static image. Ancillary metadata, APNG
+		// frames and trailing/polyglot bytes never reach the browser decoder.
+		var normalized bytes.Buffer
+		if png.Encode(viewerBoundedWriter{&normalized, 256 * 1024}, decoded) != nil {
+			return false
+		}
+		chunks := (normalized.Len() + 12*1024 - 1) / (12 * 1024)
+		s.metaMu.Lock()
+		if len(s.acks) >= 128 && s.acks[in[1]] == 0 || chunks > 128-s.acks[in[1]] {
+			s.metaMu.Unlock()
+			return false
+		}
+		s.acks[in[1]] += chunks
+		s.metaMu.Unlock()
+		for data := normalized.Bytes(); len(data) > 0; {
+			n := min(len(data), 12*1024)
+			if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, instruction{"blob", in[1], base64.StdEncoding.EncodeToString(data[:n])}) != nil {
+				return false
+			}
+			data = data[n:]
 		}
 		s.imageBytes -= len(image.pixels)
 		clear(image.pixels)
@@ -189,7 +234,7 @@ func (s *viewerStream) drawing(in instruction) bool {
 		h, _ := num(5, 0, 768)
 		x, _ := num(8, 0, 1024)
 		y, _ := num(9, 0, 768)
-		return s.fit(dst, x, y, w, h, false)
+		return s.fit(dst, x, y, w, h, false) && s.renderWork(w*h)
 	case "cursor":
 		_, a := layer(3)
 		if len(in) != 8 || !a {
@@ -200,10 +245,12 @@ func (s *viewerStream) drawing(in instruction) bool {
 				return false
 			}
 		}
-		return true
+		w, _ := num(6, 0, 256)
+		h, _ := num(7, 0, 256)
+		return s.renderWork(w * h)
 	case "cfill":
 		_, a := num(1, 0, 15)
-		_, b := layer(2)
+		id, b := layer(2)
 		if len(in) != 7 || !a || !b {
 			return false
 		}
@@ -212,7 +259,8 @@ func (s *viewerStream) drawing(in instruction) bool {
 				return false
 			}
 		}
-		return true
+		l := s.layers[id]
+		return s.renderWork(l.width * l.height)
 	case "rect":
 		id, ok := layer(1)
 		return len(in) == 6 && ok && xy(id, 2, 3, 4, 5)
@@ -301,7 +349,11 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 		if in[0] == "name" {
 			continue
 		} // remote text never becomes browser UI/HTML
-		if !s.drawing(in) || writeInstruction(&s.pending, in) != nil || s.pending.Len() > 2*1024*1024 {
+		if !s.drawing(in) {
+			_ = s.Close()
+			return 0, errNative
+		}
+		if in[0] != "blob" && writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, in) != nil {
 			_ = s.Close()
 			return 0, errNative
 		}
