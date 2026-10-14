@@ -21,6 +21,13 @@ const (
 type instruction []string
 
 func readInstruction(reader *bufio.Reader) (instruction, error) {
+	return readBoundedInstruction(reader, maxElements)
+}
+
+func readBoundedInstruction(reader *bufio.Reader, limit int) (instruction, error) {
+	if reader == nil || limit < 1 || limit > 128 {
+		return nil, ErrWire
+	}
 	var elements instruction
 	remaining := maxWireBytes
 	readByte := func() (byte, error) {
@@ -30,7 +37,7 @@ func readInstruction(reader *bufio.Reader) (instruction, error) {
 		remaining--
 		return reader.ReadByte()
 	}
-	for len(elements) < maxElements {
+	for len(elements) < limit {
 		length := 0
 		digits := 0
 		for {
@@ -81,7 +88,11 @@ func readInstruction(reader *bufio.Reader) (instruction, error) {
 }
 
 func writeInstruction(writer io.Writer, elements instruction) error {
-	if len(elements) == 0 || len(elements) > maxElements || elements[0] == "" {
+	return writeBoundedInstruction(writer, elements, maxElements)
+}
+
+func writeBoundedInstruction(writer io.Writer, elements instruction, limit int) error {
+	if writer == nil || limit < 1 || limit > 128 || len(elements) == 0 || len(elements) > limit || elements[0] == "" {
 		return ErrWire
 	}
 	var wire strings.Builder

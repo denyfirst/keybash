@@ -109,6 +109,9 @@ jobs:
             GOOS="${platform}" go build -trimpath ./...
           done
 
+      - name: Build and verify the isolated native RDP laboratory
+        run: sh scripts/native-rdp-lab.sh
+
   analysis:
     name: Static and vulnerability analysis
     runs-on: ubuntu-24.04

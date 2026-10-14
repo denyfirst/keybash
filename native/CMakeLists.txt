@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22)
+project(KeybashNativeIdentityLab LANGUAGES C)
+find_package(OpenSSL 3 REQUIRED)
+add_library(keybash_native_identity STATIC identity.c)
+target_compile_features(keybash_native_identity PRIVATE c_std_11)
+target_compile_options(keybash_native_identity PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(keybash_native_identity PRIVATE OpenSSL::Crypto)
