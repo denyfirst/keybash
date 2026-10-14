@@ -69,6 +69,8 @@ ldd "${prefix}/lib/libguac-client-rdp.so"
 go test -c -tags=nativelab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' -test.timeout=25s -test.v
+sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=3m -test.v
 
 # Both directions must detect sabotage on the ACTUAL native TLS callback.
