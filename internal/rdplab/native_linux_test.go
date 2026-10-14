@@ -52,7 +52,9 @@ func sandboxArgs(prefix string) []string {
 		"--hostname", "keybash-native-lab",
 		"--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP", "--clearenv",
 		"--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
-		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--ro-bind", prefix, prefix, "--dir", "/run",
+		"--proc", "/proc", "--dev", "/dev", "--perms", "1777", "--tmpfs", "/tmp", "--chmod", "0755", "/",
+		"--perms", "0755", "--dir", filepath.Dir(prefix), "--chmod", "0755", filepath.Dir(prefix),
+		"--ro-bind", prefix, prefix, "--dir", "/run",
 		"--setenv", "LD_LIBRARY_PATH", prefix + "/lib", "--setenv", "HOME", "/tmp", "--setenv", "LANG", "C",
 		"--setenv", "WLOG_LEVEL", "ERROR", "--setenv", "KEYBASH_NATIVE_PREFIX", prefix}
 }

@@ -11,6 +11,7 @@ sudo apt-get install -y --no-install-recommends build-essential clang cmake ninj
 prefix="${lab}/prefix"
 mkdir -p "${prefix}/bin"
 go test -c -tags=nativelab -o "${prefix}/bin/lab.test" ./internal/rdplab
+chmod 755 "${prefix}" "${prefix}/bin" "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPSandboxPreparation$' -test.timeout=10s -test.v
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
