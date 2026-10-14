@@ -74,6 +74,8 @@ replace_once(rdp, "        int connection_closing;\n        do {",
              "        int connection_closing = 0;\n        unsigned keybash_event_batch = 0;\n        do {")
 replace_once(rdp, "            if (!guac_rdp_handle_events(rdp_client))\n                wait_result = -1;",
              "            if (!guac_rdp_handle_events(rdp_client)) {\n                wait_result = -1;\n                break;\n            }")
+replace_once(rdp, "    pthread_mutex_unlock(&(rdp_client->message_lock));\n\n    return retval;",
+             "    pthread_mutex_unlock(&(rdp_client->message_lock));\n    if (!retval) {\n        printf(\"KB_NATIVE_ERROR_%u_%u\\n\", freerdp_get_last_error(GUAC_RDP_CONTEXT(rdp_client->rdp_inst)), getChannelError(GUAC_RDP_CONTEXT(rdp_client->rdp_inst)));\n        fflush(stdout);\n    }\n\n    return retval;")
 replace_once(rdp, "        } while (!connection_closing &&\n                (wait_result = rdp_guac_client_wait_for_events(client, 0)) > 0);",
              "        } while (!connection_closing && ++keybash_event_batch < 64 &&\n                (wait_result = rdp_guac_client_wait_for_events(client, 0)) > 0);")
 for old, stage in [
@@ -107,6 +109,12 @@ replace_once(rdp, " *     Always TRUE.\n */\nstatic BOOL keybash_authentication_
 replace_once(rdp, "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;",
              "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;\n    rdp_inst->VerifyX509Certificate = keybash_verify_x509;")
 settings = guac / "src/protocols/rdp/settings.c"
+# The sample peer requires a negotiated classic bitmap codec. Guacamole only
+# enables RemoteFX together with its disabled dynamic graphics pipeline, while
+# FreeRDP's default NSCodec is off. Enable the classic lossless NSCodec path
+# explicitly; this does not open a virtual channel or change TLS/NLA policy.
+replace_once(settings, "/* Always request frame markers */",
+             "/* Fixed classic bitmap path; dynamic graphics remains disabled. */\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodec, TRUE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowDynamicColorFidelity, FALSE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowSubsampling, FALSE);\n    freerdp_settings_set_uint32(rdp_settings, FreeRDP_NSCodecColorLossLevel, 0);\n\n    /* Always request frame markers */")
 anchor = "freerdp_settings_set_bool(rdp_settings, FreeRDP_IgnoreCertificate, guac_settings->ignore_certificate);"
 replace_once(settings, anchor, '''freerdp_settings_set_bool(rdp_settings, FreeRDP_IgnoreCertificate, FALSE);
     freerdp_settings_set_bool(rdp_settings, FreeRDP_AutoAcceptCertificate, FALSE);

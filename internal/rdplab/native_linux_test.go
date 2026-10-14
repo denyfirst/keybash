@@ -88,6 +88,16 @@ type nativeStages struct{ pending string }
 func (s *nativeStages) Write(p []byte) (int, error) {
 	for _, b := range p {
 		if b == '\n' {
+			if strings.HasPrefix(s.pending, "KB_NATIVE_ERROR_") {
+				codes := strings.Split(strings.TrimPrefix(s.pending, "KB_NATIVE_ERROR_"), "_")
+				if len(codes) == 2 {
+					_, first := strconv.ParseUint(codes[0], 10, 32)
+					_, second := strconv.ParseUint(codes[1], 10, 32)
+					if first == nil && second == nil {
+						fmt.Fprintln(os.Stdout, s.pending)
+					}
+				}
+			}
 			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_GDI_READY", "KB_STAGE_CHANNELS", "KB_STAGE_IDENTITY", "KB_STAGE_POST_READY", "KB_STAGE_CONNECTED"} {
 				if s.pending == stage {
 					fmt.Fprintln(os.Stdout, stage)
@@ -286,6 +296,38 @@ func acceptNative(ctx context.Context, l *net.UnixListener) (net.Conn, error) {
 		return nil, errNative
 	}
 	return c, nil
+}
+
+func TestNativeRDPControlIPCRejectsWrongUID(t *testing.T) {
+	_ = nativePrefix(t)
+	path := filepath.Join(t.TempDir(), "control.sock")
+	l := nativeSocket(t, path)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+	if err != nil {
+		t.Fatal("synthetic wrong-UID IPC dial failed")
+	}
+	defer client.Close()
+	// The trusted parent runs as root; it must not impersonate the dropped
+	// worker merely by reaching the socket. The real native cases prove that
+	// UID 65534 succeeds inside its private mounted capability boundary.
+	connection, err := acceptNative(ctx, l)
+	if connection != nil {
+		_ = connection.Close()
+		t.Fatal("wrong-UID process obtained native IPC")
+	}
+	if err != errNative {
+		t.Fatal("wrong-UID native IPC was not refused")
+	}
+	if client.SetReadDeadline(time.Now().Add(time.Second)) != nil {
+		t.Fatal("synthetic IPC deadline failed")
+	}
+	var b [1]byte
+	n, err := client.Read(b[:])
+	if n != 0 || !errors.Is(err, io.EOF) {
+		t.Fatal("refused IPC transport stayed open")
+	}
 }
 
 func launchNativeWorker(t *testing.T, ctx context.Context, prefix string, identity *Identity, dial func(context.Context) (net.Conn, error)) (net.Conn, *nativeProcess, <-chan error) {
