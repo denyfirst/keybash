@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -447,6 +448,38 @@ func relayNative(a, b net.Conn) {
 	<-done
 }
 
+// Temporary lab-only stack diagnosis. Exact executable/UID selection, no GDB
+// auto-load or function arguments/locals/memory dumps; no real account exists.
+func nativeFixtureStacks(prefix string) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	count := 0
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 1 || count >= 4 {
+			continue
+		}
+		exe, err := os.Readlink("/proc/" + entry.Name() + "/exe")
+		if err != nil || exe != prefix+"/sbin/guacd" {
+			continue
+		}
+		status, err := os.ReadFile("/proc/" + entry.Name() + "/status")
+		if err != nil || !strings.Contains(string(status), "Uid:\t65534\t65534\t65534\t65534") {
+			continue
+		}
+		count++
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		cmd := exec.CommandContext(ctx, "/usr/bin/gdb", "--nx", "--batch", "-iex", "set auto-load off", "-ex", "set print frame-arguments none", "-ex", "set print thread-events off", "-ex", "set pagination off", "-ex", "thread apply all bt 12", "--pid="+entry.Name()) // #nosec G204 -- exact synthetic worker binary/UID, numeric kernel PID, fixed no-data debugger commands.
+		cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = io.Discard
+		_ = cmd.Run()
+		cancel()
+	}
+}
+
 func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 	prefix := nativePrefix(t)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -481,6 +514,8 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 			}
 			defer stream.close()
 			if valid {
+				diagnose := time.AfterFunc(5*time.Second, func() { nativeFixtureStacks(prefix) })
+				defer diagnose.Stop()
 				select {
 				case <-authenticated:
 				case <-ctx.Done():
