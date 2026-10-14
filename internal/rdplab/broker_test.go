@@ -1,8 +1,10 @@
 package rdplab
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -37,6 +39,45 @@ func TestNativeBrokerBindsIdentityToGuardedTarget(t *testing.T) {
 		if _, err := newNativeBroker(pair.t, pair.i); err != errNative {
 			t.Fatal("unbound identity accepted")
 		}
+	}
+}
+
+func TestNativeBrokerQuotaClosesBothDirections(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reverse_%t", reverse), func(t *testing.T) {
+			worker, bridge := net.Pipe()
+			target, server := net.Pipe()
+			defer worker.Close()
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			broker := &nativeBroker{dial: func(context.Context) (net.Conn, error) { return target, nil }}
+			done := make(chan error, 1)
+			go func() { done <- broker.serve(ctx, bridge) }()
+			source, destination := worker, server
+			if reverse {
+				source, destination = server, worker
+			}
+			wrote := make(chan struct{})
+			go func() {
+				_, _ = io.Copy(source, bytes.NewReader(make([]byte, 16*1024*1024+1)))
+				close(wrote)
+			}()
+			count, err := io.Copy(io.Discard, destination)
+			if err != nil || count != 16*1024*1024 || ctx.Err() != nil {
+				t.Fatal("broker exceeded quota or did not close at boundary")
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("quota leaked broker")
+			}
+			select {
+			case <-wrote:
+			case <-ctx.Done():
+				t.Fatal("quota leaked writer")
+			}
+		})
 	}
 }
 

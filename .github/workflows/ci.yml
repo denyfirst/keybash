@@ -83,6 +83,9 @@ jobs:
             | sed -E 's/^func //' | sort -u > "${RUNNER_TEMP}/defined"
           test -z "$(comm -23 "${RUNNER_TEMP}/cited" "${RUNNER_TEMP}/defined")"
 
+      - name: Build and verify the isolated native RDP laboratory
+        run: sh scripts/native-rdp-lab.sh
+
       - name: Vet, race-test and build
         run: |
           set -eu
@@ -108,9 +111,6 @@ jobs:
             GOOS="${platform}" go vet ./...
             GOOS="${platform}" go build -trimpath ./...
           done
-
-      - name: Build and verify the isolated native RDP laboratory
-        run: sh scripts/native-rdp-lab.sh
 
   analysis:
     name: Static and vulnerability analysis
