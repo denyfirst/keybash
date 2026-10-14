@@ -45,8 +45,11 @@ for old, stage in [
     ("if (!freerdp_connect(rdp_inst)) {", "NETWORK"),
     ("guac_rdp_push_settings(client, settings, instance);", "SETTINGS"),
     ("if (!gdi_init(instance, guac_rdp_get_native_pixel_format(FALSE)))", "GDI"),
+    ("/* Set up pointer handling */", "GDI_READY"),
+    ("static BOOL rdp_freerdp_load_channels(freerdp* instance) {", "CHANNELS"),
 ]:
-    replace_once(rdp, old, f'puts("KB_STAGE_{stage}"); fflush(stdout);\n    ' + old)
+    new = old + f'\n    puts("KB_STAGE_{stage}"); fflush(stdout);' if stage == "CHANNELS" else f'puts("KB_STAGE_{stage}"); fflush(stdout);\n    ' + old
+    replace_once(rdp, old, new)
 # Supplied credentials are immutable for this one-use session. Missing/rejected
 # credentials must abort, never prompt, retry or switch authentication modes.
 rdp_text = rdp.read_text()

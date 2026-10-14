@@ -87,7 +87,7 @@ type nativeStages struct{ pending string }
 func (s *nativeStages) Write(p []byte) (int, error) {
 	for _, b := range p {
 		if b == '\n' {
-			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_IDENTITY"} {
+			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_GDI_READY", "KB_STAGE_CHANNELS", "KB_STAGE_IDENTITY"} {
 				if s.pending == stage {
 					fmt.Fprintln(os.Stdout, stage)
 				}
