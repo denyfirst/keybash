@@ -12,10 +12,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"math/big"
 	"net"
@@ -363,6 +365,8 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 			}
 			defer stream.close()
 			image := false
+			imageID := ""
+			var pixels []byte
 			for {
 				in, err := stream.next()
 				if err != nil {
@@ -374,7 +378,27 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				if in[0] == "sync" && len(in) == 2 {
 					_ = writeInstruction(control, in)
 				}
-				if in[0] == "img" {
+				if in[0] == "img" && len(in) == 7 && in[4] == "image/png" {
+					if imageID != "" {
+						t.Fatal("overlapping native image streams")
+					}
+					imageID = in[1]
+				}
+				if in[0] == "blob" && len(in) == 3 && in[1] == imageID {
+					data, err := base64.StdEncoding.Strict().DecodeString(in[2])
+					if err != nil || len(pixels)+len(data) > 256*1024 {
+						t.Fatal("invalid or excessive native image")
+					}
+					pixels = append(pixels, data...)
+				}
+				if in[0] == "end" && len(in) == 2 && in[1] == imageID && imageID != "" {
+					config, err := png.DecodeConfig(bytes.NewReader(pixels))
+					if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 1024 || config.Height > 768 {
+						t.Fatal("invalid native image dimensions")
+					}
+					if _, err := png.Decode(bytes.NewReader(pixels)); err != nil {
+						t.Fatal("native image payload did not decode")
+					}
 					image = true
 					break
 				}

@@ -38,6 +38,7 @@ test "$(pkg-config --modversion freerdp3)" = 3.32.2
 cd "${lab}/guacamole-server-1.6.0"
 ./configure --prefix="${prefix}" --with-rdp --without-ssh --without-vnc --without-telnet --without-kubernetes \
   --without-pulse --without-avcodec --without-avformat --without-avutil --without-swscale \
+  CPPFLAGS="-isystem ${prefix}/include/freerdp3 -isystem ${prefix}/include/winpr3" \
   CFLAGS='-O2 -fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \
   LDFLAGS='-Wl,-z,relro,-z,now' LIBS='-lssl -lcrypto'
 make -j4
