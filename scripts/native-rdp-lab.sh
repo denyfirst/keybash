@@ -6,7 +6,7 @@ lab="$(mktemp -d /tmp/keybash-native.XXXXXX)"
 trap 'rm -rf "${lab}"' EXIT
 chmod 755 "${lab}"
 sudo apt-get update -qq
-sudo apt-get install -y --no-install-recommends build-essential clang gdb cmake ninja-build pkg-config bubblewrap \
+sudo apt-get install -y --no-install-recommends build-essential clang cmake ninja-build pkg-config bubblewrap \
   libssl-dev libcairo2-dev libjpeg-dev libpng-dev libwebp-dev libpango1.0-dev libuuid1 uuid-dev
 prefix="${lab}/prefix"
 mkdir -p "${prefix}/bin"
@@ -34,7 +34,7 @@ if test -s "${lab}/identity-analysis.log"; then
 fi
 cmake -S "${lab}/freerdp-3.32.2" -B "${lab}/freerdp-build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${prefix}" -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCMAKE_C_FLAGS='-g -fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \
+  -DCMAKE_C_FLAGS='-fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \
   -DCMAKE_EXE_LINKER_FLAGS='-Wl,-z,relro,-z,now' -DCMAKE_SHARED_LINKER_FLAGS='-Wl,-z,relro,-z,now' \
   -DBUILD_TESTING=OFF -DWITH_CLIENT=OFF -DWITH_CLIENT_COMMON=ON -DWITH_SERVER=ON -DWITH_SAMPLE=ON \
   -DWITH_SHADOW=OFF -DWITH_PROXY=OFF -DWITH_X11=OFF -DWITH_WAYLAND=OFF -DWITH_MANPAGES=OFF \
@@ -51,7 +51,7 @@ cd "${lab}/guacamole-server-1.6.0"
 ./configure --prefix="${prefix}" --with-rdp --without-ssh --without-vnc --without-telnet --without-kubernetes \
   --without-pulse --without-avcodec --without-avformat --without-avutil --without-swscale \
   CPPFLAGS="-isystem ${prefix}/include/freerdp3 -isystem ${prefix}/include/winpr3" \
-  CFLAGS='-g -O2 -fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \
+  CFLAGS='-O2 -fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \
   LDFLAGS='-Wl,-z,relro,-z,now' LIBS='-lssl -lcrypto'
 make -j4
 make install

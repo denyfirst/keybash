@@ -490,38 +490,6 @@ func relayNative(a, b net.Conn) {
 	<-done
 }
 
-// Temporary lab-only stack diagnosis. Exact executable/UID selection, no GDB
-// auto-load or function arguments/locals/memory dumps; no real account exists.
-func nativeFixtureStacks(prefix string) {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return
-	}
-	count := 0
-	for _, entry := range entries {
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 1 || count >= 4 {
-			continue
-		}
-		exe, err := os.Readlink("/proc/" + entry.Name() + "/exe")
-		if err != nil || exe != prefix+"/sbin/guacd" {
-			continue
-		}
-		status, err := os.ReadFile("/proc/" + entry.Name() + "/status")
-		if err != nil || !strings.Contains(string(status), "Uid:\t65534\t65534\t65534\t65534") {
-			continue
-		}
-		count++
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		cmd := exec.CommandContext(ctx, "/usr/bin/gdb", "--nx", "--batch", "-iex", "set auto-load off", "-ex", "set print frame-arguments none", "-ex", "set print thread-events off", "-ex", "set pagination off", "-ex", "thread apply all bt 12", "--pid="+entry.Name()) // #nosec G204 -- exact synthetic worker binary/UID, numeric kernel PID, fixed no-data debugger commands.
-		cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = io.Discard
-		_ = cmd.Run()
-		cancel()
-	}
-}
-
 func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 	prefix := nativePrefix(t)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -556,8 +524,6 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 			}
 			defer stream.close()
 			if valid {
-				diagnose := time.AfterFunc(5*time.Second, func() { nativeFixtureStacks(prefix) })
-				defer diagnose.Stop()
 				select {
 				case <-authenticated:
 				case <-ctx.Done():
@@ -570,11 +536,14 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				}
 			}
 			image := false
-			imageID := ""
-			imageLayer := ""
+			type nativeImage struct {
+				layer  string
+				pixels []byte
+			}
+			images := make(map[string]*nativeImage)
+			imageBytes := 0
 			decodedLayers := make(map[string]bool)
 			seen := make(map[string]int)
-			var pixels []byte
 			for {
 				in, err := stream.next()
 				if err != nil {
@@ -588,34 +557,50 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				if in[0] == "sync" && (len(in) == 2 || len(in) == 3) {
 					_ = writeInstruction(control, in)
 				}
-				if in[0] == "img" && len(in) == 7 && in[4] == "image/png" {
-					if imageID != "" {
-						t.Fatal("overlapping native image streams")
+				if in[0] == "img" {
+					if len(in) != 7 || in[4] != "image/png" || len(images) >= 8 || images[in[1]] != nil {
+						t.Fatal("invalid or excessive native image streams")
 					}
-					imageID = in[1]
-					imageLayer = in[3]
+					id, err := strconv.ParseUint(in[1], 10, 16)
+					if err != nil || strconv.FormatUint(id, 10) != in[1] {
+						t.Fatal("invalid native image stream ID")
+					}
+					images[in[1]] = &nativeImage{layer: in[3]}
 				}
-				if in[0] == "blob" && len(in) == 3 && in[1] == imageID {
+				if in[0] == "blob" {
+					if len(in) != 3 || images[in[1]] == nil {
+						t.Fatal("unexpected native image blob")
+					}
+					current := images[in[1]]
 					data, err := base64.StdEncoding.Strict().DecodeString(in[2])
-					if err != nil || len(pixels)+len(data) > 256*1024 {
+					if err != nil || len(current.pixels)+len(data) > 256*1024 || imageBytes+len(data) > 1024*1024 {
 						t.Fatal("invalid or excessive native image")
 					}
-					pixels = append(pixels, data...)
+					current.pixels = append(current.pixels, data...)
+					imageBytes += len(data)
+					if writeInstruction(control, instruction{"ack", in[1], "OK", "0"}) != nil {
+						t.Fatal("native image acknowledgement failed")
+					}
 				}
-				if in[0] == "end" && len(in) == 2 && in[1] == imageID && imageID != "" {
-					config, err := png.DecodeConfig(bytes.NewReader(pixels))
+				if in[0] == "end" {
+					if len(in) != 2 || images[in[1]] == nil {
+						t.Fatal("unexpected native image end")
+					}
+					current := images[in[1]]
+					config, err := png.DecodeConfig(bytes.NewReader(current.pixels))
 					if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 1024 || config.Height > 768 {
 						t.Fatal("invalid native image dimensions")
 					}
-					if _, err := png.Decode(bytes.NewReader(pixels)); err != nil {
+					if _, err := png.Decode(bytes.NewReader(current.pixels)); err != nil {
 						t.Fatal("native image payload did not decode")
 					}
 					if len(decodedLayers) >= 32 {
 						t.Fatal("excessive fixture image layers")
 					}
-					decodedLayers[imageLayer] = true
-					image = imageLayer == "0"
-					imageID, imageLayer, pixels = "", "", nil
+					decodedLayers[current.layer] = true
+					image = current.layer == "0"
+					imageBytes -= len(current.pixels)
+					delete(images, in[1])
 				}
 				if (in[0] == "copy" || in[0] == "transfer") && len(in) == 10 && in[7] == "0" && decodedLayers[in[1]] {
 					image = true
