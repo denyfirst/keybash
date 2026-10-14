@@ -40,6 +40,31 @@ callback = '''static int keybash_verify_x509(freerdp* instance, const BYTE* pem,
 replace_once(rdp, anchor, callback + anchor)
 replace_once(rdp, '#include "rdp.h"', '#include "rdp.h"\n#include <freerdp/version.h>\n_Static_assert(FREERDP_VERSION_MAJOR == 3, "Keybash lab requires FreeRDP 3");\n#include "keybash_identity.c"')
 (rdp.parent / "keybash_identity.c").write_bytes(identity_source.read_bytes())
+# The pinned FreeRDP client initializes GDI in PostConnect (as its own X11
+# client does), after transport/authentication state is established. Guacamole
+# 1.6's older PreConnect placement stalls this build before any network dial.
+rdp_text = rdp.read_text()
+gdi_start = "    /* Init FreeRDP internal GDI implementation */"
+gdi_end = "    GUAC_RDP_CONTEXT(instance)->update->altsec->FrameMarker = guac_rdp_gdi_frame_marker;"
+if rdp_text.count(gdi_start) != 1 or rdp_text.count(gdi_end) != 1:
+    raise SystemExit("native GDI lifecycle anchors changed")
+start = rdp_text.index(gdi_start)
+end = rdp_text.index(gdi_end, start) + len(gdi_end)
+gdi_block = rdp_text[start:end]
+replace_once(rdp, gdi_block, "    /* GDI and graphics handlers initialize in PostConnect. */")
+replace_once(rdp, "    rdpGraphics* graphics = context->graphics;", "")
+post_connect = '''static BOOL keybash_post_connect(freerdp* instance) {
+    rdpContext* context = GUAC_RDP_CONTEXT(instance);
+    rdpGraphics* graphics = context->graphics;
+''' + gdi_block + '''
+    return TRUE;
+}
+
+'''
+replace_once(rdp, "static BOOL rdp_freerdp_pre_connect(freerdp* instance) {",
+             post_connect + "static BOOL rdp_freerdp_pre_connect(freerdp* instance) {")
+replace_once(rdp, "rdp_inst->PreConnect = rdp_freerdp_pre_connect;",
+             "rdp_inst->PreConnect = rdp_freerdp_pre_connect;\n    rdp_inst->PostConnect = keybash_post_connect;")
 for old, stage in [
     ("if (!freerdp_context_new(rdp_inst)) {", "CONTEXT"),
     ("if (!freerdp_connect(rdp_inst)) {", "NETWORK"),
