@@ -66,6 +66,16 @@ func dropNativePrivileges() []string {
 
 type nativeProcess struct {
 	done <-chan struct{}
+	exit error // written before done closes; read only after done
+}
+
+type nativeSetupErrors struct{ text string }
+
+func (d *nativeSetupErrors) Write(p []byte) (int, error) {
+	if len(d.text) < 4096 {
+		d.text += string(p[:min(len(p), 4096-len(d.text))])
+	}
+	return len(p), nil
 }
 
 func runSandbox(t *testing.T, ctx context.Context, args []string, stdout io.Writer) *nativeProcess {
@@ -74,15 +84,52 @@ func runSandbox(t *testing.T, ctx context.Context, args []string, stdout io.Writ
 	cmd := exec.CommandContext(ctx, "/usr/bin/setpriv", launch...) // #nosec G204 -- fixed sandbox/test binaries, only generated local paths; no browser input.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
 	cmd.Stdout = stdout
-	cmd.Stderr = io.Discard
+	diagnostics := &nativeSetupErrors{}
+	cmd.Stderr = diagnostics
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := cmd.Start(); err != nil {
 		t.Fatal("native sandbox start failed")
 	}
 	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
+	process := &nativeProcess{done: done}
+	go func() {
+		process.exit = cmd.Wait()
+		if process.exit != nil {
+			// Reflect only setup-tool diagnostics, whose inputs are fixed paths/
+			// flags. Native library/session logs are never printed.
+			for _, line := range strings.Split(diagnostics.text, "\n") {
+				if strings.HasPrefix(line, "bwrap: ") || strings.HasPrefix(line, "setpriv: ") {
+					fmt.Fprintln(os.Stdout, line)
+				}
+			}
+		}
+		close(done)
+	}()
 	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
-	return &nativeProcess{done: done}
+	return process
+}
+
+func TestNativeRDPSandboxPreparation(t *testing.T) {
+	prefix := nativePrefix(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	parent, err := os.Readlink("/proc/self/ns/net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := sandboxArgs(prefix)
+	args = append(args, "--setenv", "KEYBASH_NATIVE_ROLE", "preflight", "--setenv", "KEYBASH_PARENT_NETNS", parent)
+	args = append(args, dropNativePrivileges()...)
+	args = append(args, prefix+"/bin/lab.test", "-test.run=^TestNativeRDPChild$", "-test.timeout=2s")
+	process := runSandbox(t, ctx, args, os.Stdout)
+	select {
+	case <-process.done:
+	case <-ctx.Done():
+		t.Fatal("sandbox preparation stalled")
+	}
+	if process.exit != nil {
+		t.Fatal("sandbox preparation failed")
+	}
 }
 
 type nativeMarker struct {
@@ -257,7 +304,8 @@ func launchNativeWorker(t *testing.T, ctx context.Context, prefix string, identi
 }
 
 func TestNativeRDPChild(t *testing.T) {
-	if os.Getenv("KEYBASH_NATIVE_ROLE") != "worker" {
+	role := os.Getenv("KEYBASH_NATIVE_ROLE")
+	if role != "worker" && role != "preflight" {
 		t.Skip("required fixed sandbox child")
 	}
 	if os.Geteuid() != 65534 || os.Getegid() != 65534 {
@@ -282,6 +330,9 @@ func TestNativeRDPChild(t *testing.T) {
 	ns, err := os.Readlink("/proc/self/ns/net")
 	if err != nil || ns == os.Getenv("KEYBASH_PARENT_NETNS") {
 		t.Fatal("worker shares host network")
+	}
+	if role == "preflight" {
+		return
 	}
 	if _, err := os.ReadFile(os.Getenv("KEYBASH_HOST_SENTINEL")); err == nil {
 		t.Fatal("worker read host file")

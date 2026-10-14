@@ -8,6 +8,11 @@ chmod 755 "${lab}"
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends build-essential clang cmake ninja-build pkg-config bubblewrap \
   libssl-dev libcairo2-dev libjpeg-dev libpng-dev libwebp-dev libpango1.0-dev libuuid1 uuid-dev
+prefix="${lab}/prefix"
+mkdir -p "${prefix}/bin"
+go test -c -tags=nativelab -o "${prefix}/bin/lab.test" ./internal/rdplab
+sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDPSandboxPreparation$' -test.timeout=10s -test.v
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
   https://github.com/FreeRDP/FreeRDP/releases/download/3.32.2/freerdp-3.32.2.tar.gz -o "${lab}/freerdp.tar.gz"
 printf '%s  %s\n' e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c "${lab}/freerdp.tar.gz" | sha256sum -c -
@@ -17,7 +22,6 @@ printf '%s  %s\n' 8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f
 tar -xf "${lab}/freerdp.tar.gz" -C "${lab}"
 tar -xf "${lab}/guacamole.tar.gz" -C "${lab}"
 python3 native/prepare.py "${lab}/freerdp-3.32.2" "${lab}/guacamole-server-1.6.0" "${repo}/native/identity.c"
-prefix="${lab}/prefix"
 cmake -S native -B "${lab}/identity-build"
 cmake --build "${lab}/identity-build" --parallel 2
 # Analyze our identity callback separately from the upstream library build.
