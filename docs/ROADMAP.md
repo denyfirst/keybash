@@ -13,6 +13,9 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    RDP worker's own TLS/NLA authentication and usable isolated egress with
    synthetic credentials, and measure actual desktop copy/paste
    and keyboard behavior. No production credential custody at this stage.
+   The native build/broker candidate and required success/refusal/mutation
+   fixtures are tracked in `NATIVE-RDP-LAB.md`; passing Go codec tests alone
+   cannot complete its native acceptance gate.
 3. **Identity and custody:** local login/MFA, server-side ownership checks,
    encrypted credential persistence, safe import/export, recovery and session
    revocation. Describe the server's ability to access active credentials.

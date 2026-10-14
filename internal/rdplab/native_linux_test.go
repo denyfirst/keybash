@@ -49,16 +49,29 @@ func nativePrefix(t *testing.T) string {
 
 func sandboxArgs(prefix string) []string {
 	return []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
-		"--uid", "65534", "--gid", "65534", "--cap-drop", "ALL", "--clearenv",
+		"--hostname", "keybash-native-lab",
+		"--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP", "--clearenv",
 		"--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--ro-bind", prefix, prefix, "--dir", "/run",
 		"--setenv", "LD_LIBRARY_PATH", prefix + "/lib", "--setenv", "HOME", "/tmp", "--setenv", "LANG", "C",
 		"--setenv", "WLOG_LEVEL", "ERROR", "--setenv", "KEYBASH_NATIVE_PREFIX", prefix}
 }
 
-func runSandbox(t *testing.T, ctx context.Context, args []string, stdout io.Writer) *exec.Cmd {
+// Root performs mount/network setup only. The fixed setpriv helper drops the
+// real host UID/GID and every capability before any fixture/worker executes.
+// A remapped namespace-root must never be accepted as the IPC's UID 65534.
+func dropNativePrivileges() []string {
+	return []string{"--", "/usr/bin/setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--"}
+}
+
+type nativeProcess struct {
+	done <-chan struct{}
+}
+
+func runSandbox(t *testing.T, ctx context.Context, args []string, stdout io.Writer) *nativeProcess {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", args...) // #nosec G204 -- fixed sandbox/test binaries, only generated local paths; no browser input.
+	launch := append([]string{"--clear-groups", "--no-new-privs", "--", "/usr/bin/bwrap"}, args...)
+	cmd := exec.CommandContext(ctx, "/usr/bin/setpriv", launch...) // #nosec G204 -- fixed sandbox/test binaries, only generated local paths; no browser input.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
 	cmd.Stdout = stdout
 	cmd.Stderr = io.Discard
@@ -66,8 +79,10 @@ func runSandbox(t *testing.T, ctx context.Context, args []string, stdout io.Writ
 	if err := cmd.Start(); err != nil {
 		t.Fatal("native sandbox start failed")
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	return cmd
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	t.Cleanup(func() { _ = cmd.Process.Kill(); <-done })
+	return &nativeProcess{done: done}
 }
 
 type nativeMarker struct {
@@ -129,8 +144,9 @@ func nativePeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certi
 	args = append(args[:0], args[1:]...)
 	args = append(args, "--dir", "/run/fixture", "--ro-bind", filepath.Join(dir, "cert.pem"), "/run/fixture/cert.pem",
 		"--ro-bind", filepath.Join(dir, "key.pem"), "/run/fixture/key.pem", "--ro-bind", filepath.Join(dir, "SAM"), "/run/fixture/SAM",
-		"--ro-bind", prefix+"/share/lab/test_icon.bmp", "/tmp/test_icon.bmp", "--chdir", "/tmp",
-		prefix+"/bin/sfreerdp-server", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
+		"--ro-bind", prefix+"/share/lab/test_icon.bmp", "/tmp/test_icon.bmp", "--chdir", "/tmp")
+	args = append(args, dropNativePrivileges()...)
+	args = append(args, prefix+"/bin/sfreerdp-server", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
 	marker := &nativeMarker{ready: make(chan struct{})}
 	runSandbox(t, ctx, args, marker)
 	address := fmt.Sprintf("127.0.0.1:%d", port)
@@ -189,7 +205,7 @@ func acceptNative(ctx context.Context, l *net.UnixListener) (net.Conn, error) {
 	return c, nil
 }
 
-func launchNativeWorker(t *testing.T, ctx context.Context, prefix string, identity *Identity, dial func(context.Context) (net.Conn, error)) (net.Conn, *exec.Cmd, <-chan error) {
+func launchNativeWorker(t *testing.T, ctx context.Context, prefix string, identity *Identity, dial func(context.Context) (net.Conn, error)) (net.Conn, *nativeProcess, <-chan error) {
 	t.Helper()
 	dir := t.TempDir()
 	control := nativeSocket(t, filepath.Join(dir, "control.sock"))
@@ -207,21 +223,32 @@ func launchNativeWorker(t *testing.T, ctx context.Context, prefix string, identi
 		args = append(args, "--ro-bind", filepath.Join(dir, file), "/run/keybash/"+file)
 	}
 	args = append(args, "--setenv", "KEYBASH_NATIVE_ROLE", "worker", "--setenv", "KEYBASH_PARENT_NETNS", parentNS,
-		"--setenv", "KEYBASH_HOST_SENTINEL", filepath.Join(dir, "host-sentinel"), prefix+"/bin/lab.test", "-test.run=^TestNativeRDPChild$", "-test.timeout=35s")
+		"--setenv", "KEYBASH_HOST_SENTINEL", filepath.Join(dir, "host-sentinel"))
+	args = append(args, dropNativePrivileges()...)
+	args = append(args, prefix+"/bin/lab.test", "-test.run=^TestNativeRDPChild$", "-test.timeout=35s")
 	// Only this fixed Go test child's assertions reach stdout. guacd and native
 	// peer diagnostics remain discarded; they may contain session material.
 	cmd := runSandbox(t, ctx, args, os.Stdout)
+	lifetime, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	go func() {
+		select {
+		case <-cmd.done:
+		case <-ctx.Done():
+		}
+		cancel()
+	}()
 	broker := &nativeBroker{dial: dial}
 	done := make(chan error, 1)
 	go func() {
-		c, err := acceptNative(ctx, target)
+		c, err := acceptNative(lifetime, target)
 		if err != nil {
 			done <- err
 			return
 		}
-		done <- broker.serve(ctx, c)
+		done <- broker.serve(lifetime, c)
 	}()
-	c, err := acceptNative(ctx, control)
+	c, err := acceptNative(lifetime, control)
 	if err != nil {
 		t.Fatal("worker did not establish private control IPC")
 	}
@@ -275,7 +302,7 @@ func TestNativeRDPChild(t *testing.T) {
 		}
 	}
 	prefix := os.Getenv("KEYBASH_NATIVE_PREFIX")
-	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-p", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
+	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--core=0", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-p", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
 	guacd.Stdout = io.Discard
 	guacd.Stderr = io.Discard
 	if guacd.Start() != nil {
@@ -430,10 +457,8 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				t.Fatal("revoked target broker stayed open")
 			}
 			// Context revocation must stop the sandbox without a manual kill.
-			stopped := make(chan struct{})
-			go func() { _ = process.Wait(); close(stopped) }()
 			select {
-			case <-stopped:
+			case <-process.done:
 			case <-time.After(time.Second):
 				t.Fatal("revoked worker stayed alive")
 			}

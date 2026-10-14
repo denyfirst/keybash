@@ -1,6 +1,6 @@
 # Keybash — cari vəziyyət
 
-13 oktyabr 2026. İnkişaf private başladı. GitHub Free private branch protection
+14 oktyabr 2026. İnkişaf private başladı. GitHub Free private branch protection
 vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 
 ## Hazır olan təməl
@@ -23,6 +23,10 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 - Unicode mətn clipboard protokolunun 32 KiB limitli, ayrıca sessiya/buffer sınağı.
 - Linux CI-də boş şəbəkə namespace-i, səlahiyyətlərin endirilməsi və egress rəddi;
   guacd üçün işlək sandbox və icazəli bağlantı yolu hələ hazırlanmayıb.
+- Native RDP üçün ayrıca namizəd: worker-in öz TLS sertifikat yoxlaması,
+  NLA-only parametr siyasəti, birdəfəlik bağlantı broker-i və sintetik Linux
+  sandbox sınaqları yazılıb. Qəbul üçün native CI nəticəsi tələb olunur;
+  bu hissə hələ brauzer RDP workspace-i və ya hazır copy/paste deyil.
 - Guard üçün müsbət, rədd, yanlış konfiqurasiya və abuse testləri.
 - Private checkout, signature verification və Go yoxlamaları üçün CI.
 
