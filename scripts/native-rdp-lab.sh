@@ -10,9 +10,14 @@ sudo apt-get install -y --no-install-recommends build-essential clang cmake ninj
   libssl-dev libcairo2-dev libjpeg-dev libpng-dev libwebp-dev libpango1.0-dev libuuid1 uuid-dev
 prefix="${lab}/prefix"
 mkdir -p "${prefix}/bin"
-go test -c -tags=nativelab -o "${prefix}/bin/lab.test" ./internal/rdplab
+# Fixed verified test Node runtime; no browser runtime enters a release.
+test "$(node --version)" = v24.19.0
+cp "$(command -v node)" "${prefix}/bin/node"
+export KEYBASH_NATIVE_BROWSER_CACHE="${HOME}/.cache/ms-playwright"
+test -d "${KEYBASH_NATIVE_BROWSER_CACHE}"
+go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}" "${prefix}/bin" "${prefix}/bin/lab.test"
-sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPSandboxPreparation$' -test.timeout=10s -test.v
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
   https://github.com/FreeRDP/FreeRDP/releases/download/3.32.2/freerdp-3.32.2.tar.gz -o "${lab}/freerdp.tar.gz"
@@ -66,11 +71,11 @@ dpkg-query -W -f='${Package} ${Version}\n'
 find "${prefix}" -type f -exec sha256sum '{}' ';'
 ldd "${prefix}/sbin/guacd"
 ldd "${prefix}/lib/libguac-client-rdp.so"
-go test -c -tags=nativelab -o "${prefix}/bin/lab.test" ./internal/rdplab
+go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
-sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
+sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' -test.timeout=25s -test.v
-sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
+sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=3m -test.v
 
 # Both directions must detect sabotage on the ACTUAL native TLS callback.
@@ -84,7 +89,7 @@ rebuild_identity() {
   make -C "${guac}/src/protocols/rdp" install
 }
 expect_mutation_failure() {
-  if sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
+  if sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
     "${prefix}/bin/lab.test" "-test.run=$1" -test.timeout=45s -test.v > "${lab}/mutation.log" 2>&1; then
     echo 'native security mutation escaped its test' >&2
     exit 1
@@ -105,5 +110,5 @@ expect_mutation_failure '^TestNativeRDPAuthenticationRenderingAndRevocation$/pas
 cp "${lab}/identity.original" "${identity}"
 cmp "${identity}" "${repo}/native/identity.c"
 rebuild_identity
-sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" \
+sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=3m -test.v

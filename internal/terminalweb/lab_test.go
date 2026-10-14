@@ -82,6 +82,43 @@ func newLab(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = f.stream.Close(); f.server.Close() })
 	return f
 }
+
+func TestDesktopProfileKeepsOwnerOriginAndClosedAssetBoundary(t *testing.T) {
+	f := newLab(t)
+	f.lab.desktop = true
+	response, err := f.server.Client().Get(f.server.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != 200 || !bytes.Contains(data, []byte("desktop.mjs")) ||
+		!strings.Contains(response.Header.Get("Content-Security-Policy"), "img-src blob:") ||
+		strings.Contains(response.Header.Get("Content-Security-Policy"), "img-src *") {
+		t.Fatal("desktop asset/CSP profile is unsafe")
+	}
+	for _, path := range []string{"/vendor/xterm.js", "/app.mjs", "/vendor/guacamole-manifest.json", "/unknown"} {
+		r, e := f.server.Client().Get(f.server.URL + path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		_ = r.Body.Close()
+		if r.StatusCode != 404 {
+			t.Fatal("unapproved desktop asset exposed")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if connection, _, e := websocket.Dial(ctx, strings.Replace(f.server.URL, "https:", "wss:", 1)+"/lab/socket", &websocket.DialOptions{HTTPClient: f.server.Client(), HTTPHeader: http.Header{"Origin": []string{f.server.URL}}}); e == nil {
+		_ = connection.CloseNow()
+		t.Fatal("desktop socket opened without owner")
+	}
+	f.grant(t)
+	if connection, _, e := websocket.Dial(ctx, strings.Replace(f.server.URL, "https:", "wss:", 1)+"/lab/socket", &websocket.DialOptions{HTTPClient: f.server.Client(), HTTPHeader: http.Header{"Origin": []string{"https://wrong.invalid"}, "Cookie": []string{f.cookie.String()}}}); e == nil {
+		_ = connection.CloseNow()
+		t.Fatal("desktop socket opened with wrong origin")
+	}
+}
 func (f *fixture) post(t *testing.T, path, origin, code string, authorized bool) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, f.server.URL+path, strings.NewReader(code))

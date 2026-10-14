@@ -3,5 +3,5 @@ package web
 
 import "embed"
 
-//go:embed index.html app.mjs paste.mjs style.css vendor/*
+//go:embed index.html app.mjs paste.mjs style.css desktop.html desktop.mjs desktop.css vendor/*
 var Assets embed.FS
