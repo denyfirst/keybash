@@ -49,7 +49,7 @@ func sandboxArgs(prefix string) []string {
 	return []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
 		"--uid", "65534", "--gid", "65534", "--cap-drop", "ALL", "--clearenv",
 		"--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
-		"--ro-bind", prefix, prefix, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/run",
+		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--ro-bind", prefix, prefix, "--dir", "/run",
 		"--setenv", "LD_LIBRARY_PATH", prefix + "/lib", "--setenv", "HOME", "/tmp", "--setenv", "LANG", "C",
 		"--setenv", "WLOG_LEVEL", "ERROR", "--setenv", "KEYBASH_NATIVE_PREFIX", prefix}
 }
@@ -206,7 +206,9 @@ func launchNativeWorker(t *testing.T, ctx context.Context, prefix string, identi
 	}
 	args = append(args, "--setenv", "KEYBASH_NATIVE_ROLE", "worker", "--setenv", "KEYBASH_PARENT_NETNS", parentNS,
 		"--setenv", "KEYBASH_HOST_SENTINEL", filepath.Join(dir, "host-sentinel"), prefix+"/bin/lab.test", "-test.run=^TestNativeRDPChild$", "-test.timeout=35s")
-	cmd := runSandbox(t, ctx, args, io.Discard)
+	// Only this fixed Go test child's assertions reach stdout. guacd and native
+	// peer diagnostics remain discarded; they may contain session material.
+	cmd := runSandbox(t, ctx, args, os.Stdout)
 	broker := &nativeBroker{dial: dial}
 	done := make(chan error, 1)
 	go func() {
