@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,7 +61,9 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 		"disable-download": "true", "disable-upload": "true", "console": "false", "console-audio": "false",
 		"enable-audio-input": "false", "enable-touch": "false", "recording-include-keys": "false",
 		"create-recording-path": "false", "recording-write-existing": "false", "wol-send-packet": "false",
-		"disable-copy": "false", "disable-paste": "false", "normalize-clipboard": "preserve",
+		// Native clipboard stays off until the bounded text adapter and browser
+		// actions are connected and measured; the separate codec is not enough.
+		"disable-copy": "true", "disable-paste": "true", "normalize-clipboard": "preserve",
 		"resize-method": "display-update", "client-name": "Keybash-lab", "disable-gfx": "true", "force-lossless": "true",
 	}
 	result := instruction{"connect", "VERSION_1_5_0"}
@@ -75,12 +78,13 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 }
 
 type nativeStream struct {
-	raw    net.Conn
-	reader *bufio.Reader
-	stop   func() bool
-	once   sync.Once
-	output int
-	frames int
+	raw     net.Conn
+	reader  *bufio.Reader
+	stop    func() bool
+	once    sync.Once
+	output  int
+	frames  int
+	failure string // fixed private classifications, never remote diagnostic text
 }
 
 func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeStream, error) {
@@ -158,6 +162,7 @@ func (s *nativeStream) next() (instruction, error) {
 	for {
 		in, err := readInstruction(s.reader)
 		if err != nil {
+			s.failure = "instruction framing"
 			s.close()
 			return nil, errNative
 		}
@@ -166,6 +171,7 @@ func (s *nativeStream) next() (instruction, error) {
 		}
 		s.frames++
 		if s.output > 8*1024*1024 || s.frames > 8192 {
+			s.failure = "output quota"
 			s.close()
 			return nil, errNative
 		}
@@ -180,10 +186,25 @@ func (s *nativeStream) next() (instruction, error) {
 		// No files, pipes, audio/video, mutable args, credential prompts or remote
 		// messages escape to a future viewer. There is no browser tunnel yet.
 		allowed := false
-		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line move name path pop push rect reset shade size start sync transfer transform clipboard") {
+		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line move name path pop push rect reset shade size start sync transfer transform") {
 			allowed = allowed || op == in[0]
 		}
 		if !allowed {
+			s.failure = "unexpected instruction"
+			switch in[0] {
+			case "error":
+				if len(in) == 3 {
+					if status, err := strconv.ParseUint(in[2], 10, 16); err == nil {
+						s.failure = "native status " + strconv.FormatUint(status, 10)
+					}
+				}
+			case "set":
+				s.failure = "unsupported drawing property"
+			case "msg":
+				s.failure = "invalid owner notice"
+			case "argv":
+				s.failure = "unexpected parameter request"
+			}
 			s.close()
 			return nil, errNative
 		}

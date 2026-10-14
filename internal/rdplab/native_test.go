@@ -40,6 +40,9 @@ func TestNativePlanEnforcesNLAChannelsAndRedactsCredentials(t *testing.T) {
 			t.Fatalf("unsafe native parameter: %s", k)
 		}
 	}
+	if values["disable-copy"] != "true" || values["disable-paste"] != "true" {
+		t.Fatal("unverified native clipboard enabled")
+	}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
 		formatted := fmt.Sprintf(verb, p)
 		if strings.Contains(formatted, p.user) || strings.Contains(formatted, p.password) {
@@ -143,7 +146,7 @@ func TestNativeHandshakeStrictSchemaReadyAndContextCleanup(t *testing.T) {
 }
 
 func TestNativeStreamRefusesUnsolicitedStreamsAndBoundsOutput(t *testing.T) {
-	for _, op := range []string{"file", "pipe", "argv", "audio", "video", "require", "select", "connect", "error", "msg", "ack blob"} {
+	for _, op := range []string{"file", "pipe", "argv", "audio", "video", "clipboard", "require", "select", "connect", "error", "msg", "ack blob"} {
 		client, server := net.Pipe()
 		stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true }}
 		done := make(chan struct{})

@@ -464,7 +464,7 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				in, err := stream.next()
 				if err != nil {
 					if valid {
-						t.Fatal("native RDP did not render")
+						t.Fatalf("native RDP did not render (%s)", stream.failure)
 					}
 					break
 				}

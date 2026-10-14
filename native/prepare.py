@@ -55,6 +55,8 @@ replace_once(rdp, rdp_text[start:end], '''static BOOL keybash_authentication_ref
 ''')
 replace_once(rdp, "rdp_inst->Authenticate = rdp_freerdp_authenticate;",
              "rdp_inst->AuthenticateEx = keybash_authentication_refusal;")
+replace_once(rdp, " *     Always TRUE.\n */\nstatic BOOL keybash_authentication_refusal",
+             " *     FALSE: supplied credential changes and retries are forbidden.\n */\nstatic BOOL keybash_authentication_refusal")
 replace_once(rdp, "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;",
              "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;\n    rdp_inst->VerifyX509Certificate = keybash_verify_x509;")
 settings = guac / "src/protocols/rdp/settings.c"
