@@ -6,7 +6,7 @@ lab="$(mktemp -d /tmp/keybash-native.XXXXXX)"
 trap 'rm -rf "${lab}"' EXIT
 chmod 755 "${lab}"
 sudo apt-get update -qq
-sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config bubblewrap \
+sudo apt-get install -y --no-install-recommends build-essential clang cmake ninja-build pkg-config bubblewrap \
   libssl-dev libcairo2-dev libjpeg-dev libpng-dev libwebp-dev libpango1.0-dev libuuid1 uuid-dev
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
   https://github.com/FreeRDP/FreeRDP/releases/download/3.32.2/freerdp-3.32.2.tar.gz -o "${lab}/freerdp.tar.gz"
@@ -20,6 +20,13 @@ python3 native/prepare.py "${lab}/freerdp-3.32.2" "${lab}/guacamole-server-1.6.0
 prefix="${lab}/prefix"
 cmake -S native -B "${lab}/identity-build"
 cmake --build "${lab}/identity-build" --parallel 2
+# Analyze our identity callback separately from the upstream library build.
+clang --analyze -std=c11 -Wall -Wextra -Werror -Xanalyzer -analyzer-output=text \
+  "${repo}/native/identity.c" -o "${lab}/identity-analysis.plist" 2> "${lab}/identity-analysis.log"
+if test -s "${lab}/identity-analysis.log"; then
+  cat "${lab}/identity-analysis.log" >&2
+  exit 1
+fi
 cmake -S "${lab}/freerdp-3.32.2" -B "${lab}/freerdp-build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${prefix}" -DCMAKE_INSTALL_LIBDIR=lib \
   -DCMAKE_C_FLAGS='-fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \

@@ -39,6 +39,22 @@ callback = '''static int keybash_verify_x509(freerdp* instance, const BYTE* pem,
 replace_once(rdp, anchor, callback + anchor)
 replace_once(rdp, '#include "rdp.h"', '#include "rdp.h"\n#include <freerdp/version.h>\n_Static_assert(FREERDP_VERSION_MAJOR == 3, "Keybash lab requires FreeRDP 3");\n#include "keybash_identity.c"')
 (rdp.parent / "keybash_identity.c").write_bytes(identity_source.read_bytes())
+# Supplied credentials are immutable for this one-use session. Missing/rejected
+# credentials must abort, never prompt, retry or switch authentication modes.
+rdp_text = rdp.read_text()
+auth_start = "static BOOL rdp_freerdp_authenticate(freerdp* instance, char** username,"
+if rdp_text.count(auth_start) != 1:
+    raise SystemExit("native authentication anchor changed")
+start = rdp_text.index(auth_start)
+end = rdp_text.index("\n}\n", start) + len("\n}\n")
+replace_once(rdp, rdp_text[start:end], '''static BOOL keybash_authentication_refusal(freerdp* instance, char** username,
+        char** password, char** domain, rdp_auth_reason reason) {
+    (void)instance; (void)username; (void)password; (void)domain; (void)reason;
+    return FALSE;
+}
+''')
+replace_once(rdp, "rdp_inst->Authenticate = rdp_freerdp_authenticate;",
+             "rdp_inst->AuthenticateEx = keybash_authentication_refusal;")
 replace_once(rdp, "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;",
              "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;\n    rdp_inst->VerifyX509Certificate = keybash_verify_x509;")
 settings = guac / "src/protocols/rdp/settings.c"
