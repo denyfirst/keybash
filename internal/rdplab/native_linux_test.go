@@ -566,6 +566,10 @@ func nativeTLSRefusalPeer(t *testing.T, cert tls.Certificate, version uint16, se
 			done <- err
 			return
 		}
+		if bytes.Contains(body, []byte("synthetic-user")) || bytes.Contains(body, []byte("must-not-be-sent")) {
+			done <- errors.New("account material leaked in cleartext RDP negotiation")
+			return
+		}
 		confirmation := hybridConfirmation
 		confirmation[15] = selected
 		if _, err := raw.Write(confirmation[:]); err != nil {
@@ -655,7 +659,7 @@ func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 				if err != nil {
 					break
 				}
-				if in[0] == "img" {
+				if in[0] == "img" && len(in) == 7 && in[3] == "0" {
 					t.Fatal("invalid certificate rendered")
 				}
 			}

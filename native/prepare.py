@@ -63,6 +63,7 @@ settings = guac / "src/protocols/rdp/settings.c"
 anchor = "freerdp_settings_set_bool(rdp_settings, FreeRDP_IgnoreCertificate, guac_settings->ignore_certificate);"
 replace_once(settings, anchor, '''freerdp_settings_set_bool(rdp_settings, FreeRDP_IgnoreCertificate, FALSE);
     freerdp_settings_set_bool(rdp_settings, FreeRDP_AutoAcceptCertificate, FALSE);
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_CookieMaxLength, 0);
     freerdp_settings_set_bool(rdp_settings, FreeRDP_ExternalCertificateManagement, TRUE);
     freerdp_settings_set_uint16(rdp_settings, FreeRDP_TLSMinVersion, 0x0303);
     freerdp_settings_set_string(rdp_settings, FreeRDP_AllowedTlsCiphers, "ECDHE+AESGCM:ECDHE+CHACHA20");''')
