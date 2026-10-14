@@ -143,7 +143,7 @@ func TestNativeHandshakeStrictSchemaReadyAndContextCleanup(t *testing.T) {
 }
 
 func TestNativeStreamRefusesUnsolicitedStreamsAndBoundsOutput(t *testing.T) {
-	for _, op := range []string{"file", "pipe", "argv", "audio", "video", "require", "select", "connect", "error", "ack blob"} {
+	for _, op := range []string{"file", "pipe", "argv", "audio", "video", "require", "select", "connect", "error", "msg", "ack blob"} {
 		client, server := net.Pipe()
 		stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true }}
 		done := make(chan struct{})
@@ -179,7 +179,12 @@ func TestNativeStreamRefusesUnsolicitedStreamsAndBoundsOutput(t *testing.T) {
 	client, server := net.Pipe()
 	stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true }}
 	defer stream.close()
-	go func() { _ = writeInstruction(server, instruction{"sync", "123"}); _ = server.Close() }()
+	go func() {
+		for _, in := range []instruction{{"nop"}, {"msg", "1", "private-owner-id", ""}, {"msg", "2", "private-owner-id"}, {"sync", "123"}} {
+			_ = writeInstruction(server, in)
+		}
+		_ = server.Close()
+	}()
 	if in, err := stream.next(); err != nil || len(in) != 2 || in[1] != "123" {
 		t.Fatal("valid native output refused")
 	}

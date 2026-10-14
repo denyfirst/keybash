@@ -155,28 +155,38 @@ func (s *nativeStream) close() {
 }
 
 func (s *nativeStream) next() (instruction, error) {
-	in, err := readInstruction(s.reader)
-	if err != nil {
-		s.close()
-		return nil, errNative
+	for {
+		in, err := readInstruction(s.reader)
+		if err != nil {
+			s.close()
+			return nil, errNative
+		}
+		for _, v := range in {
+			s.output += len(v)
+		}
+		s.frames++
+		if s.output > 8*1024*1024 || s.frames > 8192 {
+			s.close()
+			return nil, errNative
+		}
+		// Protocol 1.5 sends owner join/leave notices before native connection
+		// setup, plus keepalives. Consume only these exact bounded shapes; never
+		// forward their metadata or admit arbitrary remote messages.
+		if len(in) == 1 && in[0] == "nop" ||
+			in[0] == "msg" && len(in) >= 3 && len(in[2]) > 0 && len(in[2]) <= 128 &&
+				(len(in) == 4 && in[1] == "1" && in[3] == "" || len(in) == 3 && in[1] == "2") {
+			continue
+		}
+		// No files, pipes, audio/video, mutable args, credential prompts or remote
+		// messages escape to a future viewer. There is no browser tunnel yet.
+		allowed := false
+		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line move name path pop push rect reset shade size start sync transfer transform clipboard") {
+			allowed = allowed || op == in[0]
+		}
+		if !allowed {
+			s.close()
+			return nil, errNative
+		}
+		return in, nil
 	}
-	for _, v := range in {
-		s.output += len(v)
-	}
-	s.frames++
-	if s.output > 8*1024*1024 || s.frames > 8192 {
-		s.close()
-		return nil, errNative
-	}
-	// No files, pipes, audio/video, mutable args, credential prompts or remote
-	// messages escape to a future viewer. There is no browser tunnel yet.
-	allowed := false
-	for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line move name path pop push rect reset shade size start sync transfer transform clipboard") {
-		allowed = allowed || op == in[0]
-	}
-	if !allowed {
-		s.close()
-		return nil, errNative
-	}
-	return in, nil
 }

@@ -113,24 +113,37 @@ func runSandbox(t *testing.T, ctx context.Context, args []string, stdout io.Writ
 
 func TestNativeRDPSandboxPreparation(t *testing.T) {
 	prefix := nativePrefix(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 	parent, err := os.Readlink("/proc/self/ns/net")
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := sandboxArgs(prefix)
-	args = append(args, "--setenv", "KEYBASH_NATIVE_ROLE", "preflight", "--setenv", "KEYBASH_PARENT_NETNS", parent)
-	args = append(args, dropNativePrivileges()...)
-	args = append(args, prefix+"/bin/lab.test", "-test.run=^TestNativeRDPChild$", "-test.timeout=2s")
-	process := runSandbox(t, ctx, args, os.Stdout)
-	select {
-	case <-process.done:
-	case <-ctx.Done():
-		t.Fatal("sandbox preparation stalled")
-	}
-	if process.exit != nil {
-		t.Fatal("sandbox preparation failed")
+	for _, omitNetwork := range []bool{false, true} {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		args := sandboxArgs(prefix)
+		if omitNetwork {
+			args = args[1:]
+		}
+		args = append(args, "--setenv", "KEYBASH_NATIVE_ROLE", "preflight", "--setenv", "KEYBASH_PARENT_NETNS", parent)
+		args = append(args, dropNativePrivileges()...)
+		args = append(args, prefix+"/bin/lab.test", "-test.run=^TestNativeRDPChild$", "-test.timeout=2s")
+		output := &nativeSetupErrors{}
+		process := runSandbox(t, ctx, args, output)
+		select {
+		case <-process.done:
+		case <-ctx.Done():
+			cancel()
+			t.Fatal("sandbox preparation stalled")
+		}
+		cancel()
+		if !omitNetwork && process.exit != nil {
+			t.Fatal("sandbox preparation failed")
+		}
+		if omitNetwork && (process.exit == nil || !strings.Contains(output.text, "worker shares host network")) {
+			t.Fatal("network isolation sabotage escaped its intended assertion")
+		}
+		if omitNetwork {
+			t.Log("Removing the native network namespace failed its intended assertion")
+		}
 	}
 }
 
