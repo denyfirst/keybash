@@ -101,7 +101,7 @@ printf '%s\n' '#include <stddef.h>' \
   'int keybash_verify_identity(const char* p, size_t n) { (void)p; (void)n; return 0; }' > "${identity}"
 rebuild_identity
 expect_mutation_failure '^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' \
-  'native RDP did not render'
+  'native account did not authenticate'
 cp "${lab}/identity.original" "${identity}"
 cmp "${identity}" "${repo}/native/identity.c"
 rebuild_identity

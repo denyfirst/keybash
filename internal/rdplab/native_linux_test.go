@@ -494,23 +494,29 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 			}
 			image := false
 			imageID := ""
+			imageLayer := ""
+			decodedLayers := make(map[string]bool)
+			seen := make(map[string]int)
 			var pixels []byte
 			for {
 				in, err := stream.next()
 				if err != nil {
 					if valid {
+						t.Logf("bounded display instruction counts: %v", seen)
 						t.Fatalf("native RDP did not render (%s)", stream.failure)
 					}
 					break
 				}
+				seen[in[0]]++ // next admits only fixed opcode constants
 				if in[0] == "sync" && (len(in) == 2 || len(in) == 3) {
 					_ = writeInstruction(control, in)
 				}
-				if in[0] == "img" && len(in) == 7 && in[3] == "0" && in[4] == "image/png" {
+				if in[0] == "img" && len(in) == 7 && in[4] == "image/png" {
 					if imageID != "" {
 						t.Fatal("overlapping native image streams")
 					}
 					imageID = in[1]
+					imageLayer = in[3]
 				}
 				if in[0] == "blob" && len(in) == 3 && in[1] == imageID {
 					data, err := base64.StdEncoding.Strict().DecodeString(in[2])
@@ -527,7 +533,20 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 					if _, err := png.Decode(bytes.NewReader(pixels)); err != nil {
 						t.Fatal("native image payload did not decode")
 					}
+					if len(decodedLayers) >= 32 {
+						t.Fatal("excessive fixture image layers")
+					}
+					decodedLayers[imageLayer] = true
+					image = imageLayer == "0"
+					imageID, imageLayer, pixels = "", "", nil
+				}
+				if (in[0] == "copy" || in[0] == "transfer") && len(in) == 10 && in[7] == "0" && decodedLayers[in[1]] {
 					image = true
+				}
+				if in[0] == "dispose" && len(in) == 2 {
+					delete(decodedLayers, in[1])
+				}
+				if image {
 					break
 				}
 			}
