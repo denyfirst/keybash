@@ -1,6 +1,6 @@
 # ADR 0003: credential-free RDP boundary experiments
 
-Date: 2026-10-13. Status: accepted for the lab, native adoption pending.
+Date: 2026-10-13. Updated: 2026-10-14. Status: accepted for the lab; production native adoption pending.
 
 ## Decision
 
@@ -85,7 +85,14 @@ disabled. Production ownership/vault and independent audit are separate gates.
 - [Guacamole security reports](https://guacamole.apache.org/security/)
 - [FreeRDP releases](https://github.com/FreeRDP/FreeRDP/releases)
 
-Guacamole 1.6.0 and FreeRDP 3.32.2 upstream sources were inspected as candidates;
-no native version, container, JS client or transitive library was adopted.
-Our probe/codec uses Go's standard library, without copying upstream code.
-No new runtime/test dependency is introduced.
+The original probe/codec uses Go's standard library. The subsequent synthetic
+native lab source-builds pinned Guacamole 1.6.0/FreeRDP 3.32.2 and OS libraries
+with inventory, license/NOTICE and narrow integration patches. The actual
+native TLS hook enforces identity before CredSSP; a one-use guarded broker and
+test-only filesystem/network/UID/resource isolation provide the sole transport.
+NLA login, image decoding, refusal and callback mutations are required CI gates.
+This does not complete the browser/clipboard/keyboard matrix or authorize real
+credential use. See [native evidence and limits](../NATIVE-RDP-LAB.md).
+No container, Java webapp or JS client is adopted; no Go dependency version is
+added. x/sys becomes direct for test-only Unix peer checks. Production worker
+launch/authorization, complete sandbox/packaging and independent audit remain.

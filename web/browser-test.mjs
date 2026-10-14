@@ -85,11 +85,16 @@ try {
   await page.locator('#paste-review').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#paste-preview').inputValue(), 'PASTE_REVIEW_ONE\nPASTE_REVIEW_TWO');
   assert(!(await page.locator('.xterm-rows').innerText()).includes('PASTE_REVIEW_ONE'));
-  await page.getByRole('button', { name: 'Ləğv et' }).click();
+  // Close/reopen in one task: the old queued close must not clear the new
+  // review. Unsafe-looking input remains a review decision, including bidi.
+  await page.evaluate(() => {
+    document.getElementById('cancel-paste').click();
+    const data = new DataTransfer(); data.setData('text/plain', 'hidden\u202e\x1b[201~');
+    document.getElementById('terminal').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
+  });
   assert(!(await page.locator('.xterm-rows').innerText()).includes('PASTE_REVIEW_ONE'));
-  // Unsafe-looking input remains a review decision, including bidi/escape.
-  await paste('hidden\u202e\x1b[201~');
   await page.locator('#paste-review').waitFor({ state: 'visible' });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert((await page.locator('#paste-preview').inputValue()).includes('\\u202e'));
   await page.getByRole('button', { name: 'Ləğv et' }).click();
   await paste('a'.repeat(32769));

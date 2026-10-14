@@ -53,7 +53,10 @@ $('confirm-paste').addEventListener('click', () => {
   $('paste-review').close(); clearPaste();
   if (connected) { term.paste(text); term.focus(); }
 });
-$('paste-review').addEventListener('close', clearPaste);
+$('paste-review').addEventListener('close', () => {
+  // A queued close event may arrive after a new review has opened.
+  if (!$('paste-review').open) clearPaste();
+});
 function panel(text, copy) {
   if (!connected) return;
   $('clipboard-text').value = text;
@@ -80,7 +83,9 @@ $('panel-paste').addEventListener('click', () => {
   const text = $('clipboard-text').value;
   $('clipboard-panel').close(); $('clipboard-text').value = ''; requestPaste(text);
 });
-$('clipboard-panel').addEventListener('close', () => { $('clipboard-text').value = ''; });
+$('clipboard-panel').addEventListener('close', () => {
+  if (!$('clipboard-panel').open) $('clipboard-text').value = '';
+});
 term.attachCustomKeyEventHandler(event => {
   if (event.type === 'keydown' && ((event.ctrlKey && event.shiftKey) || event.metaKey) && event.key.toLowerCase() === 'c' && term.hasSelection()) {
     event.preventDefault(); void copySelection(); return false;

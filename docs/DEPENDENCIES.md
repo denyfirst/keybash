@@ -105,6 +105,17 @@ Sources: [xterm security](https://xtermjs.org/docs/guides/security/),
 
 ## Remaining adoptions
 
+The native RDP lab uses test-only source builds of Guacamole 1.6.0 and
+FreeRDP 3.32.2. Exact archives, integration changes, upstream/OS review, license
+inventory and limits are recorded in `NATIVE-RDP-LAB.md`; required Linux CI
+checks native success, refusal, decoded images, cancellation and actual C
+callback sabotage in both directions, followed by restored-source verification. They are not adopted
+as a production runtime or packaged/deployed service. The Go module graph adds
+no version; x/sys becomes a direct test dependency for Unix peer credentials.
+NTLM's MD4 SAM hash is confined to a synthetic `_linux_test.go` peer, not a vault
+password hashing choice. Native vulnerability evidence is separate from Go's
+govulncheck and the browser graph audit.
+
 The credential-free RDP probe/private text codec introduces no module, native
 binary or browser dependency. TLS uses the pinned Go standard library. Its
 imported leaf is the only trust anchor; standard TLS/name checks remain enabled,
@@ -115,7 +126,7 @@ Linux isolation fixture uses runner-provided util-linux unshare/setpriv and
 sudo, and only a temporary fixed test child. This does not package a sandbox.
 See ADR 0003 for limits and the native adoption gate.
 
-Guacamole/FreeRDP, database and vault dependencies remain unapproved. Review
+Production Guacamole/FreeRDP, database and vault dependencies remain unapproved. Review
 their exact versions, full graph, license, advisories,
 resource limits and update process before adding them.
 

@@ -35,6 +35,7 @@ type Identity struct {
 	name  string
 	pin   [sha256.Size]byte
 	roots *x509.CertPool
+	der   []byte
 }
 
 // NewIdentity requires a bounded valid server certificate matching the logical
@@ -55,7 +56,7 @@ func NewIdentity(name string, approvedDER []byte) (*Identity, error) {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
-	return &Identity{name: name, pin: pin, roots: roots}, nil
+	return &Identity{name: name, pin: pin, roots: roots, der: cert.Raw}, nil
 }
 
 // Probe verifies an independently approved leaf, its SHA-256 digest and name
