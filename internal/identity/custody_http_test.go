@@ -290,6 +290,7 @@ func (b *startedBody) Read(p []byte) (int, error) {
 func FuzzCustodyFields(f *testing.F) {
 	f.Add([]byte(`{"code":"123456"}`))
 	f.Add([]byte(`{"code":"\ud800"}`))
+	f.Add([]byte(`{"code":"` + strings.Repeat("<", 700) + `"}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		fields, ok := parseFields(raw, 4096, "code")
 		if ok {
@@ -297,7 +298,11 @@ func FuzzCustodyFields(f *testing.F) {
 				t.Fatal("parser accepted invalid bounds")
 			}
 			encoded, _ := json.Marshal(fields)
-			if _, again := parseFields(encoded, 4096, "code"); !again {
+			// Marshal escapes HTML/control characters. Equivalent JSON can
+			// therefore need up to six bytes per accepted input byte; this
+			// round-trip property must allow representation growth, while
+			// the original network-input admission above remains 4096.
+			if _, again := parseFields(encoded, 6*4096+32, "code"); !again {
 				t.Fatal("accepted fields not round-trippable")
 			}
 		}
