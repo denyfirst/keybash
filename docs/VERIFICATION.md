@@ -35,6 +35,15 @@ and the affected sabotage was repeated successfully. No failed test/build was
 treated as an intended detection without checking its assertion. Native RDP
 identity/input/viewer mutation gates continue unchanged in required CI.
 
+CodeQL follow-up: its initial password-hash query classified random recovery
+tokens as user passwords. Login passwords already use Argon2id. Recovery
+verifiers now additionally use HMAC-SHA256 under an independently HKDF-derived
+instance/purpose key rather than an unkeyed random-token digest. The alert is
+addressed in code, not dismissed. Instance/owner/purpose binding is directly
+tested, and follow-up sabotage of the MAC key and code-dependent verifier was
+detected before restoration and repeat gates. No existing production schema
+or user database is migrated: this remains an unreleased synthetic laboratory.
+
 ### Adversarial maintainer self-review
 
 Reviewed the final trust transitions separately from implementation: setup

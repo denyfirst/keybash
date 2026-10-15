@@ -47,6 +47,7 @@ type Store struct {
 	instance           string
 	wrap               cipher.AEAD
 	indexKey, checkKey [32]byte
+	recoveryKey        [32]byte
 	closed             bool
 }
 
@@ -326,7 +327,7 @@ func openStore(dir string, key []byte, initial bool) (*Store, error) {
 	for _, item := range []struct {
 		name   string
 		target *[32]byte
-	}{{"index", &s.indexKey}, {"check", &s.checkKey}} {
+	}{{"index", &s.indexKey}, {"check", &s.checkKey}, {"recovery", &s.recoveryKey}} {
 		b, e := hkdf.Key(sha256.New, key, salt, "keybash/custody/v1/"+item.name, 32)
 		if e != nil {
 			return nil, errRefused
@@ -384,6 +385,7 @@ func (s *Store) Close() error {
 	_ = s.root.Close()
 	clear(s.indexKey[:])
 	clear(s.checkKey[:])
+	clear(s.recoveryKey[:])
 	s.wrap = nil
 	if e != nil {
 		return errRefused

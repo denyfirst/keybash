@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -32,10 +33,18 @@ type recoveryCodes []string
 func (recoveryCodes) Format(w fmt.State, _ rune) {
 	_, _ = io.WriteString(w, "[recovery codes redacted]")
 }
-func recoveryDigest(owner, code string) [32]byte {
-	return sha256.Sum256([]byte("keybash/recovery/v1/" + owner + "/" + code))
+
+// Recovery codes are random 128-bit tokens, never user-selected passwords.
+// An independent instance-derived MAC key also separates their verifier from
+// password hashing and prevents offline guesses without that key.
+func (s *Store) recoveryDigest(owner, code string) [32]byte {
+	h := hmac.New(sha256.New, s.recoveryKey[:])
+	_, _ = h.Write([]byte("keybash/recovery/v1/" + owner + "/" + code))
+	var digest [32]byte
+	copy(digest[:], h.Sum(nil))
+	return digest
 }
-func newRecovery(owner string) (recoveryCodes, [][32]byte, error) {
+func (s *Store) newRecovery(owner string) (recoveryCodes, [][32]byte, error) {
 	codes := make(recoveryCodes, 10)
 	hashes := make([][32]byte, 10)
 	for i := range codes {
@@ -44,7 +53,7 @@ func newRecovery(owner string) (recoveryCodes, [][32]byte, error) {
 			return nil, nil, errRefused
 		}
 		codes[i] = base64.RawURLEncoding.EncodeToString(raw[:])
-		hashes[i] = recoveryDigest(owner, codes[i])
+		hashes[i] = s.recoveryDigest(owner, codes[i])
 	}
 	return codes, hashes, nil
 }
@@ -98,7 +107,7 @@ func (s *Store) consumeFactor(id string, revision uint64, code string, now time.
 			a.LastCounter = counter
 			accepted = true
 		} else if len(code) == 22 {
-			digest := recoveryDigest(id, code)
+			digest := s.recoveryDigest(id, code)
 			for i, h := range a.Recovery {
 				if subtle.ConstantTimeCompare(h[:], digest[:]) == 1 {
 					a.Recovery = append(a.Recovery[:i], a.Recovery[i+1:]...)
@@ -129,7 +138,7 @@ func (s *Store) enroll(id string, revision uint64, seed, code string, now time.T
 		}
 		if counter, ok := factorCounter(seed, code, now, -1); ok {
 			var hashes [][32]byte
-			codes, hashes, e = newRecovery(id)
+			codes, hashes, e = s.newRecovery(id)
 			if e != nil {
 				return e
 			}
@@ -162,7 +171,7 @@ func (s *Store) regenerateRecovery(id string, revision uint64) (recoveryCodes, e
 		if e != nil || a.Revision != revision || a.Seed == "" {
 			return errRefused
 		}
-		codes, a.Recovery, e = newRecovery(id)
+		codes, a.Recovery, e = s.newRecovery(id)
 		if e != nil {
 			return e
 		}

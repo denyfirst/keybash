@@ -14,6 +14,20 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+func TestCustodyRecoveryVerifierPurposeAndOwnerBinding(t *testing.T) {
+	one, _, _, _ := custodyFixture(t)
+	two, _, _, _ := custodyFixture(t)
+	owner := strings.Repeat("a", 32)
+	code := "Synthetic-random-token"
+	digest := one.recoveryDigest(owner, code)
+	if digest == one.recoveryDigest(strings.Repeat("b", 32), code) || digest == two.recoveryDigest(owner, code) || one.recoveryKey == one.indexKey || one.recoveryKey == one.checkKey {
+		t.Fatal("recovery verifier lost instance, owner or purpose binding")
+	}
+	if digest != one.recoveryDigest(owner, code) {
+		t.Fatal("valid recovery verifier is not stable")
+	}
+}
+
 func TestCustodySSHRejectsCostBombAndMismatchedPublic(t *testing.T) {
 	_, private, e := ed25519.GenerateKey(rand.Reader)
 	if e != nil {

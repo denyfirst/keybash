@@ -22,7 +22,7 @@ and changed entries are refused. The key's private directory must resolve
 outside the data directory. Exported storage/provisioning refuses non-Linux.
 Portable tests use private synthetic fixture helpers, not a runtime bypass.
 
-HKDF-SHA256 derives independent wrap/index/check keys with a random instance
+HKDF-SHA256 derives independent wrap/index/check/recovery keys with a random instance
 ID as salt and version/purpose labels. Each account/credential save generates
 a new random 32-byte data key. Standard-library AES-GCM with random nonces
 encrypts the record and wraps its data key separately. AAD binds instance,
@@ -64,7 +64,9 @@ the cookie. TOTP uses the pinned OTP library, a random 160-bit seed, SHA1,
 six digits, 30 seconds, +/- one time step. The greatest consumed counter and
 five factor attempts per account/minute (including failures) commit durably.
 Ten random 128-bit recovery codes are shown once and only their owner-bound
-SHA256 digests persist. Each is atomically removed when used. The password
+HMAC-SHA256 digests under the separate derived recovery key persist. Each is
+atomically removed when used. These random tokens are not user-chosen passwords;
+login passwords always use Argon2id. The password
 global/name budgets and KDF two-slot cap remain process-local; a restart
 resets those limits but never the durable factor replay/budget state.
 
