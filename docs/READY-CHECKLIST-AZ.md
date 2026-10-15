@@ -15,10 +15,12 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    reconnect və logout. SSH-də vim/nano/tmux/htop və gündəlik işlər də yoxlanır.
 2. **Login və MFA.** Lokal bootstrap, default passwordsuz hesab yaratma, MFA və
    recovery code, rate limit, CSRF/cookie və sessiya expiry/revocation.
-   Şifrə ilə giriş, şifrə dəyişmə və sessiya nəzarəti artıq ayrıca yaddaş lab-ında
-   var; daimi hesab saxlanması, bootstrap, blocklist və MFA hələ tamamlanmayıb.
+   Daimi şifrələnmiş hesab, birdəfəlik bootstrap, offline blocklist, MFA/recovery
+   və təkrar doğrulama ayrıca Linux lab-ında hazırdır (`CUSTODY-LAB.md`).
+   Production quraşdırma, restore/rotation və uzaq sessiya inteqrasiyası qalır.
 3. **Credential vault və istifadəçi icazələri.** Şifrələnmiş persistence, ayrıca
-   qorunan instance key, SSH key/passphrase və RDP password/domain importu;
+   instance key, Ed25519 key/passphrase və password importu lab-da hazırdır.
+   RDP domain sahəsi, digər key formatları və connection inteqrasiyası qalır;
    connection-credential əlaqəsi, reveal/export icazəsi və başqa hesabın
    connection/credential/socket-ına çıxışın rəddi. Real secret istifadə etməzdən
    əvvəl bu sərhədlər və bərpa modeli sınaqdan keçir.

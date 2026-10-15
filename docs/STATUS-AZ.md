@@ -37,7 +37,11 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 - Private checkout, signature verification və Go yoxlamaları üçün CI.
 - Ayrıca şifrə ilə giriş lab-ı: fərdi hesablar, Argon2id, giriş cəhd limitləri,
   qorunan cookie/CSRF, şifrə dəyişmə, idle/absolute expiry və sessiya ləğvi.
-- Denyfirst üslubunda giriş/hesab ekranı; yalnız sintetik, yaddaşda olan hesablar.
+- Denyfirst üslubunda giriş/hesab ekranı və ayrıca Linux custody lab-ı.
+- Daimi şifrələnmiş hesablar, birdəfəlik bootstrap, məcburi MFA/bərpa kodları,
+  restart-dan sonra replay rəddi və ayrıca instance key.
+- Öz hesabına aid Ed25519 açar/passphrase və şifrə saxlama/göstərmə/silmə;
+  həssas əməliyyatlar üçün şifrə + təzə MFA ilə təkrar doğrulama.
 
 Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağlıdır.
 Native sınaqlarda yalnız test fayllarına aid sintetik loopback bağlantısı var.
@@ -45,9 +49,10 @@ Bu, işlək brauzer remote-access məhsulu və production təhlükəsizlik zəma
 
 ## Hələ hazırlanmayıb
 
-Daimi hesab saxlanması/bootstrap/MFA, vault və credential importu, hostname/IP/host-key təsdiqi üçün UI,
+Login/vault-un SSH/RDP worker və connection icazələrinə bağlanması,
+hostname/IP/host-key təsdiqi üçün UI,
 məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
-hazır RDP workspace/copy-paste, persistence, backup/restore,
+hazır RDP workspace/copy-paste, backup/restore/key rotation,
 Docker deployment və release automation.
 
 ## Növbəti mərhələ
@@ -57,8 +62,9 @@ SSH/brauzer lab sərhədi və dependency review hazırdır. RDP ilkin negotiatio
 və mətn protokol lab-ına native TLS/NLA, masaüstü görüntüsü və izolyasiya olunmuş
 worker/broker və brauzer görüntü/input sınaqları əlavə olunub. Növbəti protokol işi
 resize, keyboard layout, reconnect və ayrıca sessiyaya bağlı məhdud mətn
-copy/paste-in faktiki sınağıdır. Şifrə giriş lab-ından sonra daimi hesablar,
-bootstrap/MFA və vault ayrıca mərhələdir (`IDENTITY-LAB.md`). Detallar
+copy/paste-in faktiki sınağıdır. Daimi hesab, bootstrap/MFA və vault lab-ı
+`CUSTODY-LAB.md`-dədir. İndi owned connection/credential ilə izolyasiyalı
+worker-i vahid sessiya/revocation sərhədinə bağlamaq lazımdır. Detallar
 `PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
 Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
 Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər

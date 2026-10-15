@@ -66,7 +66,10 @@ flowchart TD
 
 Brauzer hədəfə birbaşa TCP bağlantısı qurmur. Self-host serverin hədəfə şəbəkə yolu olmalıdır. LAN, müştərinin VPN-i və ya öz VPS-i istifadə oluna bilər; məhsul öz cloud relay-ini tələb etməyəcək. Hədəfdə mövcud SSH/RDP xidməti lazımdır; ilk versiyada ayrıca agent quraşdırılması nəzərdə tutulmur.
 
-İlkin texniki namizədlər: TypeScript/React frontend, Go API/SSH servisi, PostgreSQL, xterm.js və RDP üçün guacd. Bunlar prototipdə yoxlanıb ayrıca qərar sənədində dəqiqləşdiriləcək. SSH/RDP protokollarını sıfırdan yazmaq nəzərdə tutulmur.
+İlkin texniki namizədlər: TypeScript/React frontend, Go API/SSH servisi, PostgreSQL, xterm.js və RDP üçün guacd. Bunlar prototipdə yoxlanıb ayrıca qərar sənədində dəqiqləşdiriləcək.
+15 oktyabr qərarı: ilk tək-proses Linux custody lab-ı PostgreSQL yerinə ayrıca
+xidmət tələb etməyən bbolt istifadə edir; instance key ayrıca saxlanır. Səbəb
+və məhdudiyyətlər `adr/0004-durable-local-custody.md`-dədir. SSH/RDP protokollarını sıfırdan yazmaq nəzərdə tutulmur.
 
 Guacamole-un hazır Java web tətbiqini istifadə etmək məcburi deyil. Öz API-miz ilə JS client/guacd inteqrasiyasının çətinliyi və təhlükəsizliyi sınaqda qiymətləndiriləcək. Hər iki bağlantı yolunda eyni authorization qaydaları işləməlidir.
 

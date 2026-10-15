@@ -19,7 +19,7 @@ const idleLife = 15 * time.Minute
 const absoluteLife = 8 * time.Hour
 
 // Account is supplied by trusted local setup. There is no public registration,
-// default password, existing-product credential import or persistent storage.
+// default password or existing-product credential import in the memory lab.
 type Account struct {
 	Username string
 	Password PasswordHash
@@ -28,6 +28,8 @@ type account struct {
 	password PasswordHash
 	revision uint64
 	disabled bool
+	id       string
+	mfa      bool
 }
 type window struct {
 	start time.Time
@@ -50,10 +52,18 @@ type session struct {
 	created, last time.Time
 	ctx           context.Context
 	cancel        context.CancelFunc
+	owner         string
+	revision      uint64
+	stage         string
+	challengeEnd  time.Time
+	pendingSeed   string
+	replacing     bool
+	reauthUntil   time.Time
 }
 
-// Lab is a single-process, loopback HTTPS password-login boundary. All accounts
-// and sessions are memory-only. It grants no terminal, vault or native worker.
+// Lab is a single-process, loopback HTTPS identity boundary. NewLab is memory-
+// only; NewPersistent enables mandatory MFA and encrypted credential custody.
+// Sessions remain memory-only. Neither constructor authorizes a native worker.
 type Lab struct {
 	origin, host string
 	mu           sync.Mutex
@@ -67,6 +77,7 @@ type Lab struct {
 	now          func() time.Time
 	closed       bool
 	stop, done   chan struct{}
+	store        *Store
 }
 
 func usernameInput(value string) bool {
@@ -118,6 +129,15 @@ func (l *Lab) expirer() {
 			return
 		case <-ticker.C:
 			l.mu.Lock()
+			if l.store != nil {
+				names := make(map[string]bool)
+				for _, s := range l.sessions {
+					names[s.username] = true
+				}
+				for name := range names {
+					l.refreshLocked(name)
+				}
+			}
 			l.sweepLocked()
 			l.mu.Unlock()
 		}
@@ -147,7 +167,7 @@ func (l *Lab) forgetLocked(id [32]byte) {
 func (l *Lab) sweepLocked() {
 	now := l.now()
 	for id, s := range l.sessions {
-		if !now.Before(s.last.Add(idleLife)) || !now.Before(s.created.Add(absoluteLife)) {
+		if !now.Before(s.last.Add(idleLife)) || !now.Before(s.created.Add(absoluteLife)) || l.store != nil && s.stage != "ready" && !now.Before(s.challengeEnd) {
 			l.forgetLocked(id)
 		}
 	}
@@ -208,6 +228,9 @@ func (l *Lab) login(ctx context.Context, username, password, previous string) (s
 		l.mu.Unlock()
 		return "", errLimited
 	}
+	if l.store != nil {
+		l.refreshLocked(username)
+	}
 	a := l.accounts[username]
 	hash, revision := l.dummy, uint64(0)
 	if a != nil {
@@ -223,11 +246,23 @@ func (l *Lab) login(ctx context.Context, username, password, previous string) (s
 	valid := hash.verify(password)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.store != nil {
+		l.refreshLocked(username)
+	}
 	if !valid || a == nil || a.disabled || a.revision != revision || l.closed || ctx.Err() != nil ||
 		oldValid && oldSession != nil && l.sessions[oldID] != oldSession {
 		return "", errRefused
 	}
+	return l.issueLocked(username, previous)
+}
+
+func (l *Lab) issueLocked(username, previous string) (string, error) {
 	l.sweepLocked()
+	a := l.accounts[username]
+	if a == nil || a.disabled || l.closed {
+		return "", errRefused
+	}
+	oldID, oldValid := tokenID(previous)
 	count := 0
 	for _, s := range l.sessions {
 		if s.username == username {
@@ -256,7 +291,15 @@ func (l *Lab) login(ctx context.Context, username, password, previous string) (s
 		l.forgetLocked(oldID)
 	}
 	c, cancel := context.WithCancel(context.Background())
-	l.sessions[id] = &session{username: username, created: l.now(), last: l.now(), ctx: c, cancel: cancel}
+	s := &session{username: username, created: l.now(), last: l.now(), ctx: c, cancel: cancel, owner: a.id, revision: a.revision}
+	if l.store != nil {
+		s.stage = "enroll"
+		if a.mfa {
+			s.stage = "challenge"
+		}
+		s.challengeEnd = l.now().Add(5 * time.Minute)
+	}
+	l.sessions[id] = s
 	return raw, nil
 }
 
@@ -266,7 +309,7 @@ func (l *Lab) change(ctx context.Context, id [32]byte, current, replacement stri
 	}
 	l.mu.Lock()
 	s := l.liveLocked(id, false)
-	if s == nil {
+	if s == nil || l.store != nil && l.readyLocked(id, true) != s {
 		l.mu.Unlock()
 		return errRefused
 	}
@@ -290,8 +333,15 @@ func (l *Lab) change(ctx context.Context, id [32]byte, current, replacement stri
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.liveLocked(id, false) != s || a.revision != revision || ctx.Err() != nil {
+	if l.liveLocked(id, false) != s || a.revision != revision || ctx.Err() != nil || l.store != nil && l.readyLocked(id, true) != s {
 		return errRefused
+	}
+	if l.store != nil {
+		if l.store.replacePassword(a.id, revision, next) != nil {
+			return errRefused
+		}
+		l.refreshLocked(s.username)
+		return nil
 	}
 	a.password, a.revision = next, a.revision+1
 	for key, active := range l.sessions {
@@ -305,6 +355,10 @@ func (l *Lab) change(ctx context.Context, id [32]byte, current, replacement stri
 func (l *Lab) liveLocked(id [32]byte, touch bool) *session {
 	l.sweepLocked()
 	s := l.sessions[id]
+	if l.store != nil && s != nil {
+		l.refreshLocked(s.username)
+		s = l.sessions[id]
+	}
 	if l.closed || s == nil || l.accounts[s.username].disabled {
 		return nil
 	}

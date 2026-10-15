@@ -1,5 +1,9 @@
 # Password identity laboratory
 
+Historical scope: this document records the initial memory-only slice. Its
+durable account/MFA/custody follow-up is implemented in [CUSTODY-LAB.md](CUSTODY-LAB.md).
+The original memory experiment still grants no credential or remote authority.
+
 15 October 2026. The first identity slice is an isolated password-login service
 with a browser interface and real password hashing/session checks. It is not a
 persistent account system, MFA, vault or remote-access authorization boundary.

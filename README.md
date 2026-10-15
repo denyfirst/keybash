@@ -25,8 +25,12 @@ keyboard, local fullscreen and native revocation checks. RDP clipboard and
 remote resize remain disabled.
 A separate memory-only identity lab adds named password login, Argon2id,
 bounded attempts, password change, secure cookies/CSRF and session revocation.
-There is no persistent product login/MFA, vault,
-RDP gateway, installable deployment or production release yet.
+A separate Linux loopback custody lab now adds durable encrypted accounts,
+one-use operator bootstrap, mandatory MFA/recovery, and owner-scoped encrypted
+Ed25519 key/password custody with fresh authentication for sensitive actions.
+Its browser interface and offline operator entry point use synthetic data.
+Remote worker authorization, RDP clipboard, installable deployment and an
+independently audited production release remain gates.
 
 ## Start here
 
@@ -40,6 +44,7 @@ RDP gateway, installable deployment or production release yet.
 - [Native RDP lab evidence and limits](docs/NATIVE-RDP-LAB.md)
 - [Browser RDP lab evidence and limits](docs/BROWSER-RDP-LAB.md)
 - [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)
+- [Durable MFA/custody lab and operator usage](docs/CUSTODY-LAB.md)
 - [Remaining product steps (Azerbaijani)](docs/READY-CHECKLIST-AZ.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
@@ -71,4 +76,4 @@ and separate release signer identities; private keys are never copied here.
 The maintainer authorized public repository development. A source license and
 production release have not yet been selected. No independent audit is
 claimed. The self-hosted gateway will need access to active credentials; the
-planned vault is not a zero-knowledge guarantee against host compromise.
+vault is not a zero-knowledge guarantee against host compromise.

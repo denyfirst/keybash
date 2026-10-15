@@ -1,5 +1,53 @@
 # Protocol dependency review
 
+## Durable custody adoption (2026-10-15)
+
+Pinned `go.etcd.io/bbolt v1.5.0` (MIT, tag
+`e7a8b2dd498494a3766ba24dd94d3509e5588485`, released 2026-06-21), module sum
+`h1:S7GAl7Fxv12yohbwFfIbQCGDWbQbtDGPET4P/bD4lxU=`. Reviewed pinned open,
+exclusive locking, rooted OpenFile callback, fsync defaults, MaxSize allocation,
+transaction rollback and bounded lookup/write behavior. It needs Go 1.25;
+the existing Go 1.26.9 pin is unchanged. It uses the already pinned x/sys;
+its dependency build/benchmark/test graph is not the runtime inventory.
+No bbolt CLI, network service, dynamic module/plugin or migration auto-run.
+
+Pinned `github.com/pquerna/otp v1.5.0` (Apache-2.0, tag
+`5971b1ef1d6652fec2caed37f11e5cacd9249f78`, released 2025-05-16), sum
+`h1:NMMR+WrmaqXU4EzdGJEE1aUUI0AMRzsp96fFFWNPwxs=`. Reviewed HOTP/TOTP
+validation, digit/algorithm selection, seed decoding and skew adapter. Keybash
+calls the six-digit SHA1 HMAC OTP API and owns transactional replay/budget
+enforcement, not the cryptographic algorithm. The root library imports
+`github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc` (MIT), sum
+`h1:biVzkmvwrH8WK8raXaxBx6fRVTlJILwEwQGL1I/ByEI=`. This older transitive
+dependency is retained explicitly in the inventory; no QR/image generation or
+untrusted barcode input path is invoked. Maintenance age limits this adoption;
+monitor the OTP/module advisories, and review removal/update before release.
+Do not silently update either dependency or widen the parser/import surface.
+
+Licenses are in `docs/third-party/`. `go list -deps`/`govulncheck` inventory
+includes the existing crypto/sys packages, bbolt, OTP and barcode. Sum-file
+entries additionally include upstream test/tool dependencies; they are not
+all linked runtime packages. No newly adopted reachable symbol/package advisory
+was reported by the scan; the excluded OpenPGP module advisory below remains.
+This is neither independent audit nor a blanket vulnerability-free claim.
+
+The embedded common-password dataset is SecLists
+`Passwords/Common-Credentials/10k-most-common.txt`, Git blob
+`a93ea7f91f095b38728795ecd6ec731e59b8c112`, SHA256
+`68782d6a4a19a4768d5f15dd66bd534e7a33055cc755411e33f16d18c50fdcce`.
+Its MIT license is preserved as `docs/third-party/seclists-LICENSE.txt`
+(source license blob `fbd3be5da1b5c7363ab6d581e4cc6a22a8893683`). It is
+bundled data, not an online password lookup; no user password leaves self-host.
+It needs deliberate corpus refresh/review and does not cover all breached
+passwords. The test pins its exact bytes.
+
+Primary references: [bbolt API](https://pkg.go.dev/go.etcd.io/bbolt@v1.5.0),
+[pinned bbolt source](https://github.com/etcd-io/bbolt/tree/v1.5.0),
+[OTP API](https://pkg.go.dev/github.com/pquerna/otp@v1.5.0/hotp),
+[pinned OTP source](https://github.com/pquerna/otp/tree/v1.5.0),
+[Go random-nonce GCM](https://pkg.go.dev/crypto/cipher#NewGCMWithRandomNonce),
+[SecLists source](https://github.com/danielmiessler/SecLists/tree/master/Passwords/Common-Credentials).
+
 ## Password identity adoption (2026-10-15)
 
 The identity lab adds `golang.org/x/crypto/argon2` from the already pinned

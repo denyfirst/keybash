@@ -23,8 +23,10 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    revocation. Describe the server's ability to access active credentials.
    An isolated memory-only password-login lab implements individual accounts,
    Argon2id, browser login/password change, bounded attempts/sessions and active
-   expiry/logout. Durable accounts/bootstrap/MFA and remote-resource ownership
-   remain gates; see `IDENTITY-LAB.md`.
+   expiry/logout. Durable accounts/bootstrap/MFA, owner-scoped encrypted key/password custody
+   and fresh proof now have a Linux loopback lab; see `CUSTODY-LAB.md`.
+   Remote-resource ownership/worker integration, restore/rotation and audited
+   production release remain gates.
 4. **Workspace:** Denyfirst UI, connections/search/favorites, terminal/RDP tabs,
    bounded clipboard behavior, reconnect states and accessible keyboard flows.
 5. **Self-host packaging:** Linux deployment, isolated workers and egress,
