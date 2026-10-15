@@ -44,6 +44,11 @@ tested, and follow-up sabotage of the MAC key and code-dependent verifier was
 detected before restoration and repeat gates. No existing production schema
 or user database is migrated: this remains an unreleased synthetic laboratory.
 
+Linux CI correctly refused the original portable fixture's final data root:
+Go's numbered `testing.TempDir` child follows the process umask and was 0755.
+The fixture now creates its own explicit 0700 data child, matching the Linux
+provisioning/CLI tests. Production permission requirements remain enforced.
+
 ### Adversarial maintainer self-review
 
 Reviewed the final trust transitions separately from implementation: setup

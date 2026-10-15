@@ -30,7 +30,12 @@ func custodyFixture(t *testing.T) (*Store, []byte, string, string) {
 	if _, e := rand.Read(key); e != nil {
 		t.Fatal("fixture entropy failed")
 	}
-	dir := t.TempDir()
+	// testing.TempDir's numbered child follows the process umask on Linux;
+	// create the actual fixture data root with the required private mode.
+	dir := filepath.Join(t.TempDir(), "data")
+	if os.Mkdir(dir, 0700) != nil {
+		t.Fatal("private fixture directory creation failed")
+	}
 	s, code, e := createStore(dir, key)
 	if e != nil {
 		t.Fatal("valid custody initialization refused")
