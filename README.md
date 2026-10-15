@@ -32,6 +32,9 @@ Its browser interface and offline operator entry point use synthetic data.
 An owned-session lab now links MFA/custody and encrypted connection records to
 the existing SSH and isolated native RDP browser fixtures, with one-use socket
 admission, approval binding and account-wide logout revocation.
+A disposable interactive UI preview now opens sample terminal/desktop views
+through the normal MFA/owned-connection flow. These are simulations, not real
+Linux/Windows sessions; see the [local demo guide](docs/INTERACTIVE-DEMO-AZ.md).
 Installed isolated workers/operator configuration, RDP clipboard, deployment and an
 independently audited production release remain gates.
 
@@ -49,6 +52,7 @@ independently audited production release remain gates.
 - [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)
 - [Durable MFA/custody lab and operator usage](docs/CUSTODY-LAB.md)
 - [Account-owned SSH/RDP session integration](docs/OWNED-REMOTE-LAB.md)
+- [Try the local interactive UI demo (Azerbaijani)](docs/INTERACTIVE-DEMO-AZ.md)
 - [Remaining product steps (Azerbaijani)](docs/READY-CHECKLIST-AZ.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
