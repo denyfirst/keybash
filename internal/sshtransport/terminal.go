@@ -32,7 +32,7 @@ const (
 
 // Config is trusted configuration, not an unchecked browser request. HostKey
 // is an independently approved SSH wire-format public key, never TOFU. The lab
-// accepts Ed25519 host/user keys only; Signer comes from the future authorized
+// accepts Ed25519 host/user keys only; Signer comes from the authorized
 // credential provider, never the host's SSH agent. No password fallback exists.
 type Config struct {
 	User    string

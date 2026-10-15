@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let csrf = '', busy = false, secretTimer, pendingDelete = '';
+let csrf = '', busy = false, secretTimer, pendingDelete = '', remoteEnabled = false;
 const notice = text => { $('notice').textContent = text; };
 const sections = ['enroll', 'challenge', 'recovery', 'vault'];
 const idOK = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
@@ -94,11 +94,21 @@ async function loadRecords() {
     row.append(label, reveal, remove); $('records').append(row);
   }
   if (!records.length) $('records').textContent = 'Hələ qeyd yoxdur.';
+  if(remoteEnabled){$('connection-credential').replaceChildren();for(const record of records){const option=document.createElement('option');option.value=record.id;option.textContent=`${record.name} · ${record.kind}`;$('connection-credential').append(option);}await loadConnections();}
+}
+async function loadConnections(){
+ const targets=await request('/api/targets'),connections=await request('/api/connections');
+ if(!Array.isArray(targets)||targets.length>256||!Array.isArray(connections)||connections.length>128)throw new Error('invalid connections');
+ const approved=new Map();$('connection-target').replaceChildren();
+ for(const target of targets){if(!idOK(target.id)||typeof target.name!=='string'||!['ssh','rdp'].includes(target.protocol))throw new Error('invalid target');approved.set(target.id,target);const option=document.createElement('option');option.value=target.id;option.textContent=`${target.name} · ${target.protocol.toUpperCase()}`;$('connection-target').append(option);}
+ $('connections').replaceChildren();for(const record of connections){if(!idOK(record.id)||typeof record.name!=='string'||!idOK(record.target)||!idOK(record.credential))throw new Error('invalid connection');const row=document.createElement('div');row.className='record';const name=document.createElement('span');name.textContent=record.name;row.append(name);const target=approved.get(record.target);if(target){const link=document.createElement('a');link.textContent='Qoşul';link.href=`/remote/${target.protocol}/${record.id}`;row.append(link);}const remove=document.createElement('button');remove.textContent='Bağlantını sil';remove.type='button';remove.className='secondary';remove.addEventListener('click',()=>{void run(async()=>{await request(`/api/connections/${record.id}`,'DELETE',{});await loadConnections();});});row.append(remove);$('connections').append(row);}
+ if(!connections.length)$('connections').textContent='Hələ bağlantı yoxdur.';
 }
 async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
   csrf = data.csrf; $('account').textContent = data.username;
+  remoteEnabled=data.remote===true;$('connections-panel').hidden=!remoteEnabled;
   sections.forEach(id => { $(id).hidden = true; });
   $('heading').textContent = data.stage === 'ready' ? 'Açarların öz yerində.' : data.stage === 'enroll' ? 'MFA-nı quraq.' : 'Girişini təsdiqlə.';
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false;
@@ -129,6 +139,7 @@ bind('credential', async () => {
   const value = { name: $('credential-name').value, kind, username: $('credential-user').value, secret: $(kind === 'password' ? 'credential-password' : 'credential-key').value, passphrase: kind === 'ssh-key' ? $('credential-passphrase').value : '' };
   clearInputs(); await request('/api/credentials', 'POST', value); $('credential').reset(); await loadRecords(); notice('Şifrələnmiş qeyd saxlanıldı.');
 });
+bind('connection',async()=>{await request('/api/connections','POST',{name:$('connection-name').value,target:$('connection-target').value,credential:$('connection-credential').value});$('connection-name').value='';await loadConnections();notice('Bağlantı saxlanıldı.');});
 $('credential-kind')?.addEventListener('change', () => {
   clearInputs(); const key = $('credential-kind').value === 'ssh-key'; $('key-fields').hidden = !key; $('password-fields').hidden = key;
 });

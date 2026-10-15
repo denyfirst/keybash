@@ -47,9 +47,12 @@ Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağl
 Native sınaqlarda yalnız test fayllarına aid sintetik loopback bağlantısı var.
 Bu, işlək brauzer remote-access məhsulu və production təhlükəsizlik zəmanəti deyil.
 
+Login/vault və connection icazələri artıq SSH/native RDP brauzer lab-ına
+bağlanıb: birdəfəlik icazə, server kimliyi versiyası və logout ləğvi yoxlanır.
+
 ## Hələ hazırlanmayıb
 
-Login/vault-un SSH/RDP worker və connection icazələrinə bağlanması,
+Hələ quraşdırılan worker, operator target konfiqurasiyası və
 hostname/IP/host-key təsdiqi üçün UI,
 məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
 hazır RDP workspace/copy-paste, backup/restore/key rotation,
@@ -63,8 +66,9 @@ və mətn protokol lab-ına native TLS/NLA, masaüstü görüntüsü və izolyas
 worker/broker və brauzer görüntü/input sınaqları əlavə olunub. Növbəti protokol işi
 resize, keyboard layout, reconnect və ayrıca sessiyaya bağlı məhdud mətn
 copy/paste-in faktiki sınağıdır. Daimi hesab, bootstrap/MFA və vault lab-ı
-`CUSTODY-LAB.md`-dədir. İndi owned connection/credential ilə izolyasiyalı
-worker-i vahid sessiya/revocation sərhədinə bağlamaq lazımdır. Detallar
+`CUSTODY-LAB.md`-dədir. Vahid authorization/revocation axını
+`OWNED-REMOTE-LAB.md`-də yoxlanır. Quraşdırılan worker və operator target/trust
+konfiqurasiyası növbəti inteqrasiya mərhələsidir. Protokol detalları
 `PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
 Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
 Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər

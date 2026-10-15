@@ -29,7 +29,10 @@ A separate Linux loopback custody lab now adds durable encrypted accounts,
 one-use operator bootstrap, mandatory MFA/recovery, and owner-scoped encrypted
 Ed25519 key/password custody with fresh authentication for sensitive actions.
 Its browser interface and offline operator entry point use synthetic data.
-Remote worker authorization, RDP clipboard, installable deployment and an
+An owned-session lab now links MFA/custody and encrypted connection records to
+the existing SSH and isolated native RDP browser fixtures, with one-use socket
+admission, approval binding and account-wide logout revocation.
+Installed isolated workers/operator configuration, RDP clipboard, deployment and an
 independently audited production release remain gates.
 
 ## Start here
@@ -45,6 +48,7 @@ independently audited production release remain gates.
 - [Browser RDP lab evidence and limits](docs/BROWSER-RDP-LAB.md)
 - [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)
 - [Durable MFA/custody lab and operator usage](docs/CUSTODY-LAB.md)
+- [Account-owned SSH/RDP session integration](docs/OWNED-REMOTE-LAB.md)
 - [Remaining product steps (Azerbaijani)](docs/READY-CHECKLIST-AZ.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 

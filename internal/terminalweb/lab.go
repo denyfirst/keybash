@@ -136,9 +136,9 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request refused", http.StatusMethodNotAllowed)
 		return
 	}
-	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css"}
+	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css"}
 	if l.desktop {
-		assets = map[string]string{"/": "desktop.html", "/desktop.mjs": "desktop.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
+		assets = map[string]string{"/": "desktop.html", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
 	}
 	path, ok := assets[r.URL.Path]
 	if !ok {
