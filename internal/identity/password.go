@@ -1,5 +1,5 @@
-// Package identity implements the isolated password-login laboratory. It is not
-// yet a persistent account store, MFA service or remote-access authorization API.
+// Package identity implements isolated login laboratories and Linux encrypted
+// account/credential custody. It does not authorize remote-access workers.
 package identity
 
 import (
@@ -16,7 +16,7 @@ var errRefused = errors.New("identity request refused")
 var errLimited = errors.New("identity request limited")
 
 // PasswordHash is an opaque, versioned value; it cannot carry caller-selected
-// allocation/work parameters. Persistence and migration are a separate gate.
+// allocation/work parameters. The custody schema stores only this fixed version.
 type PasswordHash struct {
 	version byte
 	salt    [16]byte
@@ -33,7 +33,7 @@ func passwordInput(password string) bool {
 // Argon2id: 64 MiB, three passes, four lanes, random 128-bit salt, 256-bit output.
 // Password bytes are preserved exactly, without trimming or normalization.
 func HashPassword(password string) (PasswordHash, error) {
-	if !passwordInput(password) || utf8.RuneCountInString(password) < 15 {
+	if !passwordInput(password) || utf8.RuneCountInString(password) < 15 || blockedPassword(password) {
 		return PasswordHash{}, errRefused
 	}
 	h := PasswordHash{version: 1}

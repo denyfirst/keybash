@@ -1,5 +1,65 @@
 # Foundation verification
 
+## Durable custody follow-up — 2026-10-15
+
+The earlier sections are historical foundation/protocol/password-lab evidence.
+This follow-up covers the implemented Linux loopback durable identity/custody
+boundary described in `CUSTODY-LAB.md`, using synthetic accounts/keys only.
+The local full analysis gate passed: formatting, bounded paste tests, module
+verification, shuffled Go tests/vet/build, staticcheck, gosec, govulncheck and
+actionlint. Linux vet/build/staticcheck/gosec also ran by cross-targeting the
+local analysis; Linux runtime permission/CLI/race and native/browser gates are
+required CI evidence, not inferred from Windows tests. Edge exercised the old
+password lab and new bootstrap/MFA/custody browser fixture. Its account screen
+was visually inspected; no production server or real credentials were used.
+
+Deliberate source sabotage produced the intended failing assertions:
+
+| Mutation | Intended failing observation |
+|---|---|
+| Remove bootstrap expiry | expired bootstrap accepted |
+| Refuse every bootstrap as expired | valid bootstrap denied |
+| Remove ready-stage requirement | password-only session opened vault |
+| Remove fresh-proof requirement | credential POST returned 200 instead of 403 |
+| Ignore greatest consumed OTP counter | enrollment OTP replay accepted |
+| Keep a consumed recovery digest | recovery code replay accepted |
+| Omit owner from AAD | ciphertext rebind to another owner accepted |
+| Refuse every parsed valid SSH key | valid Ed25519 key import refused |
+| Allow owner credential number 257 | owner credential quota bypassed |
+| Allow wrapping after the 2^31 cap | wrap message limit bypassed |
+
+Each temporary edit was restored byte-for-byte in a finally block before the
+next case; the final local gates then passed on restored source. Initial
+diagnostic assertion strings were corrected to match the actual test messages,
+and the affected sabotage was repeated successfully. No failed test/build was
+treated as an intended detection without checking its assertion. Native RDP
+identity/input/viewer mutation gates continue unchanged in required CI.
+
+### Adversarial maintainer self-review
+
+Reviewed the final trust transitions separately from implementation: setup
+code race/expiry/reissue, exclusive DB access, key separation/private file
+admission, envelope/tag/owner binding, metadata authentication and message
+budget, durable failure/recovery/replay transactions, immutable IDs/revisions,
+password-only/fresh authority, in-flight KDF/import work, HTTP/body-lock and
+secret-response cancellation, offline recovery, browser DOM/storage/history,
+seed/codes visibility and dependency/parser limits. Findings fixed included
+committing invalid MFA attempt budgets rather than rolling them back, keeping
+the active seed during replacement, validating the Ed25519 seed/public halves,
+reading slow bodies before the session mutex, and waiting for canceled-write
+callbacks before a handler can finish/reuse its response writer. Random-nonce
+GCM's nil argument is its documented API; narrowly scoped analysis annotations
+explain that fact and intentional secret serialization into encryption.
+
+Explicit limits: local service/key-holder compromise is trusted, old DB restore
+can resurrect factor/recovery state, no crash/power-loss injection or tested
+key rotation/restore, no real credential/remote-worker integration, no complete
+browser/OS/clipboard matrix, process-memory erasure or DDoS guarantee. The
+blocklist is deliberately limited and barcode transitive maintenance remains
+an update review point. This is maintainer self-review, not independent audit.
+An exact candidate independent security review and material-finding resolution
+remain mandatory before first production credential/remote-access release.
+
 Scope: outbound IP target guard and repository workflow, not login, vault,
 SSH/RDP sessions, clipboard or a deployable service. All test endpoints and
 messages are synthetic. Dial tests use injected package-private test functions

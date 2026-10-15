@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $taskRepoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $taskRepoRoot
 try {
-    $taskUnformatted = @(gofmt -l internal web)
+    $taskUnformatted = @(gofmt -l cmd internal web)
     if ($LASTEXITCODE -ne 0 -or $taskUnformatted.Count -ne 0) { throw 'format check failed' }
     node --test web/paste.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'paste tests failed' }

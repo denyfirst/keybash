@@ -1,13 +1,23 @@
 # Implemented Keybash security invariants
 
-This file describes only code that exists. Persistent login/MFA, vault,
-production RDP access, browser RDP clipboard and deployment controls are in the product
-plan and roadmap, not claims of this lab. Tests use synthetic targets,
+This file describes only code that exists. Durable login/MFA and encrypted
+custody exist in a Linux loopback laboratory; production RDP access, browser
+RDP clipboard and deployment controls remain product gates. Tests use synthetic targets,
 in-memory connections and ephemeral loopback SSH/browser fixtures. They perform
 no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
+| Initial registration requires a single-use expiring local setup code; it cannot reopen | atomic bootstrap state and keyed metadata | `TestCustodyBootstrapSingleUseExpiryAndExclusiveOpen`, `TestCustodyOfflineRecoveryBootstrapRenewalAndSealLimit` |
+| Password-only persistent sessions cannot access custody | explicit enroll/challenge/ready state and rotated cookies | `TestPersistentPasswordSessionsCannotOpenVault`, `TestCustodyHTTPBootstrapMFAAndVault` |
+| Factor replay and recovery reuse are refused across restart/concurrency | transactional greatest counter, hashed one-time codes, durable failed-attempt budget | `TestCustodyMFAReplayRecoveryAndRestart`, `TestCustodyFactorFailuresPersistAndReplacementKeepsOldMFA` |
+| Old MFA survives an abandoned replacement; old sessions die on account revision changes | pending session seed and atomic replacement | `TestCustodyHTTPBootstrapMFAAndVault`, `TestCustodyRandomEnvelopesQuotaAndHTTPIsolation` |
+| Secrets are encrypted at rest and authenticated to immutable owner/record IDs | separate random instance key, HKDF purposes, per-save random DEK and random-nonce GCM, metadata MAC/seal budget | `TestCustodyCiphertextOwnerBindingTamperAndPlaintextAbsence`, `TestCustodyRandomEnvelopesQuotaAndHTTPIsolation`, `TestCustodyOfflineRecoveryBootstrapRenewalAndSealLimit` |
+| Sensitive custody mutations/reveal require fresh password plus factor; owner is never browser supplied | server ready/fresh/session owner checks, strict JSON | `TestCustodyHTTPBootstrapMFAAndVault`, `TestCustodyRandomEnvelopesQuotaAndHTTPIsolation`, `TestCustodyCancelledReauthentication` |
+| Slow bodies do not hold session revocation; malformed/ambiguous fields refuse | bounded read before account mutex, exact scalar fields | `TestCustodyStrictFieldsAndSlowBodyIsolation`, `FuzzCustodyFields` |
+| SSH import bounds cost before parsing and rejects key confusion | bounded OpenSSH Ed25519/bcrypt preflight, seed/public consistency | `TestCustodySSHImportBoundsAndPasswordBlocklist`, `TestCustodySSHRejectsCostBombAndMismatchedPublic` |
+| Linux provisioning refuses shared files, symlinks, concurrent writers and a key inside DB storage | owned 0700 roots, 0600 regular files, exclusive rooted opens | `TestCustodyLinuxPrivateProvisioning`, `TestOperatorLinuxInitBootstrapAndOfflineRecovery` |
+| Custody UI uses local assets, no secret URLs/storage, and clears explicit reveal | strict response handling, text DOM, explicit user copy and expiry/hide | `TestBrowserDurableCustody` |
 | Unconfigured policy denies access | `targetguard.Policy.DialContext` | `TestEmptyAndNilPolicyDenyEveryDial` |
 | Only approved address/port pairs are dialed | `Policy.permitted` at the dial boundary | `TestDialRejectsUnregisteredTargetWithoutNetwork` |
 | Explicit private targets are usable | literal TCP dial, not a public-IP-only policy | `TestDialApprovedPrivateTargetUsesLiteralAddress` |

@@ -35,6 +35,10 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if l.store != nil {
+		l.serveDurable(w, r)
+		return
+	}
 	if r.URL.Path == "/api/session" && r.Method == http.MethodPost {
 		fields, ok := readInput(w, r, "username", "password")
 		if !ok || !usernameInput(fields["username"]) || !passwordInput(fields["password"]) {
@@ -147,9 +151,9 @@ func serveAsset(w http.ResponseWriter, name string) {
 		return
 	}
 	typeName := "text/html; charset=utf-8"
-	if name == "auth.mjs" {
+	if name == "auth.mjs" || name == "custody.mjs" {
 		typeName = "text/javascript; charset=utf-8"
-	} else if name == "auth.css" {
+	} else if name == "auth.css" || name == "custody.css" {
 		typeName = "text/css; charset=utf-8"
 	}
 	w.Header().Set("Content-Type", typeName)
