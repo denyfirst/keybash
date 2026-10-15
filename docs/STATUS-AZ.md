@@ -1,6 +1,6 @@
 # Keybash — cari vəziyyət
 
-14 oktyabr 2026. İnkişaf private başladı. GitHub Free private branch protection
+15 oktyabr 2026. İnkişaf private başladı. GitHub Free private branch protection
 vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 
 ## Hazır olan təməl
@@ -35,6 +35,9 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
   native clipboard və dinamik ekran kanalları hələ bağlıdır.
 - Guard üçün müsbət, rədd, yanlış konfiqurasiya və abuse testləri.
 - Private checkout, signature verification və Go yoxlamaları üçün CI.
+- Ayrıca şifrə ilə giriş lab-ı: fərdi hesablar, Argon2id, giriş cəhd limitləri,
+  qorunan cookie/CSRF, şifrə dəyişmə, idle/absolute expiry və sessiya ləğvi.
+- Denyfirst üslubunda giriş/hesab ekranı; yalnız sintetik, yaddaşda olan hesablar.
 
 Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağlıdır.
 Native sınaqlarda yalnız test fayllarına aid sintetik loopback bağlantısı var.
@@ -42,7 +45,7 @@ Bu, işlək brauzer remote-access məhsulu və production təhlükəsizlik zəma
 
 ## Hələ hazırlanmayıb
 
-Login/MFA, vault və credential importu, hostname/IP/host-key təsdiqi üçün UI,
+Daimi hesab saxlanması/bootstrap/MFA, vault və credential importu, hostname/IP/host-key təsdiqi üçün UI,
 məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
 hazır RDP workspace/copy-paste, persistence, backup/restore,
 Docker deployment və release automation.
@@ -54,7 +57,8 @@ SSH/brauzer lab sərhədi və dependency review hazırdır. RDP ilkin negotiatio
 və mətn protokol lab-ına native TLS/NLA, masaüstü görüntüsü və izolyasiya olunmuş
 worker/broker və brauzer görüntü/input sınaqları əlavə olunub. Növbəti protokol işi
 resize, keyboard layout, reconnect və ayrıca sessiyaya bağlı məhdud mətn
-copy/paste-in faktiki sınağıdır. Login/MFA və vault ayrıca mərhələdir. Detallar
+copy/paste-in faktiki sınağıdır. Şifrə giriş lab-ından sonra daimi hesablar,
+bootstrap/MFA və vault ayrıca mərhələdir (`IDENTITY-LAB.md`). Detallar
 `PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
 Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
 Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər

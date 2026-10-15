@@ -1,5 +1,34 @@
 # Protocol dependency review
 
+## Password identity adoption (2026-10-15)
+
+The identity lab adds `golang.org/x/crypto/argon2` from the already pinned
+v0.58.0 module, plus its `blake2b` implementation and architecture helpers.
+No module/version or external identity service is added. Existing BSD notices
+apply. Reviewed the pinned `IDKey` implementation/API, fixed-cost validation,
+memory/work allocation, salt generation and constant-time digest comparison.
+The library owns Argon2; Keybash does not implement or fork a password KDF.
+
+The opaque lab hash fixes 64 MiB, three passes, four lanes, 16 random salt
+bytes and 32 output bytes. There is no untrusted serialized cost field/parser.
+Two concurrent derivations are allowed, with bounded attempts and no request
+queue. The KDF itself is not interruptible; canceled/stale work must finish
+within that fixed cost and cannot issue a session. These controls are not a
+process-RAM limit or calibrated production throughput claim. Hash storage,
+migration, password blocklist, MFA and durable encrypted seed custody are
+separate gates in `IDENTITY-LAB.md`.
+
+Local module verification and reachable-symbol/package vulnerability checks
+passed; the existing excluded OpenPGP module advisory below remains relevant.
+No claim that the entire crypto module is vulnerability-free. CI repeats these
+checks, JSON fuzzing, race tests and the Chromium identity browser fixture.
+
+Primary sources: [pinned Argon2 API](https://pkg.go.dev/golang.org/x/crypto@v0.58.0/argon2),
+[Go source](https://cs.opensource.google/go/x/crypto/+/refs/tags/v0.58.0:argon2/argon2.go),
+[OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+
+## Original protocol review
+
 Reviewed on 2026-10-13 for the SSH library lab, not an entire product release.
 Maintainer/update owner: Denyfirst. Keep exact module versions and checksums;
 review each upgrade and rerun dependency, vulnerability and protocol gates.
@@ -9,7 +38,7 @@ review each upgrade and rerun dependency, vulnerability and protocol gates.
 `golang.org/x/crypto v0.58.0` (tag commit
 `8fdf07b3114278fb3b78c1cf1814e08bd851eb4c`, published 2026-10-09) is the Go
 extended crypto module, maintained through the Go project. It requires Go
-1.26.0; Keybash remains pinned to Go 1.26.9. The direct runtime import is
+1.26.0; Keybash remains pinned to Go 1.26.9. The initial direct runtime import was
 `golang.org/x/crypto/ssh`. Use `go mod verify` and the checksum database; no
 vendored protocol fork, custom crypto or external SSH executable is introduced.
 

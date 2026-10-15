@@ -1,6 +1,6 @@
 # Implemented Keybash security invariants
 
-This file describes only code that exists. Planned login, vault,
+This file describes only code that exists. Persistent login/MFA, vault,
 production RDP access, browser RDP clipboard and deployment controls are in the product
 plan and roadmap, not claims of this lab. Tests use synthetic targets,
 in-memory connections and ephemeral loopback SSH/browser fixtures. They perform
@@ -65,6 +65,15 @@ no external server dials and load no real credentials.
 | Browser input cannot select targets/credentials/streams or replay credits | one bounded instruction, opcode/state/keysym/coordinate limits | `TestViewerInputRefusesArbitraryParametersReplayAndBounds` |
 | Revocation closes partial image reads and refuses late input/output | atomic closed state and native transport teardown | `TestViewerPartialImageAndCancellationCloseReaders`, `TestViewerValidatedPNGGroupingInputAndRevocation` |
 | Browser pixels and input are independently measured; logout removes the display and native stream | isolated Edge/Chromium fixture and actual native NLA peer markers | `TestBrowserRDPViewerLab`, `TestNativeRDPBrowserDesktopAndRevocation` |
+| Passwords use independently salted fixed-cost Argon2id and exact Unicode bytes | opaque versioned hash, constant-time comparison, byte/codepoint limits | `TestPasswordSaltUnicodeAndWrongPassword` |
+| Login creates a fresh owner session; logout/password change cannot revoke another account | hashed random token, owner-bound session and revision recheck | `TestIdentityLoginGateRotationLogoutAndAccountIsolation`, `TestIdentityPasswordChangeRevokesOnlyItsOwner`, `TestIdentityRefusesWrongUnknownAndCrossAccountPassword` |
+| Identity mutation requires exact TLS/peer/Host/Origin and session-bound CSRF; duplicate/forged cookies refuse | common HTTP boundary before hashing and standard HMAC proof | `TestIdentityTLSOriginCSRFAndCookieBoundary`, `TestIdentityLoginRejectsUntrustedTransportBeforeHash` |
+| JSON credentials reject duplicate/unknown/coerced fields, invalid UTF-8/surrogates and excess input | bounded scalar preflight and exact two-string decoder | `TestIdentityStrictJSONAndBodyBounds`, `FuzzIdentityJSON` |
+| Known/unknown accounts share bounded attempt policy; KDF and sessions have finite capacity | global/name windows, two slots, owner/aggregate session caps | `TestIdentityAttemptBucketsAreUniformAndBounded`, `TestIdentityRateKDFAndSessionQuotas`, `TestIdentityActivityRenewalAndOwnerSessionQuota` |
+| Status polling cannot extend idle/absolute sessions; expiry cancels without another request | idle/absolute checks plus one-second background sweep | `TestIdentityIdleAbsoluteExpiryAndStatusDoesNotExtend`, `TestIdentityBackgroundExpiryCancelsWithoutRequest` |
+| Stale password derivation, logout and service closure cannot commit late authentication changes | revision/context/live-session recheck under lock | `TestIdentityRevocationDuringDerivationAndClose`, `TestIdentityPasswordChangeCannotFinishAfterLogout` |
+| Missing/duplicate identities or non-loopback origins cannot initialize login | copied account configuration and numeric origin checks | `TestIdentityConfigurationRefusesMissingDuplicateOrUntrusted` |
+| Browser login/change/logout preserve password clearing, protected navigation and truthful failure state | local fixed assets, bounded response/deadline, no storage or secret URLs | `TestBrowserPasswordLogin` |
 
 Browser evidence is additionally enforced by `web/paste.test.mjs` and the
 `browserlab` tagged `TestBrowserTerminalLab`: paste review/cancel/approve, byte
@@ -74,6 +83,14 @@ after logout. Linux adds native headless clipboard, bracketed Bash paste and
 kernel resize. Windows uses a mocked clipboard to protect the workstation.
 
 ## Limits
+
+The separate identity lab implements password-only, memory-resident accounts
+and owner sessions. It has no persistent IDs/hash storage, operator bootstrap,
+blocklist, MFA/recovery, vault or remote-resource authorization. Its cookie is
+not accepted by the protocol labs and opens no worker. See `IDENTITY-LAB.md`.
+Fixed attempt windows can be exhausted deliberately; KDF concurrency is not a
+process-memory or DDoS guarantee. Production durability/ownership and independent
+candidate review remain gates before real credentials or remote access.
 
 The initial RDP probe is a pre-credential experiment and private text prototype. The
 probe checks its own TLS, closes it, and never sends CredSSP; it cannot authorize
@@ -117,7 +134,7 @@ Aggregate connection quotas, worker isolation, application revocation, idle
 limits, exit-status presentation and independent security review remain future
 gates. Closing a stream does not guarantee killing all remote processes.
 
-The lab is not product login/MFA or ownership authorization. Its bootstrap code
+The terminal lab is not product login/MFA or ownership authorization. Its bootstrap code
 is passed via test process stdin, never URLs/environment/logs; it accepts no
 browser-selected target or credential. No test shell implementation is compiled
 into runtime packages. Automated browser contexts accept only the fixture's
