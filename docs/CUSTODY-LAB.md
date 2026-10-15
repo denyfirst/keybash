@@ -164,8 +164,9 @@ failure handling, cookies, and absence of external/secret URL requests/storage.
 `FuzzCustodyFields` gets two million executions with a hard timeout in CI.
 See `VERIFICATION.md` for deliberate sabotage and adversarial self-review.
 
-Remaining: connect owned credentials to approved target/identity records and
-revocable isolated SSH/RDP workers; measured protocol convenience/clipboard;
+Follow-up: `OWNED-REMOTE-LAB.md` links owned records/MFA/custody to synthetic
+SSH and isolated native RDP browser sessions with revocation. Remaining:
+installed isolated workers/operator configuration; measured protocol convenience/clipboard;
 complete workspace; hardened install/updates, privacy-safe audit, tested backup/
 restore/key recovery/rotation, real server/browser/load matrix, independent
 review of an exact release candidate and separately authorized signed release.

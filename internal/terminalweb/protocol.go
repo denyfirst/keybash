@@ -74,6 +74,33 @@ func (f *flow) acknowledge(sequence uint32) bool {
 func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, stream Stream, outputLimit int) {
 	chunks := make(chan []byte, 2)
 	var readers, workers sync.WaitGroup
+	// Never block the socket reader on remote input writes: output credits
+	// share that socket, so a backpressured duplex stream could deadlock its
+	// own ACK behind queued keyboard input. Preserve ordered input in a bounded
+	// 32-frame queue (at most 1 MiB); overflow closes rather than accumulating.
+	type inputFrame struct {
+		data          []byte
+		columns, rows uint32
+	}
+	input := make(chan inputFrame, 32)
+	workers.Go(func() {
+		defer cancel()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case frame := <-input:
+				if frame.data != nil {
+					n, e := stream.Write(frame.data)
+					if e != nil || n != len(frame.data) {
+						return
+					}
+				} else if stream.Resize(frame.columns, frame.rows) != nil {
+					return
+				}
+			}
+		}
+	})
 	read := func(source io.Reader) {
 		defer readers.Done()
 		buffer := make([]byte, 8192)
@@ -155,8 +182,14 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 			return
 		}
 		if kind == websocket.MessageBinary {
-			n, err := stream.Write(data)
-			if err != nil || n != len(data) {
+			if len(data) == 0 {
+				continue
+			}
+			select {
+			case input <- inputFrame{data: data}:
+			case <-ctx.Done():
+				return
+			default:
 				return
 			}
 			continue
@@ -169,8 +202,14 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 			if !window.acknowledge(command.Sequence) {
 				return
 			}
-		} else if stream.Resize(command.Columns, command.Rows) != nil {
-			return
+		} else {
+			select {
+			case input <- inputFrame{columns: command.Columns, rows: command.Rows}:
+			case <-ctx.Done():
+				return
+			default:
+				return
+			}
 		}
 	}
 }

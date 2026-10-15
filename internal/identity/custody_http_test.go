@@ -23,10 +23,10 @@ type custodyClient struct {
 
 func (c *custodyClient) call(method, path, body string) *httptest.ResponseRecorder {
 	c.t.Helper()
-	r := httptest.NewRequest(method, "https://127.0.0.1:8443"+path, strings.NewReader(body))
+	r := httptest.NewRequest(method, c.l.origin+path, strings.NewReader(body))
 	r.RemoteAddr = "127.0.0.1:9876"
 	r.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
-	r.Header.Set("Origin", "https://127.0.0.1:8443")
+	r.Header.Set("Origin", c.l.origin)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("X-Keybash-Request", "1")
 	r.Header.Set("X-Keybash-CSRF", c.csrf)

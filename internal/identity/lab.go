@@ -78,6 +78,7 @@ type Lab struct {
 	closed       bool
 	stop, done   chan struct{}
 	store        *Store
+	remote       *remoteConfig
 }
 
 func usernameInput(value string) bool {
@@ -163,6 +164,7 @@ func (l *Lab) forgetLocked(id [32]byte) {
 		s.cancel()
 		delete(l.sessions, id)
 	}
+	l.sweepRemotesLocked()
 }
 func (l *Lab) sweepLocked() {
 	now := l.now()
@@ -171,6 +173,7 @@ func (l *Lab) sweepLocked() {
 			l.forgetLocked(id)
 		}
 	}
+	l.sweepRemotesLocked()
 }
 
 func token() (string, error) {

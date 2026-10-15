@@ -1,7 +1,8 @@
 import { Guacamole } from './vendor/guacamole.mjs';
+import { ownedRemote, remoteProof } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
-let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true;
+let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
 const encoder = new TextEncoder();
 function end() {
   if (stopped) return;
@@ -18,18 +19,21 @@ function fit() {
   const height = document.fullscreenElement ? window.innerHeight : Math.min(window.innerHeight * 0.72, 768);
   client.getDisplay().scale(Math.min(1, width/1024, height/768));
 }
-function begin() {
+function begin(proof=null) {
   const tunnel = new Guacamole.Tunnel();
   const parser = new Guacamole.Parser();
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let sequence = 0, bytes = 0;
   parser.oninstruction = (op, args) => { if (!stopped) tunnel.oninstruction?.(op,args); };
   tunnel.connect = () => {
-    socket = new WebSocket(`${location.origin.replace('https:', 'wss:')}/lab/socket`);
+    socket = new WebSocket(`${location.origin.replace('https:', 'wss:')}${ownedRemote?'/api/remote/socket':'/lab/socket'}`);
     socket.binaryType = 'arraybuffer';
-    socket.onopen = () => { if (!stopped) tunnel.setState(Guacamole.Tunnel.State.OPEN); };
+    let ready=!ownedRemote;const timer=setTimeout(end,15000);
+    socket.onopen = () => { if (!stopped) {if(proof){socket.send(JSON.stringify(proof));proof=null;}else{clearTimeout(timer);tunnel.setState(Guacamole.Tunnel.State.OPEN);}} };
+    socket.addEventListener('close',()=>clearTimeout(timer));
     socket.onerror = end; socket.onclose = end;
     socket.onmessage = event => {
+      if(!ready){if(event.data!=='{"type":"ready"}'){end();return;}ready=true;clearTimeout(timer);if(!stopped)tunnel.setState(Guacamole.Tunnel.State.OPEN);return;}
       if (stopped) return;
       try {
         if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 5 || event.data.byteLength > 8196) throw new Error('frame');
@@ -100,7 +104,7 @@ $('login').addEventListener('submit', async event => {
 });
 $('disconnect').addEventListener('click', () => {
   end();
-  void fetch('/lab/logout',{method:'POST',headers:{'X-Keybash-Lab':'1'}}).catch(()=>{});
+  if(!ownedRemote)void fetch('/lab/logout',{method:'POST',headers:{'X-Keybash-Lab':'1'}}).catch(()=>{});
 });
 $('special').addEventListener('click', () => {
   if (stopped) return;
@@ -113,4 +117,6 @@ $('fullscreen').addEventListener('click', () => {
 });
 window.addEventListener('resize', fit);
 document.addEventListener('fullscreenchange', fit);
-window.addEventListener('pagehide', end);
+window.addEventListener('pagehide', ()=>{retired=true;end();});
+window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
+if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired){stopped=false;begin(proof);}}).catch(()=>{$('notice').textContent='Qoşulma rədd edildi. Hesab səhifəsində təkrar doğrula.';});}

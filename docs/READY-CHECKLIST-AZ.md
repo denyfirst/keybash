@@ -17,11 +17,13 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    recovery code, rate limit, CSRF/cookie və sessiya expiry/revocation.
    Daimi şifrələnmiş hesab, birdəfəlik bootstrap, offline blocklist, MFA/recovery
    və təkrar doğrulama ayrıca Linux lab-ında hazırdır (`CUSTODY-LAB.md`).
-   Production quraşdırma, restore/rotation və uzaq sessiya inteqrasiyası qalır.
+   Production quraşdırma, restore/rotation və quraşdırılan worker qalır.
 3. **Credential vault və istifadəçi icazələri.** Şifrələnmiş persistence, ayrıca
    instance key, Ed25519 key/passphrase və password importu lab-da hazırdır.
-   RDP domain sahəsi, digər key formatları və connection inteqrasiyası qalır;
-   connection-credential əlaqəsi, reveal/export icazəsi və başqa hesabın
+   RDP domain sahəsi və digər key formatları qalır.
+   Connection-credential əlaqəsi və sessiya icazələri artıq SSH/native RDP
+   brauzer lab-ında birləşir (`OWNED-REMOTE-LAB.md`); quraşdırılan worker və
+   operator target/trust konfiqurasiyası qalır. Reveal/export icazəsi və başqa hesabın
    connection/credential/socket-ına çıxışın rəddi. Real secret istifadə etməzdən
    əvvəl bu sərhədlər və bərpa modeli sınaqdan keçir.
 4. **Gündəlik workspace.** Connection/credential ekranları, axtarış, qovluq,

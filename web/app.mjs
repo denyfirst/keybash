@@ -1,4 +1,5 @@
 import { inspectPaste, decodeOutput, MAX_INPUT } from './paste.mjs';
+import { ownedRemote, remoteProof } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const encoder = new TextEncoder();
@@ -102,12 +103,15 @@ function resize() {
 }
 let resizeTimer;
 new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 120); }).observe($('terminal'));
-function connect() {
+function connect(proof=null) {
   expected = 1;
-  socket = new WebSocket(`${location.origin.replace('https:', 'wss:')}/lab/socket`);
+  socket = new WebSocket(`${location.origin.replace('https:', 'wss:')}${ownedRemote?'/api/remote/socket':'/lab/socket'}`);
   socket.binaryType = 'arraybuffer';
-  socket.onopen = () => { term.reset(); updateState(true); resize(); term.focus(); notice(''); };
+  const activate = () => { term.reset(); updateState(true); resize(); term.focus(); notice(''); };
+  const timer=setTimeout(()=>socket.close(),15000);
+  socket.onopen = () => {if(proof){socket.send(JSON.stringify(proof));proof=null;}else{clearTimeout(timer);activate();}};
   socket.onmessage = event => {
+    if(ownedRemote&&!connected){if(event.data!=='{"type":"ready"}'){socket.close();return;}clearTimeout(timer);activate();return;}
     if (!connected || retired) return;
     try {
       const frame = decodeOutput(event.data, expected++);
@@ -119,6 +123,7 @@ function connect() {
     } catch { socket.close(1008, 'invalid output'); }
   };
   socket.onclose = () => {
+    clearTimeout(timer);
     updateState(false); clearPaste();
     retireTerminal();
     for (const id of ['paste-review', 'clipboard-panel']) if ($(id).open) $(id).close();
@@ -139,5 +144,8 @@ $('login').addEventListener('submit', async event => {
 $('disconnect').addEventListener('click', async () => {
   updateState(false); clearPaste(); retireTerminal();
   socket?.close();
-  try { await fetch('/lab/logout', { method: 'POST', headers: { 'X-Keybash-Lab': '1' }, credentials: 'same-origin', signal: AbortSignal.timeout(5000) }); } catch {}
+  if(!ownedRemote)try { await fetch('/lab/logout', { method: 'POST', headers: { 'X-Keybash-Lab': '1' }, credentials: 'same-origin', signal: AbortSignal.timeout(5000) }); } catch {}
 });
+window.addEventListener('pagehide',()=>{socket?.close();retireTerminal();clearPaste();});
+window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
+if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(()=>notice('Qoşulma rədd edildi. Hesab səhifəsində təkrar doğrula.'));}

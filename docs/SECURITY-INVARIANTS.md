@@ -8,6 +8,12 @@ no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
+| Owned connections cannot select another owner's credential or authenticate relocated ciphertext | connection envelope kind/owner AAD, server ownership references | `TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount`, `TestOwnedConnectionEnvelopePersistenceAndOwnerBinding` |
+| Launch requires ready MFA plus fresh proof on both grant and consumption | session-bound single-use 30-second capability, current account/record checks | `TestOwnedRemoteLeaseOwnershipReplayExpiryAndRevocation`, `TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount`, `TestOwnedRemoteExpiryLimitsAndDelete` |
+| Reused target IDs cannot silently retarget credentials to another approved identity | authenticated connection approval fingerprint | `TestOwnedRemoteChangedApprovalRefusesStoredConnection` |
+| Logout, MFA readiness loss, deletion and late setup cannot escape the account's remote cancellation context | bound lease contexts, stream/socket close and rechecks | `TestOwnedRemoteSocketEchoLogoutAndLateSetup`, `TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount`, `TestOwnedRemoteMFADowngradeStopsOutputAuthority` |
+| Browser supplied owner/target overrides and missing trusted launchers refuse | exact fields, immutable catalog, protocol/credential-kind matching | `TestOwnedRemoteConstructorAndMalformedRequests` |
+| Integrated SSH and native RDP take the selected owned credential through MFA to browser input/logout | authorized relay plus actual key-auth/PTY and isolated NLA/viewer/broker fixtures | `TestBrowserOwnedSSHConnectionAndLogout`, `TestNativeRDPOwnedIdentityVaultAndBrowser`, `TestBrowserOwnedRemotePortable` |
 | Initial registration requires a single-use expiring local setup code; it cannot reopen | atomic bootstrap state and keyed metadata | `TestCustodyBootstrapSingleUseExpiryAndExclusiveOpen`, `TestCustodyOfflineRecoveryBootstrapRenewalAndSealLimit` |
 | Password-only persistent sessions cannot access custody | explicit enroll/challenge/ready state and rotated cookies | `TestPersistentPasswordSessionsCannotOpenVault`, `TestCustodyHTTPBootstrapMFAAndVault` |
 | Factor replay and recovery reuse are refused across restart/concurrency | transactional greatest counter, hashed one-time codes, durable failed-attempt budget | `TestCustodyMFAReplayRecoveryAndRestart`, `TestCustodyFactorFailuresPersistAndReplacementKeepsOldMFA` |

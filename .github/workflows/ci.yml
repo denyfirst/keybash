@@ -105,7 +105,9 @@ jobs:
           go test ./internal/identity -run='^$' -fuzz='^FuzzCustodyFields$' -fuzztime=2000000x -timeout=3m
           go test -tags=browserlab -race -run='^TestBrowserPasswordLogin$' -timeout=90s ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserDurableCustody$' -timeout=2m ./internal/identity
+          go test -tags=browserlab -race -run='^TestBrowserOwnedRemotePortable$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
+          go test -tags=browserlab -race -run='^TestBrowserOwnedSSHConnectionAndLogout$' -timeout=2m ./internal/sshtransport
           go test -tags=browserlab -race -run='^TestBrowserRDPViewerLab$' -timeout=1m ./internal/rdplab
           # Test-only empty netns; root setup drops to UID/GID 65534 with no
           # effective capabilities before the fixed child runs. No guacd yet.

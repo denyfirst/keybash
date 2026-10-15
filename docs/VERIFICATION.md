@@ -1,5 +1,77 @@
 # Foundation verification
 
+## Owned remote-session follow-up — 2026-10-15
+
+`OWNED-REMOTE-LAB.md` describes the linked synthetic account/MFA/custody,
+owned connection and SSH/native RDP browser boundary. The prior main CI and
+CodeQL repeats passed before this branch began. No real credential, service
+deployment or release; Porch/Rootwell remain untouched.
+
+The local full formatting/module/vet/shuffled-suite/build/staticcheck/gosec/
+govulncheck/actionlint gate passed, plus Linux tagged cross-vet/analysis and
+Edge's existing password/custody/terminal/RDP fixtures. The portable owned
+browser fixture exercises bootstrap, mandatory MFA, own credential import,
+connection UI, exact terminal input and cross-tab account logout. Required CI
+adds the actual SSH key-auth/PTY fixture and isolated native RDP NLA/viewer/
+broker path with the same public identity/custody/connection API. Native-only
+loopback substitutions are confined to test files. These are laboratory
+measurements, not a production isolated SSH-worker or shipped RDP launcher.
+
+Behavioral source mutations were each checked against their intended assertion,
+then restored byte-for-byte in finally blocks:
+
+| Mutation | Intended detection |
+|---|---|
+| Remove exact browser-session binding | other browser consumed lease |
+| Permit an already active capability | lease replay accepted |
+| Remove pending/consumption expiry checks | expired lease accepted |
+| Permit a third owner lease | returned 200 instead of expected 429 |
+| Refuse all otherwise valid grants | returned 401 instead of expected 200 |
+| Omit stored approval comparison | changed approval silently retargeted connection |
+| Omit owner from envelope AAD | connection ciphertext owner rebind accepted |
+| Omit connection-deletion cancellation | connection deletion did not revoke |
+| Skip fresh proof during consumption | stale proof redeemed lease |
+| Ignore ready-stage loss during cancellation sweep | MFA downgrade retained remote output authority |
+| Count all successful RDP protocol frames as activity | output-driven RDP credit extended idle |
+
+### Separate adversarial maintainer self-review
+
+Reviewed the final admission path separately: immutable guarded catalog/pin
+copies and changed-approval binding; optional encrypted connection namespace;
+cross-account and cross-browser references; fresh MFA at grant and consumption;
+one-use/expiry/quota accounting; first-frame CSRF before worker invocation;
+setup/owner/request cancellation and late stream cleanup; account-revision,
+credential/connection deletion; locks versus network writes and slow bodies;
+bounded parser/input/output work; trusted launcher contract, asset escaping,
+secret URL/storage absence and abandoned/BFCache browser state.
+
+Findings fixed: responses/assets no longer hold the account mutex while writing;
+pre-proof upgraded sockets have their own owner/aggregate cap and logout
+cancellation; account input rechecks its lease context; copied target approval
+fingerprints prevent retargeting after catalog replacement; retired pages
+cannot start late async connections.
+MFA replacement also immediately revokes that browser's pending/active remote
+leases as it reenters enrollment, including output-only sessions; the old
+account factor remains intact until replacement confirmation. The portable
+duplex pipe exposed an
+existing relay deadlock: input writes blocked the same reader that needed to
+consume output ACKs. A bounded ordered 32-frame input/resize worker keeps ACK
+reads available, closes on overflow and joins on cancellation. The portable
+browser regression now passes; existing terminal/RDP gates are repeated.
+RDP idle accounting also distinguishes successfully validated key/mouse input
+from output-driven Guacamole ack/sync/nop frames; refused input cannot refresh
+idle. An explicit regression and bypass mutation cover this distinction.
+
+Limits: trusted worker implementations must enforce their own TLS/SSH identity
+and cooperative cancellation; only the stock SSH connector and synthetic native
+launcher are measured. No production RDP launcher, installed SSH sandbox,
+operator catalog deployment/configuration, trust UI, complete browser/server/
+clipboard/load matrix or restore/rotation is claimed. SSH disconnect cannot
+guarantee killing remote background processes. Whole-database rollback and
+service/key-holder compromise remain in the documented custody threat model.
+This is maintainer self-review, not independent audit. Candidate independent
+security review and finding resolution still precede production release.
+
 ## Durable custody follow-up — 2026-10-15
 
 The earlier sections are historical foundation/protocol/password-lab evidence.

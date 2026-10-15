@@ -111,6 +111,10 @@ func (l *Lab) bootstrapHTTP(w http.ResponseWriter, r *http.Request) {
 }
 func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=(self)")
+	if r.URL.Path == "/api/remote/socket" {
+		l.remoteSocket(w, r)
+		return
+	}
 	// Read bounded bodies before taking the account/session mutex. A slow
 	// client must not hold logout, expiry or another user's authentication.
 	if r.Method != "GET" {
@@ -207,7 +211,8 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			Username string `json:"username"`
 			CSRF     string `json:"csrf"`
 			Stage    string `json:"stage"`
-		}{s.username, l.csrf(id), s.stage}
+			Remote   bool   `json:"remote"`
+		}{s.username, l.csrf(id), s.stage, l.remote != nil}
 		l.mu.Unlock()
 		jsonReply(w, data)
 		return
@@ -277,6 +282,23 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		refuse(w, 403)
 		return
 	}
+	if r.Method == "GET" {
+		l.mu.Unlock()
+		if l.remoteAsset(w, r, s) {
+			return
+		}
+		l.mu.Lock()
+		s = l.readyLocked(id, false)
+		if s == nil {
+			l.mu.Unlock()
+			refuse(w, 401)
+			return
+		}
+	}
+	if r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/connections") || r.URL.Path == "/api/remote/open" {
+		l.remoteHTTP(w, r, id, s)
+		return
+	}
 	if r.URL.Path == "/api/reauth" && r.Method == "POST" {
 		l.mu.Unlock()
 		fields, ok := readFields(w, r, 4096, "password", "code")
@@ -335,6 +357,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		s.replacing = true
 		s.pendingSeed = ""
 		s.challengeEnd = l.now().Add(5 * time.Minute)
+		l.sweepRemotesLocked()
 		l.mu.Unlock()
 		w.WriteHeader(204)
 	case r.URL.Path == "/api/mfa/recovery" && r.Method == "POST":
@@ -420,6 +443,9 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			e := l.store.deleteCredential(s.owner, record)
+			if e == nil {
+				l.revokeRemotesLocked(s.owner, "", record)
+			}
 			l.mu.Unlock()
 			if e != nil {
 				refuse(w, 404)
