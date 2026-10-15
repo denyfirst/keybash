@@ -154,6 +154,13 @@ func TestCustodyMFAReplayRecoveryAndRestart(t *testing.T) {
 	if accepted.Load() != 1 {
 		t.Fatal("concurrent TOTP was not single-use")
 	}
+	// Reset the attempt window, then consume a fresh code before reopening.
+	// Replaying that SAME still-timely code after restart isolates persistence
+	// from both clock-skew refusal and exhausted attempt-budget refusal.
+	code = otpCode(t, seed, now.Add(time.Minute).Unix()/30)
+	if s.consumeFactor(a.ID, a.Revision, code, now.Add(time.Minute)) != nil {
+		t.Fatal("fresh pre-restart OTP refused")
+	}
 	_ = s.Close()
 	s, e := openStore(dir, key, false)
 	if e != nil {
