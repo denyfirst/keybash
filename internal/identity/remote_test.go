@@ -416,3 +416,57 @@ func TestOwnedRemoteMFADowngradeStopsOutputAuthority(t *testing.T) {
 		t.Fatal("downgraded session retained pending remote authority")
 	}
 }
+
+type activityProbe struct{ refuse bool }
+
+func (activityProbe) Read([]byte) (int, error)       { return 0, io.EOF }
+func (activityProbe) ReadStderr([]byte) (int, error) { return 0, io.EOF }
+func (p activityProbe) Write(b []byte) (int, error) {
+	if p.refuse {
+		return 0, errRefused
+	}
+	return len(b), nil
+}
+func (activityProbe) Resize(uint32, uint32) error { return nil }
+func (activityProbe) Close() error                { return nil }
+func TestOwnedRemoteOutputDrivenRDPDoesNotExtendIdle(t *testing.T) {
+	l, _, c, _, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	id, _ := tokenID(c.cookie.Value)
+	now := time.Now()
+	l.mu.Lock()
+	l.now = func() time.Time { return now }
+	start := l.sessions[id].last
+	ctx := l.sessions[id].ctx
+	l.mu.Unlock()
+	advance(l, &now, time.Minute)
+	stream := &remoteActivity{Stream: activityProbe{}, l: l, id: id, ctx: ctx, protocol: "rdp"}
+	for _, command := range []string{"3.nop;", "4.sync,1.1;", "3.ack,1.0,2.OK,1.0;"} {
+		if _, e := stream.Write([]byte(command)); e != nil {
+			t.Fatal("valid protocol credit fixture refused")
+		}
+	}
+	l.mu.Lock()
+	unchanged := l.sessions[id].last.Equal(start)
+	l.mu.Unlock()
+	if !unchanged {
+		t.Fatal("output-driven RDP credit extended idle")
+	}
+	stream.Stream = activityProbe{refuse: true}
+	_, _ = stream.Write([]byte("3.key,2.97,1.1;"))
+	l.mu.Lock()
+	unchanged = l.sessions[id].last.Equal(start)
+	l.mu.Unlock()
+	if !unchanged {
+		t.Fatal("rejected input extended idle")
+	}
+	stream.Stream = activityProbe{}
+	if _, e := stream.Write([]byte("3.key,2.97,1.1;")); e != nil {
+		t.Fatal("valid user activity refused")
+	}
+	l.mu.Lock()
+	touched := l.sessions[id].last.Equal(now)
+	l.mu.Unlock()
+	if !touched {
+		t.Fatal("valid user activity did not refresh idle")
+	}
+}

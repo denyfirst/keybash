@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -315,11 +316,12 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		_ = stream.Close()
 		return
 	}
-	terminalweb.Relay(ctx, socket, &remoteActivity{Stream: stream, l: l, id: id, ctx: ctx})
+	terminalweb.Relay(ctx, socket, &remoteActivity{Stream: stream, l: l, id: id, ctx: ctx, protocol: target.Protocol})
 }
 
 type remoteActivity struct {
-	ctx context.Context
+	protocol string
+	ctx      context.Context
 	terminalweb.Stream
 	l  *Lab
 	id [32]byte
@@ -328,14 +330,23 @@ type remoteActivity struct {
 func (s *remoteActivity) Write(p []byte) (int, error) {
 	s.l.mu.Lock()
 	live := s.ctx.Err() == nil && s.l.readyLocked(s.id, false) != nil
-	if live && len(p) > 0 {
-		s.l.sessions[s.id].last = s.l.now()
-	}
 	s.l.mu.Unlock()
 	if !live {
 		return 0, errRefused
 	}
-	return s.Stream.Write(p)
+	n, e := s.Stream.Write(p)
+	// Count only successfully validated native key/mouse commands as RDP
+	// activity. Output-driven Guacamole ack/sync/nop frames must not keep an
+	// unattended desktop logged in. SSH remains an opaque terminal input stream.
+	activity := len(p) > 0 && (s.protocol == "ssh" || s.protocol == "rdp" && (bytes.HasPrefix(p, []byte("3.key,")) || bytes.HasPrefix(p, []byte("5.mouse,"))))
+	if e == nil && n == len(p) && activity {
+		s.l.mu.Lock()
+		if s.ctx.Err() == nil && s.l.readyLocked(s.id, false) != nil {
+			s.l.sessions[s.id].last = s.l.now()
+		}
+		s.l.mu.Unlock()
+	}
+	return n, e
 }
 func (s *remoteActivity) Resize(c, r uint32) error {
 	s.l.mu.Lock()

@@ -32,6 +32,7 @@ then restored byte-for-byte in finally blocks:
 | Omit connection-deletion cancellation | connection deletion did not revoke |
 | Skip fresh proof during consumption | stale proof redeemed lease |
 | Ignore ready-stage loss during cancellation sweep | MFA downgrade retained remote output authority |
+| Count all successful RDP protocol frames as activity | output-driven RDP credit extended idle |
 
 ### Separate adversarial maintainer self-review
 
@@ -57,6 +58,9 @@ existing relay deadlock: input writes blocked the same reader that needed to
 consume output ACKs. A bounded ordered 32-frame input/resize worker keeps ACK
 reads available, closes on overflow and joins on cancellation. The portable
 browser regression now passes; existing terminal/RDP gates are repeated.
+RDP idle accounting also distinguishes successfully validated key/mouse input
+from output-driven Guacamole ack/sync/nop frames; refused input cannot refresh
+idle. An explicit regression and bypass mutation cover this distinction.
 
 Limits: trusted worker implementations must enforce their own TLS/SSH identity
 and cooperative cancellation; only the stock SSH connector and synthetic native
