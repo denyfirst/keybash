@@ -385,3 +385,75 @@ remote resize remain disabled; layouts/reconnect, real Windows/browser matrix,
 login/MFA, ownership/vault, production worker packaging/quotas, restore and
 independent candidate review remain gates. No real credential, installer,
 deployment or release is introduced. Porch and Rootwell remain untouched.
+
+## Identity slice 1: password login and session lifecycle (2026-10-15)
+
+Read Porch's login/session and Rootwell's login/gate as references only;
+implemented separate Keybash source and assets. No reference repository build,
+Git operation or mutation. This first identity lab has named synthetic accounts
+in memory, no persistent account store or real credentials, and no remote-access
+entry point. MFA is explicitly absent, not silently treated as complete.
+
+The existing pinned crypto module supplies Argon2id/Blake2b; no dependency
+version changed. Fixed 64 MiB/three-pass/four-lane work, independent random salts,
+opaque hash values, exact Unicode password bytes and constant-time comparison
+are tested. The browser interface measures protected navigation, login/change/
+logout, cookie flags and script invisibility, password clearing, no secret URL
+or persistent browser storage, malformed account replies and uncertain logout.
+Local Edge evidence is separate from required Linux Chromium/race evidence.
+
+Unit tests observe correct/wrong/unknown/cross-account passwords, token rotation,
+CSRF/Origin/Host/peer/TLS, duplicate cookies and strict JSON including lone
+surrogates, attempt/KDF/session capacities, owner isolation, idle renewal,
+non-renewing status, idle/absolute/background expiry and stale derivation/close.
+The new JSON fuzz target performs no KDF and must complete two million executions
+with a hard timeout in CI, alongside every existing target and native RDP gate.
+
+Thirteen temporary compiling Go mutations failed the intended assertions:
+
+1. Accept every password: wrong/unknown authentication assertion failed.
+2. Reject every password: positive login assertion failed.
+3. Bypass CSRF proof: unsafe request was accepted.
+4. Accept duplicate session cookies: duplicate-cookie refusal failed.
+5. Accept duplicate JSON fields: malformed-payload refusal failed.
+6. Serve the account page anonymously: protected-navigation refusal failed.
+7. Remove background expiry: idle context stayed live without another request.
+8. Reject all live sessions: positive owner metadata assertion failed.
+9. Ignore account revision after hashing: stale work created a session.
+10. Revoke every account on password change: unrelated owner was revoked.
+11. Ignore the global attempt budget: excess attempts were allowed.
+12. Raise the owner session cap: owner quota assertion failed.
+13. Delete a session without canceling: revoked context stayed live.
+
+Two browser asset mutations also failed explicit assertions: refusing successful
+login prevented the account page, and treating a failed DELETE as success
+claimed an unconfirmed logout. Each source/asset was restored byte-for-byte;
+affected unit/browser tests passed after restoration. Mutation outputs remain
+outside the repository and contain only synthetic fixtures.
+
+Separate adversarial maintainer self-review inspected fixed KDF work/queues,
+cookie parsing and token rotation, account ownership and generation changes,
+CSRF scope, cancellation/expiry, JSON repair/duplicate semantics, UI deadlines,
+failure recovery and history restoration. Findings changed unknown-user attempt
+handling to the same bounded policy as known names, refused invalid Unicode
+before JSON repair, covered response bodies under deadlines, and prevented
+Playwright failed-fill diagnostics from printing the synthetic password values.
+The login screen was visually inspected in local Edge. No claim of NIST
+compliance, DDoS resistance, exact process-memory bounds or guaranteed RAM erasure.
+
+Final capacity review permits rotation of the current browser at capacity while
+still refusing additional sessions; it cannot evict another browser. Positive
+renewal-at-capacity and late password-change-after-logout tests were added.
+Owner-cap and stale-revision sabotage were repeated on the final source; two
+additional mutations (remove the aggregate session cap and permit password
+change after logout) failed their intended assertions. Sources were restored
+byte-for-byte and the identity suite reran. The local JSON fuzz target completed
+two million executions within its hard three-minute timeout; minimization uses
+the Go defaults and no error/retry suppression is added.
+
+This is maintainer self-review, not independent audit. Memory-only password
+changes disappear on restart; trusted setup supplies accounts. Stable IDs,
+durable transactional hashes/revisions, operator bootstrap/recovery, blocklist,
+MFA/replay/recovery-code controls, encrypted seed/vault custody and resource
+authorization remain separate gates. This cookie cannot authorize SSH/RDP or
+secrets. No production access, deployment or release; Porch/Rootwell untouched.

@@ -23,7 +23,9 @@ Its one-use broker and actual native identity mutations are required CI gates.
 A loopback browser RDP viewer adds bounded PNG/canvas rendering, focused mouse/
 keyboard, local fullscreen and native revocation checks. RDP clipboard and
 remote resize remain disabled.
-There is no product login/MFA, vault,
+A separate memory-only identity lab adds named password login, Argon2id,
+bounded attempts, password change, secure cookies/CSRF and session revocation.
+There is no persistent product login/MFA, vault,
 RDP gateway, installable deployment or production release yet.
 
 ## Start here
@@ -37,6 +39,7 @@ RDP gateway, installable deployment or production release yet.
 - [RDP boundaries and remaining native gates](docs/adr/0003-rdp-precredential-boundaries.md)
 - [Native RDP lab evidence and limits](docs/NATIVE-RDP-LAB.md)
 - [Browser RDP lab evidence and limits](docs/BROWSER-RDP-LAB.md)
+- [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)
 - [Remaining product steps (Azerbaijani)](docs/READY-CHECKLIST-AZ.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 

@@ -1,6 +1,6 @@
 # Keybash — məhsulun hazır olması üçün qalan işlər
 
-14 oktyabr 2026. Bu siyahı tarix vədi deyil; hər mərhələ faktiki sınaqla qəbul
+15 oktyabr 2026. Bu siyahı tarix vədi deyil; hər mərhələ faktiki sınaqla qəbul
 edilir. Təhlükəsizlik bütün mərhələlərdə birinci prioritetdir. Yalnız self-host.
 
 İndiki vəziyyət: ayrıca imzalanmış repository, hədəf/DNS/SSH kimlik nəzarəti,
@@ -15,6 +15,8 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    reconnect və logout. SSH-də vim/nano/tmux/htop və gündəlik işlər də yoxlanır.
 2. **Login və MFA.** Lokal bootstrap, default passwordsuz hesab yaratma, MFA və
    recovery code, rate limit, CSRF/cookie və sessiya expiry/revocation.
+   Şifrə ilə giriş, şifrə dəyişmə və sessiya nəzarəti artıq ayrıca yaddaş lab-ında
+   var; daimi hesab saxlanması, bootstrap, blocklist və MFA hələ tamamlanmayıb.
 3. **Credential vault və istifadəçi icazələri.** Şifrələnmiş persistence, ayrıca
    qorunan instance key, SSH key/passphrase və RDP password/domain importu;
    connection-credential əlaqəsi, reveal/export icazəsi və başqa hesabın

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="az">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keybash · Giriş</title>
+  <link rel="stylesheet" href="/auth.css">
+  <script type="module" src="/auth.mjs"></script>
+</head>
+<body data-screen="login">
+  <main>
+    <a class="brand" href="/login" aria-label="Keybash"><span class="mark">k</span>keybash<span class="dot">.</span></a>
+    <section class="card" aria-labelledby="heading">
+      <div class="heading-row"><p class="eyebrow">SƏNİN İŞ YERİN</p><span class="tag">Self-host</span></div>
+      <h1 id="heading">Xoş gəldin.</h1>
+      <p class="hint">Davam etmək üçün hesabına daxil ol.</p>
+      <form id="login" method="post" action="/api/session">
+        <label for="username">İstifadəçi adı</label>
+        <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required autofocus>
+        <label for="password">Şifrə</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
+        <button type="submit">Daxil ol</button>
+      </form>
+      <p id="notice" role="status" aria-live="polite"></p>
+    </section>
+    <p class="foot">Denyfirst · Öz serverində, öz nəzarətində.</p>
+  </main>
+</body>
+</html>
