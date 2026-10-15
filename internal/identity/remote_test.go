@@ -392,3 +392,27 @@ func TestOwnedRemoteChangedApprovalRefusesStoredConnection(t *testing.T) {
 		t.Fatal("old grant survived changed target identity")
 	}
 }
+
+func TestOwnedRemoteMFADowngradeStopsOutputAuthority(t *testing.T) {
+	l, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	raw := grantFixture(t, c, record)
+	id, _ := tokenID(c.cookie.Value)
+	l.mu.Lock()
+	_, _, _, ctx, e := l.redeemRemoteLocked(id, raw)
+	l.mu.Unlock()
+	if e != nil {
+		t.Fatal("downgrade fixture lease refused")
+	}
+	c.expect("POST", "/api/mfa/reset", "{}", 204)
+	c.session("enroll")
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("MFA downgrade retained remote output authority")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.remote.leases) != 0 {
+		t.Fatal("downgraded session retained pending remote authority")
+	}
+}

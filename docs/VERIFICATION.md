@@ -31,6 +31,7 @@ then restored byte-for-byte in finally blocks:
 | Omit owner from envelope AAD | connection ciphertext owner rebind accepted |
 | Omit connection-deletion cancellation | connection deletion did not revoke |
 | Skip fresh proof during consumption | stale proof redeemed lease |
+| Ignore ready-stage loss during cancellation sweep | MFA downgrade retained remote output authority |
 
 ### Separate adversarial maintainer self-review
 
@@ -48,6 +49,9 @@ pre-proof upgraded sockets have their own owner/aggregate cap and logout
 cancellation; account input rechecks its lease context; copied target approval
 fingerprints prevent retargeting after catalog replacement; retired pages
 cannot start late async connections. The portable duplex pipe exposed an
+MFA replacement also immediately revokes that browser's pending/active remote
+leases as it reenters enrollment, including output-only sessions; the old
+account factor remains intact until replacement confirmation. The portable duplex pipe exposed an
 existing relay deadlock: input writes blocked the same reader that needed to
 consume output ACKs. A bounded ordered 32-frame input/resize worker keeps ACK
 reads available, closes on overflow and joins on cancellation. The portable

@@ -357,6 +357,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		s.replacing = true
 		s.pendingSeed = ""
 		s.challengeEnd = l.now().Add(5 * time.Minute)
+		l.sweepRemotesLocked()
 		l.mu.Unlock()
 		w.WriteHeader(204)
 	case r.URL.Path == "/api/mfa/recovery" && r.Method == "POST":

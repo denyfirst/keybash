@@ -118,7 +118,8 @@ func (l *Lab) sweepRemotesLocked() {
 		return
 	}
 	for key, lease := range l.remote.leases {
-		if l.closed || l.sessions[lease.session] == nil || !lease.active && !l.now().Before(lease.expires) {
+		s := l.sessions[lease.session]
+		if l.closed || s == nil || s.stage != "ready" || !lease.active && !l.now().Before(lease.expires) {
 			if lease.cancel != nil {
 				lease.cancel()
 			}
