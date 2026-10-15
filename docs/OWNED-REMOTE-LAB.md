@@ -72,7 +72,10 @@ alone still does not prove NLA).
 Contexts bind active streams to logout, idle/absolute expiry, account password/
 MFA/recovery revision change and service close. Credential/connection deletion
 also cancels matching pending/active leases. Current owned input rechecks live
-session state and refreshes idle; output/ACK/status polls do not. Socket close
+session state. Entering MFA replacement immediately revokes that browser's
+leases, including output-only streams, while retaining the old account factor
+until the new one is confirmed. Current owned input refreshes
+idle; output/ACK/status polls do not. Socket close
 closes that stream, while account logout cancels all its browser streams. Data
 already sent and remote background processes cannot be retracted/guaranteed
 killed by closing the transport. The one-second identity sweep remains the
