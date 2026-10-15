@@ -12,7 +12,9 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    and an empty Linux netns experiment are implemented. A pinned native lab adds
    actual TLS identity enforcement, synthetic NLA login, decoded desktop images,
    a one-use guarded broker and isolated worker/revocation checks. Next measure
-   actual browser desktop copy/paste, keyboard, resize and reconnect behavior. No production credential custody at this stage.
+   actual browser desktop copy/paste, keyboard layouts, resize and reconnect behavior.
+   A loopback RDP viewer adds bounded PNG/canvas rendering, focused keyboard/
+   mouse, held-key release, fullscreen and native-to-browser revocation evidence. No production credential custody at this stage.
    The native build/broker and required success/refusal/mutation fixtures are
    tracked in `NATIVE-RDP-LAB.md`; passing Go codec tests alone
    cannot complete its native acceptance gate.

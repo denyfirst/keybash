@@ -179,21 +179,31 @@ func TestNativeRDPSandboxPreparation(t *testing.T) {
 }
 
 type nativeMarker struct {
-	mu    sync.Mutex
-	tail  string
-	ready chan struct{}
-	once  sync.Once
+	mu                  sync.Mutex
+	tail                string
+	ready               chan struct{}
+	once                sync.Once
+	keys, mouse         chan struct{}
+	keysOnce, mouseOnce sync.Once
 }
 
 func (m *nativeMarker) Write(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.tail += string(p)
-	if strings.Contains(m.tail, "KB_AUTHENTICATED") {
-		m.once.Do(func() { close(m.ready) })
-	}
-	if len(m.tail) > 256 {
-		m.tail = m.tail[len(m.tail)-256:]
+	for _, b := range p {
+		if b == '\n' {
+			switch m.tail {
+			case "KB_AUTHENTICATED":
+				m.once.Do(func() { close(m.ready) })
+			case "KB_INPUT_A":
+				m.keysOnce.Do(func() { close(m.keys) })
+			case "KB_INPUT_MOUSE":
+				m.mouseOnce.Do(func() { close(m.mouse) })
+			}
+			m.tail = ""
+		} else if len(m.tail) < 256 {
+			m.tail += string(b)
+		}
 	}
 	return len(p), nil
 }
@@ -206,6 +216,11 @@ func writeLabFile(t *testing.T, path string, data []byte) {
 }
 
 func nativePeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certificate, password string) (string, <-chan struct{}) {
+	address, marker := nativePeerWithInput(t, ctx, prefix, cert, password)
+	return address, marker.ready
+}
+
+func nativePeerWithInput(t *testing.T, ctx context.Context, prefix string, cert tls.Certificate, password string) (string, *nativeMarker) {
 	t.Helper()
 	dir := t.TempDir()
 	writeLabFile(t, filepath.Join(dir, "cert.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}))
@@ -240,7 +255,7 @@ func nativePeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certi
 		"--ro-bind", prefix+"/share/lab/test_icon.bmp", "/tmp/test_icon.bmp", "--chdir", "/tmp")
 	args = append(args, dropNativePrivileges()...)
 	args = append(args, prefix+"/bin/sfreerdp-server", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
-	marker := &nativeMarker{ready: make(chan struct{})}
+	marker := &nativeMarker{ready: make(chan struct{}), keys: make(chan struct{}), mouse: make(chan struct{})}
 	runSandbox(t, ctx, args, marker)
 	address := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(3 * time.Second)
@@ -255,7 +270,7 @@ func nativePeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certi
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return address, marker.ready
+	return address, marker
 }
 
 func nativeSocket(t *testing.T, path string) *net.UnixListener {

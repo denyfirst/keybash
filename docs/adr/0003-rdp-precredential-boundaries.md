@@ -93,6 +93,9 @@ test-only filesystem/network/UID/resource isolation provide the sole transport.
 NLA login, image decoding, refusal and callback mutations are required CI gates.
 This does not complete the browser/clipboard/keyboard matrix or authorize real
 credential use. See [native evidence and limits](../NATIVE-RDP-LAB.md).
-No container, Java webapp or JS client is adopted; no Go dependency version is
+The subsequent browser lab adopts locally bundled guacamole-common-js 1.6.0,
+with a typed drawing/input adapter and static PNG normalization, while retaining
+the owner/Origin/revocation boundary. See [browser evidence](../BROWSER-RDP-LAB.md).
+No container or Java webapp is adopted; no Go dependency version is
 added. x/sys becomes direct for test-only Unix peer checks. Production worker
 launch/authorization, complete sandbox/packaging and independent audit remain.

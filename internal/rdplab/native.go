@@ -191,7 +191,7 @@ func (s *nativeStream) next() (instruction, error) {
 			}
 		}
 		// No files, pipes, audio/video, mutable args, credential prompts or remote
-		// messages escape to a future viewer. There is no browser tunnel yet.
+		// messages escape. The private viewer further validates drawing schemas.
 		allowed := false
 		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line mouse move name path pop push rect reset shade size start sync transfer transform") {
 			allowed = allowed || op == in[0]

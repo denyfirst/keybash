@@ -53,6 +53,7 @@ jobs:
           "${pnpm}" --dir web install --frozen-lockfile --ignore-scripts
           "${pnpm}" --dir web audit
           node web/vendor.mjs
+          python3 scripts/vendor-guacamole.py --check
           test -z "$(git status --porcelain)"
           node --test web/paste.test.mjs
           "${pnpm}" --dir web exec playwright install --with-deps chromium
@@ -99,7 +100,9 @@ jobs:
           go test ./internal/terminalweb -run='^$' -fuzz='^FuzzTerminalControl$' -fuzztime=2000000x -timeout=3m
           go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPConfirmation$' -fuzztime=2000000x -timeout=3m
           go test ./internal/rdplab -run='^$' -fuzz='^FuzzRDPWireAndClipboard$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/rdplab -run='^$' -fuzz='^FuzzViewerDrawingSchemas$' -fuzztime=2000000x -timeout=3m
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
+          go test -tags=browserlab -race -run='^TestBrowserRDPViewerLab$' -timeout=1m ./internal/rdplab
           # Test-only empty netns; root setup drops to UID/GID 65534 with no
           # effective capabilities before the fixed child runs. No guacd yet.
           worker_dir="$(mktemp -d /tmp/keybash-rdp-worker.XXXXXX)"

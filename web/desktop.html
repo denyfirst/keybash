@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="az">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keybash · RDP lab</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/desktop.css">
+  <script type="module" src="/desktop.mjs"></script>
+</head>
+<body>
+  <aside>
+    <a class="brand" href="/" aria-label="Keybash"><span class="brand-mark">k</span>keybash<span class="brand-dot">.</span></a>
+    <div class="eyebrow">WORKSPACE</div>
+    <div class="nav-item active"><span>›_</span> RDP masaüstü</div>
+    <div class="sidebar-note">Denyfirst<br><span>Self-hosted workspace</span></div>
+  </aside>
+  <main>
+    <header><div><div class="eyebrow">RDP LAB</div><h1>Öz iş yerin.</h1><p>Sintetik RDP sessiyası · real credential istifadə edilmir.</p></div><span id="status" role="status">Bağlı deyil</span></header>
+    <section id="login-panel" class="login-panel">
+      <form id="login"><label for="code">Birdəfəlik lab giriş kodu</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Sessiyanı aç</button></div></form>
+    </section>
+    <section class="workspace" aria-label="RDP workspace">
+      <div class="toolbar"><div class="tab"><span class="tab-dot"></span>rdp-lab <span class="tab-type">RDP</span></div><div class="tools"><button id="special" disabled>Ctrl+Alt+Del</button><button id="fullscreen" disabled>Tam ekran</button><button id="disconnect" disabled>Bağla</button></div></div>
+      <div id="desktop" tabindex="0" role="application" aria-label="RDP masaüstü"><div id="display"></div></div>
+      <footer><span>Klaviatura masaüstü fokusda olduqda işləyir</span><span id="size">1024 × 768</span></footer>
+    </section>
+    <p class="help">Bu lab-da görüntü, mouse və klaviatura yoxlanır. Clipboard və remote resize növbəti mərhələdədir.</p>
+    <p id="notice" role="status" class="notice"></p>
+  </main>
+</body>
+</html>

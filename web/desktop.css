@@ -1,0 +1,1 @@
+#desktop{background:#090a0c;min-height:200px;max-height:75vh;overflow:hidden;outline:none;display:flex;justify-content:center;align-items:center}#desktop:focus-visible{outline:2px solid #e5696b;outline-offset:-2px}#display{line-height:0}#desktop:fullscreen{width:100vw;height:100vh;max-height:none}.workspace:has(#desktop){overflow:hidden}.tools{flex-wrap:wrap}
