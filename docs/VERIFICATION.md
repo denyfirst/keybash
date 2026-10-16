@@ -1,5 +1,64 @@
 # Foundation verification
 
+## Interactive workstation UI preview — 2026-10-15
+
+`scripts/demo.ps1` opens a disposable Edge development context and a private
+loopback TLS fixture for manual feedback. `INTERACTIVE-DEMO-AZ.md` states the
+simulation boundary. Synthetic terminal commands never spawn a local process
+or dial a host; desktop PNGs and input are a generated test picture, not Windows
+or a native RDP authentication claim. Simulated workers and portable custody
+initialization are confined to browserlab `_test.go` files. Runtime embedding
+does not include the demo driver; `cmd/keybash` gains no flag/permission bypass.
+
+The normal browser UI performs one-use bootstrap and mandatory MFA. Initial
+reauthentication consumes an ordinary recovery code rather than replaying the
+enrollment TOTP or racing the 30-second boundary. Owned credentials/connections
+are seeded through the normal CSRF-protected APIs after proof. No ready session
+is injected, no policy/pin check is weakened and no production data is loaded.
+The separate about:blank guide exposes only synthetic account/factor data in
+its disposable context; passwords/keys are passed to the driver through stdin,
+not arguments, URLs, environment or log output. The guide is never a product
+route or an injected application script. Self-signed acceptance is scoped to
+the development browser context; OS trust and normal profiles stay unchanged.
+
+Local `scripts/check.ps1 -Analysis` passed formatting, module verification,
+vet, shuffled suites, builds, staticcheck, gosec, govulncheck and actionlint.
+Tagged vet and `scripts/demo.ps1 -Check` passed on Edge. The latter verifies
+the guide and its workspace action, MFA refusal before enrollment, two owned
+sample connections, actual terminal echo, independently compared desktop
+pixels after keyboard and mouse input, and account logout removing both views.
+Workspace, terminal and desktop screenshots were visually inspected; no secret
+reveal was photographed. The headed launcher was also opened successfully for
+manual feedback. Linux CI additionally runs the new checks under race/Chromium,
+retaining all prior native RDP, protocol, browser and fuzz gates.
+
+Three compiling behavioral sabotages failed the intended assertions, then the
+original source was restored byte-for-byte and the demo/browser checks reran:
+
+- Permit a clipboard instruction: unsafe/malformed input refusal failed.
+- Refuse every input: the valid key/mouse acceptance assertion failed.
+- Remove SSH fixture context closure: cancellation did not release its read.
+
+### Separate adversarial maintainer self-review
+
+Reviewed the preview after implementation for production seam leakage,
+process/dial paths, bounded command/input/image work and queues, cancellation,
+sample secret handling, ordinary MFA/CSRF/owner admission, browser context and
+TLS scope, helper-page access, disclosure labels and actual input assertions.
+The guide's initially collapsed recovery textarea caused a browser timeout;
+initialization now sets the synthetic value without requiring a hidden form
+control to be interactable. Pixel comparisons replaced a weaker check that
+could pass on the initial image. Both guide and desktop behavior now run in
+the automated path, not just in a manual-only branch.
+
+This is maintainer self-review, not independent audit. A preview cannot validate
+real Windows/Linux sessions, shell programs, browser clipboard/keyboard matrix,
+native RDP resize/clipboard, worker installation or production deployment.
+The existing session/output quotas remain. Shutdown is bounded to one hour;
+abrupt termination may leave synthetic encrypted test files/temporary browser
+profile remnants. No forensic erase, general browser/host egress sandbox or
+production readiness claim. No new dependency, release, or Porch/Rootwell change.
+
 ## Owned remote-session follow-up — 2026-10-15
 
 `OWNED-REMOTE-LAB.md` describes the linked synthetic account/MFA/custody,

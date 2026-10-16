@@ -8,6 +8,7 @@ no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
+| Interactive UI preview stays synthetic; its bounded desktop input refuses clipboard/arbitrary instructions, wrong demo credentials and cancellation | only browserlab `_test.go` workers; fixed command simulation with no dial/process execution | `TestDemoInputBoundary`, `TestDemoWorkerCancellation`, `TestInteractiveDemoBrowser` |
 | Owned connections cannot select another owner's credential or authenticate relocated ciphertext | connection envelope kind/owner AAD, server ownership references | `TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount`, `TestOwnedConnectionEnvelopePersistenceAndOwnerBinding` |
 | Launch requires ready MFA plus fresh proof on both grant and consumption | session-bound single-use 30-second capability, current account/record checks | `TestOwnedRemoteLeaseOwnershipReplayExpiryAndRevocation`, `TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount`, `TestOwnedRemoteExpiryLimitsAndDelete` |
 | Reused target IDs cannot silently retarget credentials to another approved identity | authenticated connection approval fingerprint | `TestOwnedRemoteChangedApprovalRefusesStoredConnection` |

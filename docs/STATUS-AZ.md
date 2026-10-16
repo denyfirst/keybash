@@ -50,6 +50,11 @@ Bu, işlək brauzer remote-access məhsulu və production təhlükəsizlik zəma
 Login/vault və connection icazələri artıq SSH/native RDP brauzer lab-ına
 bağlanıb: birdəfəlik icazə, server kimliyi versiyası və logout ləğvi yoxlanır.
 
+Özün UI-ni yoxlamaq üçün `./scripts/demo.ps1` lokal interaktiv preview açır.
+Login/MFA, iki owned connection, simulyasiya terminalı və test desktop-u var.
+Bu preview real Linux/Windows deyil; real credential işlətmir. Açmaq və
+məhdudiyyətlər: `INTERACTIVE-DEMO-AZ.md`.
+
 ## Hələ hazırlanmayıb
 
 Hələ quraşdırılan worker, operator target konfiqurasiyası və
