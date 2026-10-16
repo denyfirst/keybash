@@ -51,7 +51,14 @@ func (w ProcessWorker) open(ctx context.Context, host string, dial func(context.
 	defer clear(seed)
 	setup, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
-	return launchSSHProcess(ctx, setup, w, host, dial, pin, user, seed)
+	stream, err := launchSSHProcess(ctx, setup, w, host, dial, pin, user, seed)
+	if err != nil || stream == nil {
+		if stream != nil {
+			_ = stream.Close()
+		}
+		return nil, ErrProcess
+	}
+	return stream, nil
 }
 
 type processStream struct {
@@ -127,6 +134,9 @@ func (s *processStream) Resize(columns, rows uint32) error {
 	return s.send(frameResize, data[:])
 }
 func (s *processStream) Close() error {
+	if s == nil {
+		return nil
+	}
 	s.cancel()
 	select {
 	case <-s.done:

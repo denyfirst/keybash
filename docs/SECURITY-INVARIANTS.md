@@ -144,15 +144,17 @@ the guard alone cannot constrain an independently launched guacd. The configured
 is trusted infrastructure and may itself require network access. This is not
 a DNS sandbox or DNSSEC guarantee. SSH identity is a separate approved host pin.
 
-SSH currently accepts Ed25519 host/user keys only, with a ten-second setup
-budget and parent-context session lifetime. There is no host-key trust UI,
-private key import, password/certificate auth, production workspace, worker
-process or sandbox. Browser and real Bash evidence is confined to the laboratory;
-vim/tmux and full browser/OS behavior remain unmeasured.
-Channel windows impose backpressure; both output streams need consumption.
-Aggregate connection quotas, worker isolation, application revocation, idle
-limits, exit-status presentation and independent security review remain future
-gates. Closing a stream does not guarantee killing all remote processes.
+SSH accepts Ed25519 host/user keys only, with a ten-second setup budget and
+parent-context session lifetime. The owned custody lab imports bounded OpenSSH
+keys and supplies MFA, ownership, session quotas, idle limits and revocation.
+The original library worker runs in process; `SSH-PROCESS-LAB.md` adds a separate
+constrained Linux/amd64 worker with a privileged laboratory manager. An installed
+manager for an unprivileged gateway, host-key trust UI, password/certificate
+SSH auth, aggregate cgroups and independent candidate review remain gates.
+Browser and real Bash evidence is confined to the laboratory; vim/tmux and the
+full browser/OS matrix remain unmeasured. Channel windows impose backpressure;
+both output streams need consumption. Closing a stream does not guarantee
+killing all remote processes.
 
 The terminal lab is not product login/MFA or ownership authorization. Its bootstrap code
 is passed via test process stdin, never URLs/environment/logs; it accepts no

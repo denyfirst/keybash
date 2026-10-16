@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"io"
 	"net"
 	"os"
@@ -242,6 +243,28 @@ func TestProcessOutputDrainsAfterCleanWorkerExit(t *testing.T) {
 	}
 	if ctx.Err() != nil {
 		t.Fatal("normal EOF was treated as revocation")
+	}
+}
+
+func TestProcessRefusalReturnsNilStream(t *testing.T) {
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal("entropy failed")
+	}
+	key, err := sshkey.New(private)
+	clear(private)
+	if err != nil {
+		t.Fatal("key setup failed")
+	}
+	defer key.Close()
+	called := false
+	stream, err := (ProcessWorker{}).open(context.Background(), "ssh.invalid", func(context.Context) (net.Conn, error) { called = true; return nil, ErrProcess }, syntheticSigner(t).PublicKey().Marshal(), "lab-user", key)
+	if err == nil || stream != nil || called {
+		t.Fatal("refusal returned a typed nil stream or reached network")
+	}
+	var empty *processStream
+	if empty.Close() != nil {
+		t.Fatal("nil stream cleanup failed")
 	}
 }
 

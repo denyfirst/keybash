@@ -49,6 +49,10 @@ discard final remote output; explicit cancellation still rejects partially
 read/queued data. Frame integer bounds are explicit rather than suppressing
 the analyzer. Linux-specific code is cross-analyzed locally; Linux execution
 must pass the actual sandbox gate, not just compilation.
+The first Linux run passed actual isolated authentication and then exposed an
+interface-wrapped nil stream on changed-pin refusal. The factory now returns a
+plain nil interface on every setup error; cleanup is nil-safe and a portable
+regression asserts both no typed-nil escape and no target dial on refusal.
 
 Limits remain explicit: root setup manager and shared UID 65534 are a laboratory
 boundary, not the deployment design. An authenticated privileged manager for
