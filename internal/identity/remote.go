@@ -3,6 +3,7 @@ package identity
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 	"golang.org/x/crypto/ssh"
@@ -217,12 +219,25 @@ func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential) (ter
 		return nil, errRefused
 	}
 	e := validateCredential(&c)
-	var signer ssh.Signer
+	var signer *sshkey.Key
 	if e == nil && t.Protocol == "ssh" {
+		var raw any
 		if c.Passphrase == "" {
-			signer, e = ssh.ParsePrivateKey([]byte(c.Secret))
+			raw, e = ssh.ParseRawPrivateKey([]byte(c.Secret))
 		} else {
-			signer, e = ssh.ParsePrivateKeyWithPassphrase([]byte(c.Secret), []byte(c.Passphrase))
+			raw, e = ssh.ParseRawPrivateKeyWithPassphrase([]byte(c.Secret), []byte(c.Passphrase))
+		}
+		if e == nil {
+			private, ok := raw.(*ed25519.PrivateKey)
+			if !ok {
+				e = errRefused
+			} else {
+				signer, e = sshkey.New(*private)
+				clear(*private)
+				if signer != nil {
+					defer signer.Close()
+				}
+			}
 		}
 	}
 	<-l.derive

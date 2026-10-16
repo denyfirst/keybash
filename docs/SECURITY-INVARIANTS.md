@@ -8,6 +8,9 @@ no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
+| SSH worker IPC bounds allocation and rejects repeated startup; cancellation drops queued data while clean EOF drains it | typed binary frames, bounded queues and explicit lifetime checks | `TestWorkerFrameBoundsAndSchemas`, `TestSSHWorkerCoreUnexpectedInputCloses`, `TestProcessOutputDropsBufferedDataAfterRevocation`, `TestProcessOutputDrainsAfterCleanWorkerExit`, `FuzzSSHWorkerFrames` |
+| The separate SSH child verifies the actual connection's host pin before configured key authentication; revocation joins its managed process | fixed Linux sandbox, inherited guarded TCP descriptor and original SSH verification gate | `TestSSHWorkerCorePinInputResizeAndCancellation`, `TestSSHWorkerCoreChangedPinRefusesBeforeAuth`, `TestSSHProcessIsolatedAuthenticationAndRevocation`, `TestSSHProcessChangedPinNeverAuthenticates`, `TestSSHProcessRequiresConfiguredKeyAuthentication`, `TestSSHProcessOwnedBrowser` |
+| Invalid worker images cannot reach a target dial; session keys refuse malformed/closed material and redact formatting | root-controlled hash-bound static image and one-session key handoff | `TestSSHProcessImageAndPolicyRefuseBeforeDial`, `TestSessionKeyHandoffAndClose` |
 | Interactive UI preview stays synthetic; its bounded desktop input refuses clipboard/arbitrary instructions, wrong demo credentials and cancellation | only browserlab `_test.go` workers; fixed command simulation with no dial/process execution | `TestDemoInputBoundary`, `TestDemoWorkerCancellation`, `TestInteractiveDemoBrowser` |
 | Owned connections cannot select another owner's credential or authenticate relocated ciphertext | connection envelope kind/owner AAD, server ownership references | `TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount`, `TestOwnedConnectionEnvelopePersistenceAndOwnerBinding` |
 | Launch requires ready MFA plus fresh proof on both grant and consumption | session-bound single-use 30-second capability, current account/record checks | `TestOwnedRemoteLeaseOwnershipReplayExpiryAndRevocation`, `TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount`, `TestOwnedRemoteExpiryLimitsAndDelete` |
@@ -141,15 +144,17 @@ the guard alone cannot constrain an independently launched guacd. The configured
 is trusted infrastructure and may itself require network access. This is not
 a DNS sandbox or DNSSEC guarantee. SSH identity is a separate approved host pin.
 
-SSH currently accepts Ed25519 host/user keys only, with a ten-second setup
-budget and parent-context session lifetime. There is no host-key trust UI,
-private key import, password/certificate auth, production workspace, worker
-process or sandbox. Browser and real Bash evidence is confined to the laboratory;
-vim/tmux and full browser/OS behavior remain unmeasured.
-Channel windows impose backpressure; both output streams need consumption.
-Aggregate connection quotas, worker isolation, application revocation, idle
-limits, exit-status presentation and independent security review remain future
-gates. Closing a stream does not guarantee killing all remote processes.
+SSH accepts Ed25519 host/user keys only, with a ten-second setup budget and
+parent-context session lifetime. The owned custody lab imports bounded OpenSSH
+keys and supplies MFA, ownership, session quotas, idle limits and revocation.
+The original library worker runs in process; `SSH-PROCESS-LAB.md` adds a separate
+constrained Linux/amd64 worker with a privileged laboratory manager. An installed
+manager for an unprivileged gateway, host-key trust UI, password/certificate
+SSH auth, aggregate cgroups and independent candidate review remain gates.
+Browser and real Bash evidence is confined to the laboratory; vim/tmux and the
+full browser/OS matrix remain unmeasured. Channel windows impose backpressure;
+both output streams need consumption. Closing a stream does not guarantee
+killing all remote processes.
 
 The terminal lab is not product login/MFA or ownership authorization. Its bootstrap code
 is passed via test process stdin, never URLs/environment/logs; it accepts no

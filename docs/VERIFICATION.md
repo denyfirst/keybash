@@ -1,5 +1,72 @@
 # Foundation verification
 
+## SSH worker process boundary — 2026-10-16
+
+`SSH-PROCESS-LAB.md` records the privileged Linux/amd64 manager, static child,
+single guarded connected TCP descriptor and same-connection SSH identity check.
+This adds no public/root service, install/deploy command, real credential or
+release. Main's previous complete CI/CodeQL repeats passed before this slice.
+Porch and Rootwell remain untouched; no dependency version is changed.
+
+Portable frame/core/key tests passed after restoration, as did the full local
+format/module/vet/shuffled-suite/build/staticcheck/gosec/govulncheck/actionlint
+gate. Linux cross-vet (including process/browser tags), cross-staticcheck and
+cross-gosec passed. Edge's existing interactive owned preview check passed with
+the new key wrapper; native Linux evidence is a separately required CI gate.
+
+Six compiling local behavior mutations failed their intended assertions:
+allow unknown frame types; refuse valid frames; accept a changed SSH host pin;
+retain queued output after cancellation; cancel queued output on normal EOF;
+retain a closed session key. Each source was restored byte-for-byte and affected
+tests reran. Startup also refuses bad version/host/seed/user/pin/trailing bytes
+before user authentication. A new two-million-execution frame fuzz gate is
+added alongside the existing targets, not substituted for them.
+
+The Linux process CI gate runs actual static-child key authentication/PTY/input,
+resize bounds, changed-pin-before-auth, none-auth refusal, approved image/hash
+refusal before dial, cancellation and full owned MFA/custody/browser/logout.
+It then compiles permissive/restrictive host-pin mutations into the actual
+child and removes network/seccomp isolation from separate manager binaries.
+Each must fail its intended assertion. Sources are restored and compared byte
+for byte, the original child rebuilt and all process tests rerun. The full CI
+job budget grows from 25 to 35 minutes for these additional gates; individual
+process/browser/fuzz timeouts remain bounded and failures are not retried.
+
+### Separate adversarial maintainer self-review
+
+Reviewed the completed source separately for parent approval/pin snapshots,
+root-controlled immutable worker-image admission, inherited FD scope, private
+startup secret handling and formatting, child privilege/thread boundaries,
+namespace/filesystem/syscall restrictions, readiness versus authentication,
+host verification before signing, frame lengths before allocation, output
+queues/quotas, EOF versus revocation, setup deadlines and process reaping.
+
+Findings changed the implementation: privilege dropping now uses trusted
+setpriv before Go starts, avoiding per-thread privilege changes in a live Go
+runtime; pin bytes are copied before asynchronous setup; child startup copies
+its pin before clearing the serialized key bytes; parent process exit does not
+discard final remote output; explicit cancellation still rejects partially
+read/queued data. Frame integer bounds are explicit rather than suppressing
+the analyzer. Linux-specific code is cross-analyzed locally; Linux execution
+must pass the actual sandbox gate, not just compilation.
+The first Linux run passed actual isolated authentication and then exposed an
+interface-wrapped nil stream on changed-pin refusal. The factory now returns a
+plain nil interface on every setup error; cleanup is nil-safe and a portable
+regression asserts both no typed-nil escape and no target dial on refusal.
+Restoring the typed-nil return made that regression fail its intended assertion;
+the source was restored and the worker tests reran. The frame fuzz target also
+completed two million executions locally. The shared owned browser driver now
+enrolls with the current TOTP and consumes an ordinary one-use recovery code
+for initial reauthentication, avoiding its former previous-counter boundary
+race. This changes only test orchestration; runtime MFA/replay rules are intact.
+
+Limits remain explicit: root setup manager and shared UID 65534 are a laboratory
+boundary, not the deployment design. An authenticated privileged manager for
+an unprivileged gateway, dedicated installation identity, aggregate cgroups,
+operator target/host-key approval UI, service packaging and independent exact-
+candidate audit remain gates. Runtime memory hints and RLIMITs are not a hard
+aggregate memory/CPU guarantee. This self-review is not independent audit.
+
 ## Interactive workstation UI preview — 2026-10-15
 
 `scripts/demo.ps1` opens a disposable Edge development context and a private
