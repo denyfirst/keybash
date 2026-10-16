@@ -37,6 +37,10 @@ through the normal MFA/owned-connection flow. These are simulations, not real
 Linux/Windows sessions; see the [local demo guide](docs/INTERACTIVE-DEMO-AZ.md).
 Installed isolated workers/operator configuration, RDP clipboard, deployment and an
 independently audited production release remain gates.
+A separate Linux/amd64 SSH process laboratory now uses a hash-bound static
+child, private namespaces, restricted syscalls and one inherited guarded TCP
+connection. Its privileged test manager is not a root web service or installer.
+See [the SSH process boundary](docs/SSH-PROCESS-LAB.md) for limits and remaining gates.
 
 ## Start here
 

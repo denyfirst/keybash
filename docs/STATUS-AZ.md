@@ -1,5 +1,11 @@
 # Keybash — cari vəziyyət
 
+16 oktyabr əlavəsi: SSH protokolunu ayrıca Linux/amd64 prosesində işlədən
+manager/worker sərhədi əlavə olunub. Şəxsi namespace-lər, məhdud syscall siyasəti,
+bir sessiyanın açarı və yalnız əvvəlcədən icazəli TCP descriptor-u istifadə edir.
+Bu privileged laboratoriya manager-idir; public root gateway və quraşdırılan
+service deyil. Məhdudiyyətlər və yoxlama: `SSH-PROCESS-LAB.md`.
+
 15 oktyabr 2026. İnkişaf private başladı. GitHub Free private branch protection
 vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 
