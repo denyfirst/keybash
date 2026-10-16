@@ -53,6 +53,12 @@ The first Linux run passed actual isolated authentication and then exposed an
 interface-wrapped nil stream on changed-pin refusal. The factory now returns a
 plain nil interface on every setup error; cleanup is nil-safe and a portable
 regression asserts both no typed-nil escape and no target dial on refusal.
+Restoring the typed-nil return made that regression fail its intended assertion;
+the source was restored and the worker tests reran. The frame fuzz target also
+completed two million executions locally. The shared owned browser driver now
+enrolls with the current TOTP and consumes an ordinary one-use recovery code
+for initial reauthentication, avoiding its former previous-counter boundary
+race. This changes only test orchestration; runtime MFA/replay rules are intact.
 
 Limits remain explicit: root setup manager and shared UID 65534 are a laboratory
 boundary, not the deployment design. An authenticated privileged manager for
