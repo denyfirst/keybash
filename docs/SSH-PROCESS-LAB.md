@@ -84,7 +84,7 @@ The child has no listener or child-selected second connection. The separate
 manager's authenticated Unix control listener is described in `SSH-MANAGER-LAB.md`.
 
 Setup is bounded to ten seconds; the child bounds initial startup to five.
-Close/owner cancellation closes private pipes, kills the managed process group
+Close/owner cancellation closes private pipes, kills the managed sandbox
 and waits at most two seconds for reaping. bwrap's parent-death/PID boundary
 also owns descendants. Normal worker EOF drains already received output;
 explicit cancellation refuses even buffered output. Remote background processes

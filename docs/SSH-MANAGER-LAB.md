@@ -53,7 +53,7 @@ cryptographic secrecy against a malicious root manager.
 ## Lifecycle and resource bounds
 
 Only one start is permitted per control connection. Extra packets, replay,
-capabilities, malformed cancellation or disconnect kill its process group.
+capabilities, malformed cancellation or disconnect kill its managed sandbox.
 Setup admission expires after five seconds and gateway setup after ten. Slot
 exhaustion refuses before the gateway target dial. Normal child completion
 allows already received terminal output to drain. Explicit cancellation or
@@ -62,6 +62,9 @@ The manager sends done only after its managed process is reaped; cancellation
 waits at most two seconds for that acknowledgement. Manager shutdown cancels
 all leases and joins them. A second manager cannot unlink/replace a live socket;
 an unclean restart can leave a stale socket for local administrator inspection.
+Cancellation signals only Go's owned process handle, using pidfd on supported
+Linux, rather than issuing a raw process-group signal against a reusable PID.
+The fixed bwrap parent-death/PID boundary closes the inner worker.
 
 There is no hard aggregate memory guarantee or kernel-uninterruptible-task kill
 guarantee. Eight slots bound accepted goroutines/children; the OS's socket

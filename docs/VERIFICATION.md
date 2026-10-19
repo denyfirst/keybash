@@ -55,6 +55,11 @@ separately refused. Runtime launch still requires the exact fixed start string.
 Interrupted recvmsg calls retry immediately rather than waiting for a new poll
 edge. The gateway's changed-pin test requires actual dial and timely refusal,
 so capacity rejection or an expired context cannot masquerade as pin evidence.
+Cancellation now signals only Go's owned process handle (pidfd on supported
+Linux); raw negative-PID group signaling was removed to avoid signaling an
+unrelated group after PID reuse. The fixed bwrap parent-death/PID boundary owns
+the inner worker; actual cancellation and standalone-manager crash gates must
+still pass with this narrower signal authority.
 
 The dedicated gateway UID is trusted to enforce catalog/owner policy. Manager
 FD validation is not a second application-authorization check. Root remains

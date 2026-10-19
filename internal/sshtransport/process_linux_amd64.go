@@ -208,7 +208,9 @@ func startSSHProcess(life context.Context, parentNS string, transport, binary, f
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL, Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			// Signal only Go's owned process handle (pidfd on supported Linux).
+			// A raw negative PID could name an unrelated group after reuse.
+			// bwrap's die-with-parent/PID boundary owns the sandbox child.
 			return cmd.Process.Kill()
 		}
 		return nil
