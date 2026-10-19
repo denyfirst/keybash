@@ -1,5 +1,12 @@
 # Keybash — cari vəziyyət
 
+19 oktyabr — operator server konfiqurasiyası: root-a aid, dəyişdirilməsi
+məhdud JSON faylından host/port/IP və public SSH/RDP kimliyi yoxlanır.
+`check-targets` şəbəkəyə və bazaya çıxmadan yoxlayır. Ayrıca `serve-ssh-lab`
+əmri root olmayan Linux/amd64 gateway-də SSH-only siyahını mövcud manager,
+login/MFA və owner təsdiqinə bağlayır. `serve-lab` custody-only qalır.
+Bu quraşdırıcı və production buraxılışı deyil: `OPERATOR-CATALOG-LAB.md`.
+
 19 oktyabr — server kimliyi interfeysi: operatorun sabit server siyahısında
 host/port/IP-lər və SSH/RDP fingerprint-i görünür. Yeni bağlantı və yenidən
 təsdiq üçün tam fingerprint, təzə şifrə/MFA və cari target snapshot-u tələb
@@ -77,7 +84,7 @@ məhdudiyyətlər: `INTERACTIVE-DEMO-AZ.md`.
 
 ## Hələ hazırlanmayıb
 
-Hələ quraşdırılan worker və operator target/policy konfiqurasiyası,
+Hələ quraşdırılan worker/xidmətlər və operator konfiqurasiyasının deployment-i,
 məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
 hazır RDP workspace/copy-paste, backup/restore/key rotation,
 Docker deployment və release automation.

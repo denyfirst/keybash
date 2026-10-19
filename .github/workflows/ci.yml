@@ -84,6 +84,9 @@ jobs:
             | sed -E 's/^func //' | sort -u > "${RUNNER_TEMP}/defined"
           test -z "$(comm -23 "${RUNNER_TEMP}/cited" "${RUNNER_TEMP}/defined")"
 
+      - name: Verify root-owned operator configuration and unprivileged CLI
+        run: sh scripts/operator-config-lab.sh
+
       - name: Verify the isolated SSH worker process
         run: |
           sudo apt-get update -qq
@@ -110,6 +113,7 @@ jobs:
           go test ./internal/rdplab -run='^$' -fuzz='^FuzzViewerDrawingSchemas$' -fuzztime=2000000x -timeout=3m
           go test ./internal/identity -run='^$' -fuzz='^FuzzIdentityJSON$' -fuzztime=2000000x -timeout=3m
           go test ./internal/identity -run='^$' -fuzz='^FuzzCustodyFields$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/operatorconfig -run='^$' -fuzz='^FuzzOperatorCatalog$' -fuzztime=2000000x -timeout=3m
           go test -tags=browserlab -race -run='^TestBrowserPasswordLogin$' -timeout=90s ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserDurableCustody$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserOwnedRemotePortable$' -timeout=2m ./internal/identity

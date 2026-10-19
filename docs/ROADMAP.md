@@ -38,6 +38,9 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    (`SERVER-TRUST-LAB.md`). Operator catalog provisioning remains a gate.
 5. **Self-host packaging:** Linux deployment, isolated workers and egress,
    trusted TLS, offline runtime, safe upgrades and fresh-system restore.
+   A root-owned offline target catalog and explicit nonroot SSH-only loopback
+   CLI now bind operator policy to the manager (`OPERATOR-CATALOG-LAB.md`).
+   Installed service identities/units and production RDP integration remain.
 6. **Candidate and release:** load/browser matrix, independent security review,
    findings resolution, protected signed tags, separated build/sign/reproduce
    path, and a separately authorized public release.

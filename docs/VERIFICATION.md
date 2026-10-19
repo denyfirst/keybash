@@ -1,5 +1,67 @@
 # Foundation verification
 
+## Offline operator catalog and SSH CLI — 2026-10-19
+
+`OPERATOR-CATALOG-LAB.md` records the new administrator file boundary and the
+explicit SSH-only integration command. Public target metadata is independent
+of account credentials and browser owner decisions. One invalid entry refuses
+the whole catalog; validation performs no network or worker operation. Runtime
+loading admits only a bounded root-owned regular file through pinned no-follow
+directory descriptors. No dependency, Porch/Rootwell, deployment or release
+changes. Installed service/identity/cgroup/RDP/recovery/audit gates remain.
+
+Portable tests measure accepted SSH and current RDP identities, certificate
+name/time/purpose, exact keys/JSON, protected/forbidden endpoints, copied target
+metadata, canceled dialing, duplicate IDs, array bounds and total byte limits.
+The new fuzz target includes a valid public SSH catalog seed and malformed
+inputs. Five local compiling mutations failed their intended assertions:
+accept duplicate JSON keys; refuse all valid input; ignore protected networks;
+ignore RDP identity refusal; accept an unsupported SSH host key algorithm.
+Sources were restored byte-for-byte and affected package/CLI tests reran.
+Diagnostic outputs are outside Git. Local full format/module/vet/shuffled suite/
+build/staticcheck/gosec/govulncheck/actionlint passed; updated test-only inputs
+were rerun. The local catalog fuzz run completed exactly two million executions.
+Linux cross-vet/staticcheck/gosec and test compilation passed. Actual Linux
+root/UID/race/process execution remains a required CI gate, separate from
+Windows execution.
+
+The required Linux operator gate executes root file refusal/success tests,
+a separate UID/GID 65533 reader which cannot overwrite the catalog, and the
+compiled CLI at that UID: private initialization, pinned trusted TLS,
+unauthenticated/pre-MFA refusal, bootstrap/MFA, configured metadata and clean
+SIGTERM. File-owner bypass/refusal, directory-owner bypass and symlink-follow
+mutations must fail their named assertions; originals are restored byte-for-
+byte and rerun. A new two-million-execution fuzz gate joins all ten fuzz targets.
+Existing actual SSH-process/manager/native RDP/browser gates remain required.
+The new CLI test does not dial the synthetic target or prove a complete real
+SSH session through that command; the existing manager/worker tests exercise
+those lower layers independently.
+
+### Separate adversarial maintainer self-review
+
+Reviewed schema confusion/escaped duplicates/nulls/surrogates, bounded reads,
+whole-snapshot refusal, per-target pin isolation, identity/credential separation,
+canonical network parsing and protected-range precedence, root provenance,
+symlink/ancestor/hardlink/FIFO handling, mutable root snapshots, gateway UID,
+launcher selection, loopback TLS and SIGTERM lifecycle. There is no catalog
+HTTP write/discovery/probe, environment expansion or arbitrary exec path.
+
+Findings shaped the implementation: protected networks must be explicit and
+nonempty; different target policies do not share endpoint approvals; metadata
+files and direct parents cannot be gateway-owned/shared-writable; descriptor
+walks reject symlinks without an lstat/open race; nonblocking open refuses FIFOs;
+single-link and before/after stat checks constrain admitted snapshots; RDP
+imports reuse existing complete leaf checks. `serve-lab` cannot acquire remote
+authority through new flags. `serve-ssh-lab` rejects root/reserved gateway IDs,
+unsupported platform or any RDP target and constructs only ManagerWorker.
+No worker readiness is implied by a successful HTTPS listener.
+
+Root/host/filesystem and the gateway remain trusted; root can edit a catalog
+and the program cannot prove independent identity acquisition or completeness
+of deployment protected CIDRs. This is a maintainer self-review, not independent
+audit. No service is installed, no production credential is used, and the
+existing exact-candidate independent review gate remains.
+
 ## Configured server identity review — 2026-10-19
 
 `SERVER-TRUST-LAB.md` records the two authorities: immutable operator network/
