@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -14,11 +15,13 @@ import (
 var connectionBucket = []byte("connections-v1")
 
 type connection struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Target     string `json:"target"`
-	Credential string `json:"credential"`
-	Approval   string `json:"approval"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Target      string `json:"target"`
+	Credential  string `json:"credential"`
+	Approval    string `json:"approval"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Revision    uint64 `json:"-"`
 }
 
 func validApproval(raw string) bool {
@@ -35,18 +38,19 @@ func (s *Store) connection(tx *bolt.Tx, owner, id string) (connection, error) {
 	if bucket == nil {
 		return c, errRefused
 	}
-	plain, _, e := s.unseal("connection", owner, id, bucket.Get(credentialKey(owner, id)))
+	plain, revision, e := s.unseal("connection", owner, id, bucket.Get(credentialKey(owner, id)))
 	if e != nil {
 		return c, e
 	}
 	defer clear(plain)
-	if decodeRecord(plain, &c, 2048) != nil || c.ID != id || !validID(c.Target) || !validID(c.Credential) || !validApproval(c.Approval) || !label(c.Name, 160, false) {
+	if decodeRecord(plain, &c, 2048) != nil || c.ID != id || !validID(c.Target) || !validID(c.Credential) || !validApproval(c.Approval) || !label(c.Name, 160, false) || c.Fingerprint != "" && !validFingerprint(c.Fingerprint) {
 		return connection{}, errRefused
 	}
+	c.Revision = revision
 	return c, nil
 }
 func (s *Store) putConnection(owner string, c connection) (string, error) {
-	if !validID(owner) || c.ID != "" || !validID(c.Target) || !validID(c.Credential) || !validApproval(c.Approval) || !label(c.Name, 160, false) {
+	if !validID(owner) || c.ID != "" || c.Revision != 0 || !validID(c.Target) || !validID(c.Credential) || !validApproval(c.Approval) || !label(c.Name, 160, false) || !validFingerprint(c.Fingerprint) {
 		return "", errRefused
 	}
 	id, e := randomID()
@@ -92,6 +96,36 @@ func (s *Store) putConnection(owner string, c connection) (string, error) {
 		return "", errRefused
 	}
 	return id, nil
+}
+
+// A fresh owner's explicit comparison is bound to the current catalog snapshot
+// and to the exact previous encrypted revision. A stale browser cannot replace
+// a newer decision. No target address, credential or owner is accepted here.
+func (s *Store) trustConnection(owner, id, expected, approval, fingerprint string) error {
+	revision, e := strconv.ParseUint(expected, 10, 64)
+	if e != nil || revision == 0 || revision >= 1<<31 || strconv.FormatUint(revision, 10) != expected || !validApproval(approval) || !validFingerprint(fingerprint) {
+		return errRefused
+	}
+	return s.update(func(tx *bolt.Tx) error {
+		c, e := s.connection(tx, owner, id)
+		if e != nil || c.Revision != revision {
+			return errRefused
+		}
+		if _, e = s.credential(tx, owner, c.Credential); e != nil {
+			return errRefused
+		}
+		c.Approval, c.Fingerprint = approval, fingerprint
+		plain, e := json.Marshal(c)
+		if e != nil {
+			return errRefused
+		}
+		defer clear(plain)
+		sealed, e := s.seal(tx, "connection", owner, id, revision+1, plain)
+		if e != nil {
+			return errRefused
+		}
+		return tx.Bucket(connectionBucket).Put(credentialKey(owner, id), sealed)
+	})
 }
 func (s *Store) readConnection(owner, id string) (connection, error) {
 	var c connection

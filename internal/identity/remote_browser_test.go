@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"encoding/pem"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -27,7 +28,9 @@ type portableSSHWorker struct{ echo fixtureRDPWorker }
 func (f *portableSSHWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, _ []byte, user string, _ ssh.Signer) (terminalweb.Stream, error) {
 	return f.echo.OpenRDP(ctx, RDPRequest{Target: target, Username: user, Password: f.echo.expected})
 }
-func TestBrowserOwnedRemotePortable(t *testing.T) {
+func TestBrowserOwnedRemotePortable(t *testing.T) { runOwnedPortable(t, false) }
+func TestBrowserServerTrustWorkflow(t *testing.T) { runOwnedPortable(t, true) }
+func runOwnedPortable(t *testing.T, review bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
 	defer cancel()
 	store, _, _, code := custodyFixture(t)
@@ -54,10 +57,45 @@ func TestBrowserOwnedRemotePortable(t *testing.T) {
 	}
 	defer l.Close()
 	server.Config.Handler = l
+	control, updatedFingerprint := "", ""
+	if review {
+		control, e = token()
+		if e != nil {
+			t.Fatal("fixture control failed")
+		}
+		_, next, e := ed25519.GenerateKey(rand.Reader)
+		if e != nil {
+			t.Fatal("fixture replacement failed")
+		}
+		nextSigner, e := ssh.NewSignerFromKey(next)
+		if e != nil {
+			t.Fatal("fixture replacement signer failed")
+		}
+		updated := target
+		updated.Identity = nextSigner.PublicKey().Marshal()
+		updated.Target = networkFixture(t, "rdp.invalid", 3390, "10.34.0.9")
+		updatedFingerprint = ssh.FingerprintSHA256(nextSigner.PublicKey())
+		server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/__fixture/trust-change" {
+				if r.Method != "POST" || r.Header.Get("X-Fixture-Control") != control {
+					w.WriteHeader(403)
+					return
+				}
+				// Synthetic catalog replacement exists only in this test. Runtime
+				// operator configuration is immutable until a restart logs out all.
+				l.mu.Lock()
+				l.remote.targets[target.ID] = updated
+				l.mu.Unlock()
+				w.WriteHeader(204)
+				return
+			}
+			l.ServeHTTP(w, r)
+		})
+	}
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	server.StartTLS()
 	defer server.Close()
-	config, _ := json.Marshal(struct{ Origin, Code, Password, Mode, Secret, Target string }{server.URL, code, "Synthetic owned account password 73!", "ssh", string(pem.EncodeToMemory(block)), target.ID})
+	config, _ := json.Marshal(struct{ Origin, Code, Password, Mode, Secret, Target, Fingerprint, UpdatedFingerprint, Control string }{server.URL, code, "Synthetic owned account password 73!", "ssh", string(pem.EncodeToMemory(block)), target.ID, ssh.FingerprintSHA256(signer.PublicKey()), updatedFingerprint, control})
 	command := exec.CommandContext(ctx, "node", filepath.Join("..", "..", "web", "owned-browser-test.mjs")) // #nosec G204 -- fixed synthetic browser driver and stdin-only fixture data.
 	command.Stdin = bytes.NewReader(config)
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr

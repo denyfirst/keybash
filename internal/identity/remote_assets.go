@@ -21,7 +21,10 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		}
 		protocol, record = parts[0], parts[1]
 		c, e := l.store.readConnection(s.owner, record)
-		if e != nil || l.remote == nil || l.remote.targets[c.Target].Protocol != protocol {
+		l.mu.Lock()
+		allowed := e == nil && !l.closed && s.ctx.Err() == nil && l.remote != nil && l.remote.targets[c.Target].Protocol == protocol && connectionTrusted(c, l.remote.targets[c.Target], l.now())
+		l.mu.Unlock()
+		if !allowed {
 			refuse(w, 404)
 			return true
 		}

@@ -1,5 +1,87 @@
 # Foundation verification
 
+## Configured server identity review — 2026-10-19
+
+`SERVER-TRUST-LAB.md` records the two authorities: immutable operator network/
+identity configuration and an owner's explicit, fresh fingerprint decision.
+No browser endpoint can provision targets, discover keys, dial a probe, alter
+network permissions or choose a worker. Metadata review performs no network or
+credential-worker operation. Existing source-only deployment/audit gates remain.
+Main's previous CI/CodeQL repeats passed before this slice. No dependency version
+changes; Porch and Rootwell are untouched.
+
+The version 2 approval now includes canonical host, port and sorted IP pins,
+in addition to target ID, protocol and identity. Old development records remain
+readable but require explicit owner review before launch. The exact current
+receipt and full independently entered SSH/RDP fingerprint are required at
+creation/replacement. Transactional envelope revision CAS prevents stale pages
+from overwriting later decisions; replacement cancels that connection's active
+and pending leases while preserving other connections. The grant, consumption
+and remote workspace gates all check trust. RDP expiry makes approval unavailable.
+
+Portable tests observe valid/invalid fingerprints against independent OpenSSH/
+certificate digests, canonical ordering, immutable metadata, host/port/IP changes,
+unknown/duplicate/coerced fields, ready/fresh MFA, CSRF/owner isolation, legacy
+blocking, encrypted reopen, stale revisions, expiry and scoped cancellation.
+Edge's owned workflow observes wrong fingerprints, empty confirmation fields,
+changed key/address blocking, Cancel, old-value refusal, explicit replacement,
+terminal input and logout. The review dialog was visually inspected from a
+synthetic screenshot. Interactive demo seeding uses independently configured
+fixture fingerprints; its separate guide displays those public fingerprints.
+No real account/host/key is used and OS trust/browser profiles stay unchanged.
+After restoration, local formatting/module/vet/shuffled-suite/build/staticcheck/
+gosec/govulncheck/actionlint passed, together with Edge's owned/trust/interactive
+demo checks. Linux tagged cross-vet, cross-analysis and test/build compilation
+passed; actual Linux race/process/native/browser execution remains required CI.
+
+Nine compiling Go mutations failed their intended assertions:
+
+1. Ignore the fingerprint comparison: wrong fingerprint accepted.
+2. Refuse all proofs: valid server proof refused.
+3. Omit network snapshot binding: port/IP/host changes retained approval.
+4. Ignore prior revision: stale trust revision accepted.
+5. Ignore owner fingerprint at launch: missing decision retained authority.
+6. Skip revocation on replacement: active connection survived.
+7. Ignore fresh proof: an expired reauthentication replaced trust.
+8. Revoke all rows using a credential: an unrelated connection was canceled.
+9. Remove the trust-write budget: excess confirmation wrote another revision.
+
+Two browser asset mutations also failed named assertions: exposing Connect for
+a changed server, and prefilling the fingerprint. Each source/asset was restored
+byte-for-byte and affected tests reran. Diagnostic outputs stay outside Git.
+The additional browser workflow is a required CI step alongside all previous
+actual Linux SSH/manager, native RDP, browser, race and nine fuzz gates.
+
+### Separate adversarial maintainer self-review
+
+Reviewed authority selection, old-record behavior, complete target binding,
+snapshot canonicalization/copying, certificate time, stale UI/async selection,
+exact request schemas, fingerprint encodings, fresh/MFA/CSRF/owner checks,
+record-revision CAS, transaction/revocation ordering, response uncertainty,
+malformed metadata, text-only DOM rendering and existing worker verification.
+
+Findings shaped the implementation: port and IP pins now join the versioned
+digest; legacy fingerprints cannot default to trust; replacement uses the
+authenticated envelope revision and revokes pending as well as active leases;
+the UI never prepopulates confirmation or exposes a changed connection link;
+late detail responses are tied to the selected ID/generation, action buttons
+remain disabled until the review is valid, and target lists/details stay bounded.
+Remote workspace checks take the session lock before reading trust/clock state.
+Full metadata is fetched per selected target so a 256-entry catalog with 16 IPv6
+pins per target cannot exceed the browser's existing bulk-response budget.
+Valid trust writes also share a per-owner five/minute budget and the existing
+global attempt window; malformed/stale proofs cannot consume seals or revoke
+leases. Limited requests preserve revision and live sessions, and capacity
+returns after the ordinary minute window.
+
+An unchanged catalog still relies on the worker to reject a changed real remote
+key before credentials; this UI does not discover that replacement. A submitted
+matching hash cannot prove the human checked an independent channel. The
+operator catalog is global to MFA-ready accounts; no team/target ACL is claimed.
+Operator provisioning, installed services, cgroups, production RDP/clipboard,
+restore/release operations and independent exact-candidate review remain gates.
+This is maintainer self-review, not independent audit.
+
 ## Separate SSH manager for an unprivileged gateway — 2026-10-19
 
 `SSH-MANAGER-LAB.md` records the new Unix seqpacket authority boundary. The

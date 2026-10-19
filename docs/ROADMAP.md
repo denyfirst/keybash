@@ -33,6 +33,9 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    aggregate cgroups and the production RDP launcher remain gates.
 4. **Workspace:** Denyfirst UI, connections/search/favorites, terminal/RDP tabs,
    bounded clipboard behavior, reconnect states and accessible keyboard flows.
+   The configured-server identity review now requires explicit owner fingerprints,
+   full network snapshot binding and fresh reapproval of changed/legacy records
+   (`SERVER-TRUST-LAB.md`). Operator catalog provisioning remains a gate.
 5. **Self-host packaging:** Linux deployment, isolated workers and egress,
    trusted TLS, offline runtime, safe upgrades and fresh-system restore.
 6. **Candidate and release:** load/browser matrix, independent security review,

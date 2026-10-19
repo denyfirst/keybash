@@ -8,6 +8,11 @@ no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
+| Owner trust binds the exact host/port/IP pin set and identity; changing only a port or IP invalidates launch | canonical copied target snapshot and version 2 approval digest checked at grant, consumption and workspace entry | `TestServerTrustFingerprintFormatsAndNetworkBinding`, `TestServerTrustChangeReapprovalRevokesAndCAS`, `TestNamedTargetSnapshotIsSortedCopiedAndNetworkFree` |
+| New and legacy connections need an explicit full fingerprint and current snapshot; wrong/stale/malformed proofs cannot create authority | strict fields, ready/fresh MFA, owner/CSRF checks and exact digest comparison | `TestServerTrustProofGate`, `TestServerTrustProofRefusalAndMetadata`, `TestServerTrustFreshMFAOwnerAndCSRF`, `TestServerTrustLegacyRequiresExplicitDecisionAndPersists` |
+| Trust replacement persists atomically, rejects stale browser revisions and revokes only that connection's active/pending leases | authenticated envelope revision CAS, fsynced transaction and scoped cancellation under the session lock | `TestServerTrustReopenAndStaleRevision`, `TestServerTrustChangeReapprovalRevokesAndCAS`, `TestServerTrustReplacementKeepsOtherConnection` |
+| Repeated valid trust confirmations have a finite write budget; refusal preserves revision and active sessions | per-owner five/minute trust bucket and existing global attempt window before writes | `TestServerTrustMutationBudget` |
+| Changed/expired/unreviewed identities are blocked in the UI and API; fingerprint input never prefills itself | typed server metadata, generation-bound review, absent Connect links and worker identity checks retained | `TestServerTrustExpiredUnavailableAndRevisionBounds`, `TestBrowserServerTrustWorkflow` |
 | Only the configured unprivileged gateway UID/primary GID can reserve a fixed root-managed SSH launch; root/wrong peers and excess leases refuse | Unix seqpacket, protected root socket, SO_PEERCRED and eight pending/active slots | `TestSSHManagerPacketsBoundRightsAndPeer`, `TestSSHManagerUnprivilegedGateway`, `TestSSHManagerRejectsWrongPeer`, `TestSSHManagerMalformedReplayAndQuota` |
 | Manager IPC accepts only a connected TCP descriptor and two distinct, correctly oriented pipes; keys bypass manager parsing | fixed three-FD packet, atomic CLOEXEC, truncation/type/direction checks | `TestSSHManagerDescriptorKinds`, `TestSSHManagerPacketsBoundRightsAndPeer`, `TestSSHManagerMalformedReplayAndQuota` |
 | Gateway revocation, repeated launch and manager shutdown/crash cannot retain an isolated SSH connection | one lease per control socket, owned-process cancellation/parent-death boundary and reaped acknowledgement | `TestSSHManagerUnprivilegedGateway`, `TestSSHManagerShutdownRevokesGateway`, `TestSSHManagerCrashRevokesGateway`, `TestSSHManagerMalformedReplayAndQuota`, `TestSSHManagerRefusalIsNilBeforeDial` |
@@ -152,7 +157,9 @@ parent-context session lifetime. The owned custody lab imports bounded OpenSSH
 keys and supplies MFA, ownership, session quotas, idle limits and revocation.
 The original library worker runs in process; `SSH-PROCESS-LAB.md` adds a separate
 constrained Linux/amd64 worker. `SSH-MANAGER-LAB.md` adds an authenticated separate
-root manager for an unprivileged gateway. An installed service, host-key trust UI, password/certificate
+root manager for an unprivileged gateway. `SERVER-TRUST-LAB.md` adds owner review
+of the immutable operator catalog; it is not discovery or catalog provisioning.
+An installed service, operator configuration, password/certificate
 SSH auth, aggregate cgroups and independent candidate review remain gates.
 Browser and real Bash evidence is confined to the laboratory; vim/tmux and the
 full browser/OS matrix remain unmeasured. Channel windows impose backpressure;

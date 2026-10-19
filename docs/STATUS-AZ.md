@@ -1,5 +1,12 @@
 # Keybash — cari vəziyyət
 
+19 oktyabr — server kimliyi interfeysi: operatorun sabit server siyahısında
+host/port/IP-lər və SSH/RDP fingerprint-i görünür. Yeni bağlantı və yenidən
+təsdiq üçün tam fingerprint, təzə şifrə/MFA və cari target snapshot-u tələb
+olunur. Kimlik/port/IP siyahısı dəyişəndə və köhnə qeyddə təsdiq olmayanda
+qoşulma bağlı qalır. Operator konfiqurasiyası və production quraşdırması
+ayrıca mərhələdir: `SERVER-TRUST-LAB.md`.
+
 19 oktyabr əlavəsi: root olmayan gateway üçün ayrıca SSH manager sərhədi
 qurulub. Unix socket-də konkret UID/GID yoxlanır; manager yalnız sabit,
 hash-lə təsdiqli worker-i başladır. Sessiyanın açarı və terminal axını
@@ -70,8 +77,7 @@ məhdudiyyətlər: `INTERACTIVE-DEMO-AZ.md`.
 
 ## Hələ hazırlanmayıb
 
-Hələ quraşdırılan worker, operator target konfiqurasiyası və
-hostname/IP/host-key təsdiqi üçün UI,
+Hələ quraşdırılan worker və operator target/policy konfiqurasiyası,
 məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
 hazır RDP workspace/copy-paste, backup/restore/key rotation,
 Docker deployment və release automation.

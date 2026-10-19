@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
 let csrf = '', busy = false, secretTimer, pendingDelete = '', remoteEnabled = false;
+let catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0;
 const notice = text => { $('notice').textContent = text; };
 const sections = ['enroll', 'challenge', 'recovery', 'vault'];
 const idOK = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
@@ -10,11 +11,11 @@ function hideSecret() {
 }
 function clearInputs() {
   document.querySelectorAll('input[type=password], input[autocomplete=one-time-code]').forEach(el => { el.value = ''; });
-  for (const id of ['credential-key', 'key-file']) if ($(id)) $(id).value = '';
+  for (const id of ['credential-key', 'key-file', 'connection-fingerprint', 'trust-fingerprint']) if ($(id)) $(id).value = '';
 }
 function clearAll() {
-  hideSecret(); clearInputs(); csrf = '';
-  for (const id of ['seed', 'account', 'records']) if ($(id)) $(id).textContent = '';
+  hideSecret(); clearInputs(); closeReview(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration;
+  for (const id of ['seed', 'account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
 }
@@ -42,6 +43,7 @@ async function request(path, method = 'GET', value) {
 function errorMessage(error) {
   hideSecret();
   if (error.status === 403) return 'Bu əməliyyat üçün giriş şifrəsi və yeni MFA kodu ilə təkrar doğrula.';
+  if (error.status === 409) return 'Fingerprint uyğun gəlmədi və ya server məlumatı dəyişib. Məlumatı yenilə və ayrıca etibarlı kanaldan yoxla.';
   if (error.status === 429) return 'Cəhd limiti dolub. Bir qədər gözlə.';
   if (error.status === 401) return 'Doğrulama qəbul edilmədi və ya sessiya bitib. Kodu yoxla; lazım olsa yenidən daxil ol.';
   if (error.status === 400) return 'Məlumat qəbul edilmədi. Şifrəni, kodu və açarın formatını yoxla.';
@@ -52,7 +54,7 @@ async function run(action) {
   busy = true; notice('');
   const buttons = [...document.querySelectorAll('button')]; buttons.forEach(el => { el.disabled = true; });
   try { await action(); } catch (error) { notice(errorMessage(error)); }
-  finally { busy = false; buttons.forEach(el => { el.disabled = false; }); }
+  finally { busy = false; buttons.forEach(el => { el.disabled = false; }); updateTrustButtons(); }
 }
 function bind(id, action) {
   $(id)?.addEventListener('submit', event => { event.preventDefault(); void run(action); });
@@ -96,13 +98,68 @@ async function loadRecords() {
   if (!records.length) $('records').textContent = 'Hələ qeyd yoxdur.';
   if(remoteEnabled){$('connection-credential').replaceChildren();for(const record of records){const option=document.createElement('option');option.value=record.id;option.textContent=`${record.name} · ${record.kind}`;$('connection-credential').append(option);}await loadConnections();}
 }
-async function loadConnections(){
- const targets=await request('/api/targets'),connections=await request('/api/connections');
- if(!Array.isArray(targets)||targets.length>256||!Array.isArray(connections)||connections.length>128)throw new Error('invalid connections');
- const approved=new Map();$('connection-target').replaceChildren();
- for(const target of targets){if(!idOK(target.id)||typeof target.name!=='string'||!['ssh','rdp'].includes(target.protocol))throw new Error('invalid target');approved.set(target.id,target);const option=document.createElement('option');option.value=target.id;option.textContent=`${target.name} · ${target.protocol.toUpperCase()}`;$('connection-target').append(option);}
- $('connections').replaceChildren();for(const record of connections){if(!idOK(record.id)||typeof record.name!=='string'||!idOK(record.target)||!idOK(record.credential))throw new Error('invalid connection');const row=document.createElement('div');row.className='record';const name=document.createElement('span');name.textContent=record.name;row.append(name);const target=approved.get(record.target);if(target){const link=document.createElement('a');link.textContent='Qoşul';link.href=`/remote/${target.protocol}/${record.id}`;row.append(link);}const remove=document.createElement('button');remove.textContent='Bağlantını sil';remove.type='button';remove.className='secondary';remove.addEventListener('click',()=>{void run(async()=>{await request(`/api/connections/${record.id}`,'DELETE',{});await loadConnections();});});row.append(remove);$('connections').append(row);}
- if(!connections.length)$('connections').textContent='Hələ bağlantı yoxdur.';
+const fingerprintOK = value => typeof value === 'string' && (/^SHA256:[A-Za-z0-9+/]{43}$/.test(value) || /^SHA256:[a-f0-9]{64}$/.test(value));
+function updateTrustButtons() {
+  if ($('connection-save')) $('connection-save').disabled = busy || !selectedTarget?.available || selectedTarget.id !== $('connection-target').value;
+  if ($('trust-save')) $('trust-save').disabled = busy || !reviewing?.target.available;
+}
+function validateTarget(data, id) {
+  if (data?.id !== id || typeof data.name !== 'string' || data.name.length > 160 || !['ssh', 'rdp'].includes(data.protocol) || typeof data.hostname !== 'string' || !/^[a-z0-9.-]{1,253}$/.test(data.hostname) || !Number.isInteger(data.port) || data.port < 1 || data.port > 65535 || !Array.isArray(data.addresses) || !data.addresses.length || data.addresses.length > 16 || !data.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) || typeof data.algorithm !== 'string' || data.algorithm.length > 80 || !fingerprintOK(data.fingerprint) || typeof data.approval !== 'string' || !/^[a-f0-9]{64}$/.test(data.approval) || typeof data.available !== 'boolean') throw new Error('invalid server identity');
+  if (catalog.get(id)?.protocol !== data.protocol || data.protocol === 'ssh' && !/^SHA256:[A-Za-z0-9+/]{43}$/.test(data.fingerprint) || data.protocol === 'rdp' && !/^SHA256:[a-f0-9]{64}$/.test(data.fingerprint)) throw new Error('inconsistent server identity');
+  return data;
+}
+function serverText(data) {
+  return `${data.hostname}:${data.port} · ${data.protocol.toUpperCase()}\nİcazəli IP-lər: ${data.addresses.join(', ')}\n${data.algorithm}\n${data.fingerprint}${data.available ? '' : '\nServer kimliyi hazırda istifadəyə yararlı deyil.'}`;
+}
+async function chooseTarget() {
+  const id = $('connection-target').value, generation = ++targetGeneration;
+  selectedTarget = null; $('connection-fingerprint').value = ''; $('connection-server').textContent = 'Server məlumatı yoxlanır…'; updateTrustButtons();
+  if (!idOK(id)) { $('connection-server').textContent = 'Operator tərəfindən icazəli server yoxdur.'; return; }
+  try {
+    const target = validateTarget(await request(`/api/targets/${id}`), id);
+    if (generation !== targetGeneration || $('connection-target').value !== id) return;
+    selectedTarget = target; $('connection-server').textContent = serverText(target);
+  } finally { updateTrustButtons(); }
+}
+function closeReview() {
+  ++reviewGeneration; reviewing = null;
+  if ($('trust-dialog')?.open) $('trust-dialog').close();
+  if ($('trust-fingerprint')) $('trust-fingerprint').value = '';
+  updateTrustButtons();
+}
+async function openReview(record) {
+  closeReview(); const generation = ++reviewGeneration;
+  $('trust-title').textContent = record.name; $('trust-server').textContent = 'Server məlumatı yoxlanır…';
+  $('trust-previous').textContent = record.fingerprint ? `Əvvəl təsdiqlədiyin fingerprint: ${record.fingerprint}` : 'Bu bağlantı üçün ayrıca kimlik təsdiqi yoxdur.';
+  $('trust-dialog').showModal(); updateTrustButtons();
+  const target = validateTarget(await request(`/api/targets/${record.target}`), record.target);
+  if (generation !== reviewGeneration || !$('trust-dialog').open) return;
+  reviewing = {record, target}; $('trust-server').textContent = serverText(target); updateTrustButtons();
+}
+async function loadConnections() {
+  const previous = $('connection-target').value;
+  selectedTarget = null; ++targetGeneration; updateTrustButtons(); $('connections').replaceChildren();
+  const targets = await request('/api/targets'), connections = await request('/api/connections');
+  if (!Array.isArray(targets) || targets.length > 256 || !Array.isArray(connections) || connections.length > 128) throw new Error('invalid connections');
+  const approved = new Map(), options = document.createDocumentFragment(), rows = document.createDocumentFragment();
+  for (const target of targets) {
+    if (!idOK(target.id) || approved.has(target.id) || typeof target.name !== 'string' || target.name.length > 160 || !['ssh', 'rdp'].includes(target.protocol)) throw new Error('invalid target');
+    approved.set(target.id, target); const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.protocol.toUpperCase()}`; options.append(option);
+  }
+  for (const record of connections) {
+    if (!idOK(record.id) || typeof record.name !== 'string' || record.name.length > 160 || !idOK(record.target) || !idOK(record.credential) || typeof record.revision !== 'string' || !/^[1-9][0-9]{0,9}$/.test(record.revision) || !['verified', 'changed', 'unverified', 'unavailable'].includes(record.trust) || record.fingerprint !== '' && !fingerprintOK(record.fingerprint) || record.trust === 'verified' && !fingerprintOK(record.fingerprint)) throw new Error('invalid connection');
+    const row = document.createElement('div'); row.className = 'record'; row.dataset.connection = record.id;
+    const name = document.createElement('span'); name.textContent = record.name;
+    const state = document.createElement('span'); state.className = 'trust-state'; state.dataset.trust = record.trust;
+    state.textContent = ({verified: 'Server kimliyi təsdiqlənib', changed: 'Server kimliyi və ya ünvanı dəyişib — bağlantı bağlıdır', unverified: 'Server kimliyini təsdiqlə — bağlantı bağlıdır', unavailable: 'Server hazırda əlçatan siyahıda deyil'})[record.trust]; row.append(name, state);
+    const target = approved.get(record.target);
+    if (target && record.trust === 'verified') { const link = document.createElement('a'); link.textContent = 'Qoşul'; link.href = `/remote/${target.protocol}/${record.id}`; row.append(link); }
+    if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server kimliyi'; review.addEventListener('click', () => { void run(() => openReview(record)); }); row.append(review); }
+    const remove = document.createElement('button'); remove.textContent = 'Bağlantını sil'; remove.type = 'button'; remove.className = 'secondary'; remove.addEventListener('click', () => { void run(async () => { await request(`/api/connections/${record.id}`, 'DELETE', {}); await loadConnections(); }); }); row.append(remove); rows.append(row);
+  }
+  catalog = approved; $('connection-target').replaceChildren(options); if (approved.has(previous)) $('connection-target').value = previous; $('connections').replaceChildren(rows);
+  if (!connections.length) $('connections').textContent = 'Hələ bağlantı yoxdur.';
+  await chooseTarget();
 }
 async function loadAccount() {
   const data = await request('/api/session');
@@ -139,7 +196,21 @@ bind('credential', async () => {
   const value = { name: $('credential-name').value, kind, username: $('credential-user').value, secret: $(kind === 'password' ? 'credential-password' : 'credential-key').value, passphrase: kind === 'ssh-key' ? $('credential-passphrase').value : '' };
   clearInputs(); await request('/api/credentials', 'POST', value); $('credential').reset(); await loadRecords(); notice('Şifrələnmiş qeyd saxlanıldı.');
 });
-bind('connection',async()=>{await request('/api/connections','POST',{name:$('connection-name').value,target:$('connection-target').value,credential:$('connection-credential').value});$('connection-name').value='';await loadConnections();notice('Bağlantı saxlanıldı.');});
+bind('connection', async () => {
+  const target = selectedTarget, fingerprint = $('connection-fingerprint').value; $('connection-fingerprint').value = '';
+  if (!target?.available || target.id !== $('connection-target').value || !catalog.has(target.id)) throw new Error('server review missing');
+  await request('/api/connections', 'POST', {name: $('connection-name').value, target: target.id, credential: $('connection-credential').value, fingerprint, approval: target.approval});
+  $('connection-name').value = ''; await loadConnections(); notice('Server kimliyi təsdiqləndi, bağlantı saxlanıldı.');
+});
+bind('trust-confirm', async () => {
+  const current = reviewing, fingerprint = $('trust-fingerprint').value; $('trust-fingerprint').value = '';
+  if (!current?.target.available) throw new Error('server review missing');
+  await request(`/api/connections/${current.record.id}/trust`, 'POST', {fingerprint, approval: current.target.approval, revision: current.record.revision});
+  closeReview(); await loadConnections(); notice('Server kimliyi yenidən təsdiqləndi. Bu bağlantının əvvəlki sessiyaları bağlandı.');
+});
+$('connection-target')?.addEventListener('change', () => { void chooseTarget().catch(error => notice(errorMessage(error))); });
+$('cancel-trust')?.addEventListener('click', closeReview);
+$('trust-dialog')?.addEventListener('close', closeReview);
 $('credential-kind')?.addEventListener('change', () => {
   clearInputs(); const key = $('credential-kind').value === 'ssh-key'; $('key-fields').hidden = !key; $('password-fields').hidden = key;
 });
@@ -164,7 +235,7 @@ $('hide-secret')?.addEventListener('click', hideSecret);
 $('secret-dialog')?.addEventListener('close', hideSecret);
 click('confirm-delete', async () => { const id = pendingDelete; pendingDelete = ''; $('delete-dialog').close(); if (!idOK(id)) return; await request(`/api/credentials/${id}`, 'DELETE', {}); hideSecret(); await loadRecords(); notice('Qeyd silindi.'); });
 $('cancel-delete')?.addEventListener('click', () => { pendingDelete = ''; $('delete-dialog').close(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { hideSecret(); clearInputs(); if ($('seed')) { $('seed').textContent = ''; $('seed-panel').hidden = true; } } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { hideSecret(); clearInputs(); closeReview(); if ($('seed')) { $('seed').textContent = ''; $('seed-panel').hidden = true; } } });
 window.addEventListener('pagehide', clearAll);
 window.addEventListener('pageshow', event => { if (event.persisted) { clearAll(); location.reload(); } });
 void run(async () => {

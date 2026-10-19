@@ -6,7 +6,10 @@ package remotefixture
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -48,7 +51,12 @@ func Run(t *testing.T, ctx context.Context, target identity.RemoteTarget, ssh id
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	server.StartTLS()
 	defer server.Close()
-	config, _ := json.Marshal(struct{ Origin, Code, Password, Mode, Secret, Target string }{server.URL, code, "Synthetic owned account password 73!", target.Protocol, secret, target.ID})
+	digest := sha256.Sum256(target.Identity)
+	fingerprint := "SHA256:" + hex.EncodeToString(digest[:])
+	if target.Protocol == "ssh" {
+		fingerprint = "SHA256:" + base64.RawStdEncoding.EncodeToString(digest[:])
+	}
+	config, _ := json.Marshal(struct{ Origin, Code, Password, Mode, Secret, Target, Fingerprint string }{server.URL, code, "Synthetic owned account password 73!", target.Protocol, secret, target.ID, fingerprint})
 	// Native CI executes its compiled test binary from the repository root;
 	// ordinary go test starts in the package directory. Pin the same driver
 	// to this build's source location instead of depending on either cwd.
