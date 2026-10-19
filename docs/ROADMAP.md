@@ -28,6 +28,9 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    Remote-resource ownership and revocation now connect the synthetic SSH/native
    RDP browser fixtures (`OWNED-REMOTE-LAB.md`). Installed isolated workers,
    operator configuration, restore/rotation and audited release remain gates.
+   The SSH process boundary now has an authenticated separate Unix manager for
+   an unprivileged gateway (`SSH-MANAGER-LAB.md`); installed service identities,
+   aggregate cgroups and the production RDP launcher remain gates.
 4. **Workspace:** Denyfirst UI, connections/search/favorites, terminal/RDP tabs,
    bounded clipboard behavior, reconnect states and accessible keyboard flows.
 5. **Self-host packaging:** Linux deployment, isolated workers and egress,

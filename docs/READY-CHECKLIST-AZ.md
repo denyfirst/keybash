@@ -32,6 +32,9 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
 5. **Production worker və sessiya idarəsi.** Login/ownership ilə bağlı launcher,
    ayrıca credential ötürmə, minimal filesystem/syscall siyasəti, hədəfə məhdud
    çıxış, aggregate resurs/session limitləri, idle/absolute vaxt və aktiv ləğv.
+   Ayrıca SSH prosesi və root olmayan gateway üçün authenticated manager
+   lab-ı əlavə olunub (`SSH-MANAGER-LAB.md`). Quraşdırılan xidmət, ayrıca worker
+   identity-si, aggregate cgroup və RDP manager inteqrasiyası qalır.
 6. **Self-host paket.** Linux quraşdırma, müştərinin HTTPS-i, publish edilməyən
    DB/guacd portları, lokal/offline asset-lər, versiyalı migration/yeniləmə,
    dependency/license/SBOM və məhdud metadata audit.

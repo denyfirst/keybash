@@ -1,5 +1,62 @@
 # Foundation verification
 
+## Separate SSH manager for an unprivileged gateway — 2026-10-19
+
+`SSH-MANAGER-LAB.md` records the new Unix seqpacket authority boundary. The
+gateway retains existing MFA/owner/target/pin authorization; root launches only
+its administrator-fixed worker using three passed descriptors. Neither keys
+nor terminal bytes enter the manager parser. No dependency version, custody
+CLI permission, real credential, installation, deployment or release changes.
+Main's previous CI/CodeQL repeats passed before this source slice.
+
+Local portable format/module/vet/shuffled-suite/build/staticcheck/gosec/
+govulncheck/actionlint passed. Linux process/browser-tagged cross-vet,
+cross-staticcheck, cross-gosec and test compilation passed. These compilation
+checks do not claim Linux execution on the Windows workstation. The required
+Linux gate runs real reduced-UID gateway subprocesses and the unchanged static
+worker; it additionally kills the separately compiled manager binary after
+actual SSH authentication. Existing owned-browser/native RDP/fuzz gates remain.
+
+Ordinary Linux tests observe seqpacket bounds, rights truncation, unexpected
+reply FDs, atomic CLOEXEC, kernel peer credentials and descriptor kinds. Root
+integration tests observe valid Unicode/resize/authentication, changed-pin
+refusal before authentication, wrong UID/primary GID/root refusal, pending and
+active lease capacity, returned capacity, malformed and repeated starts,
+five-second setup expiry, cancellation/reaping, graceful shutdown and abrupt
+manager loss. Negative setup results must return a plain nil stream and must
+not reach the target dial for untrusted manager paths.
+
+The Linux script compiles four new admission/descriptor mutations: accept wrong
+peers; reject the valid gateway; accept unsafe three-FD sets; reject valid sets.
+Each must fail its named assertion, not merely a timeout/build/setup failure.
+It compares restored sources byte-for-byte and reruns all manager/process tests.
+The previous two actual-child pin mutations and two sandbox-removal mutations
+also remain mandatory, with no retries or failure suppression.
+
+### Separate adversarial maintainer self-review
+
+Reviewed the completed implementation separately for socket ownership and
+ancestor replacement, UID versus group membership, authority in passed FDs,
+capability cleanup, concurrent exec inheritance, pending/active admission,
+timeout/cancellation races, false readiness, child/manager crash, normal EOF
+versus explicit revocation and root configuration versus browser input.
+
+Review changes: received rights use kernel MSG_CMSG_CLOEXEC instead of a racy
+post-receive fcntl; the fixed image is revalidated before each admission hello
+and target dial; only connected TCP and distinct oriented pipes are admitted;
+the child-creating OS thread stays locked through Wait because Linux parent-
+death signals follow that thread; completion is acknowledged after reaping,
+while unexpected control loss cancels buffered output. Shared Linux launcher
+setup is reused without moving SSH/secret parsing into the root manager.
+
+The dedicated gateway UID is trusted to enforce catalog/owner policy. Manager
+FD validation is not a second application-authorization check. Root remains
+trusted, and direct private pipes do not protect against malicious root.
+The laboratory's worker UID 65534, non-aggregate RLIMITs/runtime hints, lack of
+cgroups/service units/installer, operator trust UI and deployment policy remain
+explicit gates. This is maintainer self-review, not independent candidate audit.
+Porch and Rootwell remain untouched.
+
 ## SSH worker process boundary — 2026-10-16
 
 `SSH-PROCESS-LAB.md` records the privileged Linux/amd64 manager, static child,

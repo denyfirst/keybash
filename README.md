@@ -41,6 +41,9 @@ A separate Linux/amd64 SSH process laboratory now uses a hash-bound static
 child, private namespaces, restricted syscalls and one inherited guarded TCP
 connection. Its privileged test manager is not a root web service or installer.
 See [the SSH process boundary](docs/SSH-PROCESS-LAB.md) for limits and remaining gates.
+A separate authenticated Unix manager now launches that worker for an
+unprivileged gateway, without reading its session key or terminal stream.
+See [the manager boundary](docs/SSH-MANAGER-LAB.md); installation remains a gate.
 
 ## Start here
 

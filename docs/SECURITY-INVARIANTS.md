@@ -8,6 +8,9 @@ no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
+| Only the configured unprivileged gateway UID/primary GID can reserve a fixed root-managed SSH launch; root/wrong peers and excess leases refuse | Unix seqpacket, protected root socket, SO_PEERCRED and eight pending/active slots | `TestSSHManagerPacketsBoundRightsAndPeer`, `TestSSHManagerUnprivilegedGateway`, `TestSSHManagerRejectsWrongPeer`, `TestSSHManagerMalformedReplayAndQuota` |
+| Manager IPC accepts only a connected TCP descriptor and two distinct, correctly oriented pipes; keys bypass manager parsing | fixed three-FD packet, atomic CLOEXEC, truncation/type/direction checks | `TestSSHManagerDescriptorKinds`, `TestSSHManagerPacketsBoundRightsAndPeer`, `TestSSHManagerMalformedReplayAndQuota` |
+| Gateway revocation, repeated launch and manager shutdown/crash cannot retain an isolated SSH connection | one lease per control socket, process-group cancellation and reaped acknowledgement | `TestSSHManagerUnprivilegedGateway`, `TestSSHManagerShutdownRevokesGateway`, `TestSSHManagerCrashRevokesGateway`, `TestSSHManagerMalformedReplayAndQuota`, `TestSSHManagerRefusalIsNilBeforeDial` |
 | SSH worker IPC bounds allocation and rejects repeated startup; cancellation drops queued data while clean EOF drains it | typed binary frames, bounded queues and explicit lifetime checks | `TestWorkerFrameBoundsAndSchemas`, `TestSSHWorkerCoreUnexpectedInputCloses`, `TestProcessOutputDropsBufferedDataAfterRevocation`, `TestProcessOutputDrainsAfterCleanWorkerExit`, `FuzzSSHWorkerFrames` |
 | The separate SSH child verifies the actual connection's host pin before configured key authentication; revocation joins its managed process | fixed Linux sandbox, inherited guarded TCP descriptor and original SSH verification gate | `TestSSHWorkerCorePinInputResizeAndCancellation`, `TestSSHWorkerCoreChangedPinRefusesBeforeAuth`, `TestSSHProcessIsolatedAuthenticationAndRevocation`, `TestSSHProcessChangedPinNeverAuthenticates`, `TestSSHProcessRequiresConfiguredKeyAuthentication`, `TestSSHProcessOwnedBrowser` |
 | Invalid worker images cannot reach a target dial; session keys refuse malformed/closed material and redact formatting | root-controlled hash-bound static image and one-session key handoff | `TestSSHProcessImageAndPolicyRefuseBeforeDial`, `TestSessionKeyHandoffAndClose` |
@@ -148,8 +151,8 @@ SSH accepts Ed25519 host/user keys only, with a ten-second setup budget and
 parent-context session lifetime. The owned custody lab imports bounded OpenSSH
 keys and supplies MFA, ownership, session quotas, idle limits and revocation.
 The original library worker runs in process; `SSH-PROCESS-LAB.md` adds a separate
-constrained Linux/amd64 worker with a privileged laboratory manager. An installed
-manager for an unprivileged gateway, host-key trust UI, password/certificate
+constrained Linux/amd64 worker. `SSH-MANAGER-LAB.md` adds an authenticated separate
+root manager for an unprivileged gateway. An installed service, host-key trust UI, password/certificate
 SSH auth, aggregate cgroups and independent candidate review remain gates.
 Browser and real Bash evidence is confined to the laboratory; vim/tmux and the
 full browser/OS matrix remain unmeasured. Channel windows impose backpressure;
