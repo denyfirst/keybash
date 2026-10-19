@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 )
@@ -49,6 +50,26 @@ func (t *NamedTarget) Hostname() string {
 		return ""
 	}
 	return t.host
+}
+
+// Snapshot describes configured approval, never a DNS observation. Addresses
+// are canonical, sorted and copied; callers cannot change dialing authority.
+type Snapshot struct {
+	Hostname  string   `json:"hostname"`
+	Port      uint16   `json:"port"`
+	Addresses []string `json:"addresses"`
+}
+
+func (t *NamedTarget) Snapshot() Snapshot {
+	if t == nil {
+		return Snapshot{}
+	}
+	result := Snapshot{Hostname: t.host, Port: t.port, Addresses: make([]string, 0, len(t.pins))}
+	for address := range t.pins {
+		result.Addresses = append(result.Addresses, address.String())
+	}
+	slices.Sort(result.Addresses)
+	return result
 }
 
 // DialContext resolves exactly once per attempt and validates the whole answer

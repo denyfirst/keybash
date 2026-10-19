@@ -9,7 +9,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"net/http/httptest"
@@ -66,9 +68,9 @@ func runInteractiveDemo(t *testing.T, interactive bool) {
 	server.StartTLS()
 	defer server.Close()
 	config, err := json.Marshal(struct {
-		Origin, Code, Password, SSHSecret, RDPSecret, SSH, RDP string
-		Interactive                                            bool
-	}{server.URL, code, "Synthetic Keybash demo password 73!", string(pem.EncodeToMemory(block)), demoRemotePassword, terminal.ID, desktop.ID, interactive})
+		Origin, Code, Password, SSHSecret, RDPSecret, SSH, RDP, SSHFingerprint, RDPFingerprint string
+		Interactive                                                                            bool
+	}{server.URL, code, "Synthetic Keybash demo password 73!", string(pem.EncodeToMemory(block)), demoRemotePassword, terminal.ID, desktop.ID, ssh.FingerprintSHA256(signer.PublicKey()), demoCertificateFingerprint(desktop.Identity), interactive})
 	if err != nil {
 		t.Fatal("demo configuration failed")
 	}
@@ -82,6 +84,11 @@ func runInteractiveDemo(t *testing.T, interactive bool) {
 	if err = command.Run(); err != nil && !(interactive && ctx.Err() != nil) {
 		t.Fatal("interactive demo/browser check failed")
 	}
+}
+
+func demoCertificateFingerprint(der []byte) string {
+	sum := sha256.Sum256(der)
+	return "SHA256:" + hex.EncodeToString(sum[:])
 }
 
 func TestInteractiveDemo(t *testing.T) {

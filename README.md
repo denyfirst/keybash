@@ -44,6 +44,10 @@ See [the SSH process boundary](docs/SSH-PROCESS-LAB.md) for limits and remaining
 A separate authenticated Unix manager now launches that worker for an
 unprivileged gateway, without reading its session key or terminal stream.
 See [the manager boundary](docs/SSH-MANAGER-LAB.md); installation remains a gate.
+The owned lab now requires explicit server identity review with host/port/IP
+metadata and the full independently compared fingerprint. Changed or legacy
+decisions block launch until freshly reapproved by their owner; see
+[the server trust boundary](docs/SERVER-TRUST-LAB.md).
 
 ## Start here
 

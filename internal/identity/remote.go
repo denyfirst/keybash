@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,11 +28,6 @@ type RemoteTarget struct {
 	ID, Name, Protocol string
 	Target             *targetguard.NamedTarget
 	Identity           []byte // SSH wire public key or RDP approved leaf DER
-}
-
-func approvalFingerprint(t RemoteTarget) string {
-	digest := sha256.Sum256(append([]byte("keybash/approval/v1/"+t.ID+"/"+t.Protocol+"/"+t.Target.Hostname()+"/"), t.Identity...))
-	return hex.EncodeToString(digest[:])
 }
 
 // RDPWorker is a TRUSTED launcher boundary, not an extension/plugin surface.
@@ -157,7 +152,7 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 		return "", errRefused
 	}
 	t, ok := l.remote.targets[c.Target]
-	if !ok || c.Approval != approvalFingerprint(t) {
+	if !ok || !connectionTrusted(c, t, l.now()) {
 		return "", errRefused
 	}
 	credential, e := l.store.readCredential(s.owner, c.Credential)
@@ -203,7 +198,7 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
 	target, ok := l.remote.targets[c.Target]
-	if !ok || c.Approval != approvalFingerprint(target) {
+	if !ok || !connectionTrusted(c, target, l.now()) {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
 	credential, e := l.store.readCredential(s.owner, c.Credential)
@@ -403,7 +398,23 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		for _, t := range l.remote.targets {
 			items = append(items, summary{t.ID, t.Name, t.Protocol})
 		}
+		slices.SortFunc(items, func(a, b summary) int {
+			if order := strings.Compare(a.Name, b.Name); order != 0 {
+				return order
+			}
+			return strings.Compare(a.ID, b.ID)
+		})
 		result = items
+		return
+	}
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/targets/") {
+		record := strings.TrimPrefix(r.URL.Path, "/api/targets/")
+		target, ok := l.remote.targets[record]
+		if !validID(record) || !ok {
+			status = 404
+			return
+		}
+		result = describeTarget(target, l.now())
 		return
 	}
 	if r.Method == "GET" && r.URL.Path == "/api/connections" {
@@ -412,7 +423,11 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 503
 			return
 		}
-		result = items
+		rows := make([]connectionView, 0, len(items))
+		for _, item := range items {
+			rows = append(rows, describeConnection(item, l.remote.targets[item.Target], l.now()))
+		}
+		result = rows
 		return
 	}
 	if l.readyLocked(id, true) != s {
@@ -421,7 +436,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 	}
 	switch {
 	case r.Method == "POST" && r.URL.Path == "/api/connections":
-		fields, ok := readFields(w, r, 2048, "name", "target", "credential")
+		fields, ok := readFields(w, r, 2048, "name", "target", "credential", "fingerprint", "approval")
 		if !ok {
 			status = 400
 			return
@@ -432,12 +447,24 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 403
 			return
 		}
+		if !acceptTargetProof(target, fields["fingerprint"], fields["approval"], l.now()) {
+			status = 409
+			return
+		}
 		credential, e := l.store.readCredential(s.owner, fields["credential"])
 		if e != nil || !compatible(target, credential) {
 			status = 403
 			return
 		}
-		record, e := l.store.putConnection(s.owner, connection{Name: fields["name"], Target: fields["target"], Credential: fields["credential"], Approval: approvalFingerprint(target)})
+		if r.Context().Err() != nil {
+			status = 401
+			return
+		}
+		if !l.attemptLocked("trust:" + s.username) {
+			status = 429
+			return
+		}
+		record, e := l.store.putConnection(s.owner, connection{Name: fields["name"], Target: fields["target"], Credential: fields["credential"], Approval: approvalFingerprint(target), Fingerprint: fields["fingerprint"]})
 		if e != nil {
 			status = 400
 			return
@@ -445,6 +472,46 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		result = struct {
 			ID string `json:"id"`
 		}{record}
+	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/connections/") && strings.HasSuffix(r.URL.Path, "/trust"):
+		record := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/connections/"), "/trust")
+		fields, ok := readFields(w, r, 2048, "fingerprint", "approval", "revision")
+		if !ok || !validID(record) {
+			status = 400
+			return
+		}
+		defer clear(fields)
+		row, e := l.store.readConnection(s.owner, record)
+		if e != nil {
+			status = 404
+			return
+		}
+		target, ok := l.remote.targets[row.Target]
+		if !ok || !acceptTargetProof(target, fields["fingerprint"], fields["approval"], l.now()) {
+			status = 409
+			return
+		}
+		credential, e := l.store.readCredential(s.owner, row.Credential)
+		if e != nil || !compatible(target, credential) {
+			status = 403
+			return
+		}
+		if r.Context().Err() != nil {
+			status = 401
+			return
+		}
+		if fields["revision"] != strconv.FormatUint(row.Revision, 10) {
+			status = 409
+			return
+		}
+		if !l.attemptLocked("trust:" + s.username) {
+			status = 429
+			return
+		}
+		if l.store.trustConnection(s.owner, record, fields["revision"], fields["approval"], fields["fingerprint"]) != nil {
+			status = 409
+			return
+		}
+		l.revokeRemotesLocked(s.owner, record, "")
 	case r.Method == "POST" && r.URL.Path == "/api/remote/open":
 		fields, ok := readFields(w, r, 1024, "connection")
 		if !ok {

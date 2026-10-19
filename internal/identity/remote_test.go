@@ -106,7 +106,7 @@ func remoteFixture(t *testing.T, origin string) (*Lab, *Store, *custodyClient, s
 	if e != nil {
 		t.Fatal("fixture credential failed")
 	}
-	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic connection", "target": target.ID, "credential": credential}), 200)
+	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic connection", "target": target.ID, "credential": credential, "fingerprint": identityFingerprint(target), "approval": approvalFingerprint(target)}), 200)
 	var record struct{ ID string }
 	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
 		t.Fatal("connection creation failed")
@@ -309,7 +309,7 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	bob.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
 	bob.session("ready")
 	bob.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": codes[1]}), 204)
-	bob.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "other", "target": row.Target, "credential": row.Credential}), 403)
+	bob.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "other", "target": row.Target, "credential": row.Credential, "fingerprint": row.Fingerprint, "approval": row.Approval}), 403)
 	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
 	bob.expect("DELETE", "/api/connections/"+record, "{}", 404)
 	// An issued but unconsumed grant cannot retain a deleted credential.
@@ -342,7 +342,7 @@ func TestOwnedConnectionEnvelopePersistenceAndOwnerBinding(t *testing.T) {
 		t.Fatal("fixture credential refused")
 	}
 	name := "Synthetic private connection canary 73"
-	record, e := store.putConnection(a.ID, connection{Name: name, Target: strings.Repeat("a", 32), Credential: credential, Approval: strings.Repeat("b", 64)})
+	record, e := store.putConnection(a.ID, connection{Name: name, Target: strings.Repeat("a", 32), Credential: credential, Approval: strings.Repeat("b", 64), Fingerprint: identityFingerprint(remoteTargetFixture(t))})
 	if e != nil {
 		t.Fatal("valid connection refused")
 	}
