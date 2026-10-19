@@ -272,11 +272,14 @@ func TestSSHManagerGatewayChild(t *testing.T) {
 	// A second launch uses a different synthetic host/key; the manager must not
 	// retain the previous launch's parameters or turn a refusal into readiness.
 	f2 := newFixture(t, fixtureOptions{host: host, user: user})
-	s2, err := worker.open(context.Background(), "ssh.invalid", func(context.Context) (net.Conn, error) { return f2.client, nil }, syntheticSigner(t).PublicKey().Marshal(), "lab-user", user)
+	refusal, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	dialed := false
+	s2, err := worker.open(refusal, "ssh.invalid", func(context.Context) (net.Conn, error) { dialed = true; return f2.client, nil }, syntheticSigner(t).PublicKey().Marshal(), "lab-user", user)
 	if s2 != nil {
 		_ = s2.Close()
 	}
-	if err == nil || f2.auth.Load() != 0 {
+	if err == nil || f2.auth.Load() != 0 || !dialed || refusal.Err() != nil {
 		t.Fatal("manager changed pin reached authentication")
 	}
 }

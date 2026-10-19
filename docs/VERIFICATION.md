@@ -52,6 +52,9 @@ Reviewing the pinned Go sendmsg implementation also corrected the empty-packet
 fixture: Linux inserts a dummy data byte when Go sends only ancillary rights.
 The zero-length record test sends no rights; unexpected reply rights remain
 separately refused. Runtime launch still requires the exact fixed start string.
+Interrupted recvmsg calls retry immediately rather than waiting for a new poll
+edge. The gateway's changed-pin test requires actual dial and timely refusal,
+so capacity rejection or an expired context cannot masquerade as pin evidence.
 
 The dedicated gateway UID is trusted to enforce catalog/owner policy. Manager
 FD validation is not a second application-authorization check. Root remains

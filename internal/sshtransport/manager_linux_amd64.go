@@ -51,8 +51,12 @@ func recvManagerPacket(c *net.UnixConn) (string, []*os.File, error) {
 	var n, oobn, flags int
 	var readErr error
 	err = raw.Read(func(fd uintptr) bool {
-		n, oobn, flags, _, readErr = unix.Recvmsg(int(fd), data[:], oob, unix.MSG_CMSG_CLOEXEC)
-		return readErr != unix.EAGAIN && readErr != unix.EWOULDBLOCK && readErr != unix.EINTR
+		for {
+			n, oobn, flags, _, readErr = unix.Recvmsg(int(fd), data[:], oob, unix.MSG_CMSG_CLOEXEC)
+			if readErr != unix.EINTR {
+				return readErr != unix.EAGAIN && readErr != unix.EWOULDBLOCK
+			}
+		}
 	})
 	files := make([]*os.File, 0, 3)
 	messages, parseErr := unix.ParseSocketControlMessage(oob[:oobn])
