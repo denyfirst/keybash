@@ -3,8 +3,9 @@
 16 October 2026. This slice moves the SSH protocol engine into a static Linux/
 amd64 worker. It is a privileged **laboratory manager**, not a root web gateway,
 installer, production service or authorization for real credentials. The
-custody-only CLI stays unchanged. An authenticated manager for an unprivileged
-gateway, operator target/trust configuration and UI, packaging and independent
+custody-only CLI stays unchanged. A later source slice adds an authenticated
+manager for an unprivileged gateway: see `SSH-MANAGER-LAB.md`. Operator
+target/trust configuration and UI, packaging and independent
 candidate audit remain required. Porch and Rootwell are untouched.
 
 ## Admission and custody
@@ -77,12 +78,13 @@ Binary frames carry a one-byte type and a four-byte length checked before
 allocation. Startup is at most 1024 bytes, terminal input 32 KiB, resize eight
 bytes, and output chunks 8192 bytes. Only one startup is accepted; input and
 resize cannot change connection parameters. Two output queues per stream are
-bounded to two chunks each. The child and manager independently cap total
+bounded to two chunks each. The child and stream adapter independently cap total
 output to 16 MiB; the browser relay's existing 8 MiB ceiling remains stricter.
-There is no listener, arbitrary IPC peer or child-selected second connection.
+The child has no listener or child-selected second connection. The separate
+manager's authenticated Unix control listener is described in `SSH-MANAGER-LAB.md`.
 
 Setup is bounded to ten seconds; the child bounds initial startup to five.
-Close/owner cancellation closes private pipes, kills the managed process group
+Close/owner cancellation closes private pipes, kills the managed sandbox
 and waits at most two seconds for reaping. bwrap's parent-death/PID boundary
 also owns descendants. Normal worker EOF drains already received output;
 explicit cancellation refuses even buffered output. Remote background processes

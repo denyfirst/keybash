@@ -1,5 +1,12 @@
 # Keybash — cari vəziyyət
 
+19 oktyabr əlavəsi: root olmayan gateway üçün ayrıca SSH manager sərhədi
+qurulub. Unix socket-də konkret UID/GID yoxlanır; manager yalnız sabit,
+hash-lə təsdiqli worker-i başladır. Sessiyanın açarı və terminal axını
+gateway-dən birbaşa worker-ə gedir. Ayrı istifadəçi ilə SSH, yanlış peer,
+descriptor/replay/limit və shutdown sınaqları CI gate-inə əlavə olunub.
+Bu hələ quraşdırılan production xidməti deyil: `SSH-MANAGER-LAB.md`.
+
 16 oktyabr əlavəsi: SSH protokolunu ayrıca Linux/amd64 prosesində işlədən
 manager/worker sərhədi əlavə olunub. Şəxsi namespace-lər, məhdud syscall siyasəti,
 bir sessiyanın açarı və yalnız əvvəlcədən icazəli TCP descriptor-u istifadə edir.

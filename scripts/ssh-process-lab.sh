@@ -7,18 +7,22 @@ case "${lab}" in /tmp/keybash-ssh-process.*) ;; *) exit 1 ;; esac
 case "${build}" in /tmp/keybash-ssh-build.*) ;; *) exit 1 ;; esac
 cp internal/sshtransport/terminal.go "${build}/terminal.original"
 cp internal/sshtransport/process_linux_amd64.go "${build}/launcher.original"
+cp internal/sshtransport/manager_linux_amd64.go "${build}/manager.original"
 restore_sources() {
   cp "${build}/terminal.original" internal/sshtransport/terminal.go
   cp "${build}/launcher.original" internal/sshtransport/process_linux_amd64.go
   cmp "${build}/terminal.original" internal/sshtransport/terminal.go
   cmp "${build}/launcher.original" internal/sshtransport/process_linux_amd64.go
+  cp "${build}/manager.original" internal/sshtransport/manager_linux_amd64.go
+  cmp "${build}/manager.original" internal/sshtransport/manager_linux_amd64.go
 }
 trap 'restore_sources; sudo -n rm -rf -- "${lab}"; rm -rf -- "${build}"' EXIT
 CGO_ENABLED=0 go build -trimpath -o "${lab}/worker" ./cmd/keybash-ssh-worker
+CGO_ENABLED=0 go build -trimpath -o "${lab}/manager" ./cmd/keybash-ssh-manager
 go test -c -race -tags=sshprocesslab,browserlab -o "${lab}/lab.test" ./internal/sshtransport
-sudo -n chown root:root "${lab}" "${lab}/worker" "${lab}/lab.test"
+sudo -n chown root:root "${lab}" "${lab}/worker" "${lab}/manager" "${lab}/lab.test"
 sudo -n chmod 755 "${lab}"
-sudo -n chmod 555 "${lab}/worker" "${lab}/lab.test"
+sudo -n chmod 555 "${lab}/worker" "${lab}/manager" "${lab}/lab.test"
 node_bin="$(dirname "$(command -v node)")"
 run_manager() {
   sudo -n env -i PATH="${node_bin}:/usr/bin:/bin" PLAYWRIGHT_BROWSERS_PATH="${HOME}/.cache/ms-playwright" KEYBASH_SSH_WORKER="${lab}/worker" \
@@ -29,6 +33,59 @@ build_worker() {
   sudo -n install -o root -g root -m 555 "${build}/worker" "${lab}/worker"
 }
 run_manager lab.test '^TestSSHProcess'
+run_manager lab.test '^TestSSHManager'
+
+# Kernel-credential admission must accept only the configured nonroot gateway.
+# Both compiling mutations exercise actual manager + unprivileged subprocesses.
+for direction in bypass refuse; do
+  python3 - "${direction}" <<'PY'
+from pathlib import Path
+import sys
+p=Path('internal/sshtransport/manager_linux_amd64.go')
+s=p.read_text();old='err != nil || cred.Uid != config.GatewayUID || cred.Gid != config.GatewayGID'
+assert s.count(old)==1
+new='err != nil' if sys.argv[1]=='bypass' else 'true || '+old
+# Keep the peer value used in the bypass mutant without changing its behavior.
+if sys.argv[1]=='bypass': new='err != nil || cred.Uid == 4294967295'
+p.write_text(s.replace(old,new))
+PY
+  go test -c -race -tags=sshprocesslab,browserlab -o "${build}/mutant.test" ./internal/sshtransport
+  sudo -n install -o root -g root -m 555 "${build}/mutant.test" "${lab}/mutant.test"
+  pattern='^TestSSHManagerRejectsWrongPeer$'
+  assertion='wrong gateway peer accepted'
+  if test "${direction}" = refuse; then
+    pattern='^TestSSHManagerUnprivilegedGateway$'
+    assertion='valid unprivileged gateway refused'
+  fi
+  if run_manager mutant.test "${pattern}" > "${build}/manager-mutation.log" 2>&1; then
+    echo 'manager credential mutation escaped its intended assertion' >&2; exit 1
+  fi
+  grep -q "${assertion}" "${build}/manager-mutation.log"
+  echo "SSH manager ${direction} mutation failed its intended assertion"
+  restore_sources
+done
+
+for direction in bypass refuse; do
+  python3 - "${direction}" <<'PY'
+from pathlib import Path
+import sys
+p=Path('internal/sshtransport/manager_linux_amd64.go')
+s=p.read_text();old='tcp := int(files[0].Fd())'
+assert s.count(old)==1
+value='true' if sys.argv[1]=='bypass' else 'false'
+p.write_text(s.replace(old,'if len(files) == 3 { return '+value+' }; '+old))
+PY
+  go test -c -race -tags=sshprocesslab,browserlab -o "${build}/mutant.test" ./internal/sshtransport
+  sudo -n install -o root -g root -m 555 "${build}/mutant.test" "${lab}/mutant.test"
+  if run_manager mutant.test '^TestSSHManagerDescriptorKinds$' > "${build}/descriptor-mutation.log" 2>&1; then
+    echo 'manager descriptor mutation escaped its intended assertion' >&2; exit 1
+  fi
+  assertion='unsafe manager descriptors accepted'
+  if test "${direction}" = refuse; then assertion='valid manager descriptors refused'; fi
+  grep -q "${assertion}" "${build}/descriptor-mutation.log"
+  echo "SSH manager descriptor ${direction} mutation failed its intended assertion"
+  restore_sources
+done
 
 # Both host-pin directions are sabotaged in the ACTUAL child image. A failure
 # must contain its intended assertion, not a build, sandbox or timeout failure.
@@ -84,3 +141,4 @@ PY
   restore_sources
 done
 run_manager lab.test '^TestSSHProcess'
+run_manager lab.test '^TestSSHManager'

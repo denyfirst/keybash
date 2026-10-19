@@ -13,17 +13,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
 )
 
 // Root performs namespace setup only. The statically linked child drops to
-// real host UID/GID 65534 BEFORE reading any key/remote protocol. A separate
-// authenticated privileged manager for an unprivileged gateway is still a gate.
+// real host UID/GID 65534 BEFORE reading any key/remote protocol.
 func sandboxSSHArgs(parentNS string) []string {
 	return []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
 		"--hostname", "keybash-ssh-worker", "--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP",
@@ -38,8 +37,8 @@ func sandboxSSHArgs(parentNS string) []string {
 
 // cBPF is applied by bwrap before exec and inherited by every Go thread. It
 // denies new sockets, process clones and namespace/introspection APIs. exec
-// remains available for the initial static binary; the only executable visible
-// in the read-only root is /worker. This is not a syscall allowlist or cgroup.
+// remains available for setpriv and the initial static worker. These and the
+// fixed runtime libraries are read-only. This is not an allowlist or cgroup.
 func sshSeccomp() []byte {
 	f := []unix.SockFilter{
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 4},
@@ -184,6 +183,23 @@ func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string,
 		return nil, ErrProcess
 	}
 	defer childOutput.Close()
+	ctx, cancel, done, err := startSSHProcess(life, parentNS, transport, binary, filter, childInput, childOutput)
+	if err != nil {
+		_ = in.Close()
+		_ = out.Close()
+		return nil, ErrProcess
+	}
+	s := newProcessStream(ctx, cancel, in, out, done)
+	if finishProcessSetup(s, setup, host, pin, user, seed) != nil {
+		_ = s.Close()
+		return nil, ErrProcess
+	}
+	return s, nil
+}
+
+// startSSHProcess never reads the inherited pipes or transport. In manager
+// mode their endpoints belong to the unprivileged gateway, not root memory.
+func startSSHProcess(life context.Context, parentNS string, transport, binary, filter, childInput, childOutput *os.File) (context.Context, context.CancelFunc, <-chan struct{}, error) {
 	ctx, cancel := context.WithCancel(life)
 	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", sandboxSSHArgs(parentNS)...) // #nosec G204 -- fixed root-owned tool, fixed sandbox flags and inherited descriptors; no secret/browser command arguments.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
@@ -192,62 +208,38 @@ func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string,
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL, Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			// Signal only Go's owned process handle (pidfd on supported Linux).
+			// A raw negative PID could name an unrelated group after reuse.
+			// bwrap's die-with-parent/PID boundary owns the sandbox child.
 			return cmd.Process.Kill()
 		}
 		return nil
 	}
 	cmd.WaitDelay = time.Second
-	if cmd.Start() != nil {
+	done := make(chan struct{})
+	started := make(chan error, 1)
+	go func() {
+		// Linux parent-death signaling follows the creating OS thread. Keep
+		// that thread alive through Wait, even if the Go scheduler retires
+		// other idle threads in this long-running manager.
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		defer close(done)
+		if err := cmd.Start(); err != nil {
+			started <- err
+			return
+		}
+		started <- nil
+		_ = cmd.Wait()
+	}()
+	if <-started != nil {
 		cancel()
-		_ = in.Close()
-		_ = out.Close()
-		return nil, ErrProcess
+		return nil, nil, nil, ErrProcess
 	}
 	// Parent must not keep child pipe endpoints alive after exec.
 	_ = childInput.Close()
 	_ = childOutput.Close()
-	done := make(chan struct{})
-	s := &processStream{ctx: ctx, cancel: cancel, in: in, out: out, done: done}
-	s.stdout = processOutput{ctx: ctx, queue: make(chan []byte, 2)}
-	s.stderr = processOutput{ctx: ctx, queue: make(chan []byte, 2)}
-	context.AfterFunc(ctx, func() { _ = in.Close(); _ = out.Close() })
-	go func() {
-		_ = cmd.Wait()
-		close(done)
-	}()
-	ready := false
-	defer func() {
-		if !ready {
-			_ = s.Close()
-		}
-	}()
-	stopSetup := context.AfterFunc(setup, cancel)
-	defer stopSetup()
-	deadline, _ := setup.Deadline()
-	if out.SetReadDeadline(deadline) != nil || in.SetWriteDeadline(deadline) != nil {
-		return nil, ErrProcess
-	}
-	kind, hello, err := readWorkerFrame(out)
-	if err != nil || kind != frameHello || string(hello) != workerHello {
-		return nil, ErrProcess
-	}
-	start := ssh.Marshal(&workerStart{Version: 1, Host: host, User: user, Pin: pin, Seed: seed})
-	err = writeWorkerFrame(in, frameStart, start)
-	clear(start)
-	if err != nil {
-		return nil, ErrProcess
-	}
-	kind, data, err := readWorkerFrame(out)
-	if err != nil || kind != frameReady || len(data) != 0 || setup.Err() != nil || ctx.Err() != nil {
-		return nil, ErrProcess
-	}
-	if !stopSetup() || out.SetReadDeadline(time.Time{}) != nil || in.SetWriteDeadline(time.Time{}) != nil {
-		return nil, ErrProcess
-	}
-	go s.demux()
-	ready = true
-	return s, nil
+	return ctx, cancel, done, nil
 }
 
 func prepareSSHWorker(parentNS string) error {
