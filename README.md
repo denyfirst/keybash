@@ -35,7 +35,7 @@ admission, approval binding and account-wide logout revocation.
 A disposable interactive UI preview now opens sample terminal/desktop views
 through the normal MFA/owned-connection flow. These are simulations, not real
 Linux/Windows sessions; see the [local demo guide](docs/INTERACTIVE-DEMO-AZ.md).
-Installed isolated workers/operator configuration, RDP clipboard, deployment and an
+Installed isolated workers, RDP clipboard, deployment and an
 independently audited production release remain gates.
 A separate Linux/amd64 SSH process laboratory now uses a hash-bound static
 child, private namespaces, restricted syscalls and one inherited guarded TCP
@@ -48,6 +48,11 @@ The owned lab now requires explicit server identity review with host/port/IP
 metadata and the full independently compared fingerprint. Changed or legacy
 decisions block launch until freshly reapproved by their owner; see
 [the server trust boundary](docs/SERVER-TRUST-LAB.md).
+An offline root-owned JSON catalog now provisions guarded server approvals.
+`check-targets` validates it without network or database access; `serve-ssh-lab`
+connects an SSH-only catalog to the separate manager for a nonroot loopback
+gateway. See [operator configuration and its limits](docs/OPERATOR-CATALOG-LAB.md).
+Installed services and production RDP integration remain gates.
 
 ## Start here
 

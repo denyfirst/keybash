@@ -14,10 +14,15 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/denyfirst/keybash/internal/identity"
+	"github.com/denyfirst/keybash/internal/operatorconfig"
+	"github.com/denyfirst/keybash/internal/sshtransport"
 )
 
 func main() {
@@ -33,7 +38,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	command := args[0]
 	switch command {
-	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab":
+	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab":
 	default:
 		return refused
 	}
@@ -45,8 +50,39 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	cert := flags.String("tls-cert", "", "operator TLS certificate path")
 	tlsKey := flags.String("tls-key", "", "operator TLS private key path")
 	lost := flags.Bool("lost-mfa", false, "offline recovery also clears a lost factor")
-	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *data == "" || *key == "" || *lost && command != "account-recover" {
+	catalog := flags.String("config", "", "root-owned operator target catalog")
+	manager := flags.String("ssh-manager", "", "fixed root SSH manager socket")
+	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" {
 		return refused
+	}
+	var targets []identity.RemoteTarget
+	if command == "check-targets" {
+		validFlags := true
+		flags.Visit(func(f *flag.Flag) { validFlags = validFlags && f.Name == "config" })
+		if !validFlags || *catalog == "" {
+			return refused
+		}
+		var e error
+		targets, e = operatorconfig.Load(*catalog)
+		if e != nil {
+			return refused
+		}
+		_, e = fmt.Fprintf(output, "Target configuration valid (%d servers).\n", len(targets))
+		return e
+	}
+	if *data == "" || *key == "" || command != "serve-ssh-lab" && (*catalog != "" || *manager != "") {
+		return refused
+	}
+	if command == "serve-ssh-lab" {
+		if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" || os.Geteuid() <= 0 || os.Geteuid() == 65534 || os.Getegid() <= 0 ||
+			*catalog == "" || !filepath.IsAbs(*manager) || filepath.Clean(*manager) != *manager || len(*manager) > 100 {
+			return refused
+		}
+		var e error
+		targets, e = operatorconfig.Load(*catalog)
+		if e != nil || !sshOnly(targets) {
+			return refused
+		}
 	}
 	if command == "init" {
 		store, code, e := identity.InitializeFiles(*data, *key)
@@ -87,14 +123,19 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return store.CreateAccount(parts[0], parts[1])
 		}
 		return store.RecoverAccount(parts[0], parts[1], *lost)
-	case "serve-lab":
+	case "serve-lab", "serve-ssh-lab":
 		host, port, e := net.SplitHostPort(*address)
 		ip, pe := netip.ParseAddr(host)
 		if e != nil || pe != nil || !ip.Unmap().IsLoopback() || port == "0" || *cert == "" || *tlsKey == "" {
 			return refused
 		}
 		origin := "https://" + *address
-		lab, e := identity.NewPersistent(origin, store)
+		var lab *identity.Lab
+		if command == "serve-ssh-lab" {
+			lab, e = identity.NewRemoteLab(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, nil)
+		} else {
+			lab, e = identity.NewPersistent(origin, store)
+		}
 		if e != nil {
 			return refused
 		}
@@ -108,7 +149,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return refused
 		}
 		server := &http.Server{Handler: lab, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}}, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 10 * time.Second, MaxHeaderBytes: 8192}
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		done := make(chan struct{})
 		go func() {
@@ -129,4 +170,16 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return refused
 	}
 	return refused
+}
+
+func sshOnly(targets []identity.RemoteTarget) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		if target.Protocol != "ssh" {
+			return false
+		}
+	}
+	return true
 }

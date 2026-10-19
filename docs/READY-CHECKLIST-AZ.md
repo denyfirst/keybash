@@ -32,6 +32,8 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    Operatorun sabit server siyahısı üçün host/port/IP/fingerprint baxışı,
    owner təsdiqi və dəyişmiş/legacy qərarların bloklanması artıq lab-da var
    (`SERVER-TRUST-LAB.md`). Operator konfiqurasiyasının quraşdırılması qalır.
+   Root-a aid offline JSON catalog və SSH-only manager CLI inteqrasiyası
+   artıq var (`OPERATOR-CATALOG-LAB.md`); quraşdırılan xidmət/RDP launcher qalır.
 5. **Production worker və sessiya idarəsi.** Login/ownership ilə bağlı launcher,
    ayrıca credential ötürmə, minimal filesystem/syscall siyasəti, hədəfə məhdud
    çıxış, aggregate resurs/session limitləri, idle/absolute vaxt və aktiv ləğv.
