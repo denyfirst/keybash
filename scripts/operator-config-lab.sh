@@ -2,16 +2,18 @@
 # Root is confined to synthetic file/UID/CLI tests; this installs no service.
 set -eu
 lab="$(mktemp -d /tmp/keybash-operator-config.XXXXXX)"
+build="$(mktemp -d /tmp/keybash-operator-build.XXXXXX)"
 case "${lab}" in /tmp/keybash-operator-config.*) ;; *) exit 1 ;; esac
-cp internal/operatorconfig/catalog.go "${lab}/catalog.original"
-cp internal/operatorconfig/load_linux.go "${lab}/load.original"
+case "${build}" in /tmp/keybash-operator-build.*) ;; *) exit 1 ;; esac
+cp internal/operatorconfig/catalog.go "${build}/catalog.original"
+cp internal/operatorconfig/load_linux.go "${build}/load.original"
 restore_sources() {
-  cp "${lab}/catalog.original" internal/operatorconfig/catalog.go
-  cp "${lab}/load.original" internal/operatorconfig/load_linux.go
-  cmp "${lab}/catalog.original" internal/operatorconfig/catalog.go
-  cmp "${lab}/load.original" internal/operatorconfig/load_linux.go
+  cp "${build}/catalog.original" internal/operatorconfig/catalog.go
+  cp "${build}/load.original" internal/operatorconfig/load_linux.go
+  cmp "${build}/catalog.original" internal/operatorconfig/catalog.go
+  cmp "${build}/load.original" internal/operatorconfig/load_linux.go
 }
-trap 'restore_sources; sudo -n rm -rf -- "${lab}"' EXIT
+trap 'restore_sources; sudo -n rm -rf -- "${lab}"; rm -rf -- "${build}"' EXIT
 CGO_ENABLED=0 go build -trimpath -o "${lab}/keybash" ./cmd/keybash
 go test -c -race -o "${lab}/catalog.test" ./internal/operatorconfig
 go test -c -race -o "${lab}/cli.test" ./cmd/keybash
@@ -41,18 +43,18 @@ old, new = {
 assert s.count(old) == (2 if sys.argv[1] == 'symlink-bypass' else 1)
 p.write_text(s.replace(old, new))
 PY
-  go test -c -race -o "${lab}/mutant.test" ./internal/operatorconfig
-  sudo -n install -o root -g root -m 555 "${lab}/mutant.test" "${lab}/catalog.test"
-  if run_catalog > "${lab}/mutation.log" 2>&1; then
+  go test -c -race -o "${build}/mutant.test" ./internal/operatorconfig
+  sudo -n install -o root -g root -m 555 "${build}/mutant.test" "${lab}/catalog.test"
+  if run_catalog > "${build}/mutation.log" 2>&1; then
     echo 'operator file mutation escaped its assertion' >&2; exit 1
   fi
   assertion='unsafe catalog file accepted'
   if test "${mutation}" = file-owner-refuse; then assertion='valid root-owned catalog refused'; fi
-  grep -q "${assertion}" "${lab}/mutation.log"
+  grep -q "${assertion}" "${build}/mutation.log"
   echo "Operator ${mutation} mutation failed its intended assertion"
   restore_sources
 done
-go test -c -race -o "${lab}/restored.test" ./internal/operatorconfig
-sudo -n install -o root -g root -m 555 "${lab}/restored.test" "${lab}/catalog.test"
+go test -c -race -o "${build}/restored.test" ./internal/operatorconfig
+sudo -n install -o root -g root -m 555 "${build}/restored.test" "${lab}/catalog.test"
 run_catalog
 run_cli

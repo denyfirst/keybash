@@ -36,6 +36,13 @@ Existing actual SSH-process/manager/native RDP/browser gates remain required.
 The new CLI test does not dial the synthetic target or prove a complete real
 SSH session through that command; the existing manager/worker tests exercise
 those lower layers independently.
+The first CI attempt passed actual root-file, separate-UID reader and compiled
+CLI/MFA/SIGTERM checks, then exposed a helper build-path permission mistake:
+the runner tried to write a mutant into the protected root-owned executable
+directory. Builds/logs now use a separate runner-owned temporary directory;
+the protected directory stays non-writable. No failure was suppressed/retried
+as success. The CLI fixture also uses a current TOTP counter so a time-step
+boundary cannot age its first proof outside the permitted window.
 
 ### Separate adversarial maintainer self-review
 

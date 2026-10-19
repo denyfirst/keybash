@@ -177,7 +177,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	if json.Unmarshal(call("POST", "/api/mfa/enrollment", map[string]string{}, 200), &seed) != nil {
 		t.Fatal("fixture factor failed")
 	}
-	otp, err := totp.GenerateCode(seed.Secret, time.Now().Add(-30*time.Second))
+	otp, err := totp.GenerateCode(seed.Secret, time.Now())
 	if err != nil {
 		t.Fatal("fixture factor generation failed")
 	}
