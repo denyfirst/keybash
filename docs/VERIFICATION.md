@@ -67,8 +67,9 @@ the UI never prepopulates confirmation or exposes a changed connection link;
 late detail responses are tied to the selected ID/generation, action buttons
 remain disabled until the review is valid, and target lists/details stay bounded.
 Remote workspace checks take the session lock before reading trust/clock state.
-Full metadata is fetched per selected target so a 256-entry catalog with 16 IPv6
-pins per target cannot exceed the browser's existing bulk-response budget.
+Full metadata is fetched per selected target: the additional 16 possible IPv6
+pins per target stay out of the bulk catalog response. The browser's existing
+response byte ceiling remains unchanged.
 Valid trust writes also share a per-owner five/minute budget and the existing
 global attempt window; malformed/stale proofs cannot consume seals or revoke
 leases. Limited requests preserve revision and live sessions, and capacity
