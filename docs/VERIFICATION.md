@@ -48,6 +48,10 @@ the child-creating OS thread stays locked through Wait because Linux parent-
 death signals follow that thread; completion is acknowledged after reaping,
 while unexpected control loss cancels buffered output. Shared Linux launcher
 setup is reused without moving SSH/secret parsing into the root manager.
+Reviewing the pinned Go sendmsg implementation also corrected the empty-packet
+fixture: Linux inserts a dummy data byte when Go sends only ancillary rights.
+The zero-length record test sends no rights; unexpected reply rights remain
+separately refused. Runtime launch still requires the exact fixed start string.
 
 The dedicated gateway UID is trusted to enforce catalog/owner policy. Manager
 FD validation is not a second application-authorization check. Root remains

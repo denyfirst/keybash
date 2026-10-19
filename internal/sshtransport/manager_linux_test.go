@@ -67,7 +67,7 @@ func TestSSHManagerPacketsBoundRightsAndPeer(t *testing.T) {
 	for _, bad := range []struct {
 		data string
 		fds  []*os.File
-	}{{string(bytes.Repeat([]byte("x"), 65)), nil}, {managerStart, []*os.File{r, r, r, r, r}}, {"", []*os.File{r}}} {
+	}{{string(bytes.Repeat([]byte("x"), 65)), nil}, {managerStart, []*os.File{r, r, r, r, r}}, {"", nil}} {
 		if writeManagerPacket(a, bad.data, bad.fds...) != nil {
 			t.Fatal("malformed fixture send failed")
 		}
