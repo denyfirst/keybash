@@ -62,6 +62,9 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 			t.Fatal("refuse existing service fixture path")
 		}
 	}
+	if _, err := os.Lstat("/run/keybash-manager"); !os.IsNotExist(err) {
+		t.Fatal("refuse existing manager runtime directory")
+	}
 	for _, unit := range units {
 		if _, err := os.Lstat("/etc/systemd/system/" + unit); !os.IsNotExist(err) {
 			t.Fatal("refuse existing unit")
@@ -104,6 +107,7 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = command("/usr/bin/systemctl", "stop", "keybash-gateway.service", "keybash-ssh-manager.service", "keybash.slice")
+		_, _ = command("/usr/bin/systemctl", "reset-failed", "keybash-gateway.service", "keybash-ssh-manager.service")
 		for _, unit := range units {
 			_ = os.Remove("/etc/systemd/system/" + unit)
 		}
