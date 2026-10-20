@@ -83,7 +83,7 @@ Bubblewrap also needs NETLINK/NET_ADMIN to initialize loopback inside the new
 private network and MKNOD for its private `/dev`. Fresh internet socket families
 remain denied to the manager; the final worker still drops every capability
 and denies new sockets through its own seccomp policy before secret input.
-it and the host/root administrator remain trusted. The child keeps its separate
+The manager and host/root administrator remain trusted. The child keeps its separate
 empty network/filesystem/PID namespace and inherited authorized TCP stream.
 This does not turn a compromised root manager into an untrusted principal.
 

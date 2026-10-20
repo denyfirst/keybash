@@ -25,7 +25,7 @@ func TestServicePlanFiniteIdentityAndInjection(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(files["keybash-ssh-manager.service"], "PrivateNetwork=yes\nRestrictAddressFamilies=AF_UNIX AF_NETLINK\n") &&
+	if !strings.Contains(files["keybash-ssh-manager.service"], "PrivateNetwork=yes\n") ||
 		!strings.Contains(files["keybash-ssh-manager.service"], "RestrictAddressFamilies=AF_UNIX AF_NETLINK\n") {
 		t.Fatal("manager private setup address families changed")
 	}
