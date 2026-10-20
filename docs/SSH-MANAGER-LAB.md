@@ -1,5 +1,11 @@
 # Separate SSH launch manager
 
+Service update: `LINUX-SERVICE-LAB.md` adds explicit root-selected worker UID/GID
+flags (omitting both retains the 65534 lab default), a source systemd plan and
+aggregate kernel policy. Dedicated generated service identities cannot be
+selected through gateway IPC. The historical lab limits below still apply to
+standalone callers without those units.
+
 20 October update: finite slot capacity is now selected through the same
 root-owned `--config` catalog as the SSH gateway; omission keeps eight slots.
 See `SESSION-CAPACITY.md` for ranges, accounting, tests and remaining kernel

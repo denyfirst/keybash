@@ -137,7 +137,8 @@ func managerDirectory(path string) error {
 // gateway UID/GID may request a bounded number of fixed sandbox launches.
 func ServeSSHManager(ctx context.Context, config ManagerConfig) error {
 	capacity, valid := managerCapacity(config.MaxSessions)
-	if !valid || ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || config.GatewayUID == 0 || config.GatewayGID == 0 || config.GatewayUID == 65534 || managerDirectory(config.SocketPath) != nil {
+	uid, gid, identityOK := workerIdentity(config.Worker.UID, config.Worker.GID)
+	if !valid || !identityOK || ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || config.GatewayUID == 0 || config.GatewayGID == 0 || config.GatewayUID == uid || config.GatewayGID == gid || managerDirectory(config.SocketPath) != nil {
 		return ErrProcess
 	}
 	binary, err := openWorkerBinary(config.Worker)
@@ -247,7 +248,7 @@ func serveManagerLease(life context.Context, conn *net.UnixConn, w ProcessWorker
 	if err != nil {
 		return
 	}
-	_, kill, done, err := startSSHProcess(ctx, parentNS, files[0], binary, filter, files[1], files[2])
+	_, kill, done, err := startSSHProcess(ctx, parentNS, w, files[0], binary, filter, files[1], files[2])
 	if err != nil {
 		return
 	}

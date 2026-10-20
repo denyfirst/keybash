@@ -96,6 +96,9 @@ jobs:
       - name: Build and verify the isolated native RDP laboratory
         run: sh scripts/native-rdp-lab.sh
 
+      - name: Verify source service units and actual aggregate kernel limits
+        run: sh scripts/service-lab.sh
+
       - name: Vet, race-test and build
         run: |
           set -eu

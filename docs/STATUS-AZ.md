@@ -1,5 +1,11 @@
 # Keybash — cari vəziyyət
 
+20 oktyabr — Linux xidmət inteqrasiyası: ayrıca gateway/worker identity-si,
+systemd xidmətləri və ortaq CPU/RAM/pids sərhədi üçün offline source plan var.
+Başlanğıcda faktiki kernel sərhədi yoxlanır; uyğun deyilsə xidmət başlamır.
+Sintetik Linux CI quraşdırma/SSH/dayandırma və kernel limitlərini yoxlayır.
+Bu production quraşdırıcı/RDP xidməti deyil: `LINUX-SERVICE-LAB.md`.
+
 20 oktyabr — paralel bağlantı tutumu: operator JSON faylında ümumi və owner
 hədlərini seçir; eyni fayl gateway və SSH manager-ə verilir. Köhnə 8/2 dəyərləri
 başlanğıc profilidir. Tutum dolanda yeni bağlantı üçün aydın mesaj görünür,

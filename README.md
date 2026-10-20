@@ -56,6 +56,11 @@ Installed services and production RDP integration remain gates.
 Total/per-owner remote admission is now configurable in the protected operator
 catalog, including the separate SSH manager. Full capacity produces a clear
 busy state while existing connections continue; see [capacity policy](docs/SESSION-CAPACITY.md).
+An offline source systemd plan now supplies separate service identities and a
+checked common cgroup-v2 CPU/memory/pids boundary for the SSH path. Disposable
+Linux CI measures actual units, SSH, shutdown/restart and kernel enforcement;
+see [service integration and limits](docs/LINUX-SERVICE-LAB.md). A production
+installer, RDP service and public ingress remain gates.
 
 ## Start here
 

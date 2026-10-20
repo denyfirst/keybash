@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,8 +23,9 @@ import (
 )
 
 // Root performs namespace setup only. The statically linked child drops to
-// real host UID/GID 65534 BEFORE reading any key/remote protocol.
-func sandboxSSHArgs(parentNS string) []string {
+// the root-selected host identity BEFORE reading any key/remote protocol.
+func sandboxSSHArgs(parentNS string, uid, gid uint32) []string {
+	u, g := strconv.FormatUint(uint64(uid), 10), strconv.FormatUint(uint64(gid), 10)
 	return []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
 		"--hostname", "keybash-ssh-worker", "--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP",
 		"--clearenv", "--setenv", "GOMAXPROCS", "2", "--setenv", "GOMEMLIMIT", "64MiB", "--setenv", "GOTRACEBACK", "none",
@@ -32,7 +34,7 @@ func sandboxSSHArgs(parentNS string) []string {
 		"--ro-bind", "/usr/lib/x86_64-linux-gnu/libc.so.6", "/lib/x86_64-linux-gnu/libc.so.6",
 		"--ro-bind", "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", "/lib64/ld-linux-x86-64.so.2",
 		"--ro-bind", "/proc/self/fd/4", "/worker", "--proc", "/proc", "--dev", "/dev", "--remount-ro", "/", "--chdir", "/",
-		"--seccomp", "5", "--", "/setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "/worker", parentNS}
+		"--seccomp", "5", "--", "/setpriv", "--reuid=" + u, "--regid=" + g, "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "/worker", parentNS, u, g}
 }
 
 // cBPF is applied by bwrap before exec and inherited by every Go thread. It
@@ -91,7 +93,8 @@ func trustedRootPath(path string, executable bool) error {
 }
 
 func openWorkerBinary(w ProcessWorker) (*os.File, error) {
-	if w.Digest == [32]byte{} || trustedRootPath(w.Path, true) != nil || trustedRootPath("/usr/bin/bwrap", true) != nil || trustedRootPath("/usr/bin/setpriv", true) != nil {
+	_, _, identityOK := workerIdentity(w.UID, w.GID)
+	if !identityOK || w.Digest == [32]byte{} || trustedRootPath(w.Path, true) != nil || trustedRootPath("/usr/bin/bwrap", true) != nil || trustedRootPath("/usr/bin/setpriv", true) != nil {
 		return nil, ErrProcess
 	}
 	for _, path := range []string{"/usr/lib/x86_64-linux-gnu/libcap-ng.so.0", "/usr/lib/x86_64-linux-gnu/libc.so.6", "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"} {
@@ -183,7 +186,7 @@ func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string,
 		return nil, ErrProcess
 	}
 	defer childOutput.Close()
-	ctx, cancel, done, err := startSSHProcess(life, parentNS, transport, binary, filter, childInput, childOutput)
+	ctx, cancel, done, err := startSSHProcess(life, parentNS, w, transport, binary, filter, childInput, childOutput)
 	if err != nil {
 		_ = in.Close()
 		_ = out.Close()
@@ -199,9 +202,13 @@ func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string,
 
 // startSSHProcess never reads the inherited pipes or transport. In manager
 // mode their endpoints belong to the unprivileged gateway, not root memory.
-func startSSHProcess(life context.Context, parentNS string, transport, binary, filter, childInput, childOutput *os.File) (context.Context, context.CancelFunc, <-chan struct{}, error) {
+func startSSHProcess(life context.Context, parentNS string, w ProcessWorker, transport, binary, filter, childInput, childOutput *os.File) (context.Context, context.CancelFunc, <-chan struct{}, error) {
+	uid, gid, valid := workerIdentity(w.UID, w.GID)
+	if !valid {
+		return nil, nil, nil, ErrProcess
+	}
 	ctx, cancel := context.WithCancel(life)
-	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", sandboxSSHArgs(parentNS)...) // #nosec G204 -- fixed root-owned tool, fixed sandbox flags and inherited descriptors; no secret/browser command arguments.
+	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", sandboxSSHArgs(parentNS, uid, gid)...) // #nosec G204 -- fixed root-owned tool, fixed sandbox flags and inherited descriptors; no secret/browser command arguments.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
 	cmd.ExtraFiles = []*os.File{transport, binary, filter}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = childInput, childOutput, io.Discard
@@ -242,8 +249,9 @@ func startSSHProcess(life context.Context, parentNS string, transport, binary, f
 	return ctx, cancel, done, nil
 }
 
-func prepareSSHWorker(parentNS string) error {
-	if !strings.HasPrefix(parentNS, "net:[") || len(parentNS) > 64 {
+func prepareSSHWorker(parentNS string, uid, gid uint32) error {
+	_, _, valid := workerIdentity(uid, gid)
+	if !valid || uid == 0 || gid == 0 || !strings.HasPrefix(parentNS, "net:[") || len(parentNS) > 64 {
 		return ErrProcess
 	}
 	ns, err := os.Readlink("/proc/self/ns/net")
@@ -251,7 +259,7 @@ func prepareSSHWorker(parentNS string) error {
 		return ErrProcess
 	}
 	host, err := os.ReadFile("/proc/sys/kernel/hostname")
-	if err != nil || string(host) != "keybash-ssh-worker\n" || os.Getuid() != 65534 || os.Geteuid() != 65534 || os.Getgid() != 65534 || os.Getegid() != 65534 {
+	if err != nil || string(host) != "keybash-ssh-worker\n" || os.Getuid() != int(uid) || os.Geteuid() != int(uid) || os.Getgid() != int(gid) || os.Getegid() != int(gid) {
 		return ErrProcess
 	}
 	for _, path := range []string{"/etc", "/home", "/usr", "/run"} {
@@ -295,15 +303,15 @@ func prepareSSHWorker(parentNS string) error {
 		}
 	}
 	groups, err := os.Getgroups()
-	if err != nil || len(groups) != 0 || os.Getuid() != 65534 || os.Getgid() != 65534 {
+	if err != nil || len(groups) != 0 || os.Getuid() != int(uid) || os.Getgid() != int(gid) {
 		return ErrProcess
 	}
 	return nil
 }
 
 // RunProcessWorker refuses outside the exact sandbox before reading credentials.
-func RunProcessWorker(parentNS string, input io.ReadCloser, output io.WriteCloser) error {
-	if prepareSSHWorker(parentNS) != nil {
+func RunProcessWorker(parentNS string, uid, gid uint32, input io.ReadCloser, output io.WriteCloser) error {
+	if prepareSSHWorker(parentNS, uid, gid) != nil {
 		return ErrProcess
 	}
 	binary := os.NewFile(4, "worker-image")

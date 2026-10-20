@@ -1,5 +1,73 @@
 # Foundation verification
 
+## Source systemd services and aggregate kernel boundary — 2026-10-20
+
+`LINUX-SERVICE-LAB.md` records the exact layout, source-only plan, identities,
+finite profiles, startup guard, lifecycle, fixture scope and remaining gates.
+The offline plan has no install/start action or arbitrary command/path inputs.
+It refuses invalid identity/budget/digest settings and existing output. Its
+four fixed public files use rooted exclusive staging. The generated gateway
+has a dedicated UID/GID, no capabilities and private custody paths; its separate
+root manager has a private network, narrowed capabilities and hidden custody
+paths. An explicit different worker UID/GID is fixed at root startup, never
+gateway IPC, and checked inside the unchanged protocol sandbox before input.
+Both IDs omitted preserve legacy laboratory callers; partial pairs refuse.
+
+The shared slice applies aggregate CPU/memory/swap/pids policy to both units
+and inherited SSH descendants. ExecStartPre checks actual cgroup-v2 ancestry,
+controller values and named/numeric service identities before runtime startup.
+Missing, mismatched or unlimited kernel values refuse; root changes after
+startup are trusted, not continuously monitored. Kernel memory enforcement can
+end active sessions. It is deliberately not represented as a graceful busy
+response or availability guarantee. Defaults are not measured sizing advice.
+
+Portable tests cover accepted/refused profiles, command/directive injection,
+mandatory unit boundaries, numeric overflow/malformed/unlimited kernel files,
+wrong membership, swap bypass, outside-service refusal and dedicated/legacy
+worker identities. Six compiling local mutations were executed: accept/refuse
+service plans, bypass/refuse kernel validation, and accept/refuse worker IDs.
+Each failed its intended assertion; sources restored byte-for-byte and both
+affected packages reran successfully. Diagnostic logs are outside Git.
+Local format/module/vet/shuffled full suite/build/staticcheck/gosec/govulncheck/
+actionlint passed. Linux service-tagged cross-vet/staticcheck/gosec and test
+compilation passed. Actual kernel execution requires the Linux CI gate below;
+Windows cross-compilation is not execution evidence.
+
+The required service gate builds and installs generated synthetic units only
+on a disposable systemd/cgroup-v2 runner, refusing existing Keybash paths,
+accounts, IDs and loaded units. It verifies the actual plan CLI/overwrite
+refusal, systemd syntax, nonroot gateway trusted TLS, real synthetic SSH through
+the root manager's inherited TCP descriptor, live dedicated child UID and
+common cgroup, hidden custody key, stop/revocation/empty descendants and restart.
+Each changed parent limit must refuse startup without a manager socket. Fixed
+unprivileged probes require actual CPU throttling, pids rejection and OOM-kill
+counters. A compiled launcher mutation deliberately uses the old worker UID;
+the live-child identity assertion must fail, then sources/binaries restore and
+the entire service gate reruns. Existing SSH/native RDP/browser/race/fuzz,
+analysis and signature gates remain required with no bypass.
+
+### Separate adversarial maintainer self-review
+
+Reviewed offline template injection, staging overwrite/traversal, finite numeric
+ranges and arithmetic, UID/GID narrowing and collisions, partial/default identity
+semantics, root-only identity propagation, inherited descriptor/key separation,
+worker self-check ordering, fixed service paths, runtime socket cleanup, cgroup
+ancestry/inheritance, missing/unlimited controllers, supplementary groups,
+capability/read-only/private-network compatibility, shutdown ordering and OOM
+availability consequences. Go rooted staging replaces an unrestricted output
+file open flagged by analysis. Kernel event counters prevent treating ordinary
+probe failure or timeout as successful enforcement. The test cleanup uses its
+own bounded context and removes only fixture-owned paths/identities/overrides.
+
+No new dependency, browser authority, target/identity bypass, public listener,
+secret URL/environment/logging, production install, release, Porch or Rootwell
+change. Root/gateway/host remain trusted; manager CAP_SYS_ADMIN is still required
+for namespace setup. The worker's older shared-per-UID NPROC backstop remains,
+so the configured admission ceiling is not an active-workload guarantee. RDP
+service/clipboard, production ingress, packaged install/upgrade/restore,
+measured load/VM/browser matrix and independent exact-candidate audit remain.
+This is separate maintainer self-review, not an independent security audit.
+
 ## Configurable finite remote capacity — 2026-10-20
 
 `SESSION-CAPACITY.md` records the approved separation between operator-selected
