@@ -40,6 +40,9 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    Ayrıca SSH prosesi və root olmayan gateway üçün authenticated manager
    lab-ı əlavə olunub (`SSH-MANAGER-LAB.md`). Quraşdırılan xidmət, ayrıca worker
    identity-si, aggregate cgroup və RDP manager inteqrasiyası qalır.
+   Gateway və SSH manager üçün operatorun tənzimlədiyi paralel bağlantı
+   hədləri və dolu tutum mesajı var (`SESSION-CAPACITY.md`). CPU/RAM/pids
+   məhdudiyyətlərinin əməliyyat sistemində tətbiqi quraşdırma mərhələsinə aiddir.
 6. **Self-host paket.** Linux quraşdırma, müştərinin HTTPS-i, publish edilməyən
    DB/guacd portları, lokal/offline asset-lər, versiyalı migration/yeniləmə,
    dependency/license/SBOM və məhdud metadata audit.

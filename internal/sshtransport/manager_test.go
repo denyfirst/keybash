@@ -39,3 +39,17 @@ func TestSSHManagerRefusalIsNilBeforeDial(t *testing.T) {
 		t.Fatal("untrusted manager path reached dial")
 	}
 }
+
+func TestSSHManagerCapacityValidation(t *testing.T) {
+	for _, value := range []int{0, 1, 10, 128} {
+		got, valid := managerCapacity(value)
+		if !valid || got < 1 || value != 0 && got != value || value == 0 && got != 8 {
+			t.Fatal("valid manager capacity ignored or refused")
+		}
+	}
+	for _, value := range []int{-1, 129} {
+		if _, valid := managerCapacity(value); valid {
+			t.Fatal("unbounded manager capacity accepted")
+		}
+	}
+}

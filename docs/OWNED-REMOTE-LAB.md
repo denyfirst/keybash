@@ -1,5 +1,10 @@
 # Account-owned remote session laboratory
 
+20 October update: the owner/global lease and independent pre-proof socket
+budgets are now operator-configurable, defaulting to two/eight. Full capacity
+returns a fixed busy response without evicting live sessions. Details and
+remaining kernel resource gates are in `SESSION-CAPACITY.md`.
+
 15 October 2026. Identity, encrypted custody, connection records and the SSH/
 RDP browser transports now share an authorization boundary. This is still a
 synthetic loopback laboratory, not an installable remote gateway or audited

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
@@ -52,6 +53,7 @@ func (RDPRequest) Format(w fmt.State, _ rune) {
 }
 
 type remoteConfig struct {
+	limits  sessionlimits.Limits
 	sockets map[string]int
 	ssh     SSHWorker
 	targets map[string]RemoteTarget
@@ -71,10 +73,16 @@ type remoteLease struct {
 // Targets are immutable for this process; restart kills every pending/active
 // lease. Production isolation, operator configuration and audit remain gates.
 func NewRemoteLab(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker) (*Lab, error) {
-	if len(targets) == 0 || len(targets) > 256 {
+	return NewRemoteLabWithLimits(origin, store, targets, worker, rdp, sessionlimits.Default())
+}
+
+// NewRemoteLabWithLimits copies an administrator-selected immutable capacity.
+// Browser requests cannot change it; restart revokes old sessions and leases.
+func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, limits sessionlimits.Limits) (*Lab, error) {
+	if !limits.Valid() || len(targets) == 0 || len(targets) > 256 {
 		return nil, errRefused
 	}
-	config := &remoteConfig{targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease)}
+	config := &remoteConfig{limits: limits, targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease)}
 	for _, t := range targets {
 		if !validID(t.ID) || !label(t.Name, 160, false) || t.Target == nil || t.Target.Hostname() == "" || config.targets[t.ID].ID != "" {
 			return nil, errRefused
@@ -143,8 +151,11 @@ func compatible(t RemoteTarget, c Credential) bool {
 }
 func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	s := l.readyLocked(id, true)
-	if s == nil || l.remote == nil || !l.attemptLocked("remote:"+s.username) {
+	if s == nil || l.remote == nil {
 		return "", errRefused
+	}
+	if !l.attemptLocked("remote:" + s.username) {
+		return "", errLimited
 	}
 	l.sweepRemotesLocked()
 	c, e := l.store.readConnection(s.owner, record)
@@ -165,8 +176,8 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 			count++
 		}
 	}
-	if count >= 2 || len(l.remote.leases) >= 8 {
-		return "", errLimited
+	if count >= l.remote.limits.PerOwner || len(l.remote.leases) >= l.remote.limits.Total {
+		return "", errRemoteCapacity
 	}
 	raw, e := token()
 	if e != nil {
@@ -253,17 +264,12 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	l.mu.Lock()
 	s := l.readyLocked(id, true)
 	allowed := ok && s != nil && l.remote != nil
-	if allowed {
-		total := 0
-		for _, count := range l.remote.sockets {
-			total += count
-		}
-		allowed = l.remote.sockets[s.owner] < 2 && total < 8
-		if allowed {
-			l.remote.sockets[s.owner]++
-		}
-	}
+	capacityFull := allowed && !l.reserveRemoteSocketLocked(s.owner)
 	l.mu.Unlock()
+	if capacityFull {
+		remoteCapacityError(w)
+		return
+	}
 	if !allowed {
 		refuse(w, 403)
 		return
@@ -386,6 +392,10 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 	}()
 	if l.remote == nil {
 		status = 503
+		return
+	}
+	if r.Method == "GET" && r.URL.Path == "/api/remote/capacity" {
+		result = l.remote.limits // configured values only; no other owners' usage
 		return
 	}
 	if r.Method == "GET" && r.URL.Path == "/api/targets" {
@@ -522,6 +532,10 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		clear(fields)
 		if e != nil {
 			status = 401
+			if e == errRemoteCapacity {
+				markRemoteCapacity(w)
+				status = 503
+			}
 			if e == errLimited {
 				status = 429
 			}

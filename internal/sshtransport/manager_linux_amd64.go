@@ -20,7 +20,6 @@ const (
 	managerActive = "active/v1"
 	managerCancel = "cancel/v1"
 	managerDone   = "done/v1"
-	managerSlots  = 8
 )
 
 func peerCredentials(c *net.UnixConn) (*unix.Ucred, error) {
@@ -135,9 +134,10 @@ func managerDirectory(path string) error {
 
 // ServeSSHManager has no TCP listener, browser API, vault access, dial, key
 // parser, command selection or caller-selected image. The exact authorized
-// gateway UID/GID may request eight fixed sandbox launches using passed FDs.
+// gateway UID/GID may request a bounded number of fixed sandbox launches.
 func ServeSSHManager(ctx context.Context, config ManagerConfig) error {
-	if ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || config.GatewayUID == 0 || config.GatewayGID == 0 || config.GatewayUID == 65534 || managerDirectory(config.SocketPath) != nil {
+	capacity, valid := managerCapacity(config.MaxSessions)
+	if !valid || ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || config.GatewayUID == 0 || config.GatewayGID == 0 || config.GatewayUID == 65534 || managerDirectory(config.SocketPath) != nil {
 		return ErrProcess
 	}
 	binary, err := openWorkerBinary(config.Worker)
@@ -161,7 +161,7 @@ func ServeSSHManager(ctx context.Context, config ManagerConfig) error {
 	var workers sync.WaitGroup
 	defer workers.Wait()
 	defer cancel() // cancel active leases before waiting, including accept errors.
-	slots := make(chan struct{}, managerSlots)
+	slots := make(chan struct{}, capacity)
 	for {
 		conn, err := listener.AcceptUnix()
 		if err != nil {

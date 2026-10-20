@@ -7,7 +7,9 @@ listener, DNS lookup, target TCP stream or worker. No dependency changes.
 
 ## Schema and authority
 
-Version 1 requires exactly `version`, `protected_networks`, and `targets`.
+Version 1 requires `version`, `protected_networks`, and `targets`. The optional
+strict `capacity` member selects finite total/per-owner admission; omission
+keeps defaults. See `SESSION-CAPACITY.md` for schema, gates and limits.
 The complete file is at most 256 KiB. There are 1–64 canonical protected CIDRs,
 1–256 targets and 1–16 canonical IP pins per target. Duplicate IDs, CIDRs and
 IPs refuse. A bad entry refuses the whole snapshot, with a fixed error and
@@ -76,8 +78,8 @@ empty/oversized file or changed size/mtime/ctime snapshot is accepted.
 Nonblocking open prevents a FIFO from hanging the loader. The unprivileged
 gateway can read public metadata but cannot change the root-owned catalog.
 
-`Parse` is a portable internal validator, not a file-authority API. Runtime
-commands always use the checked `Load` path. Neither the browser nor a stored
+`ParseCatalog` is a portable internal validator, not a file-authority API. Runtime
+commands use the checked `LoadCatalog` path. Neither the browser nor a stored
 connection can call it or replace a running catalog. Restart is required;
 existing in-memory sessions/leases die and stored owner decisions are checked
 against the new host/port/IP/key snapshot before reuse.

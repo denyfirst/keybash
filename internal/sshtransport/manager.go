@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
@@ -17,6 +18,16 @@ type ManagerConfig struct {
 	SocketPath             string
 	Worker                 ProcessWorker
 	GatewayUID, GatewayGID uint32
+	MaxSessions            int // zero selects the legacy default; never unlimited
+}
+
+const managerSlots = sessionlimits.DefaultTotal
+
+func managerCapacity(value int) (int, bool) {
+	if value == 0 {
+		value = managerSlots
+	}
+	return value, value >= 1 && value <= sessionlimits.MaxTotal
 }
 
 // ManagerWorker uses a separate privileged launcher. The gateway remains an

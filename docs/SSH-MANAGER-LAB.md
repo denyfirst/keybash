@@ -1,7 +1,12 @@
 # Separate SSH launch manager
 
+20 October update: finite slot capacity is now selected through the same
+root-owned `--config` catalog as the SSH gateway; omission keeps eight slots.
+See `SESSION-CAPACITY.md` for ranges, accounting, tests and remaining kernel
+resource/service gates. Session private keys still bypass manager parsing.
+
 19 October 2026. Source-only Linux/amd64 laboratory boundary. The custody CLI
-still has no operator target catalog/remote-access enable flag. No installer,
+now has a separate operator-catalog SSH integration flag (`OPERATOR-CATALOG-LAB.md`). No installer,
 production service, real credential, image or release is introduced.
 
 ## Authority and data flow
@@ -22,7 +27,7 @@ The gateway verifies the root-owned socket and the manager's kernel UID before
 dialing the target or handing off descriptors. UID 65534 is reserved for the
 existing sandbox worker and cannot run the gateway.
 
-The authenticated manager hello reserves one of eight pending/active slots.
+The authenticated manager hello reserves a configured pending/active slot (default eight).
 The gateway uses `NamedTarget.DialContext` and transfers exactly three FDs in
 one fixed `start/v1` packet: the already connected internet TCP stream, the
 worker input pipe's read end, and its distinct output pipe's write end. Kernel
@@ -43,7 +48,7 @@ process launch only; application readiness still requires successful SSH
 authentication, PTY and shell admission.
 
 The gateway UID is trusted to enforce target/owner/custody policy. A compromise
-of that UID can request up to eight launches using its own connected TCP FDs;
+of that UID can request the configured number of launches using its own connected TCP FDs;
 the manager does not independently reconstruct DNS/catalog authorization.
 It never grants the UID a root network dial or arbitrary exec. FD possession
 is a capability, not proof of application ownership. Root/host administration
@@ -67,7 +72,7 @@ Linux, rather than issuing a raw process-group signal against a reusable PID.
 The fixed bwrap parent-death/PID boundary closes the inner worker.
 
 There is no hard aggregate memory guarantee or kernel-uninterruptible-task kill
-guarantee. Eight slots bound accepted goroutines/children; the OS's socket
+guarantee. Configured finite slots bound accepted goroutines/children; the OS's socket
 backlog and host resource policy remain outside this bound. Dedicated installed
 worker identity (the laboratory still uses shared UID/GID 65534), aggregate
 cgroups, restrictive service units, package/runtime dependency delivery,

@@ -118,6 +118,7 @@ jobs:
           go test -tags=browserlab -race -run='^TestBrowserDurableCustody$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserOwnedRemotePortable$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserServerTrustWorkflow$' -timeout=2m ./internal/identity
+          go test -tags=browserlab -race -run='^TestBrowserCapacityWorkflow$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestDemoInputBoundary$|^TestDemoWorkerCancellation$|^TestInteractiveDemoBrowser$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
           go test -tags=browserlab -race -run='^TestBrowserOwnedSSHConnectionAndLogout$' -timeout=2m ./internal/sshtransport

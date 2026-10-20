@@ -6,11 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -21,7 +23,7 @@ import (
 
 const gatewayFixtureUID = 65533
 
-func startManagerFixture(t *testing.T) (ManagerConfig, context.CancelFunc, <-chan error) {
+func startManagerFixture(t *testing.T, capacity ...int) (ManagerConfig, context.CancelFunc, <-chan error) {
 	t.Helper()
 	w := processFixtureManager(t)
 	dir, err := os.MkdirTemp(filepath.Dir(w.Path), "manager-")
@@ -30,6 +32,9 @@ func startManagerFixture(t *testing.T) (ManagerConfig, context.CancelFunc, <-cha
 	}
 	t.Cleanup(func() { _ = os.Remove(dir) })
 	config := ManagerConfig{SocketPath: filepath.Join(dir, "control.sock"), Worker: w, GatewayUID: gatewayFixtureUID, GatewayGID: gatewayFixtureUID}
+	if len(capacity) > 0 {
+		config.MaxSessions = capacity[0]
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- ServeSSHManager(ctx, config) }()
@@ -61,6 +66,8 @@ func runGatewayFixture(t *testing.T, config ManagerConfig, mode string, uid, gid
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSSHManagerGatewayChild$", "-test.timeout=30s", "-test.v") // #nosec G204 -- fixed test executable and test-only environment, no command from IPC.
 	cmd.Dir = filepath.Dir(config.Worker.Path)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGER_FIXTURE=" + config.SocketPath, "KEYBASH_MANAGER_MODE=" + mode}
+	limit, _ := managerCapacity(config.MaxSessions)
+	cmd.Env = append(cmd.Env, "KEYBASH_MANAGER_CAPACITY="+strconv.Itoa(limit))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: gid, Groups: []uint32{gatewayFixtureUID}}}
 	if data, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("unprivileged gateway fixture failed (%s): %s", mode, data)
@@ -73,6 +80,49 @@ func TestSSHManagerUnprivilegedGateway(t *testing.T) {
 		t.Fatal("second manager replaced a live socket")
 	}
 	runGatewayFixture(t, config, "positive", gatewayFixtureUID, gatewayFixtureUID)
+}
+
+func TestSSHManagerConfiguredCapacity(t *testing.T) {
+	for _, limit := range []int{10, 1} {
+		t.Run(strconv.Itoa(limit), func(t *testing.T) {
+			config, _, _ := startManagerFixture(t, limit)
+			runGatewayFixture(t, config, "capacity", gatewayFixtureUID, gatewayFixtureUID)
+		})
+	}
+}
+
+func TestSSHManagerCLIConfiguredCapacity(t *testing.T) {
+	w := processFixtureManager(t)
+	dir, err := os.MkdirTemp(filepath.Dir(w.Path), "capacity-")
+	if err != nil || os.Chmod(dir, 0755) != nil {
+		t.Fatal("configured manager directory failed")
+	}
+	config := ManagerConfig{SocketPath: filepath.Join(dir, "control.sock"), Worker: w, GatewayUID: gatewayFixtureUID, GatewayGID: gatewayFixtureUID, MaxSessions: 10}
+	catalog, _ := json.Marshal(map[string]any{"version": 1, "capacity": map[string]int{"total": 10, "per_owner": 3}, "protected_networks": []string{"10.99.0.0/16"}, "targets": []any{
+		map[string]any{"id": strings.Repeat("a", 32), "name": "Synthetic SSH", "protocol": "ssh", "hostname": "ssh.invalid", "port": 22, "addresses": []string{"10.44.0.8"}, "ssh_host_key": strings.TrimSpace(string(ssh.MarshalAuthorizedKey(syntheticSigner(t).PublicKey())))}}})
+	path := filepath.Join(dir, "targets.json")
+	if os.WriteFile(path, catalog, 0644) != nil {
+		t.Fatal("configured manager catalog failed")
+	} // #nosec G306 -- public root-owned synthetic metadata.
+	t.Cleanup(func() { _ = os.Remove(path); _ = os.Remove(config.SocketPath); _ = os.Remove(dir) })
+	manager := exec.Command(filepath.Join(filepath.Dir(w.Path), "manager"), "-socket", config.SocketPath, "-worker", w.Path, "-worker-sha256", hex.EncodeToString(w.Digest[:]), "-gateway-uid", "65533", "-gateway-gid", "65533", "-config", path) // #nosec G204 -- fixed root-owned CI binary and synthetic operator paths.
+	manager.Env = []string{"PATH=/usr/bin:/bin"}
+	if manager.Start() != nil {
+		t.Fatal("configured manager CLI failed to start")
+	}
+	defer func() { _ = manager.Process.Kill(); _ = manager.Wait() }()
+	ready := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		if info, err := os.Stat(config.SocketPath); err == nil && info.Mode().Perm() == 0660 {
+			ready = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("configured manager CLI did not become ready")
+	}
+	runGatewayFixture(t, config, "capacity", gatewayFixtureUID, gatewayFixtureUID)
 }
 
 func TestSSHManagerRejectsWrongPeer(t *testing.T) {
@@ -241,17 +291,25 @@ func TestSSHManagerGatewayChild(t *testing.T) {
 		}
 		return
 	}
-	holders := make([]*net.UnixConn, 0, managerSlots-1)
-	for range managerSlots - 1 {
+	limit := managerSlots
+	if mode == "capacity" {
+		var err error
+		limit, err = strconv.Atoi(os.Getenv("KEYBASH_MANAGER_CAPACITY"))
+		if err != nil || limit < 1 {
+			t.Fatal("capacity fixture missing")
+		}
+	}
+	holders := make([]*net.UnixConn, 0, limit-1)
+	for range limit - 1 {
 		conn := dialManagerFixture(t, path)
 		if expectManagerPacket(conn, managerHello) != nil {
-			t.Fatal("active manager quota refused within capacity")
+			t.Fatal("configured manager refused within capacity")
 		}
 		holders = append(holders, conn)
 	}
 	excess := dialManagerFixture(t, path)
 	if expectManagerPacket(excess, managerHello) == nil {
-		t.Fatal("active manager lease did not count against quota")
+		t.Fatal("configured manager overflowed capacity")
 	}
 	for _, conn := range holders {
 		_ = conn.Close()
@@ -268,6 +326,18 @@ func TestSSHManagerGatewayChild(t *testing.T) {
 	}
 	if n, err := s.Read(got); n != 0 || err == nil {
 		t.Fatal("revoked manager output remained readable")
+	}
+	if mode == "capacity" {
+		for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+			conn := dialManagerFixture(t, path)
+			err := expectManagerPacket(conn, managerHello)
+			_ = conn.Close()
+			if err == nil {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatal("configured manager capacity did not return")
 	}
 	// A second launch uses a different synthetic host/key; the manager must not
 	// retain the previous launch's parameters or turn a refusal into readiness.

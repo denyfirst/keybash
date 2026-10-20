@@ -41,6 +41,9 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    A root-owned offline target catalog and explicit nonroot SSH-only loopback
    CLI now bind operator policy to the manager (`OPERATOR-CATALOG-LAB.md`).
    Installed service identities/units and production RDP integration remain.
+   Remote admission now has immutable operator total/per-owner capacity and
+   matching SSH manager slots (`SESSION-CAPACITY.md`); kernel CPU/RAM/pids and
+   measured host sizing remain part of service integration.
 6. **Candidate and release:** load/browser matrix, independent security review,
    findings resolution, protected signed tags, separated build/sign/reproduce
    path, and a separately authorized public release.

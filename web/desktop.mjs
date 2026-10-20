@@ -1,5 +1,5 @@
 import { Guacamole } from './vendor/guacamole.mjs';
-import { ownedRemote, remoteProof } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
@@ -119,4 +119,4 @@ window.addEventListener('resize', fit);
 document.addEventListener('fullscreenchange', fit);
 window.addEventListener('pagehide', ()=>{retired=true;end();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
-if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired){stopped=false;begin(proof);}}).catch(()=>{$('notice').textContent='Qoşulma rədd edildi. Hesab səhifəsində təkrar doğrula.';});}
+if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired){stopped=false;begin(proof);}}).catch(error=>{$('notice').textContent=remoteErrorMessage(error);});}

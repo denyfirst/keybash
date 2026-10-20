@@ -1,5 +1,71 @@
 # Foundation verification
 
+## Configurable finite remote capacity — 2026-10-20
+
+`SESSION-CAPACITY.md` records the approved separation between operator-selected
+parallelism and invariant parser/transport/resource safety controls. Capacity
+is not a licensing tier. The existing root-owned catalog optionally contains
+strict total/per-owner integers; a single runtime Catalog carries both targets
+and capacity, so the latter cannot disappear through a target-only loader.
+Existing catalogs/default lab callers retain 8/2. Explicit zero/null/unlimited,
+invalid relationships, malformed/duplicate/unknown/coerced/overflow fields refuse.
+
+The immutable validated policy is applied at pending/active lease admission,
+independent pre-proof socket admission and separate SSH manager slots. Comparisons
+and state changes use the original mutex/channel boundaries; no browser setter
+exists. Fixed authenticated busy responses disclose no other owner's usage,
+preserve live sessions and return capacity on existing cleanup paths. The
+entry UI distinguishes full capacity from proof failure and rate budgets.
+The same root-owned file is supplied to both CLIs and restart is required;
+there is no cross-process live capacity negotiation. A smaller manager remains
+an independent conservative backstop.
+
+Portable tests cover defaults/custom/range boundaries, malformed settings,
+invalid constructors, copied policy, three owners exceeding the old owner/global
+constants, concurrency, pending expiry, logout, pre-proof socket refusal/return,
+unchanged active leases and browser override refusal. The real Edge workflow
+observes a blocked second connection, its named busy message, continued terminal
+input/output and exactly one worker. The compiled Linux gateway gate now checks
+configured 16/4 metadata after MFA. Linux manager gates use one actual SSH worker
+plus pending reservations at capacities 1 and 10, and a separately compiled
+manager CLI configured at ten; this is not a ten-active-worker benchmark.
+
+Compiling local mutations must fail named assertions for accepting invalid
+limits, refusing valid limits, ignoring catalog/gateway capacity, bypassing
+owner/global lease caps, and accepting/refusing pre-proof sockets. A UI mutation
+must fail its busy-message assertion. The required Linux gate mutates manager
+overflow, use of the old default, and standalone CLI config propagation; original
+sources/binaries are restored and affected gates rerun. Existing root provenance,
+actual SSH/native RDP/browser/race/fuzz/signature/analysis gates stay required.
+All eight local Go mutations and the UI mutation were executed, failed their
+intended assertions, restored byte-for-byte and rerun successfully. Logs stay
+outside Git. Final local format/module/vet/shuffled suite/build/staticcheck/
+gosec/govulncheck/actionlint passed; Linux tagged cross-vet/staticcheck/gosec
+and test compilation passed. The updated catalog fuzz run completed exactly
+two million executions. Edge capacity and interactive SSH/RDP demo checks
+passed. Actual Linux root/worker/mutation execution remains required CI evidence.
+
+### Separate adversarial maintainer self-review
+
+Reviewed operator provenance, optional-vs-malformed semantics, coherent snapshot
+loading, integer bounds, immutable policy, independent lease/socket accounting,
+counter release, concurrent admission, owner/CSRF/MFA boundaries, expired pending
+leases, active-session preservation, manager pending/active slot lifetime and
+root startup catalog parsing, both CLI propagation paths and fixed UI messages.
+
+Findings shaped the code: runtime APIs return targets/capacity together; browser
+payloads cannot override policy; zero means refusal in explicit JSON, not no cap;
+attempt exhaustion remains HTTP 429 and capacity has a separate fixed 503 marker;
+manager completion tests allow its conservative acknowledgement/release ordering
+while measuring bounded capacity return. No new arbitrary exec, target/network
+approval, secret URL/storage/logging, dependency or Porch/Rootwell change.
+
+128 is an implementation admission ceiling, not a measured hardware promise.
+Root/host/gateway remain trusted. Aggregate kernel CPU/RAM/pids enforcement,
+installed service identities/units, production RDP/clipboard, load/VM/browser
+profiles, recovery/release tooling and independent exact-candidate audit remain
+gates. This is maintainer self-review, not an independent audit or a deployment.
+
 ## Offline operator catalog and SSH CLI — 2026-10-19
 
 `OPERATOR-CATALOG-LAB.md` records the new administrator file boundary and the

@@ -8,6 +8,7 @@ case "${build}" in /tmp/keybash-ssh-build.*) ;; *) exit 1 ;; esac
 cp internal/sshtransport/terminal.go "${build}/terminal.original"
 cp internal/sshtransport/process_linux_amd64.go "${build}/launcher.original"
 cp internal/sshtransport/manager_linux_amd64.go "${build}/manager.original"
+cp cmd/keybash-ssh-manager/main.go "${build}/manager-cli.original"
 restore_sources() {
   cp "${build}/terminal.original" internal/sshtransport/terminal.go
   cp "${build}/launcher.original" internal/sshtransport/process_linux_amd64.go
@@ -15,6 +16,8 @@ restore_sources() {
   cmp "${build}/launcher.original" internal/sshtransport/process_linux_amd64.go
   cp "${build}/manager.original" internal/sshtransport/manager_linux_amd64.go
   cmp "${build}/manager.original" internal/sshtransport/manager_linux_amd64.go
+  cp "${build}/manager-cli.original" cmd/keybash-ssh-manager/main.go
+  cmp "${build}/manager-cli.original" cmd/keybash-ssh-manager/main.go
 }
 trap 'restore_sources; sudo -n rm -rf -- "${lab}"; rm -rf -- "${build}"' EXIT
 CGO_ENABLED=0 go build -trimpath -o "${lab}/worker" ./cmd/keybash-ssh-worker
@@ -32,8 +35,51 @@ build_worker() {
   CGO_ENABLED=0 go build -trimpath -o "${build}/worker" ./cmd/keybash-ssh-worker
   sudo -n install -o root -g root -m 555 "${build}/worker" "${lab}/worker"
 }
+build_manager() {
+  CGO_ENABLED=0 go build -trimpath -o "${build}/manager" ./cmd/keybash-ssh-manager
+  sudo -n install -o root -g root -m 555 "${build}/manager" "${lab}/manager"
+}
 run_manager lab.test '^TestSSHProcess'
 run_manager lab.test '^TestSSHManager'
+
+# Configured capacity must replace the old constant in both the library and
+# the standalone manager. Overflow and default-only regressions must be caught.
+for mutation in overflow default; do
+  python3 - "${mutation}" <<'PY'
+from pathlib import Path
+import sys
+p=Path('internal/sshtransport/manager_linux_amd64.go')
+s=p.read_text()
+old,new = ('make(chan struct{}, capacity)','make(chan struct{}, capacity+1)') if sys.argv[1]=='overflow' else ('managerCapacity(config.MaxSessions)','managerCapacity(0)')
+assert s.count(old)==1
+p.write_text(s.replace(old,new))
+PY
+  go test -c -race -tags=sshprocesslab,browserlab -o "${build}/mutant.test" ./internal/sshtransport
+  sudo -n install -o root -g root -m 555 "${build}/mutant.test" "${lab}/mutant.test"
+  if run_manager mutant.test '^TestSSHManagerConfiguredCapacity$' > "${build}/capacity-mutation.log" 2>&1; then
+    echo 'manager capacity mutation escaped its intended assertion' >&2; exit 1
+  fi
+  assertion='configured manager overflowed capacity'
+  if test "${mutation}" = default; then assertion='configured manager refused within capacity'; fi
+  grep -q "${assertion}" "${build}/capacity-mutation.log"
+  echo "SSH manager capacity ${mutation} mutation failed its intended assertion"
+  restore_sources
+done
+python3 - <<'PY'
+from pathlib import Path
+p=Path('cmd/keybash-ssh-manager/main.go')
+s=p.read_text();old='config.MaxSessions = snapshot.Capacity.Total'
+assert s.count(old)==1
+p.write_text(s.replace(old,old+' * 0'))
+PY
+build_manager
+if run_manager lab.test '^TestSSHManagerCLIConfiguredCapacity$' > "${build}/cli-capacity-mutation.log" 2>&1; then
+  echo 'CLI capacity mutation escaped its intended assertion' >&2; exit 1
+fi
+grep -q 'configured manager refused within capacity' "${build}/cli-capacity-mutation.log"
+echo 'SSH manager CLI capacity mutation failed its intended assertion'
+restore_sources
+build_manager
 
 # Kernel-credential admission must accept only the configured nonroot gateway.
 # Both compiling mutations exercise actual manager + unprivileged subprocesses.

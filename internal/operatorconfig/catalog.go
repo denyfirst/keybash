@@ -16,6 +16,7 @@ import (
 
 	"github.com/denyfirst/keybash/internal/identity"
 	"github.com/denyfirst/keybash/internal/rdplab"
+	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"golang.org/x/crypto/ssh"
 )
@@ -24,24 +25,35 @@ const MaxBytes = 256 * 1024
 
 var ErrConfiguration = errors.New("operator target configuration refused")
 
-// Parse validates bounded public metadata. Parsing untrusted bytes alone does
-// not establish administrator authority: runtime callers must use Load. There
+// Catalog carries network approvals and admission limits from one checked file.
+type Catalog struct {
+	Targets  []identity.RemoteTarget
+	Capacity sessionlimits.Limits
+}
+
+// ParseCatalog validates bounded public metadata. Parsing untrusted bytes alone
+// does not establish administrator authority: runtime callers use LoadCatalog. There
 // are no credentials, environment expansion, includes, URLs or file references.
-func Parse(input io.Reader) ([]identity.RemoteTarget, error) {
+func ParseCatalog(input io.Reader) (Catalog, error) {
+	var zero Catalog
 	if input == nil {
-		return nil, ErrConfiguration
+		return zero, ErrConfiguration
 	}
 	raw, err := io.ReadAll(io.LimitReader(input, MaxBytes+1))
 	if err != nil || len(raw) == 0 || len(raw) > MaxBytes || !utf8.Valid(raw) {
-		return nil, ErrConfiguration
+		return zero, ErrConfiguration
 	}
-	root, err := object(raw, "version", "protected_networks", "targets")
-	if err != nil || len(root) != 3 || string(bytes.TrimSpace(root["version"])) != "1" {
-		return nil, ErrConfiguration
+	root, err := object(raw, "version", "protected_networks", "targets", "capacity")
+	if err != nil || (len(root) != 3 && len(root) != 4) || string(bytes.TrimSpace(root["version"])) != "1" {
+		return zero, ErrConfiguration
+	}
+	limits, err := parseCapacity(root["capacity"])
+	if err != nil {
+		return zero, ErrConfiguration
 	}
 	prefixes, err := array(root["protected_networks"], 64)
 	if err != nil {
-		return nil, ErrConfiguration
+		return zero, ErrConfiguration
 	}
 	protected := make([]netip.Prefix, 0, len(prefixes))
 	seenPrefixes := make(map[netip.Prefix]bool)
@@ -49,26 +61,39 @@ func Parse(input io.Reader) ([]identity.RemoteTarget, error) {
 		value, err := text(raw)
 		prefix, pe := netip.ParsePrefix(value)
 		if err != nil || pe != nil || prefix.Addr().Is4In6() || prefix != prefix.Masked() || value != prefix.String() || seenPrefixes[prefix] {
-			return nil, ErrConfiguration
+			return zero, ErrConfiguration
 		}
 		seenPrefixes[prefix] = true
 		protected = append(protected, prefix)
 	}
 	entries, err := array(root["targets"], 256)
 	if err != nil {
-		return nil, ErrConfiguration
+		return zero, ErrConfiguration
 	}
 	targets := make([]identity.RemoteTarget, 0, len(entries))
 	ids := make(map[string]bool)
 	for _, raw := range entries {
 		target, err := parseTarget(raw, protected)
 		if err != nil || ids[target.ID] {
-			return nil, ErrConfiguration
+			return zero, ErrConfiguration
 		}
 		ids[target.ID] = true
 		targets = append(targets, target)
 	}
-	return targets, nil
+	return Catalog{Targets: targets, Capacity: limits}, nil
+}
+
+func parseCapacity(raw []byte) (sessionlimits.Limits, error) {
+	if raw == nil {
+		return sessionlimits.Default(), nil
+	}
+	var limits sessionlimits.Limits
+	fields, err := object(raw, "total", "per_owner")
+	if err != nil || len(fields) != 2 || json.Unmarshal(fields["total"], &limits.Total) != nil ||
+		json.Unmarshal(fields["per_owner"], &limits.PerOwner) != nil || !limits.Valid() {
+		return sessionlimits.Limits{}, ErrConfiguration
+	}
+	return limits, nil
 }
 
 func parseTarget(raw []byte, protected []netip.Prefix) (identity.RemoteTarget, error) {

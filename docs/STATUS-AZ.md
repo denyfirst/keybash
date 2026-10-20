@@ -1,5 +1,11 @@
 # Keybash — cari vəziyyət
 
+20 oktyabr — paralel bağlantı tutumu: operator JSON faylında ümumi və owner
+hədlərini seçir; eyni fayl gateway və SSH manager-ə verilir. Köhnə 8/2 dəyərləri
+başlanğıc profilidir. Tutum dolanda yeni bağlantı üçün aydın mesaj görünür,
+işləyən terminal davam edir. Bu, CPU/RAM cgroup və quraşdırıcı deyil:
+`SESSION-CAPACITY.md`.
+
 19 oktyabr — operator server konfiqurasiyası: root-a aid, dəyişdirilməsi
 məhdud JSON faylından host/port/IP və public SSH/RDP kimliyi yoxlanır.
 `check-targets` şəbəkəyə və bazaya çıxmadan yoxlayır. Ayrıca `serve-ssh-lab`

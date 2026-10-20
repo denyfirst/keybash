@@ -53,6 +53,9 @@ An offline root-owned JSON catalog now provisions guarded server approvals.
 connects an SSH-only catalog to the separate manager for a nonroot loopback
 gateway. See [operator configuration and its limits](docs/OPERATOR-CATALOG-LAB.md).
 Installed services and production RDP integration remain gates.
+Total/per-owner remote admission is now configurable in the protected operator
+catalog, including the separate SSH manager. Full capacity produces a clear
+busy state while existing connections continue; see [capacity policy](docs/SESSION-CAPACITY.md).
 
 ## Start here
 
