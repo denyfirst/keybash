@@ -70,9 +70,16 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 			t.Fatal("refuse existing unit")
 		}
 		for _, inventory := range []string{"list-unit-files", "list-units"} {
-			raw, err := command("/usr/bin/systemctl", inventory, "--all", "--no-legend", "--no-pager", unit)
-			if err != nil || len(bytes.TrimSpace(raw)) != 0 {
+			// Query the whole inventory: systemctl versions differ on the exit
+			// status of an empty name-filtered result. A failed full query refuses.
+			raw, err := command("/usr/bin/systemctl", inventory, "--all", "--no-legend", "--no-pager")
+			if err != nil {
 				t.Fatalf("refuse existing service unit inventory: %s: %s", inventory, raw)
+			}
+			for _, field := range strings.Fields(string(raw)) {
+				if field == unit {
+					t.Fatal("refuse existing loaded or installed unit")
+				}
 			}
 		}
 	}
