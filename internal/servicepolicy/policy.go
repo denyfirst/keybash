@@ -97,6 +97,7 @@ Group=root
 # Bubblewrap uses netlink for private loopback setup and mknod for private /dev.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SYS_PTRACE CAP_NET_ADMIN CAP_MKNOD CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_KILL
+AmbientCapabilities=CAP_SETUID CAP_SETGID CAP_SETPCAP
 RuntimeDirectory=keybash-manager
 RuntimeDirectoryMode=0755
 InaccessiblePaths=-/var/lib/keybash -/etc/keybash/keys -/etc/keybash/tls

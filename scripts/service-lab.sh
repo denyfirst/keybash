@@ -18,23 +18,6 @@ chmod 755 "${build}"
 for bin in keybash keybash-ssh-manager keybash-ssh-worker keybash-service-check keybash-service-plan; do
   CGO_ENABLED=0 go build -trimpath -o "${build}/${bin}" "./cmd/${bin}"
 done
-# Temporary CI-only setup diagnostics. The overlay changes no checked-in
-# runtime source and logs no pipes/transport content, only sandbox stderr.
-python3 - "${build}" <<'PY'
-import json,sys
-from pathlib import Path
-build=Path(sys.argv[1]); source=Path('internal/sshtransport/process_linux_amd64.go').resolve()
-s=source.read_text(); old='cmd.Stdin, cmd.Stdout, cmd.Stderr = childInput, childOutput, io.Discard'
-assert s.count(old)==1
-replacement=build/'diagnostic-launcher.go'
-tail='"--seccomp", "5", "--", "/setpriv", "--reuid=" + u, "--regid=" + g, "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "/worker", parentNS, u, g'
-assert s.count(tail)==1
-s=s.replace(tail,'"--seccomp", "5", "--", "/setpriv", "--dump"')
-s=s.replace('u, g := strconv.FormatUint(uint64(uid), 10), strconv.FormatUint(uint64(gid), 10)','u, g := strconv.FormatUint(uint64(uid), 10), strconv.FormatUint(uint64(gid), 10); _, _ = u, g')
-replacement.write_text(s.replace(old,'cmd.Stdin, cmd.Stdout, cmd.Stderr = childInput, childOutput, os.Stderr'))
-(build/'overlay.json').write_text(json.dumps({'Replace':{str(source):str(replacement)}}))
-PY
-CGO_ENABLED=0 go build -overlay "${build}/overlay.json" -trimpath -o "${build}/keybash-ssh-manager" ./cmd/keybash-ssh-manager
 go test -c -tags=sshprocesslab,browserlab,servicelab -o "${build}/service.test" ./internal/sshtransport
 sudo -n chown -R root:root "${build}"
 sudo -n chmod 555 "${build}/service.test"

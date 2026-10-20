@@ -84,6 +84,9 @@ private network and MKNOD for its private `/dev`. It requires SYS_PTRACE for
 setup-time namespace descriptor inspection. Fresh internet socket families
 remain denied to the manager; the final worker still drops every capability
 and denies new sockets through its own seccomp policy before secret input.
+The fixed root setup exec chain explicitly inherits SETUID/SETGID/SETPCAP;
+the final setpriv handoff clears bounding/inheritable/ambient sets and verifies
+zero worker capabilities. NoNewPrivileges stays enabled on both service units.
 The manager and host/root administrator remain trusted. The child keeps its separate
 empty network/filesystem/PID namespace and inherited authorized TCP stream.
 This does not turn a compromised root manager into an untrusted principal.

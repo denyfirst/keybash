@@ -62,6 +62,10 @@ Upstream Bubblewrap setup review identified required private-loopback
 NETLINK/NET_ADMIN and private-device MKNOD operations. The service permits those
 setup operations inside its private network while retaining denied fresh
 internet socket families and the final worker's capability/socket refusal.
+Synthetic setup inspection also exposed missing UID/GID capability inheritance
+under systemd. The fixed root chain explicitly inherits SETUID/SETGID/SETPCAP;
+the final worker still requires every capability set empty and no-new-privileges.
+Temporary setup overlays/diagnostics were removed before final acceptance.
 
 No new dependency, browser authority, target/identity bypass, public listener,
 secret URL/environment/logging, production install, release, Porch or Rootwell

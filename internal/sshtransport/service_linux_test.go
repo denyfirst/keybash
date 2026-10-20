@@ -345,40 +345,6 @@ func TestKeybashServiceSSHChild(t *testing.T) {
 	host := syntheticSigner(t)
 	closed := make(chan struct{})
 	f := newFixture(t, fixtureOptions{host: host, user: user, shellFixture: func(c ssh.Channel) { defer close(closed); _, _ = io.Copy(c, c) }})
-	// Temporary synthetic pre-drop inspection. No worker hello, SSH startup,
-	// private seed or terminal data is sent through these pipes.
-	diagnostic := dialManagerFixture(t, "/run/keybash-manager/control.sock")
-	if expectManagerPacket(diagnostic, managerHello) != nil {
-		t.Fatal("diagnostic admission refused")
-	}
-	tcp := f.client.(*net.TCPConn)
-	transport, e := tcp.File()
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer transport.Close()
-	in, inWriter, e := os.Pipe()
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer in.Close()
-	defer inWriter.Close()
-	outReader, out, e := os.Pipe()
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer outReader.Close()
-	defer out.Close()
-	if writeManagerPacket(diagnostic, managerStart, transport, in, out) != nil || expectManagerPacket(diagnostic, managerActive) != nil {
-		t.Fatal("diagnostic start refused")
-	}
-	_ = in.Close()
-	_ = out.Close()
-	raw, e := io.ReadAll(io.LimitReader(outReader, 4096))
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Fatalf("synthetic pre-drop capabilities: %s", raw)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	w := ManagerWorker{SocketPath: "/run/keybash-manager/control.sock"}
