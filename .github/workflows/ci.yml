@@ -35,6 +35,12 @@ jobs:
           unset auth
           git checkout -q FETCH_HEAD
 
+      - name: Verify source service units and actual aggregate kernel limits
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          sh scripts/service-lab.sh
+
       - name: Verify local browser assets and test dependencies
         run: |
           set -eu
@@ -88,16 +94,10 @@ jobs:
         run: sh scripts/operator-config-lab.sh
 
       - name: Verify the isolated SSH worker process
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends bubblewrap
-          sh scripts/ssh-process-lab.sh
+        run: sh scripts/ssh-process-lab.sh
 
       - name: Build and verify the isolated native RDP laboratory
         run: sh scripts/native-rdp-lab.sh
-
-      - name: Verify source service units and actual aggregate kernel limits
-        run: sh scripts/service-lab.sh
 
       - name: Vet, race-test and build
         run: |
