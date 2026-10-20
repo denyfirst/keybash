@@ -66,8 +66,11 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 		if _, err := os.Lstat("/etc/systemd/system/" + unit); !os.IsNotExist(err) {
 			t.Fatal("refuse existing unit")
 		}
-		if raw, _ := command("/usr/bin/systemctl", "show", "-p", "LoadState", "--value", unit); strings.TrimSpace(string(raw)) != "not-found" {
-			t.Fatal("refuse loaded service unit")
+		for _, inventory := range []string{"list-unit-files", "list-units"} {
+			raw, err := command("/usr/bin/systemctl", inventory, "--all", "--no-legend", "--no-pager", unit)
+			if err != nil || len(bytes.TrimSpace(raw)) != 0 {
+				t.Fatalf("refuse existing service unit inventory: %s: %s", inventory, raw)
+			}
 		}
 	}
 	if _, err := os.Lstat("/run/systemd/system.control/keybash.slice.d"); !os.IsNotExist(err) {
