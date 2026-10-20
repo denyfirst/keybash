@@ -1,5 +1,9 @@
 # Operator-controlled connection capacity
 
+Service integration update: `LINUX-SERVICE-LAB.md` now adds a source systemd
+plan and actual aggregate kernel-limit gate. The earlier text below describes
+this admission milestone; an installer and measured sizing still remain.
+
 20 October 2026. Remote connections now use finite, immutable operator-selected
 admission bounds. These are resource controls, not licensing tiers. Existing
 catalogs keep eight total/two per owner; those values are now defaults rather

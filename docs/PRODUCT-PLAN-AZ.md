@@ -166,6 +166,11 @@ Sonrakı namizədlər: komanda paylaşımı, SSH bastion/jump host, SFTP fayl pa
 
 İlkin deployment: müştərinin Linux hostunda Docker Compose. Server resursları və paralel sessiya limiti load test nəticəsinə görə elan olunacaq; hələ minimum RAM/CPU vəd edilmir.
 
+20 oktyabr qərarı: ilk SSH xidmət inteqrasiyası native Linux systemd/cgroup-v2
+source plan ilə sınanır (`LINUX-SERVICE-LAB.md`). Ayrıca root manager-in namespace
+qurması və gateway-in root olmaması konteynerə geniş host səlahiyyətləri vermədən
+yoxlanır. Compose ilkin namizəd idi; hazır konteyner/quraşdırıcı iddiası yoxdur.
+
 Public-facing giriş yalnız HTTPS-dir; private CA və ya müştərinin certificate-i ilə lokal HTTPS mümkündür. Public CA/ACME seçilərsə onun xarici şəbəkə ehtiyacı ayrıca göstərilir. DB və guacd portları publish edilmir.
 
 Paketə frontend asset-ləri, protokol komponentləri və lazımi runtime daxil edilir. Versiyalar pin edilir; imzalanmış release, checksum, dependency inventarı/SBOM və yeniləmə təlimatı hazırlanır. Offline paket ayrıca paylana bilər; gündəlik işləmə internetə çıxış olmadan test olunur.

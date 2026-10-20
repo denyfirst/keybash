@@ -53,3 +53,17 @@ func TestSSHManagerCapacityValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSSHWorkerIdentityValidation(t *testing.T) {
+	for _, pair := range [][2]uint32{{0, 0}, {65531, 65531}, {1001, 1002}, {2147483647, 2147483647}} {
+		uid, gid, ok := workerIdentity(pair[0], pair[1])
+		if !ok || uid == 0 || gid == 0 || pair[0] != 0 && (uid != pair[0] || gid != pair[1]) {
+			t.Fatal("valid worker identity lost or refused")
+		}
+	}
+	for _, pair := range [][2]uint32{{0, 1}, {1, 0}, {2147483648, 1}, {1, 2147483648}} {
+		if _, _, ok := workerIdentity(pair[0], pair[1]); ok {
+			t.Fatal("unsafe worker identity accepted")
+		}
+	}
+}

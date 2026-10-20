@@ -24,6 +24,15 @@ import (
 type ProcessWorker struct {
 	Path   string
 	Digest [sha256.Size]byte
+	// Root-selected host identity; a zero pair retains the legacy lab identity.
+	UID, GID uint32
+}
+
+func workerIdentity(uid, gid uint32) (uint32, uint32, bool) {
+	if uid == 0 && gid == 0 {
+		return 65534, 65534, true
+	}
+	return uid, gid, uid > 0 && gid > 0 && uid <= 2147483647 && gid <= 2147483647
 }
 
 func (w ProcessWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, signer ssh.Signer) (terminalweb.Stream, error) {

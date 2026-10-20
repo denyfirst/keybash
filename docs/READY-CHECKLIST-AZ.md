@@ -43,6 +43,10 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    Gateway və SSH manager üçün operatorun tənzimlədiyi paralel bağlantı
    hədləri və dolu tutum mesajı var (`SESSION-CAPACITY.md`). CPU/RAM/pids
    məhdudiyyətlərinin əməliyyat sistemində tətbiqi quraşdırma mərhələsinə aiddir.
+   Linux systemd source plan və faktiki cgroup-v2 başlanğıc yoxlaması əlavədir
+   (`LINUX-SERVICE-LAB.md`); ayrıca UID-lər, SSH worker, dayandırma/restart və
+   CPU/pids/OOM kernel sınaqları CI-də tələb olunur. Avtomatik production
+   quraşdırıcı, ölçülmüş server profilləri və RDP xidməti hələ qalır.
 6. **Self-host paket.** Linux quraşdırma, müştərinin HTTPS-i, publish edilməyən
    DB/guacd portları, lokal/offline asset-lər, versiyalı migration/yeniləmə,
    dependency/license/SBOM və məhdud metadata audit.

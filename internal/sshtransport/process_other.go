@@ -11,4 +11,4 @@ import (
 func launchSSHProcess(context.Context, context.Context, ProcessWorker, string, func(context.Context) (net.Conn, error), []byte, string, []byte) (*processStream, error) {
 	return nil, ErrProcess
 }
-func RunProcessWorker(string, io.ReadCloser, io.WriteCloser) error { return ErrProcess }
+func RunProcessWorker(string, uint32, uint32, io.ReadCloser, io.WriteCloser) error { return ErrProcess }
