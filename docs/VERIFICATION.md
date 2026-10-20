@@ -58,6 +58,10 @@ availability consequences. Go rooted staging replaces an unrestricted output
 file open flagged by analysis. Kernel event counters prevent treating ordinary
 probe failure or timeout as successful enforcement. The test cleanup uses its
 own bounded context and removes only fixture-owned paths/identities/overrides.
+Upstream Bubblewrap setup review identified required private-loopback
+NETLINK/NET_ADMIN and private-device MKNOD operations. The service permits those
+setup operations inside its private network while retaining denied fresh
+internet socket families and the final worker's capability/socket refusal.
 
 No new dependency, browser authority, target/identity bypass, public listener,
 secret URL/environment/logging, production install, release, Porch or Rootwell

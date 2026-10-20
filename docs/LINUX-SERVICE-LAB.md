@@ -79,6 +79,10 @@ The gateway is nonroot with no capabilities, read-only system/home protection,
 no namespace creation and only private data writable. The root manager has
 only a Unix listener, private network, restricted capabilities and no mounted
 custody key/data/TLS paths. Its namespace setup still requires CAP_SYS_ADMIN;
+Bubblewrap also needs NETLINK/NET_ADMIN to initialize loopback inside the new
+private network and MKNOD for its private `/dev`. Fresh internet socket families
+remain denied to the manager; the final worker still drops every capability
+and denies new sockets through its own seccomp policy before secret input.
 it and the host/root administrator remain trusted. The child keeps its separate
 empty network/filesystem/PID namespace and inherited authorized TCP stream.
 This does not turn a compromised root manager into an untrusted principal.
@@ -150,3 +154,5 @@ not an independent audit or authorization to deploy real credentials.
 Primary references: [systemd resource controls](https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html),
 [service execution](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html)
 and [service lifecycle](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html).
+Bubblewrap setup references: [private network setup](https://github.com/containers/bubblewrap/blob/v0.9.0/network.c)
+and [namespace/filesystem launcher](https://github.com/containers/bubblewrap/blob/v0.9.0/bubblewrap.c).
