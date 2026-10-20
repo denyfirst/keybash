@@ -348,9 +348,10 @@ func TestKeybashServiceSSHChild(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	w := ManagerWorker{SocketPath: "/run/keybash-manager/control.sock"}
-	s, err := w.open(ctx, "ssh.invalid", func(context.Context) (net.Conn, error) { return f.client, nil }, host.PublicKey().Marshal(), "lab-user", user)
+	dialed := false
+	s, err := w.open(ctx, "ssh.invalid", func(context.Context) (net.Conn, error) { dialed = true; return f.client, nil }, host.PublicKey().Marshal(), "lab-user", user)
 	if err != nil {
-		t.Fatal("service synthetic SSH refused")
+		t.Fatalf("service synthetic SSH refused (admitted dial=%t)", dialed)
 	}
 	defer s.Close()
 	text := []byte("service SSH: əöğ\r\n")
