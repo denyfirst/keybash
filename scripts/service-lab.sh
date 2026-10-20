@@ -31,7 +31,7 @@ tail='"--seccomp", "5", "--", "/setpriv", "--reuid=" + u, "--regid=" + g, "--cle
 assert s.count(tail)==1
 s=s.replace(tail,'"--seccomp", "5", "--", "/setpriv", "--dump"')
 s=s.replace('u, g := strconv.FormatUint(uint64(uid), 10), strconv.FormatUint(uint64(gid), 10)','u, g := strconv.FormatUint(uint64(uid), 10), strconv.FormatUint(uint64(gid), 10); _, _ = u, g')
-replacement.write_text(s.replace(old,'cmd.Stdin, cmd.Stdout, cmd.Stderr = childInput, io.MultiWriter(os.Stderr, childOutput), os.Stderr'))
+replacement.write_text(s.replace(old,'cmd.Stdin, cmd.Stdout, cmd.Stderr = childInput, childOutput, os.Stderr'))
 (build/'overlay.json').write_text(json.dumps({'Replace':{str(source):str(replacement)}}))
 PY
 CGO_ENABLED=0 go build -overlay "${build}/overlay.json" -trimpath -o "${build}/keybash-ssh-manager" ./cmd/keybash-ssh-manager
