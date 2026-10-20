@@ -12,7 +12,7 @@ import (
 )
 
 func Check(c Config, role string) error {
-	if !c.Valid() || role != "gateway" && role != "manager" {
+	if !c.Valid() || role != "gateway" && role != "manager" && role != "rdp-manager" {
 		return ErrPolicy
 	}
 	for name, ids := range map[string][2]uint32{"keybash-gateway": {c.GatewayUID, c.GatewayGID}, "keybash-worker": {c.WorkerUID, c.WorkerGID}} {
@@ -28,7 +28,7 @@ func Check(c Config, role string) error {
 			return ErrPolicy
 		}
 	}
-	if role == "manager" && (os.Getuid() != 0 || os.Geteuid() != 0 || os.Getgid() != 0 || os.Getegid() != 0) ||
+	if (role == "manager" || role == "rdp-manager") && (os.Getuid() != 0 || os.Geteuid() != 0 || os.Getgid() != 0 || os.Getegid() != 0) ||
 		role == "gateway" && (os.Getuid() != int(c.GatewayUID) || os.Geteuid() != int(c.GatewayUID) || os.Getgid() != int(c.GatewayGID) || os.Getegid() != int(c.GatewayGID)) {
 		return ErrPolicy
 	}
@@ -37,7 +37,7 @@ func Check(c Config, role string) error {
 		return ErrPolicy
 	}
 	for _, g := range groups {
-		if role == "gateway" && g != int(c.GatewayGID) || role == "manager" && g != 0 {
+		if role == "gateway" && g != int(c.GatewayGID) || (role == "manager" || role == "rdp-manager") && g != 0 {
 			return ErrPolicy
 		}
 	}

@@ -13,17 +13,26 @@ import (
 var ErrPolicy = errors.New("service policy refused")
 
 type Config struct {
-	GatewayUID, GatewayGID uint32
-	WorkerUID, WorkerGID   uint32
-	WorkerDigest           string
-	CPUPercent             uint64
-	MemoryMiB              uint64
-	Tasks                  uint64
+	GatewayUID, GatewayGID            uint32
+	WorkerUID, WorkerGID              uint32
+	WorkerDigest                      string
+	RDPWorkerDigest, RDPRuntimeDigest string
+	CPUPercent                        uint64
+	MemoryMiB                         uint64
+	Tasks                             uint64
 }
 
 func Default() Config { return Config{CPUPercent: 200, MemoryMiB: 1024, Tasks: 512} }
 
+func (c Config) HasRDP() bool { return c.RDPWorkerDigest != "" && c.RDPRuntimeDigest != "" }
+func validDigest(s string) bool {
+	d, e := hex.DecodeString(s)
+	return e == nil && len(d) == 32 && s == strings.ToLower(s) && s != strings.Repeat("0", 64)
+}
 func (c Config) Valid() bool {
+	if (c.RDPWorkerDigest != "" || c.RDPRuntimeDigest != "") && (!validDigest(c.RDPWorkerDigest) || !validDigest(c.RDPRuntimeDigest)) {
+		return false
+	}
 	for _, id := range []uint32{c.GatewayUID, c.GatewayGID, c.WorkerUID, c.WorkerGID} {
 		if id < 1 || id > 2147483647 || id == 65534 {
 			return false
@@ -42,6 +51,9 @@ func Render(c Config) (map[string]string, error) {
 		return nil, ErrPolicy
 	}
 	args := fmt.Sprintf("--gateway-uid=%d --gateway-gid=%d --worker-uid=%d --worker-gid=%d --worker-digest=%s --cpu-percent=%d --memory-mib=%d --tasks=%d", c.GatewayUID, c.GatewayGID, c.WorkerUID, c.WorkerGID, c.WorkerDigest, c.CPUPercent, c.MemoryMiB, c.Tasks)
+	if c.HasRDP() {
+		args += " --rdp-worker-digest=" + c.RDPWorkerDigest + " --rdp-runtime-digest=" + c.RDPRuntimeDigest
+	}
 	common := `Slice=keybash.slice
 Type=exec
 UMask=0077
@@ -107,7 +119,7 @@ ExecStart=/usr/local/libexec/keybash/keybash-ssh-manager --socket=/run/keybash-m
 [Install]
 WantedBy=multi-user.target
 `, common, args, c.WorkerDigest, c.GatewayUID, c.GatewayGID, c.WorkerUID, c.WorkerGID)
-	return map[string]string{
+	files := map[string]string{
 		"keybash.slice": fmt.Sprintf(`[Unit]
 Description=Keybash aggregate resource boundary
 
@@ -124,14 +136,31 @@ TasksMax=%d
 		"keybash-gateway.service":     gateway,
 		"keybash-ssh-manager.service": manager,
 		"keybash.conf":                fmt.Sprintf("g keybash-gateway %d\ng keybash-worker %d\nu keybash-gateway %d:%d \"Keybash gateway\" /nonexistent /usr/sbin/nologin\nu keybash-worker %d:%d \"Keybash SSH worker\" /nonexistent /usr/sbin/nologin\n", c.GatewayGID, c.WorkerGID, c.GatewayUID, c.GatewayGID, c.WorkerUID, c.WorkerGID),
-	}, nil
+	}
+	if c.HasRDP() {
+		for _, key := range []string{"BindsTo=", "After=", "PartOf="} {
+			gateway = strings.ReplaceAll(gateway, key+"keybash-ssh-manager.service", key+"keybash-ssh-manager.service keybash-rdp-manager.service")
+		}
+		gateway = strings.ReplaceAll(gateway, "serve-ssh-lab", "serve-remote-lab")
+		gateway = strings.ReplaceAll(gateway, "--ssh-manager=/run/keybash-manager/control.sock", "--ssh-manager=/run/keybash-manager/control.sock --rdp-manager=/run/keybash-rdp-manager/control.sock")
+		files["keybash-gateway.service"] = gateway
+		rdp := strings.ReplaceAll(manager, "fixed SSH worker manager", "fixed RDP worker manager")
+		rdp = strings.ReplaceAll(rdp, "keybash-manager", "keybash-rdp-manager")
+		rdp = strings.ReplaceAll(rdp, "--role=manager", "--role=rdp-manager")
+		rdp = strings.ReplaceAll(rdp, "RestrictAddressFamilies=AF_UNIX AF_NETLINK", "RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET")
+		begin := strings.Index(rdp, "ExecStart=")
+		end := strings.Index(rdp[begin:], "\n") + begin
+		rdp = rdp[:begin] + fmt.Sprintf("ExecStart=/usr/local/libexec/keybash/keybash-rdp-manager --socket=/run/keybash-rdp-manager/control.sock --worker=/usr/local/libexec/keybash/keybash-rdp-worker --worker-sha256=%s --runtime=/usr/local/lib/keybash/rdp --runtime-sha256=%s --gateway-uid=%d --gateway-gid=%d --worker-uid=%d --worker-gid=%d --config=/etc/keybash/targets.json", c.RDPWorkerDigest, c.RDPRuntimeDigest, c.GatewayUID, c.GatewayGID, c.WorkerUID, c.WorkerGID) + rdp[end:]
+		files["keybash-rdp-manager.service"] = rdp
+	}
+	return files, nil
 }
 
 // validateState also runs on synthetic snapshots. Runtime reads only the fixed
 // kernel hierarchy, not a caller-supplied proc/sysfs path.
 func validateState(c Config, role, membership string, files map[string]string) error {
-	unit := map[string]string{"gateway": "keybash-gateway.service", "manager": "keybash-ssh-manager.service"}[role]
-	if !c.Valid() || unit == "" || membership != "0::/keybash.slice/"+unit+"\n" {
+	unit := map[string]string{"gateway": "keybash-gateway.service", "manager": "keybash-ssh-manager.service", "rdp-manager": "keybash-rdp-manager.service"}[role]
+	if !c.Valid() || role == "rdp-manager" && !c.HasRDP() || unit == "" || membership != "0::/keybash.slice/"+unit+"\n" {
 		return ErrPolicy
 	}
 	parse := func(s string) (uint64, bool) {

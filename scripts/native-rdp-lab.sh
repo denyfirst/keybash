@@ -71,6 +71,8 @@ dpkg-query -W -f='${Package} ${Version}\n'
 find "${prefix}" -type f -exec sha256sum '{}' ';'
 ldd "${prefix}/sbin/guacd"
 ldd "${prefix}/lib/libguac-client-rdp.so"
+CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/keybash-rdp-worker" ./cmd/keybash-rdp-worker
+python3 scripts/build-rdp-runtime.py --prefix "${prefix}" --output "${prefix}/runtime-stage"
 go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
