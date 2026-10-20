@@ -241,7 +241,8 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 		defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
 		marker := make([]byte, len("gateway-ready\n"))
 		if _, e := io.ReadFull(out, marker); e != nil || string(marker) != "gateway-ready\n" {
-			t.Fatal("service SSH worker refused")
+			rest, _ := io.ReadAll(io.LimitReader(out, 4096))
+			t.Fatalf("service SSH worker refused: %s%s", marker, rest)
 		}
 		procs, e := os.ReadFile("/sys/fs/cgroup/keybash.slice/keybash-ssh-manager.service/cgroup.procs")
 		if e != nil {

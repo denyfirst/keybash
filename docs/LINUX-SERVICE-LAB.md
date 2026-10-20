@@ -81,6 +81,7 @@ only a Unix listener, private network, restricted capabilities and no mounted
 custody key/data/TLS paths. Its namespace setup still requires CAP_SYS_ADMIN;
 Bubblewrap also needs NETLINK/NET_ADMIN to initialize loopback inside the new
 private network and MKNOD for its private `/dev`. Fresh internet socket families
+It requires SYS_PTRACE for its setup-time namespace descriptor inspection.
 remain denied to the manager; the final worker still drops every capability
 and denies new sockets through its own seccomp policy before secret input.
 The manager and host/root administrator remain trusted. The child keeps its separate
