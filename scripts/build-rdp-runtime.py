@@ -51,8 +51,12 @@ while pending:
             raise SystemExit("unresolved native dependency")
         match = re.search(r"(?:=>\s+)?(/[^\s]+)\s+\(0x[0-9a-f]+\)", line)
         if not match:
-            if line.strip().startswith("linux-vdso.so.") or (line.strip() == "statically linked" and source.name == "ld-linux-x86-64.so.2"):
+            if line.strip().startswith("linux-vdso.so."):
                 continue
+            if line.strip() == "statically linked":
+                dynamic = subprocess.run(["/usr/bin/readelf", "--dynamic", "--wide", str(source)], capture_output=True, text=True, check=True)
+                if "(NEEDED)" not in dynamic.stdout:
+                    continue
             raise SystemExit("unrecognized native dependency inventory: " + source.name + ": " + line[:256])
         dependency = Path(match[1])
         if dependency.is_relative_to(prefix):
