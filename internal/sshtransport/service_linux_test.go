@@ -217,8 +217,8 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 	}
 	serviceSSH := func() {
 		t.Helper()
-		child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSSHManagerGatewayChild$", "-test.timeout=15s") // #nosec G204 -- fixed synthetic test executable.
-		child.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGER_FIXTURE=/run/keybash-manager/control.sock", "KEYBASH_MANAGER_MODE=shutdown"}
+		child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestKeybashServiceSSHChild$", "-test.timeout=15s") // #nosec G204 -- fixed synthetic test executable.
+		child.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_SERVICE_SSH=1"}
 		child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: gatewayFixtureUID, Gid: gatewayFixtureUID}}
 		out, e := child.StdoutPipe()
 		if e != nil || child.Start() != nil {
@@ -316,6 +316,46 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 }
 
 var serviceProbeMemory [][]byte
+
+// A separate service-only fixture keeps the older /tmp-only laboratory guard
+// intact. The installed socket path and synthetic dial exist in this test only.
+func TestKeybashServiceSSHChild(t *testing.T) {
+	if os.Getenv("KEYBASH_SERVICE_SSH") != "1" {
+		t.Skip("dedicated service SSH fixture")
+	}
+	if os.Geteuid() != gatewayFixtureUID || os.Getegid() != gatewayFixtureUID {
+		t.Fatal("service fixture identity wrong")
+	}
+	user, _ := processFixtureKey(t)
+	host := syntheticSigner(t)
+	closed := make(chan struct{})
+	f := newFixture(t, fixtureOptions{host: host, user: user, shellFixture: func(c ssh.Channel) { defer close(closed); _, _ = io.Copy(c, c) }})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	w := ManagerWorker{SocketPath: "/run/keybash-manager/control.sock"}
+	s, err := w.open(ctx, "ssh.invalid", func(context.Context) (net.Conn, error) { return f.client, nil }, host.PublicKey().Marshal(), "lab-user", user)
+	if err != nil {
+		t.Fatal("service synthetic SSH refused")
+	}
+	defer s.Close()
+	text := []byte("service SSH: əöğ\r\n")
+	got := make([]byte, len(text))
+	if _, err := s.Write(text); err != nil {
+		t.Fatal("service SSH input refused")
+	}
+	if _, err := io.ReadFull(s, got); err != nil || !bytes.Equal(got, text) || s.Resize(150, 45) != nil || s.Resize(501, 45) == nil {
+		t.Fatal("service SSH bytes/resize changed")
+	}
+	_, _ = os.Stdout.WriteString("gateway-ready\n")
+	select {
+	case <-closed:
+	case <-time.After(4 * time.Second):
+		t.Fatal("service stop retained SSH")
+	}
+	if n, err := s.Read(got); n != 0 || err == nil {
+		t.Fatal("service stop retained output")
+	}
+}
 
 func TestKeybashServiceResourceProbeChild(t *testing.T) {
 	mode := os.Getenv("KEYBASH_SERVICE_PROBE")
