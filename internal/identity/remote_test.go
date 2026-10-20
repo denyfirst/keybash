@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 	bolt "go.etcd.io/bbolt"
@@ -85,12 +86,16 @@ func remoteTargetFixture(t *testing.T) RemoteTarget {
 	return RemoteTarget{strings.Repeat("a", 32), "Synthetic desktop", "rdp", target, der}
 }
 func remoteFixture(t *testing.T, origin string) (*Lab, *Store, *custodyClient, string, *fixtureRDPWorker) {
+	return remoteFixtureWithLimits(t, origin, sessionlimits.Default())
+}
+
+func remoteFixtureWithLimits(t *testing.T, origin string, limits sessionlimits.Limits) (*Lab, *Store, *custodyClient, string, *fixtureRDPWorker) {
 	t.Helper()
 	store, _, _ := bootstrapped(t)
 	_, _, codes := enrollFixture(t, store, "alice", time.Now())
 	target := remoteTargetFixture(t)
 	worker := &fixtureRDPWorker{expected: "Synthetic remote password", closed: make(chan struct{})}
-	l, e := NewRemoteLab(origin, store, []RemoteTarget{target}, nil, worker)
+	l, e := NewRemoteLabWithLimits(origin, store, []RemoteTarget{target}, nil, worker, limits)
 	if e != nil {
 		t.Fatal("remote constructor refused")
 	}
@@ -178,7 +183,7 @@ func TestOwnedRemoteExpiryLimitsAndDelete(t *testing.T) {
 	l.mu.Unlock()
 	raw := grantFixture(t, c, record)
 	_ = grantFixture(t, c, record)
-	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 429)
+	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 503)
 	advance(l, &now, 31*time.Second)
 	id, _ := tokenID(c.cookie.Value)
 	l.mu.Lock()

@@ -1,5 +1,5 @@
 import { inspectPaste, decodeOutput, MAX_INPUT } from './paste.mjs';
-import { ownedRemote, remoteProof } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const encoder = new TextEncoder();
@@ -148,4 +148,4 @@ $('disconnect').addEventListener('click', async () => {
 });
 window.addEventListener('pagehide',()=>{socket?.close();retireTerminal();clearPaste();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
-if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(()=>notice('Qoşulma rədd edildi. Hesab səhifəsində təkrar doğrula.'));}
+if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(error=>notice(remoteErrorMessage(error)));}

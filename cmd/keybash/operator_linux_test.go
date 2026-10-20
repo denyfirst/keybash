@@ -55,7 +55,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, _ := ssh.NewPublicKey(pub)
-	catalog, _ := json.Marshal(map[string]any{"version": 1, "protected_networks": []string{"10.99.0.0/16"}, "targets": []any{
+	catalog, _ := json.Marshal(map[string]any{"version": 1, "capacity": map[string]int{"total": 16, "per_owner": 4}, "protected_networks": []string{"10.99.0.0/16"}, "targets": []any{
 		map[string]any{"id": strings.Repeat("a", 32), "name": "Operator fixture", "protocol": "ssh", "hostname": "ssh.invalid", "port": 22,
 			"addresses": []string{"10.44.0.8"}, "ssh_host_key": strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))}}})
 	config := filepath.Join(base, "targets.json")
@@ -63,7 +63,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 		t.Fatal("fixture catalog failed")
 	}
 	var check bytes.Buffer
-	if run([]string{"check-targets", "--config", config}, nil, &check) != nil || check.String() != "Target configuration valid (1 servers).\n" {
+	if run([]string{"check-targets", "--config", config}, nil, &check) != nil || check.String() != "Target configuration valid (1 servers; capacity 16 total, 4 per owner).\n" {
 		t.Fatal("valid offline CLI catalog refused")
 	}
 	keyFile := filepath.Join(keyDir, "instance.key")
@@ -166,6 +166,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 		return raw
 	}
 	call("GET", "/api/targets", nil, 401)
+	call("GET", "/api/remote/capacity", nil, 401)
 	call("POST", "/api/bootstrap", map[string]string{"code": code, "username": "alice", "password": "Synthetic operator integration password 86!"}, 204)
 	var session struct{ CSRF string }
 	if json.Unmarshal(call("GET", "/api/session", nil, 200), &session) != nil || session.CSRF == "" {
@@ -173,6 +174,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	}
 	csrf = session.CSRF
 	call("GET", "/api/targets", nil, 403)
+	call("GET", "/api/remote/capacity", nil, 403)
 	var seed struct{ Secret string }
 	if json.Unmarshal(call("POST", "/api/mfa/enrollment", map[string]string{}, 200), &seed) != nil {
 		t.Fatal("fixture factor failed")
@@ -182,6 +184,13 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 		t.Fatal("fixture factor generation failed")
 	}
 	call("POST", "/api/mfa/confirm", map[string]string{"code": otp}, 200)
+	var capacity struct {
+		Total    int
+		PerOwner int `json:"per_owner"`
+	}
+	if json.Unmarshal(call("GET", "/api/remote/capacity", nil, 200), &capacity) != nil || capacity.Total != 16 || capacity.PerOwner != 4 {
+		t.Fatal("configured CLI capacity ignored")
+	}
 	var targets []struct{ ID, Name, Protocol string }
 	if json.Unmarshal(call("GET", "/api/targets", nil, 200), &targets) != nil || len(targets) != 1 || targets[0].ID != strings.Repeat("a", 32) || targets[0].Protocol != "ssh" {
 		t.Fatal("configured CLI catalog missing after MFA")

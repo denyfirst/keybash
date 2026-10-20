@@ -22,6 +22,7 @@ import (
 
 	"github.com/denyfirst/keybash/internal/identity"
 	"github.com/denyfirst/keybash/internal/operatorconfig"
+	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/sshtransport"
 )
 
@@ -56,6 +57,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return refused
 	}
 	var targets []identity.RemoteTarget
+	limits := sessionlimits.Default()
 	if command == "check-targets" {
 		validFlags := true
 		flags.Visit(func(f *flag.Flag) { validFlags = validFlags && f.Name == "config" })
@@ -63,11 +65,13 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return refused
 		}
 		var e error
-		targets, e = operatorconfig.Load(*catalog)
+		var snapshot operatorconfig.Catalog
+		snapshot, e = operatorconfig.LoadCatalog(*catalog)
+		targets = snapshot.Targets
 		if e != nil {
 			return refused
 		}
-		_, e = fmt.Fprintf(output, "Target configuration valid (%d servers).\n", len(targets))
+		_, e = fmt.Fprintf(output, "Target configuration valid (%d servers; capacity %d total, %d per owner).\n", len(targets), snapshot.Capacity.Total, snapshot.Capacity.PerOwner)
 		return e
 	}
 	if *data == "" || *key == "" || command != "serve-ssh-lab" && (*catalog != "" || *manager != "") {
@@ -79,7 +83,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return refused
 		}
 		var e error
-		targets, e = operatorconfig.Load(*catalog)
+		var snapshot operatorconfig.Catalog
+		snapshot, e = operatorconfig.LoadCatalog(*catalog)
+		targets, limits = snapshot.Targets, snapshot.Capacity
 		if e != nil || !sshOnly(targets) {
 			return refused
 		}
@@ -132,7 +138,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		origin := "https://" + *address
 		var lab *identity.Lab
 		if command == "serve-ssh-lab" {
-			lab, e = identity.NewRemoteLab(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, nil)
+			lab, e = identity.NewRemoteLabWithLimits(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, nil, limits)
 		} else {
 			lab, e = identity.NewPersistent(origin, store)
 		}

@@ -230,16 +230,18 @@ func TestOperatorCatalogRDPCertificate(t *testing.T) {
 }
 
 func FuzzOperatorCatalog(f *testing.F) {
-	f.Add([]byte(fixture(f)))
+	seed := fixture(f)
+	f.Add([]byte(seed))
+	f.Add([]byte(strings.Replace(seed, `"version":1`, `"version":1,"capacity":{"total":16,"per_owner":4}`, 1)))
 	f.Add([]byte(`{"version":1,"protected_networks":["10.99.0.0/16"],"targets":[]}`))
 	f.Add([]byte(`{"version":1,"version":1}`))
 	f.Add([]byte(`{"targets":[{"name":"\ud800"}]}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		targets, err := Parse(bytes.NewReader(raw))
-		if err != nil && (err != ErrConfiguration || targets != nil) {
+		catalog, err := ParseCatalog(bytes.NewReader(raw))
+		if err != nil && (err != ErrConfiguration || catalog.Targets != nil || catalog.Capacity.Valid()) {
 			t.Fatal("parser leaked partial authority or diagnostics")
 		}
-		if err == nil && (len(targets) == 0 || len(targets) > 256) {
+		if err == nil && (len(catalog.Targets) == 0 || len(catalog.Targets) > 256 || !catalog.Capacity.Valid()) {
 			t.Fatal("parser returned invalid authority count")
 		}
 	})

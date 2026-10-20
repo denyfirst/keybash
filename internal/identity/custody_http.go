@@ -295,7 +295,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || r.URL.Path == "/api/remote/open" {
+	if r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/capacity" {
 		l.remoteHTTP(w, r, id, s)
 		return
 	}

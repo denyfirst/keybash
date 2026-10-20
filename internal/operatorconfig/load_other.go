@@ -2,6 +2,4 @@
 
 package operatorconfig
 
-import "github.com/denyfirst/keybash/internal/identity"
-
-func Load(string) ([]identity.RemoteTarget, error) { return nil, ErrConfiguration }
+func LoadCatalog(string) (Catalog, error) { return Catalog{}, ErrConfiguration }
