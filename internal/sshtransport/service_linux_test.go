@@ -290,7 +290,7 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 			t.Fatal("refused service exposed manager socket")
 		}
 		run("/usr/bin/systemctl", "set-property", "--runtime", "keybash.slice", "TasksMax=512", "MemoryMax=1024M", "CPUQuota=200%", "MemorySwapMax=0")
-		run("/usr/bin/systemctl", "reset-failed", "keybash-ssh-manager.service", "keybash-gateway.service")
+		run("/usr/bin/systemctl", "reset-failed", "keybash-ssh-manager.service")
 	}
 	run("/usr/bin/systemctl", "start", "keybash-gateway.service")
 	serviceSSH() // Restored policy actually admits SSH and clean restart again.
