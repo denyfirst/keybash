@@ -51,9 +51,9 @@ while pending:
             raise SystemExit("unresolved native dependency")
         match = re.search(r"(?:=>\s+)?(/[^\s]+)\s+\(0x[0-9a-f]+\)", line)
         if not match:
-            if line.strip().startswith("linux-vdso.so."):
+            if line.strip().startswith("linux-vdso.so.") or (line.strip() == "statically linked" and source.name == "ld-linux-x86-64.so.2"):
                 continue
-            raise SystemExit("unrecognized native dependency inventory")
+            raise SystemExit("unrecognized native dependency inventory: " + source.name + ": " + line[:256])
         dependency = Path(match[1])
         if dependency.is_relative_to(prefix):
             destination = "/opt/keybash-rdp/" + dependency.relative_to(prefix).as_posix()
