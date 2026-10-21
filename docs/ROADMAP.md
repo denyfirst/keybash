@@ -48,10 +48,11 @@ the real Windows/browser matrix, production installer, restore or release gates.
    trusted TLS, offline runtime, safe upgrades and fresh-system restore.
    A root-owned offline target catalog and explicit nonroot SSH-only loopback
    CLI now bind operator policy to the manager (`OPERATOR-CATALOG-LAB.md`).
-   Installed service identities/units and production RDP integration remain.
+   Source service identities/units and RDP integration are present; production
+   packaging and real Windows acceptance remain.
    Remote admission now has immutable operator total/per-owner capacity and
-   matching SSH manager slots (`SESSION-CAPACITY.md`); kernel CPU/RAM/pids and
-   measured host sizing remain part of service integration.
+   matching manager slots (`SESSION-CAPACITY.md`); checked kernel CPU/RAM/pids
+   are in the source service plan, while measured host sizing remains a gate.
    A source systemd plan now separates gateway/worker identities and binds
    gateway/manager/SSH descendants to checked aggregate cgroup-v2 CPU/memory/pids
    limits (`LINUX-SERVICE-LAB.md`). Disposable CI installs synthetic units and

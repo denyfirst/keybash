@@ -184,10 +184,10 @@ func rdpSandboxArgs(parent string, c ManagerConfig) []string {
 		"--hostname", "keybash-rdp-worker", "--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP",
 		"--clearenv", "--setenv", "GOMAXPROCS", "2", "--setenv", "GOMEMLIMIT", "64MiB", "--setenv", "GOTRACEBACK", "none",
 		"--ro-bind", c.Runtime, "/",
-		// Bind inherited capabilities before replacing /proc: the setup process
-		// is outside the new PID namespace and cannot resolve its new proc/self.
 		"--ro-bind", "/proc/self/fd/4", "/worker",
-		"--dir", "/run/keybash", "--ro-bind", "/proc/self/fd/6", "/run/keybash/approved.pem", "--ro-bind", "/proc/self/fd/7", "/run/keybash/name",
+		// memfds have no realpath. Let bwrap consume the sealed public bytes
+		// directly into private read-only mounts, never host trust files.
+		"--dir", "/run/keybash", "--perms", "0444", "--ro-bind-data", "6", "/run/keybash/approved.pem", "--perms", "0444", "--ro-bind-data", "7", "/run/keybash/name",
 		"--proc", "/proc", "--dev", "/dev", "--perms", "1777", "--tmpfs", "/tmp", "--remount-ro", "/", "--chdir", "/",
 		"--seccomp", "5", "--", "/setpriv", "--reuid=" + u, "--regid=" + g, "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "/worker", parent, u, g}
 }

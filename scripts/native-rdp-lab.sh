@@ -48,6 +48,19 @@ if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
   echo 'Normal candidate public preflight failed; diagnostic overlays cannot pass this gate.' >&2
   exit 1
 fi
+# Observe both directions on the actual manager/helper syscall boundary. These
+# public-only overlays cannot send credentials or satisfy a normal test gate.
+python3 scripts/rdp-sandbox-mutations.py "${prefix}"
+for mutation in allow refuse; do
+  go test -c -overlay="${lab}/sandbox-mutations/${mutation}.json" -race -tags=nativelab,browserlab -o "${prefix}/bin/mutation.test" ./internal/rdplab
+  if sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+    "${prefix}/bin/mutation.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v > "${lab}/sandbox-${mutation}.log" 2>&1; then
+    echo 'RDP sandbox mutation escaped its positive preflight test' >&2
+    exit 1
+  fi
+  cat "${lab}/sandbox-${mutation}.log"
+  grep -F 'public-only managed preflight refused' "${lab}/sandbox-${mutation}.log"
+done
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' -test.timeout=25s -test.v
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
