@@ -37,6 +37,7 @@ done
 LD_LIBRARY_PATH="${normal_prefix}/lib" python3 scripts/build-rdp-runtime.py --prefix "${normal_prefix}" --output "${prefix}/runtime-stage"
 go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
+preflight_failed=0
 if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v; then
   python3 scripts/rdp-preflight-diagnostics.py "${prefix}"
@@ -46,8 +47,16 @@ if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
   sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
     "${prefix}/bin/debug.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v || true
   echo 'Normal candidate public preflight failed; diagnostic overlays cannot pass this gate.' >&2
-  exit 1
+  preflight_failed=1
 fi
+# Observe the independent original-launcher workspace boundary even if manager
+# preparation failed. Only the unchanged normal binary runs this synthetic test;
+# either failure still stops the gate before any acceptance/mutation conclusion.
+if ! sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDPWorkspaceClipboardAndDisplay$' -test.timeout=65s -test.v; then
+  preflight_failed=1
+fi
+test "${preflight_failed}" = 0
 # Observe both directions on the actual manager/helper syscall boundary. These
 # public-only overlays cannot send credentials or satisfy a normal test gate.
 python3 scripts/rdp-sandbox-mutations.py "${prefix}"
