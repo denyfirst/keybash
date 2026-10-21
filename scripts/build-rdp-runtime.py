@@ -40,6 +40,10 @@ for source in sorted((prefix / "lib").rglob("*.so*")):
     if source.is_file() and (source.name.startswith(("libguac", "libfreerdp3", "libwinpr3")) or source.parent.name == "freerdp3"):
         copy(source, "/opt/keybash-rdp/" + source.relative_to(prefix).as_posix())
 copy("/usr/bin/setpriv", "/setpriv")
+# WinPR's NTLM implementation needs OpenSSL's MD4 provider. This is a
+# dlopened OS module, so ldd alone cannot discover it. TLS/certificate policy
+# remains the separate mandatory strong-cipher and exact-identity boundary.
+copy("/usr/lib/x86_64-linux-gnu/ossl-modules/legacy.so", "/opt/keybash-rdp/ossl-modules/legacy.so")
 
 while pending:
     source = pending.pop()

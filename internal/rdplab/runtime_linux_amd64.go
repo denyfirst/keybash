@@ -60,7 +60,7 @@ func RuntimeInventory(path string) ([32]byte, error) {
 	}
 	h := sha256.New()
 	count, total := 0, int64(0)
-	required := map[string]bool{"opt/keybash-rdp/sbin/guacd": false, "opt/keybash-rdp/lib/libguac-client-rdp.so": false, "lib64/ld-linux-x86-64.so.2": false, "setpriv": false, "worker": false, "run/keybash/approved.pem": false, "run/keybash/name": false}
+	required := map[string]bool{"opt/keybash-rdp/sbin/guacd": false, "opt/keybash-rdp/lib/libguac-client-rdp.so": false, "opt/keybash-rdp/ossl-modules/legacy.so": false, "lib64/ld-linux-x86-64.so.2": false, "setpriv": false, "worker": false, "run/keybash/approved.pem": false, "run/keybash/name": false}
 	directories := map[string]bool{"proc": false, "dev": false, "tmp": false, "run/keybash": false}
 	err := filepath.WalkDir(path, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

@@ -205,6 +205,8 @@ func (m *nativeMarker) Write(p []byte) (int, error) {
 				m.clipboardOnce.Do(func() { close(m.clipboard) })
 			case "KB_DESKTOP_RESIZED":
 				m.resizedOnce.Do(func() { close(m.resized) })
+			case "KB_DISP_READY", "KB_DISP_CAPS_SENT":
+				fmt.Fprintln(os.Stdout, m.tail) // fixed synthetic channel states only
 			}
 			m.tail = ""
 		} else if len(m.tail) < 256 {

@@ -134,6 +134,16 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	if os.Rename(hidden, helper) != nil {
 		t.Fatal("runtime helper restoration failed")
 	}
+	provider := filepath.Join(c.Runtime, "opt/keybash-rdp/ossl-modules/legacy.so")
+	if os.Rename(provider, provider+".hidden") != nil {
+		t.Fatal("native NTLM provider fixture failed")
+	}
+	if _, e := RuntimeInventory(c.Runtime); e == nil {
+		t.Fatal("runtime without its native NTLM provider accepted")
+	}
+	if os.Rename(provider+".hidden", provider) != nil {
+		t.Fatal("native NTLM provider restoration failed")
+	}
 	file, e := sealedRDPFile([]byte("public trust"))
 	if e != nil {
 		t.Fatal("sealed trust failed")
@@ -346,7 +356,7 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 	select {
 	case e := <-got:
 		if e != nil {
-			t.Fatal("managed native desktop did not render")
+			t.Fatalf("managed native desktop did not render (fixed classification: %v)", s.(*viewerStream).native.failure.Load())
 		}
 	case <-ctx.Done():
 		t.Fatal("managed native desktop stalled")

@@ -20,6 +20,11 @@ sample server, source build tool, host /usr mount or vault file enters it.
 The source-test package is not a signed/offline distributable or final SBOM.
 Host library licensing/inventory, reproducibility and independent audit remain
 release gates. User-space native loopback sockets are private to each worker.
+The runtime inventory explicitly includes OpenSSL's distribution-supplied
+`legacy.so` provider, which WinPR loads dynamically for NTLM's protocol MD4
+operation and which `ldd` cannot discover. The module and its dependencies are
+hash-bound; its fixed module directory is supplied only to guacd. This does not
+enable weak TLS ciphers/certificates or change the Argon2id login password store.
 
 The 21 October recheck includes the new [FreeRDP advisories](https://github.com/FreeRDP/FreeRDP/security/advisories),
 including [DRDYNVC allocation bounds](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-rrp5-666j-g6gp)
@@ -32,7 +37,9 @@ inventory and update policy.
 Guacamole 1.6's common UTF-16 reader/writer treats individual 16-bit units as
 characters. The RDP clipboard integration therefore adds a narrow adapter using
 the already pinned WinPR conversion API, queried capacities, explicit UTF-16
-surrogate/terminator checks and exact UTF-8 roundtrip validation. Only
+surrogate/terminator checks and exact UTF-8 roundtrip validation. The adapter
+copies a bounded snapshot under the native clipboard lock before querying or
+converting, so concurrent clipboard updates cannot change its input. Only
 CF_UNICODETEXT is advertised/requested; no lossy codepage fallback is enabled.
 The codec tests compare golden wire bytes, empty/exact-limit text, malformed
 UTF-8/UTF-16 and buffer bounds under ASan/UBSan. Both accept-all/refuse-all

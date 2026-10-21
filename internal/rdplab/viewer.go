@@ -71,6 +71,7 @@ func (s *viewerStream) Close() error {
 }
 func (s *viewerStream) ReadStderr([]byte) (int, error) { return 0, io.EOF }
 func (s *viewerStream) Resize(uint32, uint32) error    { _ = s.Close(); return errNative }
+func (s *viewerStream) revoked() bool                  { return s.closed.Load() || s.native.revoked() }
 
 func canonicalNumber(raw string, low, high int) (int, bool) {
 	n, err := strconv.Atoi(raw)
@@ -360,12 +361,13 @@ func (s *viewerStream) drawing(in instruction) bool {
 }
 
 func (s *viewerStream) Read(data []byte) (int, error) {
-	if s.closed.Load() {
+	if s.revoked() {
+		_ = s.Close()
 		return 0, errNative
 	}
 	for s.ready.Len() == 0 {
 		in, err := s.native.next()
-		if err != nil || s.closed.Load() {
+		if err != nil || s.revoked() {
 			_ = s.Close()
 			return 0, errNative
 		}
@@ -399,11 +401,11 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 			s.pending.Reset()
 		}
 	}
-	if s.closed.Load() {
+	if s.revoked() {
 		return 0, errNative
 	}
 	n, err := s.ready.Read(data)
-	if s.closed.Load() {
+	if s.revoked() {
 		clear(data[:n])
 		return 0, errNative
 	}
@@ -412,11 +414,14 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 func (s *viewerStream) send(in instruction) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	if s.revoked() {
+		return errNative
+	}
 	return writeInstruction(s.native.raw, in)
 }
 func (s *viewerStream) Write(data []byte) (int, error) {
 	refuse := func() (int, error) { _ = s.Close(); return 0, errNative }
-	if s.closed.Load() || len(data) == 0 || len(data) > 1024 && !s.workspace || len(data) > 8192 {
+	if s.revoked() || len(data) == 0 || len(data) > 1024 && !s.workspace || len(data) > 8192 {
 		return refuse()
 	}
 	reader := bufio.NewReader(bytes.NewReader(data))
@@ -563,15 +568,21 @@ func (s *viewerStream) clipboardInput(in instruction) bool {
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	if s.revoked() {
+		return false
+	}
 	if writeInstruction(s.native.raw, instruction{"clipboard", "0", "text/plain"}) != nil {
 		return false
 	}
 	for b := []byte(text); len(b) > 0; {
+		if s.revoked() {
+			return false
+		}
 		n := min(len(b), 512)
 		if writeInstruction(s.native.raw, instruction{"blob", "0", base64.StdEncoding.EncodeToString(b[:n])}) != nil {
 			return false
 		}
 		b = b[n:]
 	}
-	return writeInstruction(s.native.raw, instruction{"end", "0"}) == nil
+	return !s.revoked() && writeInstruction(s.native.raw, instruction{"end", "0"}) == nil
 }

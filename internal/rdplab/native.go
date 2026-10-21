@@ -89,6 +89,8 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 
 type nativeStream struct {
 	raw       net.Conn
+	ctx       context.Context
+	closed    atomic.Bool
 	workspace bool
 	reader    *bufio.Reader
 	stop      func() bool
@@ -117,7 +119,7 @@ func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeS
 	if _, err := newNativePlan(plan.identity, plan.user, plan.password); err != nil {
 		return nil, errNative
 	}
-	stream := &nativeStream{workspace: plan.workspace, raw: raw, reader: bufio.NewReader(raw)}
+	stream := &nativeStream{ctx: ctx, workspace: plan.workspace, raw: raw, reader: bufio.NewReader(raw)}
 	stream.stop = context.AfterFunc(ctx, func() { _ = raw.Close() })
 	defer func() {
 		if !ok {
@@ -166,13 +168,29 @@ func (s *nativeStream) close() {
 	if s == nil {
 		return
 	}
+	s.closed.Store(true)
 	s.once.Do(func() { s.stop(); _ = s.raw.Close() })
+}
+
+func (s *nativeStream) revoked() bool {
+	if s == nil || s.closed.Load() || s.ctx != nil && s.ctx.Err() != nil {
+		return true
+	}
+	if lease, ok := s.raw.(interface{ leaseContext() context.Context }); ok {
+		ctx := lease.leaseContext()
+		return ctx != nil && ctx.Err() != nil
+	}
+	return false
 }
 
 func (s *nativeStream) next() (instruction, error) {
 	for {
+		if s.revoked() {
+			s.close()
+			return nil, errNative
+		}
 		in, err := readInstruction(s.reader)
-		if err != nil {
+		if err != nil || s.revoked() {
 			s.failure.Store("instruction framing")
 			s.close()
 			return nil, errNative

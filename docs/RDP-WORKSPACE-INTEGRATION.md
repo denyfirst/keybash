@@ -38,7 +38,8 @@ Implemented source and its required acceptance boundaries:
 
 `native/clipboard.c` uses the already pinned WinPR conversion API after querying
 capacities. It validates surrogate pairs and termination, refuses lossy UTF-8
-roundtrips, and handles exactly Guacamole's one final NUL as framing. Native
+roundtrips, snapshots input under the native clipboard lock and handles
+Guacamole's initial empty state or one final NUL as framing. Native
 ASan/UBSan tests compare Unicode golden wire bytes, malformed text, exact bounds
 and empty clipboard. Both accept-all/refuse-all conversions must fail their
 intended assertions, followed by the normal unchanged sanitized test. Both
@@ -59,6 +60,12 @@ without realpaths, fixed the guacd port option, bound root/directory modes and
 rejected special permission bits, added complete Unicode conversion and framing
 checks, and made fixed diagnostic state atomic. This is self-review, not an
 independent candidate audit.
+Further review added a clipboard snapshot under its native lock, immediate
+lease/owner checks for buffered data and unconditional revocation on manager
+done. Both local accept-all/refuse-all revocation mutations fail the intended
+assertions; the unchanged RDP suite reruns after the overlays. The minimal
+runtime also inventories the dynamically loaded OpenSSL provider required by
+WinPR's NTLM path; strong TLS/identity checks remain mandatory.
 
 Local Go 1.26.10 formatting/module/vet/shuffled tests/build/static/security/
 vulnerability/workflow gates and both portable Edge desktop/workspace browser

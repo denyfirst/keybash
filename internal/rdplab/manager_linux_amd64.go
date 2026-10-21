@@ -374,10 +374,11 @@ func connectRDPManager(life, setup context.Context, path string, dial func(conte
 	go func() {
 		defer close(done)
 		defer conn.Close()
+		defer cancel()
 		defer stopLife()
-		if expectRDPPacket(conn, managerDone) != nil {
-			cancel() // manager crash/disappearance revokes buffered output too.
-		}
+		// A normally reaped worker and a vanished manager both revoke the
+		// lease, including output already buffered above the underlying pipes.
+		_ = expectRDPPacket(conn, managerDone)
 	}()
 	owned = false
 	if finishRDPSetup(s, setup) != nil {

@@ -59,8 +59,9 @@ func (c *rdpConnection) Close() error {
 		return errNative
 	}
 }
-func (c *rdpConnection) LocalAddr() net.Addr  { return &net.UnixAddr{Net: "unix", Name: "private-rdp"} }
-func (c *rdpConnection) RemoteAddr() net.Addr { return c.LocalAddr() }
+func (c *rdpConnection) LocalAddr() net.Addr           { return &net.UnixAddr{Net: "unix", Name: "private-rdp"} }
+func (c *rdpConnection) RemoteAddr() net.Addr          { return c.LocalAddr() }
+func (c *rdpConnection) leaseContext() context.Context { return c.ctx }
 func (c *rdpConnection) SetDeadline(t time.Time) error {
 	if c.SetReadDeadline(t) != nil || c.SetWriteDeadline(t) != nil {
 		return errNative
@@ -168,7 +169,7 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	}
 	defer bridge.Close()
 	guacd := exec.Command("/opt/keybash-rdp/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error")
-	guacd.Env = []string{"LD_LIBRARY_PATH=/opt/keybash-rdp/lib", "HOME=/tmp", "LANG=C.UTF-8", "WLOG_LEVEL=OFF"}
+	guacd.Env = []string{"LD_LIBRARY_PATH=/opt/keybash-rdp/lib", "OPENSSL_MODULES=/opt/keybash-rdp/ossl-modules", "HOME=/tmp", "LANG=C.UTF-8", "WLOG_LEVEL=OFF"}
 	guacd.Stdout, guacd.Stderr = io.Discard, io.Discard
 	guacd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if guacd.Start() != nil {

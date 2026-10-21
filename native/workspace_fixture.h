@@ -3,11 +3,26 @@
  * display-control PDUs. Only fixed markers reach the Go parent, never text. */
 #include <freerdp/server/cliprdr.h>
 #include <freerdp/server/disp.h>
+#include <freerdp/channels/wtsvc.h>
 #include <winpr/clipboard.h>
 
 
 static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,0};
 static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,10,'l','i','n','e',0};
+
+static BOOL kb_disp_assigned(DispServerContext* ctx, UINT32 id) {
+    testPeerContext* peer = (testPeerContext*)ctx->custom;
+    atomic_store_explicit(&peer->kb_disp_id,id,memory_order_release);
+    return TRUE;
+}
+static BOOL kb_dvc_created(void* data, UINT32 id, INT32 status) {
+    testPeerContext* peer = (testPeerContext*)data;
+    if (!peer->kb_disp || id != atomic_load_explicit(&peer->kb_disp_id,memory_order_acquire)) return TRUE;
+    if (status != 0) return FALSE;
+    atomic_store_explicit(&peer->kb_disp_ready,1,memory_order_release);
+    puts("KB_DISP_READY"); fflush(stdout);
+    return SetEvent(peer->kb_resize_event);
+}
 
 static UINT kb_clip_capabilities(CliprdrServerContext* ctx, const CLIPRDR_CAPABILITIES* caps) {
     (void)caps;
@@ -76,11 +91,16 @@ static BOOL kb_workspace_events(freerdp_peer* client) {
             peer->kb_disp=disp_server_context_new(peer->vcm);
             if (!peer->kb_disp) return FALSE;
             peer->kb_disp->rdpcontext=client->context; peer->kb_disp->custom=peer;
+            peer->kb_disp->ChannelIdAssigned=kb_disp_assigned;
             peer->kb_disp->MaxNumMonitors=1;peer->kb_disp->MaxMonitorAreaFactorA=1920;peer->kb_disp->MaxMonitorAreaFactorB=1080;
             peer->kb_disp->DispMonitorLayout=kb_disp_layout;
             if (peer->kb_disp->Open(peer->kb_disp)!=CHANNEL_RC_OK) return FALSE;
         }
-        if (!peer->kb_caps_sent && peer->kb_disp->DisplayControlCaps(peer->kb_disp)==CHANNEL_RC_OK) peer->kb_caps_sent=TRUE;
+        if (!peer->kb_caps_sent && atomic_load_explicit(&peer->kb_disp_ready,memory_order_acquire)) {
+            if (peer->kb_disp->DisplayControlCaps(peer->kb_disp)!=CHANNEL_RC_OK) return FALSE;
+            peer->kb_caps_sent=TRUE;
+            puts("KB_DISP_CAPS_SENT"); fflush(stdout);
+        }
     }
     uint_fast64_t size=atomic_exchange_explicit(&peer->kb_size,0,memory_order_acq_rel);
     if (size) {

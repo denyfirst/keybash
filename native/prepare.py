@@ -17,13 +17,13 @@ def replace_once(path, old, new):
 sample = freerdp / "server/Sample/sfreerdp.c"
 sample_header = sample.with_suffix(".h")
 replace_once(sample_header, "#include <freerdp/server/rdpsnd.h>", "#include <freerdp/server/rdpsnd.h>\n#include <freerdp/server/cliprdr.h>\n#include <freerdp/server/disp.h>\n#include <stdatomic.h>")
-replace_once(sample_header, "EncomspServerContext* encomsp;", "EncomspServerContext* encomsp;\n\tCliprdrServerContext* kb_clip;\n\tDispServerContext* kb_disp;\n\tBOOL kb_caps_sent;\n\tatomic_uint_fast64_t kb_size;\n\tHANDLE kb_resize_event;")
+replace_once(sample_header, "EncomspServerContext* encomsp;", "EncomspServerContext* encomsp;\n\tCliprdrServerContext* kb_clip;\n\tDispServerContext* kb_disp;\n\tBOOL kb_caps_sent;\n\tatomic_uint_fast32_t kb_disp_id;\n\tatomic_int kb_disp_ready;\n\tatomic_uint_fast64_t kb_size;\n\tHANDLE kb_resize_event;")
 (sample.parent / "keybash_workspace_fixture.h").write_bytes((identity_source.parent / "workspace_fixture.h").read_bytes())
 replace_once(sample, '#include "sfreerdp.h"', '#include "sfreerdp.h"\n#include "keybash_workspace_fixture.h"')
 replace_once(sample, "winpr_image_free(context->image, TRUE);", "kb_workspace_free(context);\n\t\twinpr_image_free(context->image, TRUE);")
 replace_once(sample, "/* Dynamic Virtual Channels */", "if (!kb_workspace_start(client)) return FALSE;\n\t/* Dynamic Virtual Channels */")
 replace_once(sample, "/* Handle dynamic virtual channel initializations */", "if (!kb_workspace_events(client)) break;\n\t\t/* Handle dynamic virtual channel initializations */")
-replace_once(sample, "context->vcm = WTSOpenServerA((LPSTR)client->context);", "context->vcm = WTSOpenServerA((LPSTR)client->context);\n\tatomic_init(&context->kb_size,0);\n\tcontext->kb_resize_event=CreateEvent(NULL,FALSE,FALSE,NULL);\n\tif (!context->kb_resize_event) goto fail;")
+replace_once(sample, "context->vcm = WTSOpenServerA((LPSTR)client->context);", "context->vcm = WTSOpenServerA((LPSTR)client->context);\n\tatomic_init(&context->kb_size,0);\n\tatomic_init(&context->kb_disp_id,0);\n\tatomic_init(&context->kb_disp_ready,0);\n\tcontext->kb_resize_event=CreateEvent(NULL,FALSE,FALSE,NULL);\n\tif (!context->kb_resize_event) goto fail;\n\tif (context->vcm) WTSVirtualChannelManagerSetDVCCreationCallback(context->vcm,kb_dvc_created,context);")
 replace_once(sample, "handles[count++] = channelHandle;", "handles[count++] = channelHandle;\n\t\thandles[count++] = context->kb_resize_event;")
 replace_once(sample, "client->GetEventHandles(client, &handles[count], 32 - count)", "client->GetEventHandles(client, &handles[count], 30 - count)")
 replace_once(sample, "FreeRDP_RdpSecurity, TRUE", "FreeRDP_RdpSecurity, FALSE")
@@ -147,6 +147,20 @@ replace_once(settings, "if (guac_settings->certificate_fingerprints != NULL)\n  
 clip = guac / "src/protocols/rdp/channels/cliprdr.c"
 (clip.parent / "keybash_clipboard.c").write_bytes((identity_source.parent / "clipboard.c").read_bytes())
 replace_once(clip, '#include "common/clipboard.h"', '#include "common/clipboard.h"\n#include "keybash_clipboard.c"')
+replace_once(clip, '    const char* input = clipboard->clipboard->buffer;', '''    /* Native input and RDP callbacks can update this shared clipboard.
+     * Convert an immutable bounded snapshot, never a changing buffer between
+     * the required-size query and conversion. No content is logged. */
+    char keybash_input[KEYBASH_CLIPBOARD_LIMIT + 1];
+    pthread_mutex_lock(&(clipboard->clipboard->lock));
+    int keybash_input_length = clipboard->clipboard->length;
+    if (keybash_input_length < 0 || keybash_input_length > KEYBASH_CLIPBOARD_LIMIT + 1) {
+        pthread_mutex_unlock(&(clipboard->clipboard->lock));
+        return ERROR_INVALID_DATA;
+    }
+    if (keybash_input_length) memcpy(keybash_input, clipboard->clipboard->buffer, (size_t)keybash_input_length);
+    else keybash_input[0] = 0;
+    pthread_mutex_unlock(&(clipboard->clipboard->lock));
+    const char* input = keybash_input;''')
 replace_once(clip, '''            { .formatId = CF_TEXT },
             { .formatId = CF_UNICODETEXT }
         },
@@ -166,7 +180,7 @@ local = '''    guac_iconv(local_reader, &input, clipboard->clipboard->length,
             remote_writer, &output, GUAC_COMMON_CLIPBOARD_MAX_LENGTH);'''
 replace_once(clip, local, '''    if (format_data_request->requestedFormatId == CF_UNICODETEXT) {
         size_t length = 0;
-        if (!keybash_clipboard_from_terminated_utf8(input, clipboard->clipboard->length,
+        if (!keybash_clipboard_from_terminated_utf8(input, (size_t)keybash_input_length,
                 start, GUAC_COMMON_CLIPBOARD_MAX_LENGTH, &length)) {
             guac_mem_free(start);
             return ERROR_INVALID_DATA;
