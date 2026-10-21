@@ -26,17 +26,47 @@ The user has no test VMs yet and requested a setup guide. `TEST-SETUP-AZ.md`
 provides the separate Ubuntu/Linux/Windows setup and pinned source build path;
 no VM or customer service has been deployed from this workstation.
 
-Acceptance work:
+Implemented source and its required acceptance boundaries:
 
-- [ ] Exact-peer manager IPC, runtime/image provenance, isolated native worker,
-  cancellation/reaping and installed service/cgroup integration.
-- [ ] Text-only, bounded, explicit user copy/paste; permission fallback, no
-  automatic local clipboard writes, session isolation and revocation.
-- [ ] Bounded size request, validated native resize and browser geometry.
-- [ ] Source test setup on an empty supported VM, trusted local TLS access,
-  explicit operator approvals and step-by-step SSH/Windows test instructions.
-- [ ] Positive/refusal/malformed/abuse and both-direction mutation evidence,
-  native/browser/service CI, signed PR and adversarial self-review.
+| Boundary | Required observable evidence |
+| --- | --- |
+| Manager IPC and minimal runtime | Exact peer and five descriptor types/seals, malformed/truncated rights, digest/ownership/mode/refusal, native NLA, pin refusal before CredSSP and canceled I/O |
+| Installed service lifecycle | Actual generated gateway/SSH/RDP units, live distinct worker identity, exact cgroup membership and aggregate values, stop/reap, mismatched-limit refusal and restart |
+| Clipboard | Completed UTF-8 only, stream collisions and malformed/NUL/oversize refusal, explicit copy/paste, permission fallback, actual headless OS clipboard through native CLIPRDR, session cleanup and late-read refusal |
+| Desktop size | Bounded request/flood refusal, actual DISPLAYCONTROL monitor layout, native display resize and browser geometry |
+| Separate VM preparation | `TEST-SETUP-AZ.md`: fresh Ubuntu source build, approved Linux/Windows identities, trusted HTTPS, account/MFA setup and first connection instructions; customer VMs are not provisioned or tested |
+
+`native/clipboard.c` uses the already pinned WinPR conversion API after querying
+capacities. It validates surrogate pairs and termination, refuses lossy UTF-8
+roundtrips, and handles exactly Guacamole's one final NUL as framing. Native
+ASan/UBSan tests compare Unicode golden wire bytes, malformed text, exact bounds
+and empty clipboard. Both accept-all/refuse-all conversions must fail their
+intended assertions, followed by the normal unchanged sanitized test. Both
+allow-all/refuse-all syscall filter overlays must fail the actual public-only
+manager/helper startup test; the full unmodified native suite follows them.
+Existing actual C X509 callback mutations, SSH, ownership/MFA, race/browser and
+all ten two-million-execution fuzz gates remain required.
+
+The public preflight never sends native select/connect or credentials. Failure
+diagnostics use separate Go overlay binaries and cannot turn a failed normal
+candidate into acceptance. Normal runtime/native stderr remains discarded.
+
+Adversarial maintainer self-review covered privilege and descriptor lifetime,
+target/identity binding, parser limits, clipboard/stream ownership, cancellation
+races, mount/runtime provenance and actual service lifecycle. Findings changed
+raw descriptor-number closes to CLOEXEC, used read-only data mounts for memfds
+without realpaths, fixed the guacd port option, bound root/directory modes and
+rejected special permission bits, added complete Unicode conversion and framing
+checks, and made fixed diagnostic state atomic. This is self-review, not an
+independent candidate audit.
+
+Local Go 1.26.10 formatting/module/vet/shuffled tests/build/static/security/
+vulnerability/workflow gates and both portable Edge desktop/workspace browser
+tests passed. Linux tagged cross-vet/staticcheck passed. Final exact-head native,
+installed service, browser, race/fuzz, signatures and all CodeQL checks must pass
+before a merge commit. [PR 18](https://github.com/denyfirst/keybash/pull/18) records
+the exact final candidate and CI evidence; diagnostic/mutant binaries are never
+substituted for its normal candidate.
 
 Real Windows VM/browser matrix, sizing, production installer/upgrade/restore,
 independent exact-candidate audit and separately authorized release remain

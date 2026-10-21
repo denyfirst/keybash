@@ -22,7 +22,7 @@ cflags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "winpr3"
 libs = shlex.split(subprocess.check_output(["pkg-config", "--libs", "winpr3"], text=True))
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 for name, before, after, assertion in (
-    ("accept", "return 0;", "return 1;", "!keybash_clipboard_to_utf8"),
+    ("accept", "return 0;", "return 1;", "!keybash_clipboard_from_terminated_utf8(text"),
     ("refuse", "return 1;", "return 0;", "keybash_clipboard_from_utf8(text"),
 ):
     directory = stage / name

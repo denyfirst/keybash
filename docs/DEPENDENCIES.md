@@ -21,6 +21,25 @@ The source-test package is not a signed/offline distributable or final SBOM.
 Host library licensing/inventory, reproducibility and independent audit remain
 release gates. User-space native loopback sockets are private to each worker.
 
+The 21 October recheck includes the new [FreeRDP advisories](https://github.com/FreeRDP/FreeRDP/security/advisories),
+including [DRDYNVC allocation bounds](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-rrp5-666j-g6gp)
+(affected through 3.32.1, fixed in the existing 3.32.2 pin), and the current
+[Apache security reports](https://guacamole.apache.org/security/). This is a
+dated advisory review, not a vulnerability-free or independent-audit claim.
+Distribution loader/library updates still belong to the supported-host/release
+inventory and update policy.
+
+Guacamole 1.6's common UTF-16 reader/writer treats individual 16-bit units as
+characters. The RDP clipboard integration therefore adds a narrow adapter using
+the already pinned WinPR conversion API, queried capacities, explicit UTF-16
+surrogate/terminator checks and exact UTF-8 roundtrip validation. Only
+CF_UNICODETEXT is advertised/requested; no lossy codepage fallback is enabled.
+The codec tests compare golden wire bytes, empty/exact-limit text, malformed
+UTF-8/UTF-16 and buffer bounds under ASan/UBSan. Both accept-all/refuse-all
+mutations must fail the intended assertions before the normal test reruns.
+Go/browser boundaries still validate complete UTF-8 independently. This changes
+the RDP adapter, not the upstream common converter or other protocol support.
+
 ## Durable custody adoption (2026-10-15)
 
 Pinned `go.etcd.io/bbolt v1.5.0` (MIT, tag

@@ -2,7 +2,7 @@
 
 Original sources/binaries remain intact. No native select/connect or credential
 is sent by the selected diagnostic test. Overlays print only fixed preparation
-refusal numbers and fixed bwrap/setpriv setup diagnostics.
+refusal numbers and bwrap/setpriv/guacd public-only setup diagnostics.
 """
 import json
 from pathlib import Path
