@@ -1,5 +1,13 @@
 # Protocol dependency review
 
+## Toolchain security update (2026-10-21)
+
+The current pin is Go 1.26.10. The live vulnerability gate reported
+GO-2026-6809 in crypto/x509 on 1.26.9; 1.26.10 contains the upstream certificate
+verification correction. See the [Go release history](https://go.dev/doc/devel/release#go1.26.10).
+Historical adoption notes below describe the toolchain at adoption time.
+All native/browser/service and analysis gates must pass with the updated pin.
+
 ## Durable custody adoption (2026-10-15)
 
 Pinned `go.etcd.io/bbolt v1.5.0` (MIT, tag
