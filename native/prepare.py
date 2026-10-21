@@ -166,7 +166,7 @@ local = '''    guac_iconv(local_reader, &input, clipboard->clipboard->length,
             remote_writer, &output, GUAC_COMMON_CLIPBOARD_MAX_LENGTH);'''
 replace_once(clip, local, '''    if (format_data_request->requestedFormatId == CF_UNICODETEXT) {
         size_t length = 0;
-        if (!keybash_clipboard_from_utf8(input, clipboard->clipboard->length,
+        if (!keybash_clipboard_from_terminated_utf8(input, clipboard->clipboard->length,
                 start, GUAC_COMMON_CLIPBOARD_MAX_LENGTH, &length)) {
             guac_mem_free(start);
             return ERROR_INVALID_DATA;

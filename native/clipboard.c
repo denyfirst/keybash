@@ -56,3 +56,12 @@ static int keybash_clipboard_from_utf8(const char* input, size_t length,
     *written = ((size_t)units + 1) * 2;
     return 1;
 }
+
+/* Guacamole appends one NUL on its completed clipboard stream. This is framing,
+ * not user text. Embedded NUL, a missing terminator and excess bytes refuse. */
+static int keybash_clipboard_from_terminated_utf8(const char* input, size_t length,
+        BYTE* output, size_t capacity, size_t* written) {
+    *written = 0;
+    if (!input || !length || length > KEYBASH_CLIPBOARD_LIMIT+1 || input[length-1] != 0) return 0;
+    return keybash_clipboard_from_utf8(input, length-1, output, capacity, written);
+}

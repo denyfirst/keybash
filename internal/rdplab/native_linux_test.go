@@ -452,7 +452,7 @@ func TestNativeRDPChild(t *testing.T) {
 		}
 	}
 	prefix := os.Getenv("KEYBASH_NATIVE_PREFIX")
-	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--core=0", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-p", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
+	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--core=0", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
 	guacd.Stdout = &nativeStages{}
 	guacd.Stderr = io.Discard
 	if guacd.Start() != nil {

@@ -167,7 +167,7 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 		return errNative
 	}
 	defer bridge.Close()
-	guacd := exec.Command("/opt/keybash-rdp/sbin/guacd", "-f", "-b", "127.0.0.1", "-p", "4822", "-L", "error")
+	guacd := exec.Command("/opt/keybash-rdp/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error")
 	guacd.Env = []string{"LD_LIBRARY_PATH=/opt/keybash-rdp/lib", "HOME=/tmp", "LANG=C.UTF-8", "WLOG_LEVEL=OFF"}
 	guacd.Stdout, guacd.Stderr = io.Discard, io.Discard
 	guacd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
