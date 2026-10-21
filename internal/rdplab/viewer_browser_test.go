@@ -18,7 +18,7 @@ import (
 	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
-func browserViewer(t *testing.T, ctx context.Context, node string, factory terminalweb.Factory, screenshot string, env []string) {
+func browserViewer(t *testing.T, ctx context.Context, node string, factory terminalweb.Factory, screenshot string, env []string, workspace ...bool) {
 	t.Helper()
 	server := httptest.NewUnstartedServer(nil)
 	server.Config.ReadHeaderTimeout = 5 * time.Second
@@ -32,9 +32,13 @@ func browserViewer(t *testing.T, ctx context.Context, node string, factory termi
 	server.Config.Handler = lab
 	server.StartTLS()
 	defer server.Close()
-	script := filepath.Join("..", "..", "web", "desktop-browser-test.mjs")
+	name := "desktop-browser-test.mjs"
+	if len(workspace) > 0 && workspace[0] {
+		name = "desktop-workspace-browser-test.mjs"
+	}
+	script := filepath.Join("..", "..", "web", name)
 	if _, e := os.Stat(script); e != nil {
-		script = filepath.Join("web", "desktop-browser-test.mjs")
+		script = filepath.Join("web", name)
 	}
 	command := exec.CommandContext(ctx, node, script) // #nosec G204 -- fixed test runtime/script, no browser-selected command.
 	if env != nil {

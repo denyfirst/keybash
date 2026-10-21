@@ -61,6 +61,7 @@ func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) 
 	if ctx == nil || ctx.Err() != nil || dial == nil || err != nil {
 		return nil, errNative
 	}
+	plan.workspace = true
 	setup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	raw, err := connectRDPManager(ctx, setup, w.SocketPath, dial, pin)
@@ -79,7 +80,7 @@ func (ManagerConfig) Format(w fmt.State, _ rune) {
 	_, _ = io.WriteString(w, "[RDP manager configuration]")
 }
 
-// Keep numeric worker arguments canonical; no namespace/path argument is ever
+// ParseWorkerID keeps numeric worker arguments canonical; no namespace/path argument is ever
 // used as a file path or command by the child.
 func ParseWorkerID(s string) (uint32, error) {
 	v, e := strconv.ParseUint(s, 10, 31)

@@ -67,6 +67,13 @@ while pending:
             raise SystemExit("unexpected native dependency path")
         copy(dependency, destination)
 
+# Mountpoints exist before the root filesystem is bound read-only. Namespace
+# setup must never create host files in the approved runtime at launch time.
+for name in ("proc", "dev", "tmp", "run/keybash"):
+    (output / name).mkdir(parents=True, exist_ok=True)
+for name in ("worker", "run/keybash/approved.pem", "run/keybash/name"):
+    (output / name).write_bytes(b"mountpoint\n")
+    (output / name).chmod(0o644)
 for directory in output.rglob("*"):
     if directory.is_dir():
         directory.chmod(0o755)

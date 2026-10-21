@@ -92,3 +92,9 @@ func streamID(id string) bool {
 	n, err := strconv.ParseUint(id, 10, 16)
 	return err == nil && n <= 65535
 }
+
+func (c *clipboard) matches(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.closed && c.active && c.id == id
+}

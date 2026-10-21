@@ -25,7 +25,12 @@
       <div id="desktop" tabindex="0" role="application" aria-label="RDP masaüstü"><div id="display"></div></div>
       <footer><span>Klaviatura masaüstü fokusda olduqda işləyir</span><span id="size">1024 × 768</span></footer>
     </section>
-    <p class="help">Bu lab-da görüntü, mouse və klaviatura yoxlanır. Clipboard və remote resize növbəti mərhələdədir.</p>
+    <section class="clipboard-panel" aria-label="Mətn mübadiləsi">
+      <div><label for="resolution">Ekran ölçüsü</label><select id="resolution" disabled><option value="fit">Pəncərəyə uyğunlaşdır</option><option value="1024x768">1024 × 768</option><option value="1280x720">1280 × 720</option><option value="1600x900">1600 × 900</option><option value="1920x1080">1920 × 1080</option></select></div>
+      <div><label for="paste-text">Remote-a yapışdırılacaq mətn · ən çox 32 KiB</label><textarea id="paste-text" rows="3" maxlength="32768" autocomplete="off" spellcheck="false"></textarea><pre id="paste-preview" aria-label="Paste baxışı"></pre><button id="paste-local" disabled>Lokal clipboard-dan oxu</button><button id="paste-send" disabled>Nəzərdən keçirdim · yapışdır</button></div>
+      <div><label for="remote-text">Remote-dan gələn mətn</label><textarea id="remote-text" rows="3" readonly autocomplete="off" spellcheck="false"></textarea><button id="copy-remote" disabled>Kopyala · Ctrl+Shift+C</button></div>
+    </section>
+    <p class="help">Yalnız mətn ötürülür. Copy düymə ilə işləyir; çoxsətirli paste üçün baxış göstərilir. Sessiya bağlananda panel təmizlənir. Ölçü dəstəyi serverdən asılıdır.</p>
     <p id="notice" role="status" class="notice"></p>
   </main>
 </body>

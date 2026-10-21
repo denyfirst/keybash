@@ -179,12 +179,14 @@ func TestNativeRDPSandboxPreparation(t *testing.T) {
 }
 
 type nativeMarker struct {
-	mu                  sync.Mutex
-	tail                string
-	ready               chan struct{}
-	once                sync.Once
-	keys, mouse         chan struct{}
-	keysOnce, mouseOnce sync.Once
+	mu                         sync.Mutex
+	tail                       string
+	ready                      chan struct{}
+	once                       sync.Once
+	keys, mouse                chan struct{}
+	keysOnce, mouseOnce        sync.Once
+	clipboard, resized         chan struct{}
+	clipboardOnce, resizedOnce sync.Once
 }
 
 func (m *nativeMarker) Write(p []byte) (int, error) {
@@ -199,6 +201,10 @@ func (m *nativeMarker) Write(p []byte) (int, error) {
 				m.keysOnce.Do(func() { close(m.keys) })
 			case "KB_INPUT_MOUSE":
 				m.mouseOnce.Do(func() { close(m.mouse) })
+			case "KB_CLIPBOARD_LOCAL":
+				m.clipboardOnce.Do(func() { close(m.clipboard) })
+			case "KB_DESKTOP_RESIZED":
+				m.resizedOnce.Do(func() { close(m.resized) })
 			}
 			m.tail = ""
 		} else if len(m.tail) < 256 {
@@ -255,7 +261,7 @@ func nativePeerWithInput(t *testing.T, ctx context.Context, prefix string, cert 
 		"--ro-bind", prefix+"/share/lab/test_icon.bmp", "/tmp/test_icon.bmp", "--chdir", "/tmp")
 	args = append(args, dropNativePrivileges()...)
 	args = append(args, prefix+"/bin/sfreerdp-server", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
-	marker := &nativeMarker{ready: make(chan struct{}), keys: make(chan struct{}), mouse: make(chan struct{})}
+	marker := &nativeMarker{ready: make(chan struct{}), keys: make(chan struct{}), mouse: make(chan struct{}), clipboard: make(chan struct{}), resized: make(chan struct{})}
 	runSandbox(t, ctx, args, marker)
 	address := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(3 * time.Second)

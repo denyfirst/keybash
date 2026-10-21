@@ -19,6 +19,7 @@ var errNative = errors.New("native RDP lab refused")
 // private lab policy: no browser-selected parameters or production entry point.
 type nativePlan struct {
 	identity       *Identity
+	workspace      bool
 	user, password string
 }
 
@@ -68,6 +69,12 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 		// callback/resize evidence before enabling them in a browser workspace.
 		"resize-method": "", "client-name": "Keybash-lab", "disable-gfx": "true", "force-lossless": "true",
 	}
+	if p.workspace {
+		values["disable-copy"] = "false"
+		values["disable-paste"] = "false"
+		values["resize-method"] = "display-update"
+		values["client-name"] = "Keybash"
+	}
 	result := instruction{"connect", "VERSION_1_5_0"}
 	for _, name := range args[2:] {
 		if !known[name] {
@@ -80,13 +87,14 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 }
 
 type nativeStream struct {
-	raw     net.Conn
-	reader  *bufio.Reader
-	stop    func() bool
-	once    sync.Once
-	output  int
-	frames  int
-	failure string // fixed private classifications, never remote diagnostic text
+	raw       net.Conn
+	workspace bool
+	reader    *bufio.Reader
+	stop      func() bool
+	once      sync.Once
+	output    int
+	frames    int
+	failure   string // fixed private classifications, never remote diagnostic text
 }
 
 func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeStream, error) {
@@ -108,7 +116,7 @@ func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeS
 	if _, err := newNativePlan(plan.identity, plan.user, plan.password); err != nil {
 		return nil, errNative
 	}
-	stream := &nativeStream{raw: raw, reader: bufio.NewReader(raw)}
+	stream := &nativeStream{workspace: plan.workspace, raw: raw, reader: bufio.NewReader(raw)}
 	stream.stop = context.AfterFunc(ctx, func() { _ = raw.Close() })
 	defer func() {
 		if !ok {
@@ -196,6 +204,7 @@ func (s *nativeStream) next() (instruction, error) {
 		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line mouse move name path pop push rect reset shade size start sync transfer transform") {
 			allowed = allowed || op == in[0]
 		}
+		allowed = allowed || s.workspace && in[0] == "clipboard"
 		if !allowed {
 			s.failure = "unexpected instruction"
 			switch in[0] {

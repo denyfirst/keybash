@@ -131,8 +131,9 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	// Only descriptor 3 is an external capability. It must not leak through
 	// exec to guacd or any of its native children.
 	unix.CloseOnExec(3)
-	_ = unix.Close(4)
-	_ = unix.Close(5)
+	for fd := 4; fd <= 7; fd++ {
+		_ = unix.Close(fd)
+	}
 	targetFile := os.NewFile(3, "guarded-rdp-target")
 	target, e := net.FileConn(targetFile)
 	_ = targetFile.Close()
