@@ -1,12 +1,20 @@
 import { Guacamole } from './vendor/guacamole.mjs';
+import { workspaceControls } from './desktop-workspace.mjs';
 import { ownedRemote, remoteProof, remoteErrorMessage } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
 const encoder = new TextEncoder();
+let sendWorkspace;
+const controls = workspaceControls({ $,
+  live: () => !stopped, client: () => client,
+  send: (...values) => sendWorkspace?.(...values), resetKeyboard: () => keyboard?.reset()
+});
 function end() {
+  controls.end();
   if (stopped) return;
   stopped = true;
+  sendWorkspace = null;
   cancelAnimationFrame(mouseFrame); pendingMouse = null;
   keyboard?.reset(); client?.disconnect(); socket?.close();
   $('display').replaceChildren();
@@ -17,14 +25,21 @@ function fit() {
   if (!client || stopped) return;
   const width = $('desktop').clientWidth;
   const height = document.fullscreenElement ? window.innerHeight : Math.min(window.innerHeight * 0.72, 768);
-  client.getDisplay().scale(Math.min(1, width/1024, height/768));
+  const display = client.getDisplay();
+  display.scale(Math.min(1, width/Math.max(1,display.getWidth()), height/Math.max(1,display.getHeight())));
+  controls.resize();
 }
 function begin(proof=null) {
   const tunnel = new Guacamole.Tunnel();
   const parser = new Guacamole.Parser();
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let sequence = 0, bytes = 0;
-  parser.oninstruction = (op, args) => { if (!stopped) tunnel.oninstruction?.(op,args); };
+  parser.oninstruction = (op, args) => {
+    if (stopped) return;
+    if (op === 'keybash') { if (!controls.feature(args)) end(); return; }
+    if (op === 'keybash-clipboard') { if (!controls.receive(args)) end(); return; }
+    tunnel.oninstruction?.(op,args);
+  };
   tunnel.connect = () => {
     socket = new WebSocket(`${location.origin.replace('https:', 'wss:')}${ownedRemote?'/api/remote/socket':'/lab/socket'}`);
     socket.binaryType = 'arraybuffer';
@@ -51,18 +66,22 @@ function begin(proof=null) {
   tunnel.sendMessage = (...values) => {
     if (stopped || socket?.readyState !== WebSocket.OPEN) return;
     if (values[0] === 'disconnect') { socket.close(); return; }
-    if (!['mouse','key','sync','ack','nop'].includes(values[0])) { end(); return; }
+    if (!['mouse','key','sync','ack','nop'].includes(values[0]) && !(controls.enabled && ['clipboard','blob','end','size'].includes(values[0]))) { end(); return; }
     const data = values.map(String).map(value => `${Array.from(value).length}.${value}`).join(',')+';';
     const encoded = encoder.encode(data);
-    if (encoded.length > 1024 || socket.bufferedAmount > 32768) { end(); return; }
+    if (encoded.length > (controls.enabled ? 8192 : 1024) || socket.bufferedAmount > 65536) { end(); return; }
     socket.send(encoded);
   };
+  sendWorkspace = (...values) => tunnel.sendMessage(...values);
   client = new Guacamole.Client(tunnel);
   const display = client.getDisplay();
+  display.onresize = (width,height) => { $('size').textContent = `${width} × ${height}`; fit(); };
   $('display').replaceChildren(display.getElement());
   keyboard = new Guacamole.Keyboard($('desktop'));
   keyboard.onkeydown = key => {
     if (stopped || document.activeElement !== $('desktop')) return true;
+    const handled = controls.key(key, keyboard.modifiers);
+    if (handled !== undefined) return handled;
     client.sendKeyEvent(1,key); return false;
   };
   keyboard.onkeyup = key => { if (!stopped) client.sendKeyEvent(0,key); };
@@ -74,8 +93,8 @@ function begin(proof=null) {
   mouse.on('mousemove', event => {
     if (stopped) return;
     const state = event.state;
-    state.x = Math.max(0, Math.min(1023*display.getScale(),state.x));
-    state.y = Math.max(0, Math.min(767*display.getScale(),state.y));
+    state.x = Math.max(0, Math.min((display.getWidth()-1)*display.getScale(),state.x));
+    state.y = Math.max(0, Math.min((display.getHeight()-1)*display.getScale(),state.y));
     pendingMouse = state;
     if (!mouseFrame) mouseFrame = requestAnimationFrame(() => {
       mouseFrame = 0;

@@ -1,5 +1,12 @@
 # Keybash — məhsulun hazır olması üçün qalan işlər
 
+21 oktyabr mənbə inteqrasiyası: ayrıca RDP manager/runtime, məhdud mətn
+clipboard-u, display-update və systemd/cgroup RDP profili əlavə olunub.
+Native/brauzer/xidmət acceptance `RDP-WORKSPACE-INTEGRATION.md`-də izlənir.
+Ayrıca VM-lər hazırda yoxdur; mənbədən test quraşdırması `TEST-SETUP-AZ.md`-dədir.
+Bu, aşağıdakı production, restore, real Windows matrisi və audit mərhələlərinin
+tamamlandığı demək deyil.
+
 15 oktyabr 2026. Bu siyahı tarix vədi deyil; hər mərhələ faktiki sınaqla qəbul
 edilir. Təhlükəsizlik bütün mərhələlərdə birinci prioritetdir. Yalnız self-host.
 
@@ -17,13 +24,14 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    recovery code, rate limit, CSRF/cookie və sessiya expiry/revocation.
    Daimi şifrələnmiş hesab, birdəfəlik bootstrap, offline blocklist, MFA/recovery
    və təkrar doğrulama ayrıca Linux lab-ında hazırdır (`CUSTODY-LAB.md`).
-   Production quraşdırma, restore/rotation və quraşdırılan worker qalır.
+   Production quraşdırma və restore/rotation qalır; source worker/service
+   inteqrasiyası ayrıca məcburi CI ilə izlənir.
 3. **Credential vault və istifadəçi icazələri.** Şifrələnmiş persistence, ayrıca
    instance key, Ed25519 key/passphrase və password importu lab-da hazırdır.
    RDP domain sahəsi və digər key formatları qalır.
    Connection-credential əlaqəsi və sessiya icazələri artıq SSH/native RDP
-   brauzer lab-ında birləşir (`OWNED-REMOTE-LAB.md`); quraşdırılan worker və
-   operator target/trust konfiqurasiyası qalır. Reveal/export icazəsi və başqa hesabın
+   brauzer lab-ında birləşir (`OWNED-REMOTE-LAB.md`). Source SSH/RDP manager
+   və root catalog inteqrasiyası var; real host qəbul sınağı qalır. Reveal/export icazəsi və başqa hesabın
    connection/credential/socket-ına çıxışın rəddi. Real secret istifadə etməzdən
    əvvəl bu sərhədlər və bərpa modeli sınaqdan keçir.
 4. **Gündəlik workspace.** Connection/credential ekranları, axtarış, qovluq,
@@ -33,20 +41,23 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    owner təsdiqi və dəyişmiş/legacy qərarların bloklanması artıq lab-da var
    (`SERVER-TRUST-LAB.md`). Operator konfiqurasiyasının quraşdırılması qalır.
    Root-a aid offline JSON catalog və SSH-only manager CLI inteqrasiyası
-   artıq var (`OPERATOR-CATALOG-LAB.md`); quraşdırılan xidmət/RDP launcher qalır.
+   artıq var (`OPERATOR-CATALOG-LAB.md`); `serve-remote-lab` ayrıca
+   RDP source manager-ə bağlanır. Paketlənmiş production deployment qalır.
 5. **Production worker və sessiya idarəsi.** Login/ownership ilə bağlı launcher,
    ayrıca credential ötürmə, minimal filesystem/syscall siyasəti, hədəfə məhdud
    çıxış, aggregate resurs/session limitləri, idle/absolute vaxt və aktiv ləğv.
    Ayrıca SSH prosesi və root olmayan gateway üçün authenticated manager
-   lab-ı əlavə olunub (`SSH-MANAGER-LAB.md`). Quraşdırılan xidmət, ayrıca worker
-   identity-si, aggregate cgroup və RDP manager inteqrasiyası qalır.
+   lab-ı əlavə olunub (`SSH-MANAGER-LAB.md`). Source xidmətlər, ayrıca worker
+   identity-si, aggregate cgroup və RDP manager inteqrasiyası var; actual
+   native/xidmət qəbul sınaqları məcburidir (`RDP-WORKSPACE-INTEGRATION.md`).
    Gateway və SSH manager üçün operatorun tənzimlədiyi paralel bağlantı
    hədləri və dolu tutum mesajı var (`SESSION-CAPACITY.md`). CPU/RAM/pids
-   məhdudiyyətlərinin əməliyyat sistemində tətbiqi quraşdırma mərhələsinə aiddir.
+   məhdudiyyətləri source systemd planında kernel başlanğıc yoxlamasına bağlıdır.
    Linux systemd source plan və faktiki cgroup-v2 başlanğıc yoxlaması əlavədir
    (`LINUX-SERVICE-LAB.md`); ayrıca UID-lər, SSH worker, dayandırma/restart və
    CPU/pids/OOM kernel sınaqları CI-də tələb olunur. Avtomatik production
-   quraşdırıcı, ölçülmüş server profilləri və RDP xidməti hələ qalır.
+   quraşdırıcı və ölçülmüş server profilləri hələ qalır. RDP source xidməti
+   əlavədir; real Windows qəbul sınağı hələ aparılmayıb.
 6. **Self-host paket.** Linux quraşdırma, müştərinin HTTPS-i, publish edilməyən
    DB/guacd portları, lokal/offline asset-lər, versiyalı migration/yeniləmə,
    dependency/license/SBOM və məhdud metadata audit.

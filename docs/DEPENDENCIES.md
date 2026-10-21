@@ -1,5 +1,52 @@
 # Protocol dependency review
 
+## Toolchain security update (2026-10-21)
+
+The current pin is Go 1.26.10. The live vulnerability gate reported
+GO-2026-6809 in crypto/x509 on 1.26.9; 1.26.10 contains the upstream certificate
+verification correction. See the [Go release history](https://go.dev/doc/devel/release#go1.26.10).
+Historical adoption notes below describe the toolchain at adoption time.
+All native/browser/service and analysis gates must pass with the updated pin.
+
+## RDP source runtime integration (2026-10-21)
+
+Versions and source archive digests remain the pinned Guacamole 1.6.0/FreeRDP
+3.32.2 reviewed below. `build-native-runtime.sh` shares the checked build between
+the synthetic sample-enabled prefix and the empty-prefix server/sample-disabled
+test-VM path. The installed manager runtime is staged from the latter. It
+contains only guacd, its selected libraries and transitive loader/library closure,
+the trusted builder's setpriv closure and fixed empty mountpoints. No browser,
+sample server, source build tool, host /usr mount or vault file enters it.
+The source-test package is not a signed/offline distributable or final SBOM.
+Host library licensing/inventory, reproducibility and independent audit remain
+release gates. User-space native loopback sockets are private to each worker.
+The runtime inventory explicitly includes OpenSSL's distribution-supplied
+`legacy.so` provider, which WinPR loads dynamically for NTLM's protocol MD4
+operation and which `ldd` cannot discover. The module and its dependencies are
+hash-bound; its fixed module directory is supplied only to guacd. This does not
+enable weak TLS ciphers/certificates or change the Argon2id login password store.
+
+The 21 October recheck includes the new [FreeRDP advisories](https://github.com/FreeRDP/FreeRDP/security/advisories),
+including [DRDYNVC allocation bounds](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-rrp5-666j-g6gp)
+(affected through 3.32.1, fixed in the existing 3.32.2 pin), and the current
+[Apache security reports](https://guacamole.apache.org/security/). This is a
+dated advisory review, not a vulnerability-free or independent-audit claim.
+Distribution loader/library updates still belong to the supported-host/release
+inventory and update policy.
+
+Guacamole 1.6's common UTF-16 reader/writer treats individual 16-bit units as
+characters. The RDP clipboard integration therefore adds a narrow adapter using
+the already pinned WinPR conversion API, queried capacities, explicit UTF-16
+surrogate/terminator checks and exact UTF-8 roundtrip validation. The adapter
+copies a bounded snapshot under the native clipboard lock before querying or
+converting, so concurrent clipboard updates cannot change its input. Only
+CF_UNICODETEXT is advertised/requested; no lossy codepage fallback is enabled.
+The codec tests compare golden wire bytes, empty/exact-limit text, malformed
+UTF-8/UTF-16 and buffer bounds under ASan/UBSan. Both accept-all/refuse-all
+mutations must fail the intended assertions before the normal test reruns.
+Go/browser boundaries still validate complete UTF-8 independently. This changes
+the RDP adapter, not the upstream common converter or other protocol support.
+
 ## Durable custody adoption (2026-10-15)
 
 Pinned `go.etcd.io/bbolt v1.5.0` (MIT, tag
@@ -231,12 +278,15 @@ native test prefix solely to run the verified headless browser harness.
 The app uses a restricted custom tunnel and only the allowed drawing/input
 subset. Auxiliary tunnel/audio/video helpers defined by the package are not
 constructed or enabled. Only bounded, completely decoded and statically re-encoded PNGs can reach the
-Blob-image renderer. Unsupported source URLs, SVG, streams, transforms and
-clipboard are refused by the server adapter. CSP stays self-only for scripts
+Blob-image renderer. Unsupported source URLs, SVG, arbitrary streams and
+transforms are refused by the server adapter. The legacy lab also refuses
+clipboard; the manager workspace admits only bounded completed plain text.
+CSP stays self-only for scripts
 with the existing reviewed inline-style allowance; the desktop profile adds
 `img-src blob:`. It does not loosen the terminal profile. Source requests,
 clipboard/storage absence and revocation are measured in the browser gates.
 
-Native/browser text clipboard, remote resize/layout/reconnect, real Windows,
-production packaging and independent audit remain gates. Limits and API/source
+The manager workspace's native/browser text and display-update evidence is
+tracked in `RDP-WORKSPACE-INTEGRATION.md`. Keyboard layouts/reconnect, real
+Windows, production packaging and independent audit remain gates. Limits and API/source
 references are in [the browser RDP lab](BROWSER-RDP-LAB.md).

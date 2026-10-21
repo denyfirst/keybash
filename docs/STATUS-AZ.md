@@ -1,5 +1,14 @@
 # Keybash — cari vəziyyət
 
+21 oktyabr — RDP mənbə inteqrasiyası: `serve-remote-lab` login/MFA, owner və
+catalog/trust axınını ayrıca RDP manager-ə bağlayır. Minimal hash-bound runtime,
+sealed public trust, ayrıca UID/namespaces/seccomp və ortaq systemd/cgroup planı
+var. Workspace yalnız məhdud mətn copy/paste və display-update qəbul edir;
+lokal clipboard-a avtomatik yazmır. Native/brauzer/xidmət acceptance PR-də və
+`RDP-WORKSPACE-INTEGRATION.md`-də izlənir. Real VM-lər hələ yoxdur;
+`TEST-SETUP-AZ.md` ayrıca test quraşdırmasını izah edir. Aşağıdakı tarixli
+qeydlər əvvəlki mərhələlərin sərhədlərini göstərir.
+
 20 oktyabr — Linux xidmət inteqrasiyası: ayrıca gateway/worker identity-si,
 systemd xidmətləri və ortaq CPU/RAM/pids sərhədi üçün offline source plan var.
 Başlanğıcda faktiki kernel sərhədi yoxlanır; uyğun deyilsə xidmət başlamır.
@@ -96,26 +105,20 @@ məhdudiyyətlər: `INTERACTIVE-DEMO-AZ.md`.
 
 ## Hələ hazırlanmayıb
 
-Hələ quraşdırılan worker/xidmətlər və operator konfiqurasiyasının deployment-i,
-məhsul workspace-i, real şəbəkə hostları və tam browser/clipboard matrisi,
-hazır RDP workspace/copy-paste, backup/restore/key rotation,
-Docker deployment və release automation.
+Production quraşdırıcı və public HTTPS ingress, gündəlik məhsul workspace-i,
+real Windows/şəbəkə hostları və tam browser/keyboard matrisi, uzun sessiya/yük
+ölçüləri, upgrade/backup/restore/key rotation, offline release paketi və ayrıca
+audit olunmuş imzalı buraxılış hələ hazırlanmayıb. Mənbə systemd/RDP xidmət
+inteqrasiyası production deployment və ya hazır installer deyil.
 
 ## Növbəti mərhələ
 
-Ayrıca laboratoriyada yalnız sintetik açar və hesablarla SSH/RDP texniki sınağı.
-SSH/brauzer lab sərhədi və dependency review hazırdır. RDP ilkin negotiation/TLS
-və mətn protokol lab-ına native TLS/NLA, masaüstü görüntüsü və izolyasiya olunmuş
-worker/broker və brauzer görüntü/input sınaqları əlavə olunub. Növbəti protokol işi
-resize, keyboard layout, reconnect və ayrıca sessiyaya bağlı məhdud mətn
-copy/paste-in faktiki sınağıdır. Daimi hesab, bootstrap/MFA və vault lab-ı
-`CUSTODY-LAB.md`-dədir. Vahid authorization/revocation axını
-`OWNED-REMOTE-LAB.md`-də yoxlanır. Quraşdırılan worker və operator target/trust
-konfiqurasiyası növbəti inteqrasiya mərhələsidir. Protokol detalları
-`PROTOCOL-LAB.md`-dədir. Vim/tmux və tam browser/OS rahatlığı hələ sübut edilməyib.
-Lab məhsul login/vault sisteminin və install edilən servisin yerini tutmur.
-Real credential-lar login, authorization və vault mərhələsi yoxlanana qədər
-istifadə edilmir. Tam brauzer və performance dəstəyi ölçüləndən sonra elan edilir.
+Mənbə inteqrasiyasının məcburi Linux/native/brauzer/xidmət yoxlamalarını bitirmək,
+sonra ayrıca disposable VM-ləri hazırlayıb yalnız test hesabları ilə real
+SSH/Windows qəbul sınağı aparmaq. Keyboard layout, reconnect, vim/tmux və tam
+browser/OS rahatlığı hələ sübut edilməyib. Tam dəstək yalnız ölçülmüş matrisi
+əhatə edəcək. Production credential və buraxılış üçün ayrıca quraşdırma/bərpa,
+candidate audit və release mərhələləri tamamlanmalıdır.
 
 ## Brend
 

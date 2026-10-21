@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -19,6 +20,7 @@ var errNative = errors.New("native RDP lab refused")
 // private lab policy: no browser-selected parameters or production entry point.
 type nativePlan struct {
 	identity       *Identity
+	workspace      bool
 	user, password string
 }
 
@@ -68,6 +70,12 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 		// callback/resize evidence before enabling them in a browser workspace.
 		"resize-method": "", "client-name": "Keybash-lab", "disable-gfx": "true", "force-lossless": "true",
 	}
+	if p.workspace {
+		values["disable-copy"] = "false"
+		values["disable-paste"] = "false"
+		values["resize-method"] = "display-update"
+		values["client-name"] = "Keybash"
+	}
 	result := instruction{"connect", "VERSION_1_5_0"}
 	for _, name := range args[2:] {
 		if !known[name] {
@@ -80,13 +88,16 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 }
 
 type nativeStream struct {
-	raw     net.Conn
-	reader  *bufio.Reader
-	stop    func() bool
-	once    sync.Once
-	output  int
-	frames  int
-	failure string // fixed private classifications, never remote diagnostic text
+	raw       net.Conn
+	ctx       context.Context
+	closed    atomic.Bool
+	workspace bool
+	reader    *bufio.Reader
+	stop      func() bool
+	once      sync.Once
+	output    int
+	frames    int
+	failure   atomic.Value // fixed private string classifications, never remote diagnostic text
 }
 
 func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeStream, error) {
@@ -108,7 +119,7 @@ func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeS
 	if _, err := newNativePlan(plan.identity, plan.user, plan.password); err != nil {
 		return nil, errNative
 	}
-	stream := &nativeStream{raw: raw, reader: bufio.NewReader(raw)}
+	stream := &nativeStream{ctx: ctx, workspace: plan.workspace, raw: raw, reader: bufio.NewReader(raw)}
 	stream.stop = context.AfterFunc(ctx, func() { _ = raw.Close() })
 	defer func() {
 		if !ok {
@@ -157,14 +168,30 @@ func (s *nativeStream) close() {
 	if s == nil {
 		return
 	}
+	s.closed.Store(true)
 	s.once.Do(func() { s.stop(); _ = s.raw.Close() })
+}
+
+func (s *nativeStream) revoked() bool {
+	if s == nil || s.closed.Load() || s.ctx != nil && s.ctx.Err() != nil {
+		return true
+	}
+	if lease, ok := s.raw.(interface{ leaseContext() context.Context }); ok {
+		ctx := lease.leaseContext()
+		return ctx != nil && ctx.Err() != nil
+	}
+	return false
 }
 
 func (s *nativeStream) next() (instruction, error) {
 	for {
+		if s.revoked() {
+			s.close()
+			return nil, errNative
+		}
 		in, err := readInstruction(s.reader)
-		if err != nil {
-			s.failure = "instruction framing"
+		if err != nil || s.revoked() {
+			s.failure.Store("instruction framing")
 			s.close()
 			return nil, errNative
 		}
@@ -173,7 +200,7 @@ func (s *nativeStream) next() (instruction, error) {
 		}
 		s.frames++
 		if s.output > 8*1024*1024 || s.frames > 8192 {
-			s.failure = "output quota"
+			s.failure.Store("output quota")
 			s.close()
 			return nil, errNative
 		}
@@ -196,21 +223,22 @@ func (s *nativeStream) next() (instruction, error) {
 		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line mouse move name path pop push rect reset shade size start sync transfer transform") {
 			allowed = allowed || op == in[0]
 		}
+		allowed = allowed || s.workspace && in[0] == "clipboard"
 		if !allowed {
-			s.failure = "unexpected instruction"
+			s.failure.Store("unexpected instruction")
 			switch in[0] {
 			case "error":
 				if len(in) == 3 {
 					if status, err := strconv.ParseUint(in[2], 10, 16); err == nil {
-						s.failure = "native status " + strconv.FormatUint(status, 10)
+						s.failure.Store("native status " + strconv.FormatUint(status, 10))
 					}
 				}
 			case "set":
-				s.failure = "unsupported drawing property"
+				s.failure.Store("unsupported drawing property")
 			case "msg":
-				s.failure = "invalid owner notice"
+				s.failure.Store("invalid owner notice")
 			case "argv":
-				s.failure = "unexpected parameter request"
+				s.failure.Store("unexpected parameter request")
 			}
 			s.close()
 			return nil, errNative

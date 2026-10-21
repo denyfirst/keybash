@@ -18,7 +18,7 @@ jobs:
   build:
     name: Build and test
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -125,6 +125,7 @@ jobs:
           go test -tags=browserlab -race -run='^TestDemoInputBoundary$|^TestDemoWorkerCancellation$|^TestInteractiveDemoBrowser$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
           go test -tags=browserlab -race -run='^TestBrowserOwnedSSHConnectionAndLogout$' -timeout=2m ./internal/sshtransport
+          go test -tags=browserlab -race -run='^TestBrowserRDPWorkspacePortable$' -timeout=90s ./internal/rdplab
           go test -tags=browserlab -race -run='^TestBrowserRDPViewerLab$' -timeout=1m ./internal/rdplab
           # Test-only empty netns; root setup drops to UID/GID 65534 with no
           # effective capabilities before the fixed child runs. No guacd yet.

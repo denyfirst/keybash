@@ -138,7 +138,7 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css"}
 	if l.desktop {
-		assets = map[string]string{"/": "desktop.html", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
+		assets = map[string]string{"/": "desktop.html", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/paste.mjs": "paste.mjs", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
 	}
 	path, ok := assets[r.URL.Path]
 	if !ok {

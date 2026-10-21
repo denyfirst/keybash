@@ -22,6 +22,7 @@ import (
 
 	"github.com/denyfirst/keybash/internal/identity"
 	"github.com/denyfirst/keybash/internal/operatorconfig"
+	"github.com/denyfirst/keybash/internal/rdplab"
 	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/sshtransport"
 )
@@ -39,7 +40,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	command := args[0]
 	switch command {
-	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab":
+	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab":
 	default:
 		return refused
 	}
@@ -52,6 +53,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	tlsKey := flags.String("tls-key", "", "operator TLS private key path")
 	lost := flags.Bool("lost-mfa", false, "offline recovery also clears a lost factor")
 	catalog := flags.String("config", "", "root-owned operator target catalog")
+	rdpManager := flags.String("rdp-manager", "", "fixed root RDP manager socket")
 	manager := flags.String("ssh-manager", "", "fixed root SSH manager socket")
 	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" {
 		return refused
@@ -74,10 +76,10 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		_, e = fmt.Fprintf(output, "Target configuration valid (%d servers; capacity %d total, %d per owner).\n", len(targets), snapshot.Capacity.Total, snapshot.Capacity.PerOwner)
 		return e
 	}
-	if *data == "" || *key == "" || command != "serve-ssh-lab" && (*catalog != "" || *manager != "") {
+	if *data == "" || *key == "" || command != "serve-ssh-lab" && command != "serve-remote-lab" && (*catalog != "" || *manager != "" || *rdpManager != "") || command != "serve-remote-lab" && *rdpManager != "" {
 		return refused
 	}
-	if command == "serve-ssh-lab" {
+	if command == "serve-ssh-lab" || command == "serve-remote-lab" {
 		if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" || os.Geteuid() <= 0 || os.Geteuid() == 65534 || os.Getegid() <= 0 ||
 			*catalog == "" || !filepath.IsAbs(*manager) || filepath.Clean(*manager) != *manager || len(*manager) > 100 {
 			return refused
@@ -86,7 +88,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		var snapshot operatorconfig.Catalog
 		snapshot, e = operatorconfig.LoadCatalog(*catalog)
 		targets, limits = snapshot.Targets, snapshot.Capacity
-		if e != nil || !sshOnly(targets) {
+		if e != nil || command == "serve-ssh-lab" && !sshOnly(targets) || command == "serve-remote-lab" && (!filepath.IsAbs(*rdpManager) || filepath.Clean(*rdpManager) != *rdpManager || len(*rdpManager) > 100 || *rdpManager == *manager) {
 			return refused
 		}
 	}
@@ -129,7 +131,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return store.CreateAccount(parts[0], parts[1])
 		}
 		return store.RecoverAccount(parts[0], parts[1], *lost)
-	case "serve-lab", "serve-ssh-lab":
+	case "serve-lab", "serve-ssh-lab", "serve-remote-lab":
 		host, port, e := net.SplitHostPort(*address)
 		ip, pe := netip.ParseAddr(host)
 		if e != nil || pe != nil || !ip.Unmap().IsLoopback() || port == "0" || *cert == "" || *tlsKey == "" {
@@ -137,8 +139,12 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		}
 		origin := "https://" + *address
 		var lab *identity.Lab
-		if command == "serve-ssh-lab" {
-			lab, e = identity.NewRemoteLabWithLimits(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, nil, limits)
+		if command == "serve-ssh-lab" || command == "serve-remote-lab" {
+			var worker identity.RDPWorker
+			if command == "serve-remote-lab" {
+				worker = rdplab.ManagerWorker{SocketPath: *rdpManager}
+			}
+			lab, e = identity.NewRemoteLabWithLimits(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, worker, limits)
 		} else {
 			lab, e = identity.NewPersistent(origin, store)
 		}

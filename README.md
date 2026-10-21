@@ -21,8 +21,8 @@ Guacamole/FreeRDP, verifies identity on its own TLS before CredSSP, authenticate
 a synthetic NLA account and decodes desktop images through an isolated worker.
 Its one-use broker and actual native identity mutations are required CI gates.
 A loopback browser RDP viewer adds bounded PNG/canvas rendering, focused mouse/
-keyboard, local fullscreen and native revocation checks. RDP clipboard and
-remote resize remain disabled.
+keyboard, local fullscreen and native revocation checks. That original lab
+keeps native clipboard and remote resize disabled.
 A separate memory-only identity lab adds named password login, Argon2id,
 bounded attempts, password change, secure cookies/CSRF and session revocation.
 A separate Linux loopback custody lab now adds durable encrypted accounts,
@@ -35,8 +35,8 @@ admission, approval binding and account-wide logout revocation.
 A disposable interactive UI preview now opens sample terminal/desktop views
 through the normal MFA/owned-connection flow. These are simulations, not real
 Linux/Windows sessions; see the [local demo guide](docs/INTERACTIVE-DEMO-AZ.md).
-Installed isolated workers, RDP clipboard, deployment and an
-independently audited production release remain gates.
+Production packaging, real Windows/browser matrices, deployment and an
+independently audited release remain gates.
 A separate Linux/amd64 SSH process laboratory now uses a hash-bound static
 child, private namespaces, restricted syscalls and one inherited guarded TCP
 connection. Its privileged test manager is not a root web service or installer.
@@ -52,7 +52,7 @@ An offline root-owned JSON catalog now provisions guarded server approvals.
 `check-targets` validates it without network or database access; `serve-ssh-lab`
 connects an SSH-only catalog to the separate manager for a nonroot loopback
 gateway. See [operator configuration and its limits](docs/OPERATOR-CATALOG-LAB.md).
-Installed services and production RDP integration remain gates.
+Production packaging and deployment remain gates.
 Total/per-owner remote admission is now configurable in the protected operator
 catalog, including the separate SSH manager. Full capacity produces a clear
 busy state while existing connections continue; see [capacity policy](docs/SESSION-CAPACITY.md).
@@ -60,7 +60,17 @@ An offline source systemd plan now supplies separate service identities and a
 checked common cgroup-v2 CPU/memory/pids boundary for the SSH path. Disposable
 Linux CI measures actual units, SSH, shutdown/restart and kernel enforcement;
 see [service integration and limits](docs/LINUX-SERVICE-LAB.md). A production
-installer, RDP service and public ingress remain gates.
+installer and public ingress remain gates.
+
+The separate RDP manager now integrates with durable MFA/custody and the approved
+catalog through `serve-remote-lab`. A hash-bound minimal runtime, sealed public
+trust mounts, private namespaces and a distinct worker identity constrain the
+native path; optional RDP units share the checked aggregate service slice.
+This workspace adds explicit bounded plain-text clipboard, permission fallback,
+paste review and bounded display-update resizing. Actual native/browser/service
+tests are required gates; see [the integration work record](docs/RDP-WORKSPACE-INTEGRATION.md).
+The user has no separate test VMs yet. [The source test setup guide](docs/TEST-SETUP-AZ.md)
+prepares that next step without deploying anything on this workstation.
 
 ## Start here
 
@@ -78,6 +88,7 @@ installer, RDP service and public ingress remain gates.
 - [Account-owned SSH/RDP session integration](docs/OWNED-REMOTE-LAB.md)
 - [Try the local interactive UI demo (Azerbaijani)](docs/INTERACTIVE-DEMO-AZ.md)
 - [Remaining product steps (Azerbaijani)](docs/READY-CHECKLIST-AZ.md)
+- [Separate test VM setup (Azerbaijani)](docs/TEST-SETUP-AZ.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
 ## Development checks

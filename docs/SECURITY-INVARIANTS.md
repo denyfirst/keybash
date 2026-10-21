@@ -1,13 +1,20 @@
 # Implemented Keybash security invariants
 
-This file describes only code that exists. Durable login/MFA and encrypted
-custody exist in a Linux loopback laboratory; production RDP access, browser
-RDP clipboard and deployment controls remain product gates. Tests use synthetic targets,
+This file describes only code that exists. Durable login/MFA, encrypted custody
+and separate SSH/RDP source service integrations exist for Linux loopback tests;
+production ingress, packaging and release remain product gates. Tests use synthetic targets,
 in-memory connections and ephemeral loopback SSH/browser fixtures. They perform
 no external server dials and load no real credentials.
 
 | Invariant | Enforcement | Evidence |
 |---|---|---|
+| RDP launch authority is bound to the exact gateway peer and five typed capabilities; public trust cannot be rewritten | root Unix seqpacket manager, connected TCP, oriented independent pipes and sealed bounded memfds mounted read-only | `TestRDPManagerConfigurationAndIdentityRefusal`, `TestRDPManagerPacketsBoundRightsAndPeer`, `TestRDPManagerDescriptorKindsAndSealedTrust` |
+| RDP cannot choose a command/runtime or access vault paths; missing or changed runtime content refuses | fixed static worker, root-controlled full ordered file/directory inventory, dedicated identity, private namespaces, denylist seccomp and capability drop | `TestNativeRDPManagerRuntimeAndProvenance`, `TestNativeRDPManagerAuthenticationRevocationAndRefusal` |
+| Installed RDP descendants inherit checked aggregate limits; manager stop revokes I/O and the gateway | optional fixed service profile, exact actual cgroup/UID preflight, BindsTo, control-group kill and reaped lease | `TestServiceRDPPlanAndSharedKernelBoundary`, `TestNativeRDPSystemdServiceBoundary` |
+| Workspace clipboard is explicit text-only, finite and isolated; partial or malformed text cannot reach native paste | per-session/per-direction strict codec, 32 KiB and 128-transfer bounds, completed text notification and immutable native profile | `TestWorkspaceTextBothDirectionsAndResize`, `TestWorkspaceRefusesAuxiliaryMalformedReplayAndLimits`, `TestWorkspaceRemoteClipboardIsCompletedTextWithDistinctStream`, `TestWorkspacePlanKeepsNLAAndClosedAuxiliaryChannels` |
+| Remote clipboard cannot silently write local clipboard or survive a revoked asynchronous read | user-action API calls, text panel fallback, generation checks and cleared UI buffers | `TestBrowserRDPWorkspacePortable`, `TestNativeRDPWorkspaceClipboardAndDisplay` |
+| Desktop requests and reported geometry remain finite without opening other native channels | even 64x64..1920x1080 requests, four/second rate, bounded actual drawing schemas and fixed display-update profile | `TestWorkspaceRefusesAuxiliaryMalformedReplayAndLimits`, `TestNativeRDPWorkspaceClipboardAndDisplay` |
+| Manager exit and owner cancellation revoke already buffered native/viewer data | lease context canceled on both normal done and peer loss; context checks before/after buffered reads and before writes | `TestViewerAndNativeBufferedDataRefuseRevokedLeaseOrOwner`, `TestNativeRDPSystemdServiceBoundary` |
 | Offline service plans cannot inject commands or disable finite aggregate bounds | fixed templates, canonical digest, distinct explicit identities, bounded numeric profiles and exclusive rooted staging | `TestServicePlanFiniteIdentityAndInjection`, `TestSSHWorkerIdentityValidation` |
 | Generated services refuse outside their exact actual kernel boundary or dedicated identities | ExecStartPre account/UID/GID/groups plus cgroup-v2 ancestor/controller/value checks before runtime starts | `TestServiceKernelSnapshotRefusesUnenforcedAndWrongGroup`, `TestServiceCheckOutsideInstalledBoundaryRefuses`, `TestKeybashSystemdServiceBoundary` |
 | Actual systemd SSH descendants share aggregate limits and stop with their manager | common slice, root-selected worker identity, control-group kill, gateway binding and actual CPU/pids/OOM counters | `TestKeybashSystemdServiceBoundary`, `TestKeybashServiceResourceProbeChild` |
@@ -137,14 +144,15 @@ native Linux lab enforces its own TLS identity before CredSSP, authenticates a
 synthetic account and decodes desktop images through a one-use broker and
 test-only worker sandbox. Both actual C callback mutations must fail before
 restoration and a full rerun. Refusal timeouts are failures, not proof. Native
-clipboard/touch/dynamic display are disabled. A loopback browser RDP lab now
-uses the bounded viewer adapter, local Apache JS and existing owner transport.
-It is fixed-viewport and has finite memory/work/output quotas. It is not a
-general Guacamole tunnel or product entry point. There is no application
-ownership/vault, production launcher, aggregate cgroup quotas or
-minimal runtime filesystem/syscall filter. The empty earlier namespace also
-denies approved destinations. Codec tests are not desktop/browser clipboard
-evidence. See ADR 0003 and `NATIVE-RDP-LAB.md`.
+clipboard/touch/dynamic display remain disabled in that original profile. Its
+loopback viewer is fixed-viewport with finite memory/work/output quotas. The
+separate source manager profile adds bounded text/display controls, a minimal
+read-only runtime, syscall denylist, installed service identities and aggregate
+cgroups; it composes with the custody/owner boundary. It is still no general
+Guacamole tunnel or public product listener. The earlier empty namespace also
+denies approved destinations. Codec-only tests cannot establish native/browser
+clipboard evidence. See ADR 0003, `NATIVE-RDP-LAB.md` and
+`RDP-WORKSPACE-INTEGRATION.md` for their distinct acceptance boundaries.
 
 The IP guard accepts parsed IP/port pairs. `NamedTarget` adds ASCII hostname
 resolution with independently approved per-host pins and a five-second total
@@ -168,8 +176,9 @@ The original library worker runs in process; `SSH-PROCESS-LAB.md` adds a separat
 constrained Linux/amd64 worker. `SSH-MANAGER-LAB.md` adds an authenticated separate
 root manager for an unprivileged gateway. `SERVER-TRUST-LAB.md` adds owner review
 of the immutable operator catalog; it is not discovery or catalog provisioning.
-An installed service, operator configuration, password/certificate
-SSH auth, aggregate cgroups and independent candidate review remain gates.
+Root-owned operator configuration and source systemd/aggregate-cgroup integration
+are implemented. A packaged installer, password/certificate SSH auth and
+independent candidate review remain gates.
 Browser and real Bash evidence is confined to the laboratory; vim/tmux and the
 full browser/OS matrix remain unmeasured. Channel windows impose backpressure;
 both output streams need consumption. Closing a stream does not guarantee

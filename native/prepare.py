@@ -15,6 +15,22 @@ def replace_once(path, old, new):
 # Synthetic fixture only: stock sample has NLA off. Its own CredSSP/NTLM
 # verifies the ephemeral fixture SAM database, not a user's real account.
 sample = freerdp / "server/Sample/sfreerdp.c"
+sample_header = sample.with_suffix(".h")
+replace_once(sample_header, "#include <freerdp/server/rdpsnd.h>", "#include <freerdp/server/rdpsnd.h>\n#include <freerdp/server/cliprdr.h>\n#include <freerdp/server/disp.h>\n#include <stdatomic.h>")
+replace_once(sample_header, "EncomspServerContext* encomsp;", "EncomspServerContext* encomsp;\n\tCliprdrServerContext* kb_clip;\n\tDispServerContext* kb_disp;\n\tBOOL kb_caps_sent;\n\tatomic_uint_fast32_t kb_disp_id;\n\tatomic_int kb_disp_ready;\n\tatomic_uint_fast64_t kb_size;\n\tHANDLE kb_resize_event;")
+(sample.parent / "keybash_workspace_fixture.h").write_bytes((identity_source.parent / "workspace_fixture.h").read_bytes())
+replace_once(sample, '#include "sfreerdp.h"', '#include "sfreerdp.h"\n#include "keybash_workspace_fixture.h"')
+replace_once(sample, "winpr_image_free(context->image, TRUE);", "kb_workspace_free(context);\n\t\twinpr_image_free(context->image, TRUE);")
+replace_once(sample, "/* Dynamic Virtual Channels */", "if (!kb_workspace_start(client)) return FALSE;\n\t/* Dynamic Virtual Channels */")
+replace_once(sample, "/* Handle dynamic virtual channel initializations */", "if (!kb_workspace_events(client)) break;\n\t\t/* Handle dynamic virtual channel initializations */")
+replace_once(sample, "context->vcm = WTSOpenServerA((LPSTR)client->context);", "context->vcm = WTSOpenServerA((LPSTR)client->context);\n\tatomic_init(&context->kb_size,0);\n\tatomic_init(&context->kb_disp_id,0);\n\tatomic_init(&context->kb_disp_ready,0);\n\tcontext->kb_resize_event=CreateEvent(NULL,FALSE,FALSE,NULL);\n\tif (!context->kb_resize_event) goto fail;\n\tif (context->vcm) WTSVirtualChannelManagerSetDVCCreationCallback(context->vcm,kb_dvc_created,context);")
+replace_once(sample, "handles[count++] = channelHandle;", "handles[count++] = channelHandle;\n\t\thandles[count++] = context->kb_resize_event;")
+# The sample's main loop runs during negotiation too. Auto-opening drdynvc
+# before MCS has joined it leaves FreeRDP's manager permanently INITIALIZED.
+# Delay only this synthetic server's automatic open until activation/join.
+replace_once(sample, 'WTSVirtualChannelManagerCheckFileDescriptor(context->vcm)',
+             'WTSVirtualChannelManagerCheckFileDescriptorEx(context->vcm, context->activated && WTSVirtualChannelManagerIsChannelJoined(context->vcm, "drdynvc"))')
+replace_once(sample, "client->GetEventHandles(client, &handles[count], 32 - count)", "client->GetEventHandles(client, &handles[count], 30 - count)")
 replace_once(sample, "FreeRDP_RdpSecurity, TRUE", "FreeRDP_RdpSecurity, FALSE")
 replace_once(sample, "FreeRDP_TlsSecurity, TRUE", "FreeRDP_TlsSecurity, FALSE")
 replace_once(sample, "FreeRDP_NlaSecurity, FALSE", "FreeRDP_NlaSecurity, TRUE")
@@ -94,6 +110,19 @@ for old, stage in [
     replace_once(rdp, old, new)
 # Supplied credentials are immutable for this one-use session. Missing/rejected
 # credentials must abort, never prompt, retry or switch authentication modes.
+replace_once(rdp, '''    if (settings->resize_method == GUAC_RESIZE_DISPLAY_UPDATE)
+        guac_rdp_disp_load_plugin(context);''', '''    if (settings->resize_method == GUAC_RESIZE_DISPLAY_UPDATE) {
+        guac_rdp_disp_load_plugin(context);
+        puts("KB_STAGE_DISP_SELECTED"); fflush(stdout);
+    }''')
+replace_once(rdp, '    /* Load plugin providing Dynamic Virtual Channel support, if required */', '''    if (freerdp_settings_get_bool(context->settings, FreeRDP_SupportDynamicChannels)) {
+        puts("KB_STAGE_DVC_REQUESTED"); fflush(stdout);
+    }
+    /* Load plugin providing Dynamic Virtual Channel support, if required */''')
+replace_once(rdp, '''        guac_client_log(client, GUAC_LOG_WARNING,
+                "Failed to load drdynvc plugin.''', '''        puts("KB_STAGE_DVC_FAILED"); fflush(stdout);
+        guac_client_log(client, GUAC_LOG_WARNING,
+                "Failed to load drdynvc plugin.''')
 rdp_text = rdp.read_text()
 auth_start = "static BOOL rdp_freerdp_authenticate(freerdp* instance, char** username,"
 if rdp_text.count(auth_start) != 1:
@@ -128,3 +157,65 @@ replace_once(settings, anchor, '''freerdp_settings_set_bool(rdp_settings, FreeRD
     freerdp_settings_set_string(rdp_settings, FreeRDP_AllowedTlsCiphers, "ECDHE+AESGCM:ECDHE+CHACHA20");''')
 replace_once(settings, "freerdp_settings_set_bool(rdp_settings, FreeRDP_AutoAcceptCertificate, guac_settings->certificate_tofu);", "/* Automatic certificate trust is forbidden by the Keybash lab. */")
 replace_once(settings, "if (guac_settings->certificate_fingerprints != NULL)\n        freerdp_settings_set_string(rdp_settings, FreeRDP_CertificateAcceptedFingerprints, \n                guac_strdup(guac_settings->certificate_fingerprints));", "/* The mandatory exact pin is checked in the native X509 callback. */")
+
+# Guacamole 1.6's common UTF-16 reader/writer handles only individual 16-bit
+# units. Keep that upstream code untouched; the RDP Unicode clipboard path
+# instead uses the existing pinned WinPR conversion API with strict bounds,
+# surrogate validation and an exact UTF-8 roundtrip before forwarding.
+clip = guac / "src/protocols/rdp/channels/cliprdr.c"
+(clip.parent / "keybash_clipboard.c").write_bytes((identity_source.parent / "clipboard.c").read_bytes())
+replace_once(clip, '#include "common/clipboard.h"', '#include "common/clipboard.h"\n#include "keybash_clipboard.c"')
+replace_once(clip, '    const char* input = clipboard->clipboard->buffer;', '''    /* Native input and RDP callbacks can update this shared clipboard.
+     * Convert an immutable bounded snapshot, never a changing buffer between
+     * the required-size query and conversion. No content is logged. */
+    char keybash_input[KEYBASH_CLIPBOARD_LIMIT + 1];
+    pthread_mutex_lock(&(clipboard->clipboard->lock));
+    int keybash_input_length = clipboard->clipboard->length;
+    if (keybash_input_length < 0 || keybash_input_length > KEYBASH_CLIPBOARD_LIMIT + 1) {
+        pthread_mutex_unlock(&(clipboard->clipboard->lock));
+        return ERROR_INVALID_DATA;
+    }
+    if (keybash_input_length) memcpy(keybash_input, clipboard->clipboard->buffer, (size_t)keybash_input_length);
+    else keybash_input[0] = 0;
+    pthread_mutex_unlock(&(clipboard->clipboard->lock));
+    const char* input = keybash_input;''')
+replace_once(clip, '''            { .formatId = CF_TEXT },
+            { .formatId = CF_UNICODETEXT }
+        },
+        .numFormats = 2''', '''            { .formatId = CF_UNICODETEXT }
+        },
+        .numFormats = 1''')
+replace_once(clip, '''    /* Use Windows' CP-1252 if Unicode unavailable */
+    if (guac_rdp_cliprdr_format_supported(format_list, CF_TEXT))
+        return guac_rdp_cliprdr_send_format_data_request(cliprdr, CF_TEXT);''',
+    '    /* Only Unicode text is supported; no lossy codepage fallback. */')
+replace_once(clip, '    /* Map requested clipboard format to a guac_iconv writer */', '''    if (format_data_request->requestedFormatId != CF_UNICODETEXT) {
+        guac_mem_free(output);
+        return ERROR_INVALID_DATA;
+    }
+    /* Map requested clipboard format to a guac_iconv writer */''')
+local = '''    guac_iconv(local_reader, &input, clipboard->clipboard->length,
+            remote_writer, &output, GUAC_COMMON_CLIPBOARD_MAX_LENGTH);'''
+replace_once(clip, local, '''    if (format_data_request->requestedFormatId == CF_UNICODETEXT) {
+        size_t length = 0;
+        if (!keybash_clipboard_from_terminated_utf8(input, (size_t)keybash_input_length,
+                start, GUAC_COMMON_CLIPBOARD_MAX_LENGTH, &length)) {
+            guac_mem_free(start);
+            return ERROR_INVALID_DATA;
+        }
+        output = (char*)start + length;
+    } else {
+''' + local + '''
+    }''')
+remote = '''    if (guac_iconv(remote_reader, &input, data_len,
+            GUAC_WRITE_UTF8, &output, sizeof(received_data))) {'''
+replace_once(clip, remote, '''    if (clipboard->requested_format == CF_UNICODETEXT) {
+        size_t length = 0;
+        if (data_len < 0 || !keybash_clipboard_to_utf8((const BYTE*)input,
+                (size_t)data_len, received_data, sizeof(received_data), &length))
+            return ERROR_INVALID_DATA;
+        guac_common_clipboard_reset(clipboard->clipboard, "text/plain");
+        guac_common_clipboard_append(clipboard->clipboard, received_data, (int)length);
+        guac_common_clipboard_send(clipboard->clipboard, client);
+    }
+    else ''' + remote.strip())

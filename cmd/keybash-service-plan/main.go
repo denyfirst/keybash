@@ -17,6 +17,8 @@ func main() {
 	flag.Uint64Var(&gg, "gateway-gid", 0, "unused dedicated gateway GID")
 	flag.Uint64Var(&wu, "worker-uid", 0, "unused dedicated worker UID")
 	flag.Uint64Var(&wg, "worker-gid", 0, "unused dedicated worker GID")
+	flag.StringVar(&c.RDPWorkerDigest, "rdp-worker-digest", "", "optional fixed RDP worker digest; requires runtime digest")
+	flag.StringVar(&c.RDPRuntimeDigest, "rdp-runtime-digest", "", "optional complete RDP runtime inventory digest")
 	flag.StringVar(&c.WorkerDigest, "worker-digest", "", "approved static worker SHA256")
 	flag.Uint64Var(&c.CPUPercent, "cpu-percent", c.CPUPercent, "aggregate CPU percent of one core")
 	flag.Uint64Var(&c.MemoryMiB, "memory-mib", c.MemoryMiB, "aggregate memory MiB")

@@ -19,64 +19,57 @@ go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./intern
 chmod 755 "${prefix}" "${prefix}/bin" "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPSandboxPreparation$' -test.timeout=10s -test.v
-curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
-  https://github.com/FreeRDP/FreeRDP/releases/download/3.32.2/freerdp-3.32.2.tar.gz -o "${lab}/freerdp.tar.gz"
-printf '%s  %s\n' e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c "${lab}/freerdp.tar.gz" | sha256sum -c -
-curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
-  https://archive.apache.org/dist/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz -o "${lab}/guacamole.tar.gz"
-printf '%s  %s\n' 8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b "${lab}/guacamole.tar.gz" | sha256sum -c -
-tar -xf "${lab}/freerdp.tar.gz" -C "${lab}"
-tar -xf "${lab}/guacamole.tar.gz" -C "${lab}"
-python3 native/prepare.py "${lab}/freerdp-3.32.2" "${lab}/guacamole-server-1.6.0" "${repo}/native/identity.c"
-cmake -S native -B "${lab}/identity-build"
-cmake --build "${lab}/identity-build" --parallel 2
-# Analyze our identity callback separately from the upstream library build.
-clang --analyze -std=c11 -Wall -Wextra -Werror -Xanalyzer -analyzer-output=text \
-  "${repo}/native/identity.c" -o "${lab}/identity-analysis.plist" 2> "${lab}/identity-analysis.log"
-if test -s "${lab}/identity-analysis.log"; then
-  cat "${lab}/identity-analysis.log" >&2
-  exit 1
-fi
-cmake -S "${lab}/freerdp-3.32.2" -B "${lab}/freerdp-build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${prefix}" -DCMAKE_INSTALL_LIBDIR=lib \
-  -DCMAKE_C_FLAGS='-fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \
-  -DCMAKE_EXE_LINKER_FLAGS='-Wl,-z,relro,-z,now' -DCMAKE_SHARED_LINKER_FLAGS='-Wl,-z,relro,-z,now' \
-  -DBUILD_TESTING=OFF -DWITH_CLIENT=OFF -DWITH_CLIENT_COMMON=ON -DWITH_SERVER=ON -DWITH_SAMPLE=ON \
-  -DWITH_SHADOW=OFF -DWITH_PROXY=OFF -DWITH_X11=OFF -DWITH_WAYLAND=OFF -DWITH_MANPAGES=OFF \
-  -DWITH_FFMPEG=OFF -DWITH_OPENH264=OFF -DWITH_KRB5=OFF -DWITH_PCSC=OFF -DWITH_CUPS=OFF \
-  -DWITH_ALSA=OFF -DWITH_PULSE=OFF -DWITH_OSS=OFF -DWITH_SWSCALE=OFF -DWITH_AAD=OFF -DWITH_FUSE=OFF \
-  -DWITH_OPUS=OFF -DWITH_GSM=OFF -DWITH_LAME=OFF -DWITH_FAAC=OFF -DWITH_FAAD2=OFF \
-  -DWITH_SOXR=OFF -DWITH_AOM=OFF -DWITH_DAV1D=OFF -DWITH_WEBP=OFF -DCHANNEL_URBDRC=OFF
-cmake --build "${lab}/freerdp-build" --parallel 4
-cmake --install "${lab}/freerdp-build"
-export PKG_CONFIG_PATH="${prefix}/lib/pkgconfig"
-export LD_LIBRARY_PATH="${prefix}/lib"
-test "$(pkg-config --modversion freerdp3)" = 3.32.2
-cd "${lab}/guacamole-server-1.6.0"
-./configure --prefix="${prefix}" --with-rdp --without-ssh --without-vnc --without-telnet --without-kubernetes \
-  --without-pulse --without-avcodec --without-avformat --without-avutil --without-swscale \
-  CPPFLAGS="-isystem ${prefix}/include/freerdp3 -isystem ${prefix}/include/winpr3" \
-  CFLAGS='-O2 -fstack-protector-strong -D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security' \
-  LDFLAGS='-Wl,-z,relro,-z,now' LIBS='-lssl -lcrypto'
-make -j4
-make install
-cd "${repo}"
-mkdir -p "${prefix}/share/lab"
-cp "${lab}/freerdp-3.32.2/LICENSE" "${prefix}/share/lab/FREERDP-LICENSE"
-cp "${lab}/guacamole-server-1.6.0/LICENSE" "${prefix}/share/lab/GUACAMOLE-LICENSE"
-cp "${lab}/guacamole-server-1.6.0/NOTICE" "${prefix}/share/lab/GUACAMOLE-NOTICE"
-find "${lab}/freerdp-3.32.2/server/Sample" -name 'test_icon.*' -exec cp '{}' "${prefix}/share/lab/" ';'
+sh scripts/build-native-runtime.sh "${prefix}" --fixtures
+# Exercise the same empty-prefix, server/sample-disabled build documented for
+# the user's future test VM. Installed managers use this runtime; synthetic
+# FreeRDP peers remain confined to the separate fixture prefix.
+normal_prefix="${lab}/normal-prefix"
+sh scripts/build-native-runtime.sh "${normal_prefix}"
 # A dated inventory is diagnostic CI evidence, never a release/SBOM claim.
 dpkg-query -W -f='${Package} ${Version}\n'
 find "${prefix}" -type f -exec sha256sum '{}' ';'
 ldd "${prefix}/sbin/guacd"
 ldd "${prefix}/lib/libguac-client-rdp.so"
+CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/keybash-rdp-worker" ./cmd/keybash-rdp-worker
+for bin in keybash keybash-ssh-manager keybash-ssh-worker keybash-service-check keybash-service-plan keybash-rdp-manager; do
+  CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/${bin}" "./cmd/${bin}"
+done
+LD_LIBRARY_PATH="${normal_prefix}/lib" python3 scripts/build-rdp-runtime.py --prefix "${normal_prefix}" --output "${prefix}/runtime-stage"
 go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
-sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
-  "${prefix}/bin/lab.test" -test.run='^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' -test.timeout=25s -test.v
-sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
-  "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=3m -test.v
+preflight_failed=0
+if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v; then
+  python3 scripts/rdp-preflight-diagnostics.py "${prefix}"
+  overlay="${lab}/preflight-diagnostics/overlay.json"
+  CGO_ENABLED=0 go build -overlay="${overlay}" -trimpath -o "${prefix}/bin/debug-worker" ./cmd/keybash-rdp-worker
+  go test -c -overlay="${overlay}" -race -tags=nativelab,browserlab -o "${prefix}/bin/debug.test" ./internal/rdplab
+  sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+    "${prefix}/bin/debug.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v || true
+  echo 'Normal candidate public preflight failed; diagnostic overlays cannot pass this gate.' >&2
+  preflight_failed=1
+fi
+# Collect every normal native/browser/service boundary even if public manager
+# preparation failed. Overlays never run these credential-bearing fixtures;
+# any normal failure stops the gate before mutation/acceptance conclusions.
+if ! sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=5m -test.v; then
+  preflight_failed=1
+fi
+test "${preflight_failed}" = 0
+# Observe both directions on the actual manager/helper syscall boundary. These
+# public-only overlays cannot send credentials or satisfy a normal test gate.
+python3 scripts/rdp-sandbox-mutations.py "${prefix}"
+for mutation in allow refuse; do
+  go test -c -overlay="${lab}/sandbox-mutations/${mutation}.json" -race -tags=nativelab,browserlab -o "${prefix}/bin/mutation.test" ./internal/rdplab
+  if sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+    "${prefix}/bin/mutation.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v > "${lab}/sandbox-${mutation}.log" 2>&1; then
+    echo 'RDP sandbox mutation escaped its positive preflight test' >&2
+    exit 1
+  fi
+  cat "${lab}/sandbox-${mutation}.log"
+  grep -F 'public-only managed preflight refused' "${lab}/sandbox-${mutation}.log"
+done
 
 # Both directions must detect sabotage on the ACTUAL native TLS callback.
 # All mutations stay in this disposable extracted tree, never repository files.
@@ -111,4 +104,4 @@ cp "${lab}/identity.original" "${identity}"
 cmp "${identity}" "${repo}/native/identity.c"
 rebuild_identity
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
-  "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=3m -test.v
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=5m -test.v

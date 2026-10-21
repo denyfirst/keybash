@@ -7,38 +7,52 @@ import (
 	"image/png"
 	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
-// Fixed lab viewport. This boundary does not enable native clipboard, resize,
-// arbitrary streams, URLs or user-selected connection parameters.
+// The legacy profile has a fixed viewport; the manager workspace adds bounded
+// text/display controls. Neither admits arbitrary streams, URLs or parameters.
 type viewerLayer struct{ width, height, depth int }
 type viewerImage struct {
 	layer, x, y int
 	pixels      []byte
 }
 type viewerStream struct {
-	native        *nativeStream
-	layers        map[int]viewerLayer // owned by the single output reader
-	images        map[string]*viewerImage
-	imageBytes    int
-	decodedPixels int
-	renderPixels  int
-	pending       bytes.Buffer
-	ready         bytes.Reader
-	writeMu       sync.Mutex
-	metaMu        sync.Mutex
-	acks          map[string]int
-	syncs         map[string]bool
-	keys          map[uint32]bool
-	closed        atomic.Bool
+	native                *nativeStream
+	workspace             bool
+	layers                map[int]viewerLayer // owned by the single output reader
+	images                map[string]*viewerImage
+	imageBytes            int
+	decodedPixels         int
+	renderPixels          int
+	pending               bytes.Buffer
+	ready                 bytes.Reader
+	writeMu               sync.Mutex
+	metaMu                sync.Mutex
+	acks                  map[string]int
+	syncs                 map[string]bool
+	keys                  map[uint32]bool
+	closed                atomic.Bool
+	width, height         atomic.Int64
+	inputClip, outputClip clipboard
+	pasteOps, copyOps     int
+	resizeWindow          time.Time
+	resizeCount           int
 }
 
 func newViewerStream(native *nativeStream) *viewerStream {
 	s := &viewerStream{native: native, layers: map[int]viewerLayer{0: {1024, 768, 0}},
 		images: make(map[string]*viewerImage), acks: make(map[string]int), syncs: make(map[string]bool), keys: make(map[uint32]bool)}
+	s.width.Store(1024)
+	s.height.Store(768)
 	var initial bytes.Buffer
+	s.workspace = native != nil && native.workspace
+	if s.workspace {
+		_ = writeInstruction(&initial, instruction{"keybash", "1", "text", "display-update"})
+	}
 	_ = writeInstruction(&initial, instruction{"size", "0", "1024", "768"})
 	s.ready.Reset(initial.Bytes())
 	return s
@@ -46,6 +60,8 @@ func newViewerStream(native *nativeStream) *viewerStream {
 func (s *viewerStream) Close() error {
 	s.closed.Store(true)
 	s.native.close()
+	s.inputClip.close()
+	s.outputClip.close()
 	s.metaMu.Lock()
 	clear(s.keys)
 	clear(s.acks)
@@ -55,6 +71,7 @@ func (s *viewerStream) Close() error {
 }
 func (s *viewerStream) ReadStderr([]byte) (int, error) { return 0, io.EOF }
 func (s *viewerStream) Resize(uint32, uint32) error    { _ = s.Close(); return errNative }
+func (s *viewerStream) revoked() bool                  { return s.closed.Load() || s.native.revoked() }
 
 func canonicalNumber(raw string, low, high int) (int, bool) {
 	n, err := strconv.Atoi(raw)
@@ -96,7 +113,8 @@ func (s *viewerStream) layer(raw string) (int, bool) {
 
 // Account for the renderer's 64-pixel canvas rounding and buffer autosizing.
 func (s *viewerStream) fit(id, x, y, w, h int, exact bool) bool {
-	if x < 0 || y < 0 || w < 0 || h < 0 || x+w > 1024 || y+h > 768 {
+	mw, mh := s.bounds()
+	if x < 0 || y < 0 || w < 0 || h < 0 || x+w > mw || y+h > mh {
 		return false
 	}
 	layer := s.layers[id]
@@ -123,6 +141,7 @@ func (s *viewerStream) fit(id, x, y, w, h int, exact bool) bool {
 }
 
 func (s *viewerStream) drawing(in instruction) bool {
+	mw, mh := s.bounds()
 	if len(in) == 0 {
 		return false
 	}
@@ -139,24 +158,29 @@ func (s *viewerStream) drawing(in instruction) bool {
 		return s.layer(in[i])
 	}
 	xy := func(id, xi, yi, wi, hi int) bool {
-		x, a := num(xi, 0, 1024)
-		y, b := num(yi, 0, 768)
-		w, c := num(wi, 0, 1024)
-		h, d := num(hi, 0, 768)
+		x, a := num(xi, 0, mw)
+		y, b := num(yi, 0, mh)
+		w, c := num(wi, 0, mw)
+		h, d := num(hi, 0, mh)
 		return a && b && c && d && s.fit(id, x, y, w, h, false)
 	}
 	switch in[0] {
 	case "size":
 		id, a := layer(1)
-		w, b := num(2, 0, 1024)
-		h, c := num(3, 0, 768)
-		return len(in) == 4 && a && b && c && (id != 0 || w == 1024 && h == 768) && s.fit(id, 0, 0, w, h, true)
+		w, b := num(2, 0, mw)
+		h, c := num(3, 0, mh)
+		valid := len(in) == 4 && a && b && c && (id != 0 || (!s.workspace && w == 1024 && h == 768 || s.workspace && w >= 64 && h >= 64)) && s.fit(id, 0, 0, w, h, true)
+		if valid && id == 0 {
+			s.width.Store(int64(w))
+			s.height.Store(int64(h))
+		}
+		return valid
 	case "img":
 		id, a := layer(3)
 		_, b := num(2, 0, 15)
-		x, c := num(5, 0, 1024)
-		y, d := num(6, 0, 768)
-		if len(in) != 7 || !a || !b || !c || !d || !streamID(in[1]) || in[4] != "image/png" || len(s.images) >= 8 || s.images[in[1]] != nil {
+		x, c := num(5, 0, mw)
+		y, d := num(6, 0, mh)
+		if len(in) != 7 || !a || !b || !c || !d || !streamID(in[1]) || in[4] != "image/png" || len(s.images) >= 8 || s.images[in[1]] != nil || s.outputClip.matches(in[1]) {
 			return false
 		}
 		s.images[in[1]] = &viewerImage{layer: id, x: x, y: y}
@@ -181,7 +205,7 @@ func (s *viewerStream) drawing(in instruction) bool {
 		}
 		image := s.images[in[1]]
 		cfg, err := png.DecodeConfig(bytes.NewReader(image.pixels))
-		if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > 1024 || cfg.Height > 768 || !s.fit(image.layer, image.x, image.y, cfg.Width, cfg.Height, false) {
+		if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > mw || cfg.Height > mh || !s.fit(image.layer, image.x, image.y, cfg.Width, cfg.Height, false) {
 			return false
 		}
 		pixels := cfg.Width * cfg.Height
@@ -225,22 +249,22 @@ func (s *viewerStream) drawing(in instruction) bool {
 		if len(in) != 10 || !a || !b || !c {
 			return false
 		}
-		for i, hi := range map[int]int{2: 1024, 3: 768, 4: 1024, 5: 768, 8: 1024, 9: 768} {
+		for i, hi := range map[int]int{2: mw, 3: mh, 4: mw, 5: mh, 8: mw, 9: mh} {
 			if _, ok := num(i, 0, hi); !ok {
 				return false
 			}
 		}
-		w, _ := num(4, 0, 1024)
-		h, _ := num(5, 0, 768)
-		x, _ := num(8, 0, 1024)
-		y, _ := num(9, 0, 768)
+		w, _ := num(4, 0, mw)
+		h, _ := num(5, 0, mh)
+		x, _ := num(8, 0, mw)
+		y, _ := num(9, 0, mh)
 		return s.fit(dst, x, y, w, h, false) && s.renderWork(w*h)
 	case "cursor":
 		_, a := layer(3)
 		if len(in) != 8 || !a {
 			return false
 		}
-		for i, hi := range map[int]int{1: 256, 2: 256, 4: 1024, 5: 768, 6: 256, 7: 256} {
+		for i, hi := range map[int]int{1: 256, 2: 256, 4: mw, 5: mh, 6: 256, 7: 256} {
 			if _, ok := num(i, 0, hi); !ok {
 				return false
 			}
@@ -266,8 +290,8 @@ func (s *viewerStream) drawing(in instruction) bool {
 		return len(in) == 6 && ok && xy(id, 2, 3, 4, 5)
 	case "start", "line":
 		id, a := layer(1)
-		x, b := num(2, 0, 1024)
-		y, c := num(3, 0, 768)
+		x, b := num(2, 0, mw)
+		y, c := num(3, 0, mh)
 		return len(in) == 4 && a && b && c && s.fit(id, x, y, 0, 0, false)
 	case "clip", "close", "identity", "reset", "push", "pop":
 		id, ok := layer(1)
@@ -308,8 +332,8 @@ func (s *viewerStream) drawing(in instruction) bool {
 		delete(s.layers, id)
 		return true
 	case "mouse":
-		_, a := num(1, 0, 1023)
-		_, b := num(2, 0, 767)
+		_, a := num(1, 0, int(s.width.Load())-1)
+		_, b := num(2, 0, int(s.height.Load())-1)
 		_, c := num(3, 0, 31)
 		_, d := num(4, 0, 1<<53-1)
 		return len(in) == 5 && a && b && c && d
@@ -337,19 +361,34 @@ func (s *viewerStream) drawing(in instruction) bool {
 }
 
 func (s *viewerStream) Read(data []byte) (int, error) {
-	if s.closed.Load() {
+	if s.revoked() {
+		_ = s.Close()
 		return 0, errNative
 	}
 	for s.ready.Len() == 0 {
 		in, err := s.native.next()
-		if err != nil {
+		if err != nil || s.revoked() {
 			_ = s.Close()
 			return 0, errNative
 		}
 		if in[0] == "name" {
 			continue
 		} // remote text never becomes browser UI/HTML
+		handled, valid := s.clipboardOutput(in)
+		if handled {
+			if !valid {
+				s.native.failure.Store("workspace clipboard schema")
+				_ = s.Close()
+				return 0, errNative
+			}
+			if s.pending.Len() > 0 && len(s.images) == 0 {
+				s.ready.Reset(append([]byte(nil), s.pending.Bytes()...))
+				s.pending.Reset()
+			}
+			continue
+		}
 		if !s.drawing(in) {
+			s.native.failure.Store("viewer drawing " + in[0]) // next admits only fixed opcode names
 			_ = s.Close()
 			return 0, errNative
 		}
@@ -362,16 +401,27 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 			s.pending.Reset()
 		}
 	}
-	return s.ready.Read(data)
+	if s.revoked() {
+		return 0, errNative
+	}
+	n, err := s.ready.Read(data)
+	if s.revoked() {
+		clear(data[:n])
+		return 0, errNative
+	}
+	return n, err
 }
 func (s *viewerStream) send(in instruction) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	if s.revoked() {
+		return errNative
+	}
 	return writeInstruction(s.native.raw, in)
 }
 func (s *viewerStream) Write(data []byte) (int, error) {
 	refuse := func() (int, error) { _ = s.Close(); return 0, errNative }
-	if s.closed.Load() || len(data) == 0 || len(data) > 1024 {
+	if s.revoked() || len(data) == 0 || len(data) > 1024 && !s.workspace || len(data) > 8192 {
 		return refuse()
 	}
 	reader := bufio.NewReader(bytes.NewReader(data))
@@ -382,9 +432,28 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 	if _, err := reader.ReadByte(); err != io.EOF {
 		return refuse()
 	}
+	if s.workspace && (in[0] == "clipboard" || in[0] == "blob" || in[0] == "end") {
+		if !s.clipboardInput(in) {
+			return refuse()
+		}
+		return len(data), nil
+	}
 	s.metaMu.Lock()
 	valid, forward := false, false
 	switch in[0] {
+	case "size":
+		if s.workspace && len(in) == 3 {
+			w, a := canonicalNumber(in[1], 64, 1920)
+			h, b := canonicalNumber(in[2], 64, 1080)
+			now := time.Now()
+			if now.Sub(s.resizeWindow) >= time.Second {
+				s.resizeWindow = now
+				s.resizeCount = 0
+			}
+			s.resizeCount++
+			valid = a && b && w%2 == 0 && h%2 == 0 && s.resizeCount <= 4
+			forward = valid
+		}
 	case "nop":
 		valid, forward = len(in) == 1, len(in) == 1
 	case "ack":
@@ -402,8 +471,8 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 		}
 	case "mouse":
 		if len(in) == 4 {
-			_, a := canonicalNumber(in[1], 0, 1023)
-			_, b := canonicalNumber(in[2], 0, 767)
+			_, a := canonicalNumber(in[1], 0, int(s.width.Load())-1)
+			_, b := canonicalNumber(in[2], 0, int(s.height.Load())-1)
 			_, c := canonicalNumber(in[3], 0, 31)
 			valid = a && b && c
 			forward = valid
@@ -438,4 +507,82 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 		return refuse()
 	}
 	return len(data), nil
+}
+
+func (s *viewerStream) bounds() (int, int) {
+	if s.workspace {
+		return 1920, 1080
+	}
+	return 1024, 768
+}
+
+// The browser sees one completed, typed text notification, never a raw native
+// clipboard stream. It can display this text but cannot automatically write it
+// to the OS clipboard. Partial UTF-8 and image/clipboard ID collisions refuse.
+func (s *viewerStream) clipboardOutput(in instruction) (bool, bool) {
+	if !s.workspace || len(in) == 0 {
+		return false, false
+	}
+	isClip := in[0] == "clipboard" || (in[0] == "blob" || in[0] == "end") && len(in) > 1 && s.outputClip.matches(in[1])
+	if !isClip {
+		return false, false
+	}
+	if len(in) < 2 || s.images[in[1]] != nil {
+		return true, false
+	}
+	text, complete, e := s.outputClip.accept(in)
+	if e != nil {
+		return true, false
+	}
+	if complete {
+		s.copyOps++
+		if s.copyOps > 128 || strings.ContainsRune(text, 0) {
+			return true, false
+		}
+		if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, instruction{"keybash-clipboard", text}) != nil {
+			return true, false
+		}
+	}
+	return true, true
+}
+func (s *viewerStream) clipboardInput(in instruction) bool {
+	if len(in) < 2 || in[1] != "0" {
+		return false
+	}
+	text, complete, e := s.inputClip.accept(in)
+	if e != nil {
+		return false
+	}
+	if !complete {
+		return true
+	}
+	if strings.ContainsRune(text, 0) {
+		return false
+	}
+	s.metaMu.Lock()
+	s.pasteOps++
+	valid := s.pasteOps <= 128
+	s.metaMu.Unlock()
+	if !valid {
+		return false
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.revoked() {
+		return false
+	}
+	if writeInstruction(s.native.raw, instruction{"clipboard", "0", "text/plain"}) != nil {
+		return false
+	}
+	for b := []byte(text); len(b) > 0; {
+		if s.revoked() {
+			return false
+		}
+		n := min(len(b), 512)
+		if writeInstruction(s.native.raw, instruction{"blob", "0", base64.StdEncoding.EncodeToString(b[:n])}) != nil {
+			return false
+		}
+		b = b[n:]
+	}
+	return !s.revoked() && writeInstruction(s.native.raw, instruction{"end", "0"}) == nil
 }

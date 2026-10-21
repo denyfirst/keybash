@@ -98,7 +98,7 @@ func (s *nativeStages) Write(p []byte) (int, error) {
 					}
 				}
 			}
-			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_GDI_READY", "KB_STAGE_CHANNELS", "KB_STAGE_IDENTITY", "KB_STAGE_POST_READY", "KB_STAGE_CONNECTED"} {
+			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_GDI_READY", "KB_STAGE_CHANNELS", "KB_STAGE_IDENTITY", "KB_STAGE_POST_READY", "KB_STAGE_CONNECTED", "KB_STAGE_DISP_SELECTED", "KB_STAGE_DVC_REQUESTED", "KB_STAGE_DVC_FAILED"} {
 				if s.pending == stage {
 					fmt.Fprintln(os.Stdout, stage)
 				}
@@ -179,12 +179,14 @@ func TestNativeRDPSandboxPreparation(t *testing.T) {
 }
 
 type nativeMarker struct {
-	mu                  sync.Mutex
-	tail                string
-	ready               chan struct{}
-	once                sync.Once
-	keys, mouse         chan struct{}
-	keysOnce, mouseOnce sync.Once
+	mu                         sync.Mutex
+	tail                       string
+	ready                      chan struct{}
+	once                       sync.Once
+	keys, mouse                chan struct{}
+	keysOnce, mouseOnce        sync.Once
+	clipboard, resized         chan struct{}
+	clipboardOnce, resizedOnce sync.Once
 }
 
 func (m *nativeMarker) Write(p []byte) (int, error) {
@@ -199,6 +201,12 @@ func (m *nativeMarker) Write(p []byte) (int, error) {
 				m.keysOnce.Do(func() { close(m.keys) })
 			case "KB_INPUT_MOUSE":
 				m.mouseOnce.Do(func() { close(m.mouse) })
+			case "KB_CLIPBOARD_LOCAL":
+				m.clipboardOnce.Do(func() { close(m.clipboard) })
+			case "KB_DESKTOP_RESIZED":
+				m.resizedOnce.Do(func() { close(m.resized) })
+			case "KB_DISP_READY", "KB_DISP_CAPS_SENT", "KB_DVC_JOINED", "KB_DVC_ABSENT", "KB_DVC_STATE_READY":
+				fmt.Fprintln(os.Stdout, m.tail) // fixed synthetic channel states only
 			}
 			m.tail = ""
 		} else if len(m.tail) < 256 {
@@ -255,7 +263,7 @@ func nativePeerWithInput(t *testing.T, ctx context.Context, prefix string, cert 
 		"--ro-bind", prefix+"/share/lab/test_icon.bmp", "/tmp/test_icon.bmp", "--chdir", "/tmp")
 	args = append(args, dropNativePrivileges()...)
 	args = append(args, prefix+"/bin/sfreerdp-server", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
-	marker := &nativeMarker{ready: make(chan struct{}), keys: make(chan struct{}), mouse: make(chan struct{})}
+	marker := &nativeMarker{ready: make(chan struct{}), keys: make(chan struct{}), mouse: make(chan struct{}), clipboard: make(chan struct{}), resized: make(chan struct{})}
 	runSandbox(t, ctx, args, marker)
 	address := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(3 * time.Second)
@@ -446,7 +454,7 @@ func TestNativeRDPChild(t *testing.T) {
 		}
 	}
 	prefix := os.Getenv("KEYBASH_NATIVE_PREFIX")
-	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--core=0", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-p", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
+	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--core=0", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
 	guacd.Stdout = &nativeStages{}
 	guacd.Stderr = io.Discard
 	if guacd.Start() != nil {
@@ -564,7 +572,7 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				if err != nil {
 					if valid {
 						t.Logf("bounded display instruction counts: %v", seen)
-						t.Fatalf("native RDP did not render (%s)", stream.failure)
+						t.Fatalf("native RDP did not render (%v)", stream.failure.Load())
 					}
 					if ctx.Err() != nil {
 						t.Fatal("native password refusal timed out without evidence")

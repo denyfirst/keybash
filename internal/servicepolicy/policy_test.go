@@ -12,6 +12,40 @@ func fixtureConfig() Config {
 	return c
 }
 
+func TestServiceRDPPlanAndSharedKernelBoundary(t *testing.T) {
+	c := fixtureConfig()
+	c.RDPWorkerDigest = strings.Repeat("b", 64)
+	c.RDPRuntimeDigest = strings.Repeat("c", 64)
+	files, e := Render(c)
+	if e != nil || len(files) != 5 {
+		t.Fatal("valid RDP service plan refused")
+	}
+	for _, required := range []string{"Slice=keybash.slice", "PrivateNetwork=yes", "KillMode=control-group", "--role=rdp-manager", "--runtime-sha256=" + c.RDPRuntimeDigest, "--worker-sha256=" + c.RDPWorkerDigest, "InaccessiblePaths=-/var/lib/keybash -/etc/keybash/keys -/etc/keybash/tls"} {
+		if !strings.Contains(files["keybash-rdp-manager.service"], required) {
+			t.Fatal("RDP service boundary missing: " + required)
+		}
+	}
+	for _, required := range []string{"BindsTo=keybash-ssh-manager.service keybash-rdp-manager.service", "serve-remote-lab", "--rdp-manager=/run/keybash-rdp-manager/control.sock"} {
+		if !strings.Contains(files["keybash-gateway.service"], required) {
+			t.Fatal("gateway RDP boundary missing")
+		}
+	}
+	good := map[string]string{"cpu.max": "200000 100000\n", "memory.max": "1073741824\n", "memory.swap.max": "0\n", "pids.max": "512\n"}
+	if validateState(c, "rdp-manager", "0::/keybash.slice/keybash-rdp-manager.service\n", good) != nil {
+		t.Fatal("valid RDP kernel boundary refused")
+	}
+	if validateState(fixtureConfig(), "rdp-manager", "0::/keybash.slice/keybash-rdp-manager.service\n", good) == nil || validateState(c, "rdp-manager", "0::/keybash.slice/keybash-ssh-manager.service\n", good) == nil {
+		t.Fatal("unconfigured or wrong RDP kernel boundary accepted")
+	}
+	for _, bad := range []func(*Config){func(c *Config) { c.RDPWorkerDigest = "" }, func(c *Config) { c.RDPRuntimeDigest = "" }, func(c *Config) { c.RDPWorkerDigest += "\nExecStart=/bin/sh" }, func(c *Config) { c.RDPRuntimeDigest = strings.Repeat("0", 64) }} {
+		copy := c
+		bad(&copy)
+		if _, e := Render(copy); e == nil {
+			t.Fatal("invalid RDP image profile accepted")
+		}
+	}
+}
+
 func TestServicePlanFiniteIdentityAndInjection(t *testing.T) {
 	c := fixtureConfig()
 	files, err := Render(c)

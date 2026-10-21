@@ -10,7 +10,7 @@ import (
 )
 
 func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bool {
-	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
+	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop.mjs": "desktop.mjs", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
 	file := assets[r.URL.Path]
 	protocol := ""
 	record := ""
@@ -43,7 +43,7 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src "+l.origin+" "+strings.Replace(l.origin, "https:", "wss:", 1)+"; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; img-src blob:")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(self), clipboard-write=(self)")
-	if protocol != "ssh" {
+	if protocol != "ssh" && protocol != "rdp" {
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=(self)")
 	}
 	mime := "text/javascript; charset=utf-8"
