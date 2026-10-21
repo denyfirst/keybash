@@ -184,8 +184,11 @@ func rdpSandboxArgs(parent string, c ManagerConfig) []string {
 		"--hostname", "keybash-rdp-worker", "--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP",
 		"--clearenv", "--setenv", "GOMAXPROCS", "2", "--setenv", "GOMEMLIMIT", "64MiB", "--setenv", "GOTRACEBACK", "none",
 		"--ro-bind", c.Runtime, "/",
-		"--ro-bind", "/proc/self/fd/4", "/worker", "--proc", "/proc", "--dev", "/dev",
-		"--dir", "/run/keybash", "--ro-bind", "/proc/self/fd/6", "/run/keybash/approved.pem", "--ro-bind", "/proc/self/fd/7", "/run/keybash/name", "--perms", "1777", "--tmpfs", "/tmp", "--remount-ro", "/", "--chdir", "/",
+		// Bind inherited capabilities before replacing /proc: the setup process
+		// is outside the new PID namespace and cannot resolve its new proc/self.
+		"--ro-bind", "/proc/self/fd/4", "/worker",
+		"--dir", "/run/keybash", "--ro-bind", "/proc/self/fd/6", "/run/keybash/approved.pem", "--ro-bind", "/proc/self/fd/7", "/run/keybash/name",
+		"--proc", "/proc", "--dev", "/dev", "--perms", "1777", "--tmpfs", "/tmp", "--remount-ro", "/", "--chdir", "/",
 		"--seccomp", "5", "--", "/setpriv", "--reuid=" + u, "--regid=" + g, "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "/worker", parent, u, g}
 }
 

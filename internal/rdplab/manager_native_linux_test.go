@@ -62,6 +62,26 @@ func nativeManagerFixture(t *testing.T) ManagerConfig {
 
 func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	c := nativeManagerFixture(t)
+	extra := filepath.Join(c.Runtime, "empty-extra")
+	if os.Mkdir(extra, 0755) != nil {
+		t.Fatal("runtime directory fixture failed")
+	}
+	withDirectory, e := RuntimeInventory(c.Runtime)
+	if e != nil || withDirectory == c.RuntimeDigest {
+		t.Fatal("empty runtime directory was not bound to inventory")
+	}
+	if os.Chmod(extra, 0700) != nil {
+		t.Fatal("runtime directory mode fixture failed")
+	}
+	if changed, e := RuntimeInventory(c.Runtime); e != nil || changed == withDirectory {
+		t.Fatal("runtime directory permissions were not bound to inventory")
+	}
+	if os.Remove(extra) != nil {
+		t.Fatal("runtime directory restoration failed")
+	}
+	if restored, e := RuntimeInventory(c.Runtime); e != nil || restored != c.RuntimeDigest {
+		t.Fatal("restored runtime inventory changed")
+	}
 	for _, bad := range []func(*ManagerConfig){func(c *ManagerConfig) { c.RuntimeDigest[0] ^= 1 }, func(c *ManagerConfig) { c.WorkerDigest[0] ^= 1 }, func(c *ManagerConfig) { c.WorkerUID = c.GatewayUID }} {
 		x := c
 		bad(&x)

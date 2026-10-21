@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -94,7 +95,7 @@ type nativeStream struct {
 	once      sync.Once
 	output    int
 	frames    int
-	failure   string // fixed private classifications, never remote diagnostic text
+	failure   atomic.Value // fixed private string classifications, never remote diagnostic text
 }
 
 func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeStream, error) {
@@ -172,7 +173,7 @@ func (s *nativeStream) next() (instruction, error) {
 	for {
 		in, err := readInstruction(s.reader)
 		if err != nil {
-			s.failure = "instruction framing"
+			s.failure.Store("instruction framing")
 			s.close()
 			return nil, errNative
 		}
@@ -181,7 +182,7 @@ func (s *nativeStream) next() (instruction, error) {
 		}
 		s.frames++
 		if s.output > 8*1024*1024 || s.frames > 8192 {
-			s.failure = "output quota"
+			s.failure.Store("output quota")
 			s.close()
 			return nil, errNative
 		}
@@ -206,20 +207,20 @@ func (s *nativeStream) next() (instruction, error) {
 		}
 		allowed = allowed || s.workspace && in[0] == "clipboard"
 		if !allowed {
-			s.failure = "unexpected instruction"
+			s.failure.Store("unexpected instruction")
 			switch in[0] {
 			case "error":
 				if len(in) == 3 {
 					if status, err := strconv.ParseUint(in[2], 10, 16); err == nil {
-						s.failure = "native status " + strconv.FormatUint(status, 10)
+						s.failure.Store("native status " + strconv.FormatUint(status, 10))
 					}
 				}
 			case "set":
-				s.failure = "unsupported drawing property"
+				s.failure.Store("unsupported drawing property")
 			case "msg":
-				s.failure = "invalid owner notice"
+				s.failure.Store("invalid owner notice")
 			case "argv":
-				s.failure = "unexpected parameter request"
+				s.failure.Store("unexpected parameter request")
 			}
 			s.close()
 			return nil, errNative

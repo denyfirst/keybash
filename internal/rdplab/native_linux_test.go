@@ -570,7 +570,7 @@ func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
 				if err != nil {
 					if valid {
 						t.Logf("bounded display instruction counts: %v", seen)
-						t.Fatalf("native RDP did not render (%s)", stream.failure)
+						t.Fatalf("native RDP did not render (%v)", stream.failure.Load())
 					}
 					if ctx.Err() != nil {
 						t.Fatal("native password refusal timed out without evidence")

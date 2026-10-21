@@ -122,3 +122,49 @@ func TestWorkspaceRefusesAuxiliaryMalformedReplayAndLimits(t *testing.T) {
 		t.Fatal("resize flood accepted")
 	}
 }
+
+func TestWorkspaceRemoteClipboardIsCompletedTextWithDistinctStream(t *testing.T) {
+	for _, sequence := range [][]instruction{
+		{{"clipboard", "8", "text/html"}},
+		{{"clipboard", "8", "text/plain"}, {"clipboard", "9", "text/plain"}},
+		{{"clipboard", "8", "text/plain"}, {"blob", "8", "AA=="}, {"end", "8"}},
+		{{"clipboard", "8", "text/plain"}, {"blob", "8", "/w=="}, {"end", "8"}},
+	} {
+		s, _, _ := viewerFixture(t)
+		s.workspace = true
+		refused := false
+		for _, in := range sequence {
+			handled, valid := s.clipboardOutput(in)
+			if !handled || !valid {
+				refused = true
+				break
+			}
+		}
+		if !refused || s.pending.Len() != 0 {
+			t.Fatal("invalid remote clipboard reached the browser")
+		}
+	}
+	s, _, _ := viewerFixture(t)
+	s.workspace = true
+	s.images["8"] = &viewerImage{}
+	if handled, valid := s.clipboardOutput(instruction{"clipboard", "8", "text/plain"}); !handled || valid {
+		t.Fatal("clipboard reused an active image stream")
+	}
+	delete(s.images, "8")
+	if handled, valid := s.clipboardOutput(instruction{"clipboard", "8", "text/plain"}); !handled || !valid {
+		t.Fatal("separate text stream refused")
+	}
+	if s.drawing(instruction{"img", "8", "14", "-1", "image/png", "0", "0"}) {
+		t.Fatal("image reused an active clipboard stream")
+	}
+	if _, valid := s.clipboardOutput(instruction{"blob", "8", "YQ=="}); !valid || s.pending.Len() != 0 {
+		t.Fatal("partial remote text escaped")
+	}
+	if _, valid := s.clipboardOutput(instruction{"end", "8"}); !valid || !bytes.Contains(s.pending.Bytes(), []byte("keybash-clipboard")) {
+		t.Fatal("completed remote text missing")
+	}
+	_ = s.Close()
+	if _, valid := s.clipboardOutput(instruction{"clipboard", "8", "text/plain"}); valid {
+		t.Fatal("closed clipboard was revived")
+	}
+}

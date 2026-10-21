@@ -38,9 +38,8 @@ func rdpPeerCredentials(c *net.UnixConn) (*unix.Ucred, error) {
 }
 
 // recvRDPPacket atomically receives one bounded seqpacket and rights buffer
-// (alignment can fit four FDs; launch admits exactly three). CLOEXEC is set by
-// recvmsg itself, including during exec
-// in other goroutines. Every received FD is owned and closed even on refusal.
+// (alignment can fit six FDs; launch admits exactly five). CLOEXEC is set by
+// recvmsg itself, including during exec in other goroutines. Every received FD is owned and closed even on refusal.
 func recvRDPPacket(c *net.UnixConn) (string, []*os.File, error) {
 	raw, err := c.SyscallConn()
 	if err != nil {

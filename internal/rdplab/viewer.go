@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// Fixed lab viewport. This boundary does not enable native clipboard, resize,
-// arbitrary streams, URLs or user-selected connection parameters.
+// The legacy profile has a fixed viewport; the manager workspace adds bounded
+// text/display controls. Neither admits arbitrary streams, URLs or parameters.
 type viewerLayer struct{ width, height, depth int }
 type viewerImage struct {
 	layer, x, y int
@@ -375,7 +375,7 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 		handled, valid := s.clipboardOutput(in)
 		if handled {
 			if !valid {
-				s.native.failure = "workspace clipboard schema"
+				s.native.failure.Store("workspace clipboard schema")
 				_ = s.Close()
 				return 0, errNative
 			}
@@ -386,7 +386,7 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 			continue
 		}
 		if !s.drawing(in) {
-			s.native.failure = "viewer drawing " + in[0] // next admits only fixed opcode names
+			s.native.failure.Store("viewer drawing " + in[0]) // next admits only fixed opcode names
 			_ = s.Close()
 			return 0, errNative
 		}

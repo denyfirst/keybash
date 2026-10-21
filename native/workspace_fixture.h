@@ -6,8 +6,8 @@
 #include <winpr/clipboard.h>
 
 
-static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ',0x018f,'z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,0};
-static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ',0x018f,'z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,10,'l','i','n','e',0};
+static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,0};
+static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,10,'l','i','n','e',0};
 
 static UINT kb_clip_capabilities(CliprdrServerContext* ctx, const CLIPRDR_CAPABILITIES* caps) {
     (void)caps;

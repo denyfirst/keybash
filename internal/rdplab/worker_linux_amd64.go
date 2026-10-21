@@ -89,8 +89,8 @@ func finishRDPSetup(c *rdpConnection, setup context.Context) error {
 }
 
 // RunNativeWorker never accepts a command, path, destination or environment
-// from its input. Its first bounded public message supplies only pinned trust.
-// Credentials then pass verbatim through private pipes to the native library.
+// from its input. Read-only sealed mounts supply only pinned public trust.
+// Credentials pass verbatim through private pipes to the native library.
 func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

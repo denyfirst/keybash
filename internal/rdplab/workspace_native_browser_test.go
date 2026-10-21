@@ -40,7 +40,7 @@ func TestNativeRDPWorkspaceClipboardAndDisplay(t *testing.T) {
 		}
 		t.Cleanup(func() {
 			if t.Failed() {
-				t.Logf("fixed native viewer classification: %s", stream.failure)
+				t.Logf("fixed native viewer classification: %v", stream.failure.Load())
 			}
 		})
 		select {

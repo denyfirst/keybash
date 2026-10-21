@@ -252,12 +252,15 @@ native test prefix solely to run the verified headless browser harness.
 The app uses a restricted custom tunnel and only the allowed drawing/input
 subset. Auxiliary tunnel/audio/video helpers defined by the package are not
 constructed or enabled. Only bounded, completely decoded and statically re-encoded PNGs can reach the
-Blob-image renderer. Unsupported source URLs, SVG, streams, transforms and
-clipboard are refused by the server adapter. CSP stays self-only for scripts
+Blob-image renderer. Unsupported source URLs, SVG, arbitrary streams and
+transforms are refused by the server adapter. The legacy lab also refuses
+clipboard; the manager workspace admits only bounded completed plain text.
+CSP stays self-only for scripts
 with the existing reviewed inline-style allowance; the desktop profile adds
 `img-src blob:`. It does not loosen the terminal profile. Source requests,
 clipboard/storage absence and revocation are measured in the browser gates.
 
-Native/browser text clipboard, remote resize/layout/reconnect, real Windows,
-production packaging and independent audit remain gates. Limits and API/source
+The manager workspace's native/browser text and display-update evidence is
+tracked in `RDP-WORKSPACE-INTEGRATION.md`. Keyboard layouts/reconnect, real
+Windows, production packaging and independent audit remain gates. Limits and API/source
 references are in [the browser RDP lab](BROWSER-RDP-LAB.md).
