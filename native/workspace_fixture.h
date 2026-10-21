@@ -4,6 +4,7 @@
 #include <freerdp/server/cliprdr.h>
 #include <freerdp/server/disp.h>
 #include <winpr/clipboard.h>
+#include <winpr/interlocked.h>
 
 static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ',0x018f,'z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,0};
 static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ',0x018f,'z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,10,'l','i','n','e',0};
@@ -87,7 +88,7 @@ static BOOL kb_workspace_events(freerdp_peer* client) {
         if (!freerdp_settings_set_uint32(client->context->settings,FreeRDP_DesktopWidth,width) ||
             !freerdp_settings_set_uint32(client->context->settings,FreeRDP_DesktopHeight,height) ||
             !rfx_context_reset(peer->rfx_context,width,height) ||
-            !client->update->DesktopResize(client->update->context)) return FALSE;
+            !client->context->update->DesktopResize(client->context->update->context)) return FALSE;
         peer->activated=FALSE;
         if (width==1280 && height==720) {puts("KB_DESKTOP_RESIZED");fflush(stdout);}
     }
@@ -95,6 +96,6 @@ static BOOL kb_workspace_events(freerdp_peer* client) {
 }
 static void kb_workspace_free(testPeerContext* peer) {
     if (peer->kb_clip) {peer->kb_clip->Stop(peer->kb_clip);cliprdr_server_context_free(peer->kb_clip);peer->kb_clip=NULL;}
-    if (peer->kb_disp) {(void)peer->kb_disp->Close(peer->kb_disp);disp_server_context_free(peer->kb_disp);peer->kb_disp=NULL;}
+    if (peer->kb_disp) {UINT rc=peer->kb_disp->Close(peer->kb_disp);(void)rc;disp_server_context_free(peer->kb_disp);peer->kb_disp=NULL;}
     if (peer->kb_resize_event) {(void)CloseHandle(peer->kb_resize_event);peer->kb_resize_event=NULL;}
 }

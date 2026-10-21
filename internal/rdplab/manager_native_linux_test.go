@@ -12,12 +12,15 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -95,18 +98,70 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	}
 }
 
-func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Identity, mode string, uid uint32) {
+func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Identity, mode string, uid uint32, during ...func()) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=20s") // #nosec G204 -- this exact compiled fixture and fixed selector.
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=40s") // #nosec G204 -- this exact compiled fixture and fixed selector.
 	cmd.Dir = "/tmp"
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGED_SOCKET=" + c.SocketPath, "KEYBASH_MANAGED_ADDRESS=" + address, "KEYBASH_MANAGED_PIN=" + base64.StdEncoding.EncodeToString(pin.der), "KEYBASH_MANAGED_MODE=" + mode}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: c.GatewayGID, Groups: []uint32{c.GatewayGID}}}
+	if len(during) > 0 {
+		output := &rdpServiceOutput{ready: make(chan struct{})}
+		cmd.Stdout, cmd.Stderr = output, output
+		in, e := cmd.StdinPipe()
+		if e != nil || cmd.Start() != nil {
+			t.Fatal("service gateway child start failed")
+		}
+		done := make(chan struct{})
+		var exit error
+		go func() { exit = cmd.Wait(); close(done) }()
+		defer func() { _ = in.Close(); _ = cmd.Process.Kill(); <-done }()
+		select {
+		case <-output.ready:
+		case <-done:
+			t.Fatalf("service child refused: %s", output.snapshot())
+		case <-ctx.Done():
+			t.Fatal("service child readiness stalled")
+		}
+		during[0]()
+		_, _ = in.Write([]byte{1})
+		_ = in.Close()
+		select {
+		case <-done:
+			if exit != nil {
+				t.Fatalf("service gateway failed: %s", output.snapshot())
+			}
+		case <-ctx.Done():
+			t.Fatal("service child revocation stalled")
+		}
+		return
+	}
 	if data, e := cmd.CombinedOutput(); e != nil {
 		t.Fatalf("managed gateway failed: %s", data)
 	}
 }
+
+type rdpServiceOutput struct {
+	mu    sync.Mutex
+	text  string
+	ready chan struct{}
+	seen  bool
+}
+
+func (o *rdpServiceOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.text) < 4096 {
+		o.text += string(p[:min(len(p), 4096-len(o.text))])
+	}
+	if !o.seen && strings.Contains(o.text, "KB_SERVICE_READY\n") {
+		o.seen = true
+		close(o.ready)
+	}
+	return len(p), nil
+}
+func (o *rdpServiceOutput) snapshot() string { o.mu.Lock(); defer o.mu.Unlock(); return o.text }
 
 func TestNativeRDPManagerAuthenticationRevocationAndRefusal(t *testing.T) {
 	c := nativeManagerFixture(t)
@@ -172,7 +227,7 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 	if path == "" {
 		t.Skip("fixed unprivileged gateway child")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	p, e := base64.StdEncoding.DecodeString(os.Getenv("KEYBASH_MANAGED_PIN"))
 	if e != nil {
@@ -234,6 +289,20 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("managed native desktop stalled")
+	}
+	if mode == "service" {
+		fmt.Fprintln(os.Stdout, "KB_SERVICE_READY")
+		var ack [1]byte
+		if _, e := io.ReadFull(os.Stdin, ack[:]); e != nil || ack[0] != 1 {
+			t.Fatal("service parent acknowledgement failed")
+		}
+		var b [16]byte
+		if n, _ := s.Read(b[:]); n != 0 {
+			t.Fatal("manager stop retained RDP output")
+		}
+		if _, e := s.Write(encodedInstruction(t, instruction{"key", "97", "1"})); e == nil {
+			t.Fatal("manager stop retained RDP input")
+		}
 	}
 	cancel()
 	if s.Close() != nil {

@@ -26,6 +26,9 @@ find "${prefix}" -type f -exec sha256sum '{}' ';'
 ldd "${prefix}/sbin/guacd"
 ldd "${prefix}/lib/libguac-client-rdp.so"
 CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/keybash-rdp-worker" ./cmd/keybash-rdp-worker
+for bin in keybash keybash-ssh-manager keybash-ssh-worker keybash-service-check keybash-service-plan keybash-rdp-manager; do
+  CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/${bin}" "./cmd/${bin}"
+done
 python3 scripts/build-rdp-runtime.py --prefix "${prefix}" --output "${prefix}/runtime-stage"
 go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
