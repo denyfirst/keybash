@@ -70,9 +70,6 @@ func RuntimeInventory(path string) ([32]byte, error) {
 		if err != nil {
 			return errNative
 		}
-		if rel == "." {
-			return nil
-		}
 		for _, r := range rel {
 			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("/._+-", r)) {
 				return errNative
@@ -83,7 +80,7 @@ func RuntimeInventory(path string) ([32]byte, error) {
 			return errNative
 		}
 		st, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || st.Uid != 0 || info.Mode().Perm()&0022 != 0 || info.Mode()&os.ModeSymlink != 0 {
+		if !ok || st.Uid != 0 || info.Mode().Perm()&0022 != 0 || info.Mode()&(os.ModeSymlink|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 			return errNative
 		}
 		count++

@@ -62,6 +62,15 @@ func nativeManagerFixture(t *testing.T) ManagerConfig {
 
 func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	c := nativeManagerFixture(t)
+	if os.Chmod(c.Runtime, 0555) != nil {
+		t.Fatal("runtime root mode fixture failed")
+	}
+	if changed, e := RuntimeInventory(c.Runtime); e != nil || changed == c.RuntimeDigest {
+		t.Fatal("runtime root permissions were not bound to inventory")
+	}
+	if os.Chmod(c.Runtime, 0755) != nil {
+		t.Fatal("runtime root mode restoration failed")
+	}
 	extra := filepath.Join(c.Runtime, "empty-extra")
 	if os.Mkdir(extra, 0755) != nil {
 		t.Fatal("runtime directory fixture failed")
@@ -106,6 +115,15 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	}
 	_ = os.Chmod(c.Runtime, 0755)
 	helper := filepath.Join(c.Runtime, "setpriv")
+	if os.Chmod(helper, os.ModeSetuid|0755) != nil {
+		t.Fatal("runtime special-mode fixture failed")
+	}
+	if _, e := RuntimeInventory(c.Runtime); e == nil {
+		t.Fatal("runtime setuid executable accepted")
+	}
+	if os.Chmod(helper, 0755) != nil {
+		t.Fatal("runtime special-mode restoration failed")
+	}
 	hidden := filepath.Join(c.Runtime, "setpriv.hidden")
 	if os.Rename(helper, hidden) != nil {
 		t.Fatal("runtime mountpoint fixture failed")

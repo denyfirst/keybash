@@ -25,6 +25,7 @@ for name in ("runtime_linux_amd64.go", "worker_linux_amd64.go", "manager_native_
         text = text.replace(anchor, "cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, os.Stderr")
     elif name == "worker_linux_amd64.go":
         text = text.replace('"context"', '"context"\n"fmt"', 1)
+        text = text.replace("guacd.Stdout, guacd.Stderr = io.Discard, io.Discard", "guacd.Stdout, guacd.Stderr = io.Discard, os.Stderr")
         start = text.index("func RunNativeWorker(")
         end = text.index("\nfunc relayRDP", start)
         function = text[start:end]

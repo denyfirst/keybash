@@ -52,6 +52,11 @@ cmake --install "${lab}/freerdp-build"
 export PKG_CONFIG_PATH="${prefix}/lib/pkgconfig"
 export LD_LIBRARY_PATH="${prefix}/lib"
 test "$(pkg-config --modversion freerdp3)" = 3.32.2
+# Golden wire bytes, malformed encodings, exact bounds and empty text exercise
+# the same conversion source included in the RDP plugin, with sanitizers.
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+  $(pkg-config --cflags winpr3) native/clipboard_test.c -o "${lab}/clipboard-test" $(pkg-config --libs winpr3)
+"${lab}/clipboard-test"
 cd "${lab}/guacamole-server-1.6.0"
 ./configure --prefix="${prefix}" --with-rdp --without-ssh --without-vnc --without-telnet --without-kubernetes \
   --without-pulse --without-avcodec --without-avformat --without-avutil --without-swscale \

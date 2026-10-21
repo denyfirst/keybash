@@ -139,3 +139,51 @@ replace_once(settings, anchor, '''freerdp_settings_set_bool(rdp_settings, FreeRD
     freerdp_settings_set_string(rdp_settings, FreeRDP_AllowedTlsCiphers, "ECDHE+AESGCM:ECDHE+CHACHA20");''')
 replace_once(settings, "freerdp_settings_set_bool(rdp_settings, FreeRDP_AutoAcceptCertificate, guac_settings->certificate_tofu);", "/* Automatic certificate trust is forbidden by the Keybash lab. */")
 replace_once(settings, "if (guac_settings->certificate_fingerprints != NULL)\n        freerdp_settings_set_string(rdp_settings, FreeRDP_CertificateAcceptedFingerprints, \n                guac_strdup(guac_settings->certificate_fingerprints));", "/* The mandatory exact pin is checked in the native X509 callback. */")
+
+# Guacamole 1.6's common UTF-16 reader/writer handles only individual 16-bit
+# units. Keep that upstream code untouched; the RDP Unicode clipboard path
+# instead uses the existing pinned WinPR conversion API with strict bounds,
+# surrogate validation and an exact UTF-8 roundtrip before forwarding.
+clip = guac / "src/protocols/rdp/channels/cliprdr.c"
+(clip.parent / "keybash_clipboard.c").write_bytes((identity_source.parent / "clipboard.c").read_bytes())
+replace_once(clip, '#include "common/clipboard.h"', '#include "common/clipboard.h"\n#include "keybash_clipboard.c"')
+replace_once(clip, '''            { .formatId = CF_TEXT },
+            { .formatId = CF_UNICODETEXT }
+        },
+        .numFormats = 2''', '''            { .formatId = CF_UNICODETEXT }
+        },
+        .numFormats = 1''')
+replace_once(clip, '''    /* Use Windows' CP-1252 if Unicode unavailable */
+    if (guac_rdp_cliprdr_format_supported(format_list, CF_TEXT))
+        return guac_rdp_cliprdr_send_format_data_request(cliprdr, CF_TEXT);''',
+    '    /* Only Unicode text is supported; no lossy codepage fallback. */')
+replace_once(clip, '    /* Map requested clipboard format to a guac_iconv writer */', '''    if (format_data_request->requestedFormatId != CF_UNICODETEXT) {
+        guac_mem_free(output);
+        return ERROR_INVALID_DATA;
+    }
+    /* Map requested clipboard format to a guac_iconv writer */''')
+local = '''    guac_iconv(local_reader, &input, clipboard->clipboard->length,
+            remote_writer, &output, GUAC_COMMON_CLIPBOARD_MAX_LENGTH);'''
+replace_once(clip, local, '''    if (format_data_request->requestedFormatId == CF_UNICODETEXT) {
+        size_t length = 0;
+        if (!keybash_clipboard_from_utf8(input, clipboard->clipboard->length,
+                start, GUAC_COMMON_CLIPBOARD_MAX_LENGTH, &length)) {
+            guac_mem_free(start);
+            return ERROR_INVALID_DATA;
+        }
+        output = (char*)start + length;
+    } else {
+''' + local + '''
+    }''')
+remote = '''    if (guac_iconv(remote_reader, &input, data_len,
+            GUAC_WRITE_UTF8, &output, sizeof(received_data))) {'''
+replace_once(clip, remote, '''    if (clipboard->requested_format == CF_UNICODETEXT) {
+        size_t length = 0;
+        if (data_len < 0 || !keybash_clipboard_to_utf8((const BYTE*)input,
+                (size_t)data_len, received_data, sizeof(received_data), &length))
+            return ERROR_INVALID_DATA;
+        guac_common_clipboard_reset(clipboard->clipboard, "text/plain");
+        guac_common_clipboard_append(clipboard->clipboard, received_data, (int)length);
+        guac_common_clipboard_send(clipboard->clipboard, client);
+    }
+    else ''' + remote.strip())
