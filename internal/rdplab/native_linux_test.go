@@ -98,7 +98,7 @@ func (s *nativeStages) Write(p []byte) (int, error) {
 					}
 				}
 			}
-			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_GDI_READY", "KB_STAGE_CHANNELS", "KB_STAGE_IDENTITY", "KB_STAGE_POST_READY", "KB_STAGE_CONNECTED"} {
+			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_GDI_READY", "KB_STAGE_CHANNELS", "KB_STAGE_IDENTITY", "KB_STAGE_POST_READY", "KB_STAGE_CONNECTED", "KB_STAGE_DISP_SELECTED", "KB_STAGE_DVC_REQUESTED", "KB_STAGE_DVC_FAILED"} {
 				if s.pending == stage {
 					fmt.Fprintln(os.Stdout, stage)
 				}
@@ -205,7 +205,7 @@ func (m *nativeMarker) Write(p []byte) (int, error) {
 				m.clipboardOnce.Do(func() { close(m.clipboard) })
 			case "KB_DESKTOP_RESIZED":
 				m.resizedOnce.Do(func() { close(m.resized) })
-			case "KB_DISP_READY", "KB_DISP_CAPS_SENT":
+			case "KB_DISP_READY", "KB_DISP_CAPS_SENT", "KB_DVC_JOINED", "KB_DVC_ABSENT", "KB_DVC_STATE_READY":
 				fmt.Fprintln(os.Stdout, m.tail) // fixed synthetic channel states only
 			}
 			m.tail = ""

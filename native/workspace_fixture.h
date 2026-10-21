@@ -70,6 +70,7 @@ static UINT kb_disp_layout(DispServerContext* ctx, const DISPLAY_CONTROL_MONITOR
 }
 static BOOL kb_workspace_start(freerdp_peer* client) {
     testPeerContext* peer = (testPeerContext*)client->context;
+    puts(WTSVirtualChannelManagerIsChannelJoined(peer->vcm,"drdynvc") ? "KB_DVC_JOINED" : "KB_DVC_ABSENT"); fflush(stdout);
     if (WTSVirtualChannelManagerIsChannelJoined(peer->vcm,"cliprdr") && !peer->kb_clip) {
         peer->kb_clip=cliprdr_server_context_new(peer->vcm);
         if (!peer->kb_clip) return FALSE;
@@ -88,6 +89,7 @@ static BOOL kb_workspace_events(freerdp_peer* client) {
     testPeerContext* peer=(testPeerContext*)client->context;
     if (WTSVirtualChannelManagerGetDrdynvcState(peer->vcm)==DRDYNVC_STATE_READY) {
         if (!peer->kb_disp) {
+            puts("KB_DVC_STATE_READY"); fflush(stdout);
             peer->kb_disp=disp_server_context_new(peer->vcm);
             if (!peer->kb_disp) return FALSE;
             peer->kb_disp->rdpcontext=client->context; peer->kb_disp->custom=peer;

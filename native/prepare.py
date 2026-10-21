@@ -105,6 +105,19 @@ for old, stage in [
     replace_once(rdp, old, new)
 # Supplied credentials are immutable for this one-use session. Missing/rejected
 # credentials must abort, never prompt, retry or switch authentication modes.
+replace_once(rdp, '''    if (settings->resize_method == GUAC_RESIZE_DISPLAY_UPDATE)
+        guac_rdp_disp_load_plugin(context);''', '''    if (settings->resize_method == GUAC_RESIZE_DISPLAY_UPDATE) {
+        guac_rdp_disp_load_plugin(context);
+        puts("KB_STAGE_DISP_SELECTED"); fflush(stdout);
+    }''')
+replace_once(rdp, '    /* Load plugin providing Dynamic Virtual Channel support, if required */', '''    if (freerdp_settings_get_bool(context->settings, FreeRDP_SupportDynamicChannels)) {
+        puts("KB_STAGE_DVC_REQUESTED"); fflush(stdout);
+    }
+    /* Load plugin providing Dynamic Virtual Channel support, if required */''')
+replace_once(rdp, '''        guac_client_log(client, GUAC_LOG_WARNING,
+                "Failed to load drdynvc plugin.''', '''        puts("KB_STAGE_DVC_FAILED"); fflush(stdout);
+        guac_client_log(client, GUAC_LOG_WARNING,
+                "Failed to load drdynvc plugin.''')
 rdp_text = rdp.read_text()
 auth_start = "static BOOL rdp_freerdp_authenticate(freerdp* instance, char** username,"
 if rdp_text.count(auth_start) != 1:
