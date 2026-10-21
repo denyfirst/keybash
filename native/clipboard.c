@@ -57,11 +57,13 @@ static int keybash_clipboard_from_utf8(const char* input, size_t length,
     return 1;
 }
 
-/* Guacamole appends one NUL on its completed clipboard stream. This is framing,
- * not user text. Embedded NUL, a missing terminator and excess bytes refuse. */
+/* Guacamole's initial empty clipboard has zero bytes; a completed stream has
+ * one final NUL. Embedded NUL or a missing nonempty terminator refuses. */
 static int keybash_clipboard_from_terminated_utf8(const char* input, size_t length,
         BYTE* output, size_t capacity, size_t* written) {
     *written = 0;
-    if (!input || !length || length > KEYBASH_CLIPBOARD_LIMIT+1 || input[length-1] != 0) return 0;
+    if (!input) return 0;
+    if (!length) return keybash_clipboard_from_utf8("", 0, output, capacity, written);
+    if (length > KEYBASH_CLIPBOARD_LIMIT+1 || input[length-1] != 0) return 0;
     return keybash_clipboard_from_utf8(input, length-1, output, capacity, written);
 }

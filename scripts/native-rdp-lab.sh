@@ -49,11 +49,11 @@ if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
   echo 'Normal candidate public preflight failed; diagnostic overlays cannot pass this gate.' >&2
   preflight_failed=1
 fi
-# Observe the independent original-launcher workspace boundary even if manager
-# preparation failed. Only the unchanged normal binary runs this synthetic test;
-# either failure still stops the gate before any acceptance/mutation conclusion.
+# Collect every normal native/browser/service boundary even if public manager
+# preparation failed. Overlays never run these credential-bearing fixtures;
+# any normal failure stops the gate before mutation/acceptance conclusions.
 if ! sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
-  "${prefix}/bin/lab.test" -test.run='^TestNativeRDPWorkspaceClipboardAndDisplay$' -test.timeout=65s -test.v; then
+  "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=5m -test.v; then
   preflight_failed=1
 fi
 test "${preflight_failed}" = 0
@@ -70,10 +70,6 @@ for mutation in allow refuse; do
   cat "${lab}/sandbox-${mutation}.log"
   grep -F 'public-only managed preflight refused' "${lab}/sandbox-${mutation}.log"
 done
-sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
-  "${prefix}/bin/lab.test" -test.run='^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' -test.timeout=25s -test.v
-sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
-  "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=5m -test.v
 
 # Both directions must detect sabotage on the ACTUAL native TLS callback.
 # All mutations stay in this disposable extracted tree, never repository files.

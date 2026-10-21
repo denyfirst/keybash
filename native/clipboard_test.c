@@ -12,7 +12,7 @@ int main(void) {
     assert(n == sizeof(golden) && !memcmp(encoded, golden, n));
     assert(!keybash_clipboard_from_terminated_utf8(text, sizeof(text)-1, encoded, sizeof(encoded), &n));
     assert(!keybash_clipboard_from_terminated_utf8("a\0b\0", 4, encoded, sizeof(encoded), &n));
-    assert(!keybash_clipboard_from_terminated_utf8("", 0, encoded, sizeof(encoded), &n));
+    assert(keybash_clipboard_from_terminated_utf8("", 0, encoded, sizeof(encoded), &n) && n==2);
     assert(keybash_clipboard_to_utf8(golden, sizeof(golden), decoded, sizeof(decoded), &m));
     assert(m == sizeof(text)-1 && !memcmp(text, decoded, sizeof(text)));
     const BYTE bad[][6] = {{0x3d,0xd8,0,0,0,0}, {0x11,0xdd,0,0,0,0}, {'a',0,0,0,'b',0}, {'a',0,'b',0,'c',0}};
