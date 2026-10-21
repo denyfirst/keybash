@@ -1,5 +1,12 @@
 # Keybash — məhsulun hazır olması üçün qalan işlər
 
+21 oktyabr mənbə inteqrasiyası: ayrıca RDP manager/runtime, məhdud mətn
+clipboard-u, display-update və systemd/cgroup RDP profili əlavə olunub.
+Native/brauzer/xidmət acceptance `RDP-WORKSPACE-INTEGRATION.md`-də izlənir.
+Ayrıca VM-lər hazırda yoxdur; mənbədən test quraşdırması `TEST-SETUP-AZ.md`-dədir.
+Bu, aşağıdakı production, restore, real Windows matrisi və audit mərhələlərinin
+tamamlandığı demək deyil.
+
 15 oktyabr 2026. Bu siyahı tarix vədi deyil; hər mərhələ faktiki sınaqla qəbul
 edilir. Təhlükəsizlik bütün mərhələlərdə birinci prioritetdir. Yalnız self-host.
 

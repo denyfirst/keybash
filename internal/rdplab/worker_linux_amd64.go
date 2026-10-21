@@ -120,6 +120,9 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	if unix.Unshare(0) != unix.EPERM {
 		return errNative
 	}
+	if unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0) != nil {
+		return errNative
+	}
 	for _, limit := range []struct {
 		kind  int
 		value uint64
@@ -132,7 +135,10 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	// exec to guacd or any of its native children.
 	unix.CloseOnExec(3)
 	for fd := 4; fd <= 7; fd++ {
-		_ = unix.Close(fd)
+		// bwrap may already have consumed its filter FD; Go can reuse that
+		// number for its poller. Never close a descriptor by number here.
+		// Remaining bootstrap capabilities contain only read-only public data.
+		unix.CloseOnExec(fd)
 	}
 	targetFile := os.NewFile(3, "guarded-rdp-target")
 	target, e := net.FileConn(targetFile)

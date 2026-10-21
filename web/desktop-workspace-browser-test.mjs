@@ -61,4 +61,5 @@ try{
   assert.equal(await page.evaluate(()=>localStorage.length+sessionStorage.length),0);
   assert.deepEqual(errors,[]);assert.deepEqual(outbound,[]);
   console.log(`RDP workspace: ${config.Native?'actual headless OS':'isolated mocked'} clipboard, explicit Unicode paste, refusal/fallback, resize and stale-read revocation passed`);
-}finally{await context.close();await browser.close();}
+}catch(error){console.log('Workspace test state:',await page.locator('#status').textContent(),await page.locator('#notice').textContent(),errors);throw error;}
+finally{await context.close();await browser.close();}

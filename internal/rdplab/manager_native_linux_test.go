@@ -253,6 +253,18 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 		dialed = true
 		return (&net.Dialer{}).DialContext(c, "tcp", os.Getenv("KEYBASH_MANAGED_ADDRESS"))
 	}
+	if os.Getenv("KEYBASH_MANAGED_MODE") == "preflight" {
+		setup, stop := context.WithTimeout(ctx, 10*time.Second)
+		defer stop()
+		connection, e := connectRDPManager(ctx, setup, path, dial, pin)
+		if e != nil {
+			t.Fatal("public-only managed preflight refused")
+		}
+		if connection.Close() != nil {
+			t.Fatal("public-only preflight revocation failed")
+		}
+		return
+	}
 	s, e := (ManagerWorker{SocketPath: path}).openDial(ctx, dial, pin, "synthetic-user", "Synthetic-managed-NLA-password")
 	mode := os.Getenv("KEYBASH_MANAGED_MODE")
 	if mode == "wrong-peer" {
@@ -325,5 +337,68 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 	}
 	if _, e = s.Write(encodedInstruction(t, instruction{"key", "97", "1"})); e == nil {
 		t.Fatal("revoked native input escaped")
+	}
+}
+
+// This diagnostic gate sends only public trust and an already-connected empty
+// TCP capability. Native select/connect and credentials are never sent.
+func TestNativeRDPManagerPublicPreflight(t *testing.T) {
+	c := nativeManagerFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- ServeRDPManager(ctx, c) }()
+	defer func() {
+		cancel()
+		select {
+		case e := <-done:
+			if e != nil {
+				t.Error("public preflight manager shutdown failed")
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("public preflight manager shutdown stalled")
+		}
+	}()
+	ready := false
+	for until := time.Now().Add(3 * time.Second); time.Now().Before(until); {
+		if st, e := os.Stat(c.SocketPath); e == nil && st.Mode().Perm() == 0660 {
+			ready = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("public preflight socket unavailable")
+	}
+	l, e := net.Listen("tcp4", "127.0.0.1:0")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer l.Close()
+	peerDone := make(chan error, 1)
+	go func() {
+		p, e := l.Accept()
+		if e != nil {
+			peerDone <- e
+			return
+		}
+		defer p.Close()
+		_ = p.SetReadDeadline(time.Now().Add(15 * time.Second))
+		var b [1]byte
+		n, e := p.Read(b[:])
+		if n != 0 || !errors.Is(e, io.EOF) {
+			peerDone <- errors.New("public preflight sent unexpected protocol bytes")
+			return
+		}
+		peerDone <- nil
+	}()
+	runManagedGateway(t, c, l.Addr().String(), labIdentity(t), "preflight", 65533)
+	select {
+	case e := <-peerDone:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-ctx.Done():
+		t.Fatal("public preflight transport remained open")
 	}
 }

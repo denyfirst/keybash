@@ -8,6 +8,19 @@ verification correction. See the [Go release history](https://go.dev/doc/devel/r
 Historical adoption notes below describe the toolchain at adoption time.
 All native/browser/service and analysis gates must pass with the updated pin.
 
+## RDP source runtime integration (2026-10-21)
+
+Versions and source archive digests remain the pinned Guacamole 1.6.0/FreeRDP
+3.32.2 reviewed below. `build-native-runtime.sh` shares the checked build between
+the synthetic sample-enabled prefix and the empty-prefix server/sample-disabled
+test-VM path. The installed manager runtime is staged from the latter. It
+contains only guacd, its selected libraries and transitive loader/library closure,
+the trusted builder's setpriv closure and fixed empty mountpoints. No browser,
+sample server, source build tool, host /usr mount or vault file enters it.
+The source-test package is not a signed/offline distributable or final SBOM.
+Host library licensing/inventory, reproducibility and independent audit remain
+release gates. User-space native loopback sockets are private to each worker.
+
 ## Durable custody adoption (2026-10-15)
 
 Pinned `go.etcd.io/bbolt v1.5.0` (MIT, tag

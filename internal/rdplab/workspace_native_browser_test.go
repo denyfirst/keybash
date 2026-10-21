@@ -38,6 +38,11 @@ func TestNativeRDPWorkspaceClipboardAndDisplay(t *testing.T) {
 		if e != nil {
 			return nil, e
 		}
+		t.Cleanup(func() {
+			if t.Failed() {
+				t.Logf("fixed native viewer classification: %s", stream.failure)
+			}
+		})
 		select {
 		case <-marker.ready:
 		case <-c.Done():

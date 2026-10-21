@@ -375,6 +375,7 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 		handled, valid := s.clipboardOutput(in)
 		if handled {
 			if !valid {
+				s.native.failure = "workspace clipboard schema"
 				_ = s.Close()
 				return 0, errNative
 			}
@@ -385,6 +386,7 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 			continue
 		}
 		if !s.drawing(in) {
+			s.native.failure = "viewer drawing " + in[0] // next admits only fixed opcode names
 			_ = s.Close()
 			return 0, errNative
 		}

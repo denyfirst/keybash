@@ -91,6 +91,7 @@ func RuntimeInventory(path string) ([32]byte, error) {
 			return errNative
 		}
 		if info.IsDir() {
+			_, _ = io.WriteString(h, rel+" "+strconv.FormatUint(uint64(info.Mode().Perm()), 8)+" directory\n")
 			if _, ok := directories[rel]; ok {
 				directories[rel] = true
 			}

@@ -2,6 +2,13 @@
 
 Stages are evidence gates, not delivery dates. Update decisions as we learn.
 
+21 October source integration: the separate RDP manager/runtime, explicit
+text clipboard, bounded display-update profile and optional shared-cgroup RDP
+service plan are implemented. Required actual native/browser/service evidence
+is tracked in `RDP-WORKSPACE-INTEGRATION.md`; the disposable test-VM guide is
+`TEST-SETUP-AZ.md`. The user has no test VMs yet. These additions do not complete
+the real Windows/browser matrix, production installer, restore or release gates.
+
 1. **Foundation (completed):** independent signed repository with the
    maintainer-authorized public visibility and enforced branch protection,
    product/threat plan, engineering workflow, fail-closed IP target guard,
@@ -29,8 +36,9 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
    RDP browser fixtures (`OWNED-REMOTE-LAB.md`). Installed isolated workers,
    operator configuration, restore/rotation and audited release remain gates.
    The SSH process boundary now has an authenticated separate Unix manager for
-   an unprivileged gateway (`SSH-MANAGER-LAB.md`); installed service identities,
-   aggregate cgroups and the production RDP launcher remain gates.
+   an unprivileged gateway (`SSH-MANAGER-LAB.md`). Source service identities,
+   aggregate cgroups and a separate RDP manager are implemented; packaged
+   installation and production release remain gates.
 4. **Workspace:** Denyfirst UI, connections/search/favorites, terminal/RDP tabs,
    bounded clipboard behavior, reconnect states and accessible keyboard flows.
    The configured-server identity review now requires explicit owner fingerprints,
