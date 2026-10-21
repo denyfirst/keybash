@@ -4,7 +4,7 @@
 #include <freerdp/server/cliprdr.h>
 #include <freerdp/server/disp.h>
 #include <winpr/clipboard.h>
-#include <winpr/interlocked.h>
+
 
 static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ',0x018f,'z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,0};
 static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ',0x018f,'z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,10,'l','i','n','e',0};
@@ -49,8 +49,8 @@ static UINT kb_disp_layout(DispServerContext* ctx, const DISPLAY_CONTROL_MONITOR
     if (pdu->NumMonitors != 1 || !pdu->Monitors) return ERROR_INVALID_DATA;
     const DISPLAY_CONTROL_MONITOR_LAYOUT* monitor = &pdu->Monitors[0];
     if (monitor->Width<64 || monitor->Width>1920 || monitor->Height<64 || monitor->Height>1080) return ERROR_INVALID_DATA;
-    LONG64 size = ((LONG64)monitor->Width<<32) | monitor->Height;
-    InterlockedExchange64(&peer->kb_size,size);
+    uint_fast64_t size = ((uint_fast64_t)monitor->Width<<32) | monitor->Height;
+    atomic_store_explicit(&peer->kb_size,size,memory_order_release);
     return SetEvent(peer->kb_resize_event) ? CHANNEL_RC_OK : ERROR_INTERNAL_ERROR;
 }
 static BOOL kb_workspace_start(freerdp_peer* client) {
@@ -82,7 +82,7 @@ static BOOL kb_workspace_events(freerdp_peer* client) {
         }
         if (!peer->kb_caps_sent && peer->kb_disp->DisplayControlCaps(peer->kb_disp)==CHANNEL_RC_OK) peer->kb_caps_sent=TRUE;
     }
-    LONG64 size=InterlockedExchange64(&peer->kb_size,0);
+    uint_fast64_t size=atomic_exchange_explicit(&peer->kb_size,0,memory_order_acq_rel);
     if (size) {
         UINT32 width=(UINT32)((UINT64)size>>32),height=(UINT32)size;
         if (!freerdp_settings_set_uint32(client->context->settings,FreeRDP_DesktopWidth,width) ||

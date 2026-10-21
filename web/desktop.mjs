@@ -11,9 +11,10 @@ const controls = workspaceControls({ $,
   send: (...values) => sendWorkspace?.(...values), resetKeyboard: () => keyboard?.reset()
 });
 function end() {
+  controls.end();
   if (stopped) return;
   stopped = true;
-  controls.end(); sendWorkspace = null;
+  sendWorkspace = null;
   cancelAnimationFrame(mouseFrame); pendingMouse = null;
   keyboard?.reset(); client?.disconnect(); socket?.close();
   $('display').replaceChildren();

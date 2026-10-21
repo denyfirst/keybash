@@ -16,14 +16,14 @@ def replace_once(path, old, new):
 # verifies the ephemeral fixture SAM database, not a user's real account.
 sample = freerdp / "server/Sample/sfreerdp.c"
 sample_header = sample.with_suffix(".h")
-replace_once(sample_header, "#include <freerdp/server/rdpsnd.h>", "#include <freerdp/server/rdpsnd.h>\n#include <freerdp/server/cliprdr.h>\n#include <freerdp/server/disp.h>")
-replace_once(sample_header, "EncomspServerContext* encomsp;", "EncomspServerContext* encomsp;\n\tCliprdrServerContext* kb_clip;\n\tDispServerContext* kb_disp;\n\tBOOL kb_caps_sent;\n\tLONG64 kb_size;\n\tHANDLE kb_resize_event;")
+replace_once(sample_header, "#include <freerdp/server/rdpsnd.h>", "#include <freerdp/server/rdpsnd.h>\n#include <freerdp/server/cliprdr.h>\n#include <freerdp/server/disp.h>\n#include <stdatomic.h>")
+replace_once(sample_header, "EncomspServerContext* encomsp;", "EncomspServerContext* encomsp;\n\tCliprdrServerContext* kb_clip;\n\tDispServerContext* kb_disp;\n\tBOOL kb_caps_sent;\n\tatomic_uint_fast64_t kb_size;\n\tHANDLE kb_resize_event;")
 (sample.parent / "keybash_workspace_fixture.h").write_bytes((identity_source.parent / "workspace_fixture.h").read_bytes())
 replace_once(sample, '#include "sfreerdp.h"', '#include "sfreerdp.h"\n#include "keybash_workspace_fixture.h"')
 replace_once(sample, "winpr_image_free(context->image, TRUE);", "kb_workspace_free(context);\n\t\twinpr_image_free(context->image, TRUE);")
 replace_once(sample, "/* Dynamic Virtual Channels */", "if (!kb_workspace_start(client)) return FALSE;\n\t/* Dynamic Virtual Channels */")
 replace_once(sample, "/* Handle dynamic virtual channel initializations */", "if (!kb_workspace_events(client)) break;\n\t\t/* Handle dynamic virtual channel initializations */")
-replace_once(sample, "context->vcm = WTSOpenServerA((LPSTR)client->context);", "context->vcm = WTSOpenServerA((LPSTR)client->context);\n\tcontext->kb_resize_event=CreateEvent(NULL,FALSE,FALSE,NULL);\n\tif (!context->kb_resize_event) goto fail;")
+replace_once(sample, "context->vcm = WTSOpenServerA((LPSTR)client->context);", "context->vcm = WTSOpenServerA((LPSTR)client->context);\n\tatomic_init(&context->kb_size,0);\n\tcontext->kb_resize_event=CreateEvent(NULL,FALSE,FALSE,NULL);\n\tif (!context->kb_resize_event) goto fail;")
 replace_once(sample, "handles[count++] = channelHandle;", "handles[count++] = channelHandle;\n\t\thandles[count++] = context->kb_resize_event;")
 replace_once(sample, "client->GetEventHandles(client, &handles[count], 32 - count)", "client->GetEventHandles(client, &handles[count], 30 - count)")
 replace_once(sample, "FreeRDP_RdpSecurity, TRUE", "FreeRDP_RdpSecurity, FALSE")

@@ -20,6 +20,11 @@ chmod 755 "${prefix}" "${prefix}/bin" "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPSandboxPreparation$' -test.timeout=10s -test.v
 sh scripts/build-native-runtime.sh "${prefix}" --fixtures
+# Exercise the same empty-prefix, server/sample-disabled build documented for
+# the user's future test VM. Installed managers use this runtime; synthetic
+# FreeRDP peers remain confined to the separate fixture prefix.
+normal_prefix="${lab}/normal-prefix"
+sh scripts/build-native-runtime.sh "${normal_prefix}"
 # A dated inventory is diagnostic CI evidence, never a release/SBOM claim.
 dpkg-query -W -f='${Package} ${Version}\n'
 find "${prefix}" -type f -exec sha256sum '{}' ';'
@@ -29,7 +34,7 @@ CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/keybash-rdp-worker" ./cmd/key
 for bin in keybash keybash-ssh-manager keybash-ssh-worker keybash-service-check keybash-service-plan keybash-rdp-manager; do
   CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/${bin}" "./cmd/${bin}"
 done
-python3 scripts/build-rdp-runtime.py --prefix "${prefix}" --output "${prefix}/runtime-stage"
+LD_LIBRARY_PATH="${normal_prefix}/lib" python3 scripts/build-rdp-runtime.py --prefix "${normal_prefix}" --output "${prefix}/runtime-stage"
 go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \

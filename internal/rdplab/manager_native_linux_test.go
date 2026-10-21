@@ -85,6 +85,17 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 		t.Fatal("writable runtime accepted")
 	}
 	_ = os.Chmod(c.Runtime, 0755)
+	helper := filepath.Join(c.Runtime, "setpriv")
+	hidden := filepath.Join(c.Runtime, "setpriv.hidden")
+	if os.Rename(helper, hidden) != nil {
+		t.Fatal("runtime mountpoint fixture failed")
+	}
+	if _, e := RuntimeInventory(c.Runtime); e == nil {
+		t.Fatal("runtime without fixed privilege-drop helper accepted")
+	}
+	if os.Rename(hidden, helper) != nil {
+		t.Fatal("runtime helper restoration failed")
+	}
 	file, e := sealedRDPFile([]byte("public trust"))
 	if e != nil {
 		t.Fatal("sealed trust failed")
