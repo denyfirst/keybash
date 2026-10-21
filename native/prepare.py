@@ -25,6 +25,11 @@ replace_once(sample, "/* Dynamic Virtual Channels */", "if (!kb_workspace_start(
 replace_once(sample, "/* Handle dynamic virtual channel initializations */", "if (!kb_workspace_events(client)) break;\n\t\t/* Handle dynamic virtual channel initializations */")
 replace_once(sample, "context->vcm = WTSOpenServerA((LPSTR)client->context);", "context->vcm = WTSOpenServerA((LPSTR)client->context);\n\tatomic_init(&context->kb_size,0);\n\tatomic_init(&context->kb_disp_id,0);\n\tatomic_init(&context->kb_disp_ready,0);\n\tcontext->kb_resize_event=CreateEvent(NULL,FALSE,FALSE,NULL);\n\tif (!context->kb_resize_event) goto fail;\n\tif (context->vcm) WTSVirtualChannelManagerSetDVCCreationCallback(context->vcm,kb_dvc_created,context);")
 replace_once(sample, "handles[count++] = channelHandle;", "handles[count++] = channelHandle;\n\t\thandles[count++] = context->kb_resize_event;")
+# The sample's main loop runs during negotiation too. Auto-opening drdynvc
+# before MCS has joined it leaves FreeRDP's manager permanently INITIALIZED.
+# Delay only this synthetic server's automatic open until activation/join.
+replace_once(sample, 'WTSVirtualChannelManagerCheckFileDescriptor(context->vcm)',
+             'WTSVirtualChannelManagerCheckFileDescriptorEx(context->vcm, context->activated && WTSVirtualChannelManagerIsChannelJoined(context->vcm, "drdynvc"))')
 replace_once(sample, "client->GetEventHandles(client, &handles[count], 32 - count)", "client->GetEventHandles(client, &handles[count], 30 - count)")
 replace_once(sample, "FreeRDP_RdpSecurity, TRUE", "FreeRDP_RdpSecurity, FALSE")
 replace_once(sample, "FreeRDP_TlsSecurity, TRUE", "FreeRDP_TlsSecurity, FALSE")

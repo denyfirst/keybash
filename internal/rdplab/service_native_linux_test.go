@@ -220,7 +220,23 @@ func TestNativeRDPSystemdServiceBoundary(t *testing.T) {
 		t.Fatal("public fixture catalog failed")
 	} // #nosec G306 -- public root-owned synthetic metadata.
 	run("/usr/bin/systemctl", "daemon-reload")
+	managerReady := func() {
+		t.Helper()
+		// Type=exec confirms exec, not completion of the manager's runtime
+		// inventory/bind. Await the protected IPC state, never retry credentials.
+		for until := time.Now().Add(8 * time.Second); time.Now().Before(until); {
+			st, e := os.Lstat("/run/keybash-rdp-manager/control.sock")
+			if e == nil && st.Mode()&os.ModeSocket != 0 && st.Mode().Perm() == 0660 {
+				if owner, ok := st.Sys().(*syscall.Stat_t); ok && owner.Uid == 0 && owner.Gid == 65533 {
+					return
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("installed RDP manager protected IPC never became ready")
+	}
 	run("/usr/bin/systemctl", "start", "keybash-gateway.service")
+	managerReady()
 	t.Cleanup(func() {
 		if t.Failed() {
 			raw, _ := command("/usr/bin/journalctl", "--no-pager", "-n", "50", "-u", "keybash-gateway.service", "-u", "keybash-ssh-manager.service")
@@ -299,6 +315,7 @@ func TestNativeRDPSystemdServiceBoundary(t *testing.T) {
 	run("/usr/bin/systemctl", "set-property", "--runtime", "keybash.slice", "TasksMax=512")
 	run("/usr/bin/systemctl", "reset-failed", "keybash-rdp-manager.service")
 	run("/usr/bin/systemctl", "start", "keybash-gateway.service")
+	managerReady()
 	runManagedGateway(t, fixture, address, pin, "positive", 65533)
 	t.Log("Actual installed RDP/gateway units: NLA, worker identity/cgroup, aggregate bounds, refusal, restart and descendant revocation passed")
 }
