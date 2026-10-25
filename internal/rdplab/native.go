@@ -95,9 +95,25 @@ type nativeStream struct {
 	reader    *bufio.Reader
 	stop      func() bool
 	once      sync.Once
-	output    int
-	frames    int
-	failure   atomic.Value // fixed private string classifications, never remote diagnostic text
+	output    pacer // owned by the single reader, like next itself
+	frames    pacer
+	clock     func() time.Time    // nil means time.Now; tests supply a fake
+	sleep     func(time.Duration) // nil means time.Sleep
+	failure   atomic.Value        // fixed private string classifications, never remote diagnostic text
+}
+
+func (s *nativeStream) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+func (s *nativeStream) wait(d time.Duration) bool {
+	sleep := time.Sleep
+	if s.sleep != nil {
+		sleep = s.sleep
+	}
+	return pause(d, s.revoked, sleep)
 }
 
 func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeStream, error) {
@@ -195,12 +211,19 @@ func (s *nativeStream) next() (instruction, error) {
 			s.close()
 			return nil, errNative
 		}
+		size := 0
 		for _, v := range in {
-			s.output += len(v)
+			size += len(v)
 		}
-		s.frames++
-		if s.output > 8*1024*1024 || s.frames > 8192 {
+		now := s.now()
+		byteWait, sized := s.output.reserve(size, nativeByteBurst, nativeBytesPerSecond, now)
+		frameWait, counted := s.frames.reserve(1, nativeInstructionBurst, nativeInstructionsPerSec, now)
+		if !sized || !counted {
 			s.failure.Store("output quota")
+			s.close()
+			return nil, errNative
+		}
+		if !s.wait(max(byteWait, frameWait)) {
 			s.close()
 			return nil, errNative
 		}

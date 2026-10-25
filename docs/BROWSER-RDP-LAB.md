@@ -49,13 +49,16 @@ The application uses the upstream renderer rather than implementing RDP.
   Image starts, ends and drawing operations retain their original order;
   normalized blob bodies are inserted immediately before their image end.
   Groups wait until all active images complete, with a 2 MiB staging ceiling.
-- Lifetime work caps: 64 million decoded image pixels and 128 million rendering
-  pixels charged conservatively for image/copy/transfer/fill/resize operations.
-  These finite lab quotas are not production throughput/capacity promises or
-  exact process memory bounds; transient canvas copies/decoders also use memory.
-- Existing 8 MiB/8192 native output ceilings and bounded WSS queues/rate still
-  apply. Byte-chunk credit bounds transport queues; upstream display-sync
-  responses separately wait for image/render work. They are different credits.
+- Continuous work budgets: 32 million decoded image pixels and 64 million
+  rendering pixels per second (bursts of 64M/128M), charged conservatively for
+  image/copy/transfer/fill/resize operations. Work beyond the rate pauses the
+  reader and backpressures guacd instead of ending the session; revocation ends
+  a pause. These are not throughput promises or exact process memory bounds;
+  transient canvas copies/decoders also use memory.
+- Native output is paced at 16 MiB and 16384 instructions per second, and the
+  WSS relay keeps at most 32 frames unacknowledged. Byte-chunk credit bounds
+  transport queues; upstream display-sync responses separately wait for
+  image/render work. They are different credits. No lifetime total remains.
 - Native PNG blob acknowledgements permit validation staging to finish; bounded
   browser image acknowledgements are consumed exactly once and not forwarded
   twice. Sync replies must match outstanding native timestamps.

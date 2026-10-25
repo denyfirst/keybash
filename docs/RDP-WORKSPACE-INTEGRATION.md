@@ -17,10 +17,12 @@ Host root and the gateway remain trusted. This is not a zero-knowledge model.
 
 The original native lab remains clipboard/resize-disabled. Only the fixed RDP
 manager selects the workspace profile. It admits text/plain up to 32 KiB,
-128 transfers per direction, explicit local clipboard actions and even display
-sizes from 64x64 to 1920x1080 at at most four requests/second. HTML/files and
-auxiliary channels remain refused. The 8 MiB output/instruction/pixel-work
-laboratory ceilings remain; this is not a long-session production claim.
+a burst of 128 transfers per direction refilling one per second, explicit
+local clipboard actions and even display sizes from 64x64 to 1920x1080 at at
+most four requests/second. HTML/files and auxiliary channels remain refused.
+Output, instruction and pixel work are paced per second instead of ending at
+a lifetime total (see `BROWSER-RDP-LAB.md`); long sessions on real Windows
+hosts are still unmeasured.
 
 The user has no test VMs yet and requested a setup guide. `TEST-SETUP-AZ.md`
 provides the separate Ubuntu/Linux/Windows setup and pinned source build path;

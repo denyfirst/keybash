@@ -157,7 +157,6 @@ func (s *processStream) Close() error {
 func (s *processStream) demux() {
 	defer close(s.stdout.queue)
 	defer close(s.stderr.queue)
-	total := 0
 	for {
 		kind, data, err := readWorkerFrame(s.out)
 		if errors.Is(err, io.EOF) {
@@ -165,11 +164,10 @@ func (s *processStream) demux() {
 			_ = s.out.Close()
 			return // clean EOF drains output; explicit revocation drops queues.
 		}
-		if err != nil || len(data) == 0 || len(data) > workerOutputLimit-total {
+		if err != nil || len(data) == 0 {
 			s.cancel()
 			return
 		}
-		total += len(data)
 		queue := s.stdout.queue
 		if kind == frameErrorOutput {
 			queue = s.stderr.queue

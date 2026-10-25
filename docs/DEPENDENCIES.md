@@ -210,9 +210,10 @@ the excluded OpenPGP module advisory above still applies. The locked JS graph
 audit reported no known advisories. These dated scans do not replace review.
 
 The lab caps WebSocket input at 32 KiB, control JSON at 1 KiB, and outgoing
-frames at 8 KiB plus sequence. One outgoing frame awaits render credit, with
-an 8 MiB total output ceiling per lab socket (also checked by the client),
-two queued chunks and bounded stream reader buffers. Duplicate/wrong credit
+frames at 8 KiB plus sequence. At most 32 outgoing frames await in-order
+render credit; the original lab socket keeps an 8 MiB total output ceiling,
+owned sessions have none. Two queued chunks and bounded stream reader buffers
+bound memory. Duplicate/wrong/unsent credit
 and unknown/duplicate control fields close the stream. Rate caps and absolute
 expiry are lab controls, not an installation capacity or production login claim.
 

@@ -26,8 +26,9 @@ type viewerStream struct {
 	layers                map[int]viewerLayer // owned by the single output reader
 	images                map[string]*viewerImage
 	imageBytes            int
-	decodedPixels         int
-	renderPixels          int
+	decode, render        pacer               // owned by the single output reader
+	clock                 func() time.Time    // nil means time.Now; tests supply a fake
+	sleep                 func(time.Duration) // nil means time.Sleep
 	pending               bytes.Buffer
 	ready                 bytes.Reader
 	writeMu               sync.Mutex
@@ -38,7 +39,7 @@ type viewerStream struct {
 	closed                atomic.Bool
 	width, height         atomic.Int64
 	inputClip, outputClip clipboard
-	pasteOps, copyOps     int
+	pastes, copies        pacer
 	resizeWindow          time.Time
 	resizeCount           int
 }
@@ -78,12 +79,29 @@ func canonicalNumber(raw string, low, high int) (int, bool) {
 	return n, err == nil && n >= low && n <= high && strconv.Itoa(n) == raw
 }
 
-func (s *viewerStream) renderWork(pixels int) bool {
-	if pixels < 0 || pixels > 128*1024*1024-s.renderPixels {
+func (s *viewerStream) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+
+// spend paces work against a budget; it refuses only a single cost larger
+// than the burst, or a stream revoked while waiting.
+func (s *viewerStream) spend(budget *pacer, cost int, burst, perSecond float64) bool {
+	wait, ok := budget.reserve(cost, burst, perSecond, s.now())
+	if !ok {
 		return false
 	}
-	s.renderPixels += pixels
-	return true
+	sleep := time.Sleep
+	if s.sleep != nil {
+		sleep = s.sleep
+	}
+	return pause(wait, s.revoked, sleep)
+}
+
+func (s *viewerStream) renderWork(pixels int) bool {
+	return s.spend(&s.render, pixels, renderBurst, renderPerSecond)
 }
 
 type viewerBoundedWriter struct {
@@ -209,10 +227,9 @@ func (s *viewerStream) drawing(in instruction) bool {
 			return false
 		}
 		pixels := cfg.Width * cfg.Height
-		if pixels > 64*1024*1024-s.decodedPixels || !s.renderWork(pixels) {
+		if !s.spend(&s.decode, pixels, decodeBurst, decodePerSecond) || !s.renderWork(pixels) {
 			return false
 		}
-		s.decodedPixels += pixels
 		decoded, err := png.Decode(bytes.NewReader(image.pixels))
 		if err != nil {
 			return false
@@ -535,8 +552,7 @@ func (s *viewerStream) clipboardOutput(in instruction) (bool, bool) {
 		return true, false
 	}
 	if complete {
-		s.copyOps++
-		if s.copyOps > 128 || strings.ContainsRune(text, 0) {
+		if !s.copies.allow(1, clipboardBurst, clipboardPerSecond, s.now()) || strings.ContainsRune(text, 0) {
 			return true, false
 		}
 		if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, instruction{"keybash-clipboard", text}) != nil {
@@ -560,8 +576,7 @@ func (s *viewerStream) clipboardInput(in instruction) bool {
 		return false
 	}
 	s.metaMu.Lock()
-	s.pasteOps++
-	valid := s.pasteOps <= 128
+	valid := s.pastes.allow(1, clipboardBurst, clipboardPerSecond, s.now())
 	s.metaMu.Unlock()
 	if !valid {
 		return false

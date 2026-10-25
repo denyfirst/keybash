@@ -348,9 +348,24 @@ func TestLabInvalidConfigurationAndControlBounds(t *testing.T) {
 			t.Fatal("invalid control accepted")
 		}
 	}
-	window := flow{credit: make(chan struct{}, 1), sequence: 1}
-	if window.acknowledge(2) || !window.acknowledge(1) || window.acknowledge(1) {
-		t.Fatal("output credit accepted duplicate/out-of-order acknowledgment")
+	window := flow{credit: make(chan struct{}, 1), sent: 2}
+	if window.acknowledge(2) || window.acknowledge(0) || !window.acknowledge(1) || window.acknowledge(1) || window.acknowledge(3) || !window.acknowledge(2) || window.acknowledge(3) {
+		t.Fatal("output credit accepted duplicate/out-of-order/unsent acknowledgment")
+	}
+	full := flow{credit: make(chan struct{}, 1)}
+	for want := uint32(1); want <= outputWindow; want++ {
+		if sequence, ok := full.reserve(); !ok || sequence != want {
+			t.Fatal("window refused room it had")
+		}
+	}
+	if _, ok := full.reserve(); ok {
+		t.Fatal("window exceeded its unacknowledged bound")
+	}
+	if sequence, ok := full.reserve(); ok || sequence != 0 || !full.acknowledge(1) {
+		t.Fatal("full window changed state")
+	}
+	if sequence, ok := full.reserve(); !ok || sequence != outputWindow+1 {
+		t.Fatal("credit did not reopen the window")
 	}
 }
 
@@ -415,20 +430,76 @@ func TestLabOutputWaitsForMatchingCredit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.CloseNow()
-	go func() { _, _ = f.stream.writer.Write(bytes.Repeat([]byte("x"), 16384)) }()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_, frame, err := conn.Read(ctx)
-	if err != nil || binary.BigEndian.Uint32(frame) != 1 {
-		t.Fatal("missing first frame")
+	// One frame per round trip made bulk output unusable over a real link.
+	// Changing the window is a deliberate decision, not a silent regression.
+	if outputWindow != 32 {
+		t.Fatal("output window changed without updating this boundary")
 	}
-	// The second frame cannot be emitted without rendering credit. An
-	// out-of-order credit closes the stream instead of granting capacity.
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"ack","sequence":2}`)); err != nil {
+	go func() { _, _ = f.stream.writer.Write(bytes.Repeat([]byte("x"), (outputWindow+2)*8192)) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	frames := make(chan uint32, outputWindow+2)
+	go func() {
+		defer close(frames)
+		for {
+			_, frame, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			frames <- binary.BigEndian.Uint32(frame)
+		}
+	}()
+	for want := uint32(1); want <= outputWindow; want++ {
+		if <-frames != want {
+			t.Fatal("windowed output was not ordered")
+		}
+	}
+	// A full window cannot emit another frame without in-order credit.
+	select {
+	case <-frames:
+		t.Fatal("output exceeded the unacknowledged window")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"ack","sequence":1}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := conn.Read(ctx); err == nil {
-		t.Fatal("unacknowledged output advanced")
+	if <-frames != outputWindow+1 {
+		t.Fatal("in-order credit did not release one frame")
+	}
+	// Out-of-order credit closes the stream instead of granting capacity.
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"ack","sequence":3}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-f.stream.done:
+	case <-ctx.Done():
+		t.Fatal("out-of-order credit kept the stream")
+	}
+}
+
+func TestLabStalledCreditReleasesStream(t *testing.T) {
+	f := newLab(t)
+	f.lab.creditWait = 100 * time.Millisecond
+	f.grant(t)
+	conn, _, err := f.dial(t, f.server.URL, f.cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	go func() { _, _ = f.stream.writer.Write(bytes.Repeat([]byte("x"), (outputWindow+1)*8192)) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go func() {
+		for {
+			if _, _, err := conn.Read(ctx); err != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case <-f.stream.done:
+	case <-ctx.Done():
+		t.Fatal("a browser that never acknowledges held its stream")
 	}
 }
 

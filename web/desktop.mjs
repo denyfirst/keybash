@@ -33,7 +33,7 @@ function begin(proof=null) {
   const tunnel = new Guacamole.Tunnel();
   const parser = new Guacamole.Parser();
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  let sequence = 0, bytes = 0;
+  let sequence = 0;
   parser.oninstruction = (op, args) => {
     if (stopped) return;
     if (op === 'keybash') { if (!controls.feature(args)) end(); return; }
@@ -53,8 +53,7 @@ function begin(proof=null) {
       try {
         if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 5 || event.data.byteLength > 8196) throw new Error('frame');
         const number = new DataView(event.data).getUint32(0);
-        bytes += event.data.byteLength - 4;
-        if (number !== ++sequence || bytes > 8*1024*1024) throw new Error('quota');
+        if (number !== ++sequence) throw new Error('sequence');
         parser.receive(decoder.decode(new Uint8Array(event.data,4), {stream:true}));
         // Chunk credit bounds the tunnel queue. Guacamole's sync response
         // separately waits for its display tasks/images to finish rendering.

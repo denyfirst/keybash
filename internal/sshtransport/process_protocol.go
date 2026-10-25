@@ -16,16 +16,15 @@ import (
 var ErrProcess = errors.New("SSH worker unavailable")
 
 const (
-	frameHello        byte = 1
-	frameStart        byte = 2
-	frameReady        byte = 3
-	frameInput        byte = 4
-	frameResize       byte = 5
-	frameOutput       byte = 6
-	frameErrorOutput  byte = 7
-	frameFailed       byte = 8
-	workerOutputLimit      = 16 * 1024 * 1024
-	workerHello            = "keybash-ssh-worker/v1"
+	frameHello       byte = 1
+	frameStart       byte = 2
+	frameReady       byte = 3
+	frameInput       byte = 4
+	frameResize      byte = 5
+	frameOutput      byte = 6
+	frameErrorOutput byte = 7
+	frameFailed      byte = 8
+	workerHello           = "keybash-ssh-worker/v1"
 )
 
 func frameLimit(kind byte) int {
@@ -140,7 +139,9 @@ func serveSSHWorker(ctx context.Context, input io.ReadCloser, output io.WriteClo
 	}
 	var workers, readers sync.WaitGroup
 	var outMu sync.Mutex
-	total := 0
+	// Output has no lifetime total: each frame is bounded, the pipe and the
+	// gateway's queues backpressure the SSH channel window, and the owner
+	// session's lifetime and revocation end the process.
 	readOutput := func(kind byte, source io.Reader) {
 		defer readers.Done()
 		buffer := make([]byte, 8192)
@@ -148,12 +149,6 @@ func serveSSHWorker(ctx context.Context, input io.ReadCloser, output io.WriteClo
 			n, e := source.Read(buffer)
 			if n > 0 {
 				outMu.Lock()
-				if n > workerOutputLimit-total {
-					outMu.Unlock()
-					cancel()
-					return
-				}
-				total += n
 				e = writeWorkerFrame(output, kind, buffer[:n])
 				outMu.Unlock()
 				if e != nil {
