@@ -1,1 +1,16 @@
-:root{color-scheme:dark;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:#0c0d0f;color:#eeedef;font-synthesis:none}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center}main{width:min(440px,100%);padding:44px 20px}.brand{display:flex;align-items:center;color:inherit;text-decoration:none;font-size:29px;font-weight:650;letter-spacing:-1.2px;margin:0 0 38px}.mark{display:grid;place-items:center;background:#cb3d43;color:#fff;width:34px;height:34px;border-radius:8px;font-size:24px;margin-right:11px}.dot{color:#e35b60}.card{background:#121317;border:1px solid #2c2e35;border-radius:12px;padding:29px;box-shadow:0 20px 70px #0003}.heading-row{display:flex;align-items:center;justify-content:space-between;gap:14px}.eyebrow{font-size:10px;letter-spacing:1.5px;color:#8a8e9a}.tag{border:1px solid #34363e;border-radius:20px;color:#a5a8b3;padding:5px 9px;font-size:10px}h1{font-size:29px;font-weight:550;letter-spacing:-.8px;margin:17px 0 10px}.hint{font-size:12px;color:#9498a5;line-height:1.7}form{margin-top:25px}label{display:block;font-size:12px;color:#b1b4bf;margin:18px 0 8px}input{display:block;width:100%;border:1px solid #363944;border-radius:6px;background:#0c0d10;color:#eee;font:14px inherit;padding:11px 12px}button{width:100%;border:1px solid #c83e45;border-radius:6px;background:#c83e45;color:#fff;font:inherit;font-size:12px;padding:11px;margin-top:22px;cursor:pointer}button:hover:enabled{background:#d34d54}button:disabled{opacity:.5;cursor:default}.secondary{background:transparent;color:#b4b7c1;border-color:#383b45;margin-top:12px}.secondary:hover:enabled{background:#22242c}button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #ed949a;outline-offset:3px}#notice{font-size:12px;line-height:1.7;min-height:20px;color:#df9da1;margin-bottom:0}.foot{font-size:11px;color:#737887;line-height:1.8;margin:21px 8px}.lab-note{padding:12px;border:1px solid #333641;border-radius:6px;color:#a9adba;font-size:12px;line-height:1.7}@media(max-width:450px){.card{padding:23px}main{padding:28px 16px}.brand{margin-bottom:26px}}
+/* Sign-in and account pages: what they share beyond keybash.css. */
+
+/* The organisation's name in a footer: deny and the stop in its red. */
+.org { font-weight: 700; color: var(--ink-soft); }
+.org-deny { color: var(--brand); }
+
+/* A row of secondary actions under a panel. */
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.actions button { margin-top: 1rem; }
+
+/* Two short fields side by side where there is room. */
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+@media (max-width: 640px) { .field-pair { grid-template-columns: 1fr; } }
+
+/* The memory-only identity lab's account card. */
+.account-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }

@@ -18,6 +18,7 @@ function clearAll() {
   for (const id of ['seed', 'account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
+  delete document.body.dataset.stage;
 }
 async function request(path, method = 'GET', value) {
   const controller = new AbortController();
@@ -165,7 +166,7 @@ async function loadConnections() {
 async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
-  csrf = data.csrf; $('account').textContent = data.username;
+  csrf = data.csrf; $('account').textContent = data.username; document.body.dataset.stage = data.stage;
   remoteEnabled=data.remote===true;$('connections-panel').hidden=!remoteEnabled;
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
