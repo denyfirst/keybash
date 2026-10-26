@@ -3,18 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
   <title>Keybash · Hesab</title>
+  <link rel="preload" href="/schibsted-grotesk.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/keybash.css">
   <link rel="stylesheet" href="/auth.css">
   <script type="module" src="/auth.mjs"></script>
 </head>
-<body data-screen="account">
-  <main>
-    <a class="brand" href="/" aria-label="Keybash"><span class="mark">k</span>keybash<span class="dot">.</span></a>
-    <section class="card" aria-labelledby="heading">
-      <div class="heading-row"><p class="eyebrow">HESAB</p><span class="tag">Self-host</span></div>
-      <h1 id="heading">Giriş təsdiqləndi.</h1>
+<body class="signin-page" data-screen="account">
+  <main class="signin">
+    <p class="signin-mark"><a class="wordmark" href="/" aria-label="Keybash">keybash<span class="wordmark-stop">.</span></a></p>
+    <section class="panel" aria-labelledby="heading">
+      <div class="panel-head"><h1 id="heading">Giriş təsdiqləndi.</h1><span class="tag">Self-host</span></div>
       <p id="account" class="hint"></p>
-      <p class="lab-note">Bu, giriş sınağıdır. Server bağlantıları hələ bu ekrandan açılmır.</p>
+      <p class="hint">Bu, giriş sınağıdır. Server bağlantıları hələ bu ekrandan açılmır.</p>
       <form id="change" method="post" action="/api/password">
         <label for="current">Hazırkı şifrə</label>
         <input id="current" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
@@ -28,7 +31,7 @@
       <button id="logout" type="button" class="secondary">Hesabdan çıx</button>
       <p id="notice" role="status" aria-live="polite"></p>
     </section>
-    <p class="foot">Şifrə dəyişəndə bu hesabın bütün giriş sessiyaları bağlanır.</p>
   </main>
+  <footer class="colophon"><p>Şifrə dəyişəndə bu hesabın bütün giriş sessiyaları bağlanır.</p></footer>
 </body>
 </html>

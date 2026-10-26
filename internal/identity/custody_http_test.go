@@ -235,6 +235,30 @@ func TestCustodyOfflineRecoveryBootstrapRenewalAndSealLimit(t *testing.T) {
 	}
 }
 
+// Before sign-in the pages load one shared stylesheet and one typeface, from
+// this server only, with exact types; nothing else becomes public.
+func TestPagesServeTheSharedDesignFromHere(t *testing.T) {
+	s, _, _, _ := custodyFixture(t)
+	l, e := NewPersistent("https://127.0.0.1:8443", s)
+	if e != nil {
+		t.Fatal("persistent lab refused")
+	}
+	defer l.Close()
+	c := custodyClient{t: t, l: l}
+	for path, kind := range map[string]string{"/keybash.css": "text/css; charset=utf-8", "/schibsted-grotesk.woff2": "font/woff2", "/auth.css": "text/css; charset=utf-8", "/login": "text/html; charset=utf-8"} {
+		w := c.expect("GET", path, "", 200)
+		policy := w.Header().Get("Content-Security-Policy")
+		if w.Header().Get("Content-Type") != kind || strings.Count(policy, "font-src") != 1 || !strings.Contains(policy, "font-src 'self';") || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("%s was served as %q under %q", path, w.Header().Get("Content-Type"), policy)
+		}
+	}
+	for _, path := range []string{"/schibsted-grotesk-OFL.txt", "/assets.go", "/keybash.css/", "/style.css"} {
+		if c.call("GET", path, "").Code == 200 {
+			t.Fatalf("%s became public", path)
+		}
+	}
+}
+
 func TestCustodyStrictFieldsAndSlowBodyIsolation(t *testing.T) {
 	for _, raw := range []string{`{"code":"a","code":"b"}`, `{"code":null}`, `{"code":"\ud800"}`, `{"code":"a"} {}`, `{"code":"a","extra":"b"}`, `[]`} {
 		if _, ok := parseFields([]byte(raw), 1024, "code"); ok {

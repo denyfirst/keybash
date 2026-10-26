@@ -3,16 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
   <title>Keybash · Giriş</title>
+  <link rel="preload" href="/schibsted-grotesk.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/keybash.css">
   <link rel="stylesheet" href="/auth.css">
   <script type="module" src="/auth.mjs"></script>
 </head>
-<body data-screen="login">
-  <main>
-    <a class="brand" href="/login" aria-label="Keybash"><span class="mark">k</span>keybash<span class="dot">.</span></a>
-    <section class="card" aria-labelledby="heading">
-      <div class="heading-row"><p class="eyebrow">SƏNİN İŞ YERİN</p><span class="tag">Self-host</span></div>
-      <h1 id="heading">Xoş gəldin.</h1>
+<body class="signin-page" data-screen="login">
+  <main class="signin">
+    <p class="signin-mark"><a class="wordmark" href="/login" aria-label="Keybash">keybash<span class="wordmark-stop">.</span></a></p>
+    <section class="panel" aria-labelledby="heading">
+      <div class="panel-head"><h1 id="heading">Xoş gəldin.</h1><span class="tag">Self-host</span></div>
       <p class="hint">Davam etmək üçün hesabına daxil ol.</p>
       <form id="login" method="post" action="/api/session">
         <label for="username">İstifadəçi adı</label>
@@ -23,7 +26,7 @@
       </form>
       <p id="notice" role="status" aria-live="polite"></p>
     </section>
-    <p class="foot">Denyfirst · Öz serverində, öz nəzarətində.</p>
   </main>
+  <footer class="colophon"><p>by <span class="org"><span class="org-deny">deny</span>first<span class="wordmark-stop">.</span></span> · Öz serverində, öz nəzarətində.</p></footer>
 </body>
 </html>

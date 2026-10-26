@@ -3,33 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Keybash · Terminal lab</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Keybash · Terminal</title>
+  <link rel="preload" href="/schibsted-grotesk.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/vendor/xterm.css">
+  <link rel="stylesheet" href="/keybash.css">
   <link rel="stylesheet" href="/style.css">
   <script src="/vendor/xterm.js" defer></script>
   <script type="module" src="/app.mjs"></script>
 </head>
-<body>
-  <aside>
-    <a class="brand" href="/" aria-label="Keybash"><span class="brand-mark">k</span>keybash<span class="brand-dot">.</span></a>
-    <div class="eyebrow">WORKSPACE</div>
-    <div class="nav-item active"><span>›_</span> SSH terminal</div>
-    <div class="sidebar-note">Denyfirst<br><span>Self-hosted workspace</span></div>
+<body class="workspace">
+  <aside class="rail">
+    <p class="rail-identity"><a class="wordmark" href="/" aria-label="Keybash">keybash<span class="wordmark-stop">.</span></a> <span class="tag">SSH</span></p>
+    <p class="rail-caption" id="rail-workspace">İş yeri</p>
+    <nav class="rail-nav" aria-labelledby="rail-workspace">
+      <a class="rail-item" href="/"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.5 6l-6 6 6 6"/></svg>Bağlantılar</a>
+      <span class="rail-item" aria-current="page"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.6"/><path d="M7 9l2.5 2L7 13M11.5 13H15"/></svg>Terminal</span>
+    </nav>
   </aside>
-  <main>
-    <header><div><div class="eyebrow">TERMINAL LAB</div><h1>Öz iş yerin.</h1><p>Sintetik SSH sessiyası · real credential istifadə edilmir.</p></div><span id="status" role="status">Bağlı deyil</span></header>
-    <section id="login-panel" class="login-panel">
-      <form id="login"><label for="code">Birdəfəlik lab giriş kodu</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Sessiyanı aç</button></div></form>
-    </section>
-    <section class="workspace" aria-label="Terminal workspace">
-      <div class="toolbar"><div class="tab"><span class="tab-dot"></span>ssh-lab <span class="tab-type">SSH</span></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="disconnect" disabled>Bağla</button></div></div>
-      <div id="terminal" aria-label="SSH terminal"></div>
-      <footer><span>Ctrl+C: interrupt <i>·</i> Ctrl+Shift+C: copy</span><span id="size">100 × 30</span></footer>
-    </section>
-    <p class="help">Çoxsətirli və idarəedici simvolları olan paste göndərilmədən əvvəl göstərilir. Paste əlavə Enter göndərmir.</p>
-    <p id="notice" role="status" class="notice"></p>
-  </main>
-  <dialog id="paste-review"><form method="dialog"><div class="eyebrow">PASTE PREVIEW</div><h2>Göndəriləcək mətni yoxla.</h2><p>Bu mətn əmrlər və idarəedici simvollar ehtiva edə bilər.</p><textarea id="paste-preview" readonly aria-label="Paste preview"></textarea><div class="dialog-actions"><button value="cancel" id="cancel-paste">Ləğv et</button><button type="button" id="confirm-paste" class="primary">Terminala göndər</button></div></form></dialog>
-  <dialog id="clipboard-panel"><form method="dialog"><h2>Clipboard paneli</h2><p id="clipboard-help"></p><textarea id="clipboard-text" aria-label="Clipboard text" maxlength="32768"></textarea><div class="dialog-actions"><button value="close">Bağla</button><button type="button" id="panel-paste">Paste-i yoxla</button></div></form></dialog>
+  <div class="workspace-main">
+    <header class="topbar"><p class="topbar-path"><span>İş yeri</span><span class="topbar-slash" aria-hidden="true">/</span><strong>Terminal</strong></p><span id="status" role="status">Bağlı deyil</span></header>
+    <main>
+      <section id="login-panel" class="panel login-panel">
+        <form id="login"><label for="code">Birdəfəlik lab giriş kodu</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Sessiyanı aç</button></div></form>
+      </section>
+      <section class="session" aria-label="Terminal workspace">
+        <div class="toolbar"><div class="tab"><span class="tab-dot"></span>ssh <span class="tab-type">SSH</span></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="disconnect" disabled>Bağla</button></div></div>
+        <div id="terminal" aria-label="SSH terminal"></div>
+        <footer class="session-foot"><span>Ctrl+C: interrupt <i>·</i> Ctrl+Shift+C: copy</span><span id="size">100 × 30</span></footer>
+      </section>
+      <p class="help">Çoxsətirli və idarəedici simvolları olan paste göndərilmədən əvvəl göstərilir. Paste əlavə Enter göndərmir.</p>
+      <p id="notice" role="status" class="notice"></p>
+    </main>
+  </div>
+  <dialog id="paste-review"><form method="dialog"><p class="eyebrow">Paste baxışı</p><h2>Göndəriləcək mətni yoxla.</h2><p class="hint">Bu mətn əmrlər və idarəedici simvollar ehtiva edə bilər.</p><textarea id="paste-preview" readonly aria-label="Paste preview"></textarea><div class="dialog-actions"><button value="cancel" id="cancel-paste" class="secondary">Ləğv et</button><button type="button" id="confirm-paste" class="primary">Terminala göndər</button></div></form></dialog>
+  <dialog id="clipboard-panel"><form method="dialog"><h2>Clipboard paneli</h2><p id="clipboard-help" class="hint"></p><textarea id="clipboard-text" aria-label="Clipboard text" maxlength="32768"></textarea><div class="dialog-actions"><button value="close" class="secondary">Bağla</button><button type="button" id="panel-paste">Paste-i yoxla</button></div></form></dialog>
 </body>
 </html>

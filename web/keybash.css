@@ -1,0 +1,450 @@
+/*
+  keybash, by denyfirst
+  ---------------------
+  The Denyfirst design Porch set out: one typeface served from this server, a
+  quiet surface in light and dark, and one accent per product. The wordmark's
+  stop is the organisation's red; Keybash's own colour is a blue, because red,
+  amber and green already say whether a server's identity is verified, changed
+  or not yet checked, and no control is drawn in a colour that means a verdict.
+
+  The scheme follows the system. There is no switch: a switch remembers its
+  choice in browser storage, and Keybash pages store nothing in the browser.
+
+  Every colour text is set in is checked for contrast against every surface in
+  both schemes (web/assets_test.go), so a token below is a promise, not a taste.
+*/
+
+/*
+  Schibsted Grotesk, variable 400 to 900, SIL Open Font License 1.1, the same
+  file Porch pins. Served from this server like everything else; its hash is
+  pinned in web/assets_test.go and its licence is in docs/third-party. Its
+  capital I and small l differ, which matters on a page of host names.
+*/
+@font-face {
+  font-family: "Schibsted Grotesk";
+  src: url("/schibsted-grotesk.woff2") format("woff2");
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --paper:       #f7f7f8;
+  --paper-sunk:  #ececf0;
+  --card:        #ffffff;
+  --ink:         #16171b;
+  --ink-soft:    #464953;
+  --ink-faint:   #5c606a;
+  --rule:        #d9d9df;
+
+  /* The organisation's red: the wordmark's stop and nothing else. */
+  --brand:       #c42b3a;
+
+  /* Keybash's colour: the current place, a chosen item, a link. */
+  --tool:         #1f5fbf;
+  --link:         #1d58b3;
+  /* A button's face. Its label is white in both schemes. */
+  --accent:       #1f5fbf;
+  --accent-hover: #194d9c;
+
+  /* A server identity's state, said in words and in these colours. */
+  --strong:      #1f6a44;
+  --weak:        #845900;
+  --insecure:    #b3202e;
+
+  /* The terminal and the desktop are dark in both schemes, so each colour on
+     them is checked against the panel and its bar rather than the paper. */
+  --term-bg:     #0e1013;
+  --term-bar:    #1a1d22;
+  --term-rule:   #2b2f36;
+  --term-ink:    #e8e9ec;
+  --term-faint:  #959aa5;
+  --term-live:   #6fbf92;
+
+  --sans: "Schibsted Grotesk", "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui,
+          -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+
+  --edge: rgba(22, 23, 27, 0.20);
+  --radius: 6px;
+  --measure: 38rem;
+
+  color-scheme: light;
+}
+
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    --paper:        #101114;
+    --paper-sunk:   #18191d;
+    --card:         #17181d;
+    --ink:          #f0f0f2;
+    --ink-soft:     #b4b5be;
+    --ink-faint:    #999ba6;
+    --rule:         #2c2d33;
+    --brand:        #ed4552;
+    --tool:         #8fb4ff;
+    --link:         #8fb4ff;
+    --accent:       #2f6fdb;
+    --accent-hover: #275fc0;
+    --strong:       #6fbf92;
+    --weak:         #d9a23c;
+    --insecure:     #ff7c86;
+    --edge:         rgba(240, 240, 242, 0.18);
+    color-scheme: dark;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.6;
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+a:hover { text-decoration-thickness: 2px; }
+
+:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
+
+h1 {
+  margin: 0 0 0.6rem;
+  font-size: 1.75rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+p { margin: 0 0 0.9rem; }
+
+/* What something is, under its heading or its field. */
+.hint, .help {
+  max-width: var(--measure);
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+}
+.foot {
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+
+/* ── The wordmark ──────────────────────────────────────────────────────── */
+.wordmark {
+  display: inline-block;
+  min-height: 24px;
+  font-size: 1.7rem;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  color: var(--ink);
+  text-decoration: none;
+}
+.wordmark-stop { color: var(--brand); }
+
+/* ── Fields and buttons ────────────────────────────────────────────────── */
+label {
+  display: block;
+  margin: 1.1rem 0 0.45rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+input, select, textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 1rem;
+  padding: 0.7rem 0.85rem;
+  color: var(--ink);
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+input[type="file"] { padding: 0.55rem; font-size: 0.9rem; }
+textarea {
+  min-height: 8rem;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--ink-faint); }
+input::placeholder, textarea::placeholder { color: var(--ink-faint); }
+
+/* The one action a form asks for, in the accent. */
+button {
+  font-family: var(--sans);
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin-top: 1.2rem;
+  padding: 0.65rem 1.2rem;
+  color: #ffffff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* Everything else a form offers: drawn in ink, outlined. */
+button.secondary {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--rule);
+}
+button.secondary:hover:not(:disabled) { background: var(--paper-sunk); border-color: var(--ink-faint); }
+/* A state is said in colour that stays legible, never faded out. */
+button:disabled, button.secondary:disabled {
+  cursor: default;
+  color: var(--paper);
+  background: var(--ink-soft);
+  border-color: var(--ink-soft);
+}
+
+/* A value to read and compare, character by character. */
+output {
+  display: block;
+  margin: 0.6rem 0;
+  padding: 0.8rem 1rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 0.86rem;
+  color: var(--ink);
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+/* The page's answer to what was just asked, in ink rather than a warning colour:
+   the words carry the meaning. */
+#notice, .notice {
+  min-height: 1.4rem;
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+/* A small boxed label beside a heading: "Self-host", an account name. */
+.tag {
+  display: inline-block;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tool);
+  border: 1px solid color-mix(in srgb, var(--tool) 40%, var(--rule));
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.eyebrow {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+details {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--rule);
+}
+summary {
+  padding: 1rem 0 0.4rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+/* A panel that opens with a fold needs no rule above it. */
+.panel > details:first-child { margin-top: 0; border-top: 0; }
+.panel > details:first-child > summary { padding-top: 0; }
+
+dialog {
+  width: min(40rem, 92vw);
+  padding: 1.6rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: 0 24px 80px var(--edge);
+}
+dialog::backdrop { background: rgba(10, 11, 13, 0.55); }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.6rem; }
+.dialog-actions button { margin-top: 1rem; }
+
+/* ── A card on the page ────────────────────────────────────────────────── */
+.panel {
+  padding: 1.4rem 1.5rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) + 2px);
+}
+.panel + .panel { margin-top: 1.2rem; }
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+.panel-head h2 { margin: 0; }
+
+/* ── Sign-in: one panel, centred, with the mark above it ───────────────── */
+body.signin-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.signin {
+  flex: 1 0 auto;
+  width: min(28rem, 100%);
+  margin: 0 auto;
+  padding: 3.2rem 1.2rem 2rem;
+}
+.signin-mark { margin: 0 0 1.6rem; }
+.signin .panel button:not(.secondary) { width: 100%; }
+
+/* ── The workspace: a rail of what can be done, and the page beside it ── */
+body.workspace {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  min-height: 100vh;
+}
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 1.6rem 1rem;
+  background: var(--paper-sunk);
+  border-right: 1px solid var(--rule);
+}
+.rail-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0 0.6rem 2.2rem;
+}
+.rail-caption {
+  margin: 0 0.75rem 0.6rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.rail-nav { display: grid; gap: 0.25rem; margin-bottom: 1.8rem; }
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 42px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+.rail-item:hover { color: var(--ink); background: var(--paper); }
+.rail-item[aria-current="page"] {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--tool) 10%, var(--paper));
+  border-color: color-mix(in srgb, var(--tool) 35%, var(--rule));
+}
+.rail-glyph {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--ink-faint);
+}
+.rail-item[aria-current="page"] .rail-glyph { color: var(--tool); }
+.rail-foot {
+  margin-top: auto;
+  padding: 1.2rem 0.75rem 0;
+  border-top: 1px solid var(--rule);
+}
+.rail-foot p { margin: 0; font-size: 0.82rem; color: var(--ink-soft); overflow-wrap: anywhere; }
+.rail-foot button { width: 100%; margin-top: 0.8rem; }
+
+.workspace-main { display: flex; flex-direction: column; min-width: 0; }
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3.6rem;
+  padding: 0 2rem;
+  border-bottom: 1px solid var(--rule);
+}
+.topbar-path { margin: 0; font-size: 0.82rem; color: var(--ink-faint); }
+.topbar-path strong { font-weight: 500; color: var(--ink); }
+.topbar-slash { margin: 0 0.35rem; }
+body.workspace main {
+  flex: 1;
+  width: 100%;
+  max-width: 72rem;
+  padding: 2rem 2rem 3rem;
+}
+.work-heading { margin-bottom: 1.6rem; }
+.work-heading p { margin: 0; color: var(--ink-soft); }
+
+.colophon {
+  padding: 1rem 2rem;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--rule);
+}
+.colophon p { margin: 0; }
+.signin-page .colophon { text-align: center; }
+
+/* A phone: the rail becomes a bar above the page. */
+@media (max-width: 760px) {
+  body.workspace { display: block; }
+  .rail {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.9rem 1rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .rail-identity { margin: 0; }
+  .rail-caption { display: none; }
+  .rail-nav { display: flex; flex-wrap: wrap; margin: 0; }
+  .rail-foot { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0 auto; padding: 0; border: 0; }
+  .rail-foot button { width: auto; margin: 0; }
+  .topbar, body.workspace main, .colophon { padding-left: 1rem; padding-right: 1rem; }
+}
