@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/sandboxfilter"
 	"golang.org/x/sys/unix"
 )
 
@@ -50,10 +51,10 @@ func sshSeccomp() []byte {
 		{Code: unix.BPF_JMP | unix.BPF_JGE | unix.BPF_K, Jf: 1, K: 0x40000000},
 		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_KILL_PROCESS},
 	}
-	for _, call := range []uint32{unix.SYS_SOCKET, unix.SYS_SOCKETPAIR, unix.SYS_CONNECT, unix.SYS_BIND, unix.SYS_LISTEN, unix.SYS_ACCEPT, unix.SYS_ACCEPT4,
+	for _, call := range append([]uint32{unix.SYS_SOCKET, unix.SYS_SOCKETPAIR, unix.SYS_CONNECT, unix.SYS_BIND, unix.SYS_LISTEN, unix.SYS_ACCEPT, unix.SYS_ACCEPT4,
 		unix.SYS_FORK, unix.SYS_VFORK, unix.SYS_CLONE3, unix.SYS_PTRACE, unix.SYS_PROCESS_VM_READV, unix.SYS_PROCESS_VM_WRITEV,
 		unix.SYS_UNSHARE, unix.SYS_SETNS, unix.SYS_MOUNT, unix.SYS_UMOUNT2, unix.SYS_PIVOT_ROOT, unix.SYS_BPF, unix.SYS_PERF_EVENT_OPEN,
-		unix.SYS_IO_URING_SETUP, unix.SYS_KEYCTL, unix.SYS_ADD_KEY, unix.SYS_REQUEST_KEY, unix.SYS_OPEN_BY_HANDLE_AT} {
+		unix.SYS_IO_URING_SETUP, unix.SYS_KEYCTL, unix.SYS_ADD_KEY, unix.SYS_REQUEST_KEY, unix.SYS_OPEN_BY_HANDLE_AT}, sandboxfilter.KernelSurface...) {
 		f = append(f, unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jf: 1, K: call}, unix.SockFilter{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM)})
 	}
 	f = append(f,

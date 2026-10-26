@@ -60,8 +60,13 @@ A small amd64 cBPF filter is loaded by bwrap before exec and inherited by every
 worker thread. It checks the syscall architecture, refuses x32, new sockets/
 connect/listen/accept, process forks and non-thread clones, namespace/mount,
 ptrace/process-memory, keyring, BPF/perf, io_uring setup and handle-based opens.
-Go runtime thread creation remains available. Initial setpriv/worker exec must
-remain available; this is a deny policy, not a complete syscall allowlist.
+Both protocol workers also deny a shared kernel surface (`sandboxfilter`):
+userfaultfd, pidfd/process-memory helpers, the new mount API, handle lookups,
+chroot, io_uring entry, module/kexec loading and administrative time, swap,
+reboot, quota and port-I/O calls. Tests evaluate the generated program
+instruction by instruction. Go runtime thread creation remains available.
+Initial setpriv/worker exec must remain available; this is a deny policy, not
+a complete syscall allowlist.
 The worker checks a different network namespace, fixed hostname, reduced UID/
 groups/capabilities, no-new-privileges, absent host paths and a behavioral EPERM
 socket probe before reading credentials. Unsupported sandbox conditions refuse.
