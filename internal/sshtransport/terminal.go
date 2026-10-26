@@ -8,10 +8,12 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"golang.org/x/crypto/ssh"
 )
@@ -31,15 +33,19 @@ const (
 )
 
 // Config is trusted configuration, not an unchecked browser request. HostKey
-// is an independently approved SSH wire-format public key, never TOFU. The lab
-// accepts Ed25519 host/user keys only; Signer comes from the authorized
-// credential provider, never the host's SSH agent. No password fallback exists.
+// is an independently approved Ed25519 SSH wire-format public key, never TOFU.
+// Exactly one credential authenticates: Signer (Ed25519, ECDSA or RSA of at
+// least 2048 bits signing only with SHA-2) or Password, both from the
+// authorized credential provider, never the host's SSH agent. Neither is
+// offered before the host key is verified, and there is no fallback between
+// them.
 type Config struct {
-	User    string
-	HostKey []byte
-	Signer  ssh.Signer
-	Columns uint32
-	Rows    uint32
+	User     string
+	HostKey  []byte
+	Signer   ssh.Signer
+	Password []byte
+	Columns  uint32
+	Rows     uint32
 }
 
 // Terminal owns one SSH connection and one remote PTY. Read and ReadStderr
@@ -91,7 +97,7 @@ func connect(ctx context.Context, identity string, dial func(context.Context) (n
 	if err := raw.SetDeadline(deadline); err != nil {
 		return nil, setupError(setup, err)
 	}
-	var verified, signed atomic.Bool
+	var verified, used atomic.Bool
 	algorithms := ssh.SupportedAlgorithms()
 	sshConfig := &ssh.ClientConfig{
 		User: config.User,
@@ -108,15 +114,15 @@ func connect(ctx context.Context, identity string, dial func(context.Context) (n
 			verified.Store(true)
 			return nil
 		},
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(&verifiedSigner{Signer: config.Signer, verified: &verified, signed: &signed})},
+		Auth: authMethods(config, &verified, &used),
 	}
 	conn, channels, requests, err := ssh.NewClientConn(raw, identity, sshConfig)
 	if err != nil {
 		return nil, setupError(setup, err)
 	}
 	// x/crypto attempts "none" first. Do not open a PTY on a server that
-	// reports authentication success without using the configured user key.
-	if !signed.Load() {
+	// reports authentication success without using the configured credential.
+	if !used.Load() {
 		_ = conn.Close()
 		return nil, ErrUnavailable
 	}
@@ -171,7 +177,7 @@ func connect(ctx context.Context, identity string, dial func(context.Context) (n
 }
 
 func validateConfig(config Config) ([]byte, error) {
-	if len(config.User) == 0 || len(config.User) > 128 || len(config.HostKey) == 0 || len(config.HostKey) > 256 || config.Signer == nil || !validSize(config.Columns, config.Rows) {
+	if len(config.User) == 0 || len(config.User) > 128 || len(config.HostKey) == 0 || len(config.HostKey) > 256 || (config.Signer == nil) == (len(config.Password) == 0) || !validSize(config.Columns, config.Rows) {
 		return nil, ErrInvalidConfig
 	}
 	for _, c := range []byte(config.User) {
@@ -180,10 +186,63 @@ func validateConfig(config Config) ([]byte, error) {
 		}
 	}
 	key, err := ssh.ParsePublicKey(config.HostKey)
-	if err != nil || key.Type() != ssh.KeyAlgoED25519 || config.Signer.PublicKey().Type() != ssh.KeyAlgoED25519 {
+	if err != nil || key.Type() != ssh.KeyAlgoED25519 {
+		return nil, ErrInvalidConfig
+	}
+	if config.Signer != nil {
+		// RSA needs a signer that can be held to SHA-2; a plain Sign would
+		// produce SHA-1 "ssh-rsa" signatures.
+		_, algorithmCapable := config.Signer.(ssh.AlgorithmSigner)
+		if !sshkey.Allowed(config.Signer.PublicKey()) || config.Signer.PublicKey().Type() == ssh.KeyAlgoRSA && !algorithmCapable {
+			return nil, ErrInvalidConfig
+		}
+	} else if !sshkey.ValidPassword(string(config.Password)) {
 		return nil, ErrInvalidConfig
 	}
 	return append([]byte(nil), key.Marshal()...), nil
+}
+
+// authMethods offers the one configured credential, and only after the host
+// key has been verified against its pin.
+func authMethods(config Config, verified, used *atomic.Bool) []ssh.AuthMethod {
+	if config.Signer != nil {
+		base := &verifiedSigner{Signer: config.Signer, verified: verified, signed: used}
+		if inner, ok := config.Signer.(ssh.AlgorithmSigner); ok {
+			return []ssh.AuthMethod{ssh.PublicKeys(&verifiedAlgorithmSigner{verifiedSigner: base, inner: inner, algorithms: sshkey.AlgorithmsFor(config.Signer.PublicKey())})}
+		}
+		return []ssh.AuthMethod{ssh.PublicKeys(base)}
+	}
+	password := string(config.Password)
+	return []ssh.AuthMethod{ssh.PasswordCallback(passwordAnswer(password, verified, used)), ssh.KeyboardInteractive(promptAnswer(password, verified, used))}
+}
+
+func passwordAnswer(password string, verified, used *atomic.Bool) func() (string, error) {
+	return func() (string, error) {
+		if !verified.Load() {
+			return "", ErrHostKey
+		}
+		used.Store(true)
+		return password, nil
+	}
+}
+
+// PAM servers ask for a password through keyboard-interactive. Only a single
+// hidden prompt is answered with it; anything else (a visible prompt, a
+// second question such as a one-time code) refuses rather than guessing.
+func promptAnswer(password string, verified, used *atomic.Bool) ssh.KeyboardInteractiveChallenge {
+	return func(_, _ string, questions []string, echos []bool) ([]string, error) {
+		if !verified.Load() {
+			return nil, ErrHostKey
+		}
+		if len(questions) == 0 {
+			return []string{}, nil
+		}
+		if len(questions) != 1 || len(echos) != 1 || echos[0] {
+			return nil, ErrUnavailable
+		}
+		used.Store(true)
+		return []string{password}, nil
+	}
 }
 
 type verifiedSigner struct {
@@ -196,6 +255,32 @@ func (s *verifiedSigner) Sign(random io.Reader, data []byte) (*ssh.Signature, er
 		return nil, ErrHostKey
 	}
 	signature, err := s.Signer.Sign(random, data)
+	if err == nil {
+		s.signed.Store(true)
+	}
+	return signature, err
+}
+
+// verifiedAlgorithmSigner keeps a key to its allowed algorithms, so the client
+// negotiates SHA-2 for RSA and never falls back to a weaker default.
+type verifiedAlgorithmSigner struct {
+	*verifiedSigner
+	inner      ssh.AlgorithmSigner
+	algorithms []string
+}
+
+func (s *verifiedAlgorithmSigner) Algorithms() []string { return slices.Clone(s.algorithms) }
+func (s *verifiedAlgorithmSigner) Sign(random io.Reader, data []byte) (*ssh.Signature, error) {
+	return s.SignWithAlgorithm(random, data, s.algorithms[0])
+}
+func (s *verifiedAlgorithmSigner) SignWithAlgorithm(random io.Reader, data []byte, algorithm string) (*ssh.Signature, error) {
+	if !s.verified.Load() {
+		return nil, ErrHostKey
+	}
+	if !slices.Contains(s.algorithms, algorithm) {
+		return nil, ErrInvalidConfig
+	}
+	signature, err := s.inner.SignWithAlgorithm(random, data, algorithm)
 	if err == nil {
 		s.signed.Store(true)
 	}

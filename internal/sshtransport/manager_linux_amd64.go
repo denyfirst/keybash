@@ -275,7 +275,7 @@ func serveManagerLease(life context.Context, conn *net.UnixConn, w ProcessWorker
 	<-monitor
 }
 
-func connectSSHManager(life, setup context.Context, path, host string, dial func(context.Context) (net.Conn, error), pin []byte, user string, seed []byte) (*processStream, error) {
+func connectSSHManager(life, setup context.Context, path, host string, dial func(context.Context) (net.Conn, error), pin []byte, user, method string, secret []byte) (*processStream, error) {
 	// The public gateway must never run as root or the sandbox's worker UID.
 	if os.Geteuid() == 0 || os.Geteuid() == 65534 || managerDirectory(path) != nil {
 		return nil, ErrProcess
@@ -358,7 +358,7 @@ func connectSSHManager(life, setup context.Context, path, host string, dial func
 		}
 	}()
 	owned = false
-	if finishProcessSetup(s, setup, host, pin, user, seed) != nil {
+	if finishProcessSetup(s, setup, host, pin, user, method, secret) != nil {
 		_ = s.Close()
 		return nil, ErrProcess
 	}

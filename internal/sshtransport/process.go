@@ -14,7 +14,6 @@ import (
 	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
-	"golang.org/x/crypto/ssh"
 )
 
 // ProcessWorker is a Linux/amd64 privileged laboratory manager, NOT a public
@@ -35,32 +34,26 @@ func workerIdentity(uid, gid uint32) (uint32, uint32, bool) {
 	return uid, gid, uid > 0 && gid > 0 && uid <= 2147483647 && gid <= 2147483647
 }
 
-func (w ProcessWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, signer ssh.Signer) (terminalweb.Stream, error) {
+func (w ProcessWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
 	if target == nil || target.Hostname() == "" {
 		return nil, ErrProcess
 	}
-	return w.open(ctx, target.Hostname(), target.DialContext, pin, user, signer)
+	return w.open(ctx, target.Hostname(), target.DialContext, pin, user, auth)
 }
 
 // The private dial seam permits synthetic TCP fixtures only in _test.go.
-func (w ProcessWorker) open(ctx context.Context, host string, dial func(context.Context) (net.Conn, error), pin []byte, user string, signer ssh.Signer) (terminalweb.Stream, error) {
-	key, ok := signer.(*sshkey.Key)
-	if ctx == nil || ctx.Err() != nil || !ok || key == nil || dial == nil {
+func (w ProcessWorker) open(ctx context.Context, host string, dial func(context.Context) (net.Conn, error), pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
+	if ctx == nil || ctx.Err() != nil || dial == nil {
 		return nil, ErrProcess
 	}
-	validated, err := validateConfig(Config{User: user, HostKey: pin, Signer: key, Columns: 100, Rows: 30})
+	pin, method, secret, err := sessionHandoff(auth, user, pin)
 	if err != nil {
 		return nil, ErrProcess
 	}
-	pin = validated
-	seed, err := key.Seed()
-	if err != nil {
-		return nil, ErrProcess
-	}
-	defer clear(seed)
+	defer clear(secret)
 	setup, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
-	stream, err := launchSSHProcess(ctx, setup, w, host, dial, pin, user, seed)
+	stream, err := launchSSHProcess(ctx, setup, w, host, dial, pin, user, method, secret)
 	if err != nil || stream == nil {
 		if stream != nil {
 			_ = stream.Close()

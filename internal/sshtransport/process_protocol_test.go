@@ -5,14 +5,15 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/binary"
-	"github.com/denyfirst/keybash/internal/sshkey"
 	"io"
 	"net"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -57,13 +58,98 @@ func workerCoreFixture(t *testing.T, pinCorrect bool) (net.Conn, *sshFixture, <-
 	if !pinCorrect {
 		pin = syntheticSigner(t).PublicKey().Marshal()
 	}
-	start := ssh.Marshal(&workerStart{Version: 1, Host: "ssh.invalid", User: "lab-user", Pin: pin, Seed: private[:32]})
+	key, err := sshkey.New(private)
+	if err != nil {
+		t.Fatal("key fixture failed")
+	}
+	material, err := key.Material()
+	if err != nil {
+		t.Fatal("key handoff failed")
+	}
+	key.Close()
+	start := ssh.Marshal(&workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: pin, Method: methodKey, Secret: material})
 	if writeWorkerFrame(parent, frameStart, start) != nil {
 		t.Fatal("start write failed")
 	}
 	clear(start)
+	clear(material)
 	clear(private)
 	return parent, fixture, done, cancel
+}
+
+// The worker authenticates with a password handed over in its start frame,
+// exactly as with a key, and only after the pinned host key is verified.
+func TestSSHWorkerCorePasswordHandoff(t *testing.T) {
+	host := syntheticSigner(t)
+	for _, prompts := range [][]string{nil, {"Password: "}} {
+		fixture := newFixture(t, fixtureOptions{host: host, password: syntheticRemotePassword, prompts: prompts, echos: []bool{false}})
+		parent, child := net.Pipe()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- serveSSHWorker(ctx, child, child, fixture.client) }()
+		start := ssh.Marshal(&workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)})
+		if writeWorkerFrame(parent, frameStart, start) != nil {
+			t.Fatal("start write failed")
+		}
+		if kind, _, err := readWorkerFrame(parent); err != nil || kind != frameReady || fixture.auth.Load() != 1 {
+			t.Fatal("password handoff did not authenticate exactly once")
+		}
+		cancel()
+		_ = parent.Close()
+		<-done
+	}
+}
+
+// What the gateway encodes is what the worker decodes, for both credential
+// kinds, and nothing invalid crosses.
+func TestSessionHandoffRoundTrip(t *testing.T) {
+	host := syntheticSigner(t)
+	pin := host.PublicKey().Marshal()
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := sshkey.New(rsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer key.Close()
+	password, _ := sshkey.NewPassword(syntheticRemotePassword)
+	for _, auth := range []sshkey.Credential{key, password} {
+		validated, method, secret, err := sessionHandoff(auth, "lab-user", pin)
+		if err != nil || !bytes.Equal(validated, pin) {
+			t.Fatal("valid credential handoff refused")
+		}
+		config, release, err := workerConfig(workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: validated, Method: method, Secret: secret})
+		if err != nil {
+			t.Fatalf("%s handoff did not decode", method)
+		}
+		if method == methodKey && (config.Signer == nil || !bytes.Equal(config.Signer.PublicKey().Marshal(), key.PublicKey().Marshal()) || config.Password != nil) ||
+			method == methodPassword && (config.Signer != nil || string(config.Password) != syntheticRemotePassword) {
+			t.Fatalf("%s handoff changed the credential", method)
+		}
+		release()
+		clear(secret)
+	}
+	for name, start := range map[string]workerStart{
+		"unknown method":   {Method: "agent", Secret: []byte("x")},
+		"empty secret":     {Method: methodPassword},
+		"NUL password":     {Method: methodPassword, Secret: []byte("nul\x00")},
+		"not a key":        {Method: methodKey, Secret: []byte("not pkcs8")},
+		"oversized secret": {Method: methodKey, Secret: make([]byte, sshkey.MaxMaterial+1)},
+	} {
+		if _, _, err := workerConfig(start); err == nil {
+			t.Fatalf("%s decoded", name)
+		}
+	}
+	for _, auth := range []sshkey.Credential{nil, (*sshkey.Key)(nil), (*sshkey.Password)(nil)} {
+		if _, _, _, err := sessionHandoff(auth, "lab-user", pin); err == nil {
+			t.Fatal("a missing credential was handed off")
+		}
+	}
+	if _, _, _, err := sessionHandoff(password, "bad user", pin); err == nil {
+		t.Fatal("a credential was handed off for an invalid connection")
+	}
 }
 
 func TestSSHWorkerCorePinInputResizeAndCancellation(t *testing.T) {
@@ -149,17 +235,23 @@ func TestSSHWorkerCoreUnexpectedInputCloses(t *testing.T) {
 
 func TestSSHWorkerCoreMalformedStartupNeverAuthenticates(t *testing.T) {
 	host, user := syntheticSigner(t), syntheticSigner(t)
-	valid := workerStart{Version: 1, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Seed: make([]byte, 32)}
-	for _, variant := range []string{"version", "host", "seed", "user", "pin", "trailing"} {
+	valid := workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)}
+	for _, variant := range []string{"version", "version0", "version3", "host", "secret", "method", "user", "pin", "trailing"} {
 		t.Run(variant, func(t *testing.T) {
 			start := valid
 			switch variant {
 			case "version":
-				start.Version = 2
+				start.Version = 1
+			case "version0":
+				start.Version = 0
+			case "version3":
+				start.Version = 3
 			case "host":
 				start.Host = ""
-			case "seed":
-				start.Seed = nil
+			case "secret":
+				start.Secret = nil
+			case "method":
+				start.Method = "agent"
 			case "user":
 				start.User = "bad user"
 			case "pin":
@@ -169,7 +261,8 @@ func TestSSHWorkerCoreMalformedStartupNeverAuthenticates(t *testing.T) {
 			if variant == "trailing" {
 				data = append(data, 42)
 			}
-			fixture := newFixture(t, fixtureOptions{host: host, user: user})
+			// The fixture would accept the valid start, so only the defect refuses.
+			fixture := newFixture(t, fixtureOptions{host: host, user: user, password: syntheticRemotePassword})
 			parent, child := net.Pipe()
 			defer parent.Close()
 			ctx, cancel := context.WithCancel(context.Background())

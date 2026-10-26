@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -58,6 +60,12 @@ type fixtureOptions struct {
 	openUnsolicited               string
 	shellFixture                  func(ssh.Channel)
 	resizeFixture                 func([]byte)
+	// password enables password authentication, or with prompts set,
+	// keyboard-interactive with those prompts (echo per prompt).
+	password     string
+	prompts      []string
+	echos        []bool
+	userKeyAlgos []string // the server's accepted public key signature algorithms
 }
 
 type sshFixture struct {
@@ -96,15 +104,35 @@ func newFixture(t *testing.T, options fixtureOptions) *sshFixture {
 	})
 	group.Go(func() {
 		config := &ssh.ServerConfig{
-			NoClientAuth: options.noAuth,
-			MaxAuthTries: 2,
+			NoClientAuth:            options.noAuth,
+			MaxAuthTries:            2,
+			PublicKeyAuthAlgorithms: options.userKeyAlgos,
 			PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 				fixture.auth.Add(1)
-				if options.rejectAuth || !bytes.Equal(key.Marshal(), options.user.PublicKey().Marshal()) {
+				if options.rejectAuth || options.user == nil || !bytes.Equal(key.Marshal(), options.user.PublicKey().Marshal()) {
 					return nil, errors.New("synthetic private authentication diagnostic")
 				}
 				return nil, nil
 			},
+		}
+		if options.password != "" && options.prompts == nil {
+			config.PasswordCallback = func(_ ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+				fixture.auth.Add(1)
+				if options.rejectAuth || string(password) != options.password {
+					return nil, errors.New("synthetic private authentication diagnostic")
+				}
+				return nil, nil
+			}
+		}
+		if options.password != "" && options.prompts != nil {
+			config.KeyboardInteractiveCallback = func(_ ssh.ConnMetadata, client ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
+				fixture.auth.Add(1)
+				answers, err := client("", "", options.prompts, options.echos)
+				if err != nil || len(answers) != 1 || answers[0] != options.password {
+					return nil, errors.New("synthetic private authentication diagnostic")
+				}
+				return nil, nil
+			}
 		}
 		config.AddHostKey(options.host)
 		if options.legacyKEX {
@@ -266,6 +294,134 @@ func TestSSHChangedHostKeyStopsBeforeAuthentication(t *testing.T) {
 	}
 }
 
+const syntheticRemotePassword = "Synthetic remote şifrə 1!"
+
+func passwordConfig(host ssh.Signer, password string) Config {
+	return Config{User: "lab-user", HostKey: host.PublicKey().Marshal(), Password: []byte(password), Columns: 100, Rows: 30}
+}
+
+func connectOnce(fixture *sshFixture, config Config) (*Terminal, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return connect(ctx, "server.example", func(context.Context) (net.Conn, error) { return fixture.client, nil }, config)
+}
+
+// A server that only takes passwords is reached with the stored password,
+// after its host key is verified, through either password or a single hidden
+// keyboard-interactive prompt. The password never reaches an unverified host.
+func TestSSHPasswordAuthenticationAfterHostVerification(t *testing.T) {
+	host := syntheticSigner(t)
+	for _, mode := range []string{"password", "keyboard-interactive"} {
+		options := fixtureOptions{host: host, password: syntheticRemotePassword}
+		if mode == "keyboard-interactive" {
+			options.prompts, options.echos = []string{"Password: "}, []bool{false}
+		}
+		fixture := newFixture(t, options)
+		terminal := openFixture(t, fixture, passwordConfig(host, syntheticRemotePassword))
+		if fixture.auth.Load() != 1 {
+			t.Fatalf("%s: authenticated %d times", mode, fixture.auth.Load())
+		}
+		_ = terminal.Close()
+	}
+	for name, options := range map[string]fixtureOptions{
+		"wrong password":    {host: host, password: "a different synthetic password"},
+		"visible prompt":    {host: host, password: syntheticRemotePassword, prompts: []string{"Password: "}, echos: []bool{true}},
+		"two prompts":       {host: host, password: syntheticRemotePassword, prompts: []string{"Password: ", "Code: "}, echos: []bool{false, false}},
+		"no authentication": {host: host, noAuth: true},
+	} {
+		fixture := newFixture(t, options)
+		if terminal, err := connectOnce(fixture, passwordConfig(host, syntheticRemotePassword)); err == nil || terminal != nil {
+			t.Fatalf("%s: session opened", name)
+		}
+	}
+	// A changed host key stops before any credential is offered.
+	fixture := newFixture(t, fixtureOptions{host: syntheticSigner(t), password: syntheticRemotePassword})
+	if _, err := connectOnce(fixture, passwordConfig(host, syntheticRemotePassword)); err != ErrHostKey || fixture.auth.Load() != 0 {
+		t.Fatal("a password was offered to an unverified host")
+	}
+	// And the answers themselves refuse without verification, whatever order
+	// a library calls them in; a prompt is answered only when it is one hidden one.
+	var verified, used atomic.Bool
+	if answer, err := passwordAnswer(syntheticRemotePassword, &verified, &used)(); answer != "" || err != ErrHostKey || used.Load() {
+		t.Fatal("password answered before host verification")
+	}
+	prompt := promptAnswer(syntheticRemotePassword, &verified, &used)
+	if answers, err := prompt("", "", []string{"Password: "}, []bool{false}); answers != nil || err != ErrHostKey || used.Load() {
+		t.Fatal("prompt answered before host verification")
+	}
+	verified.Store(true)
+	for name, prompts := range map[string][2][]any{
+		"visible":    {{"Password: "}, {true}},
+		"two hidden": {{"Password: ", "Code: "}, {false, false}},
+	} {
+		questions, echos := []string{}, []bool{}
+		for i := range prompts[0] {
+			questions, echos = append(questions, prompts[0][i].(string)), append(echos, prompts[1][i].(bool))
+		}
+		if answers, err := prompt("", "", questions, echos); answers != nil || err == nil || used.Load() {
+			t.Fatalf("%s prompt was answered with the password", name)
+		}
+	}
+	if answers, err := prompt("", "", []string{"Password: "}, []bool{false}); err != nil || len(answers) != 1 || answers[0] != syntheticRemotePassword || !used.Load() {
+		t.Fatal("a single hidden prompt after verification was not answered")
+	}
+	user := syntheticSigner(t)
+	for name, config := range map[string]Config{
+		"both credentials": {User: "lab-user", HostKey: host.PublicKey().Marshal(), Signer: user, Password: []byte(syntheticRemotePassword), Columns: 100, Rows: 30},
+		"no credential":    {User: "lab-user", HostKey: host.PublicKey().Marshal(), Columns: 100, Rows: 30},
+		"NUL password":     passwordConfig(host, "nul\x00inside"),
+		"invalid UTF-8":    passwordConfig(host, string([]byte{0xff})),
+		"long password":    passwordConfig(host, strings.Repeat("a", sshkey.MaxPasswordLen+1)),
+	} {
+		if _, err := validateConfig(config); err != ErrInvalidConfig {
+			t.Fatalf("%s: configuration accepted", name)
+		}
+	}
+}
+
+// ECDSA and RSA user keys authenticate; RSA signs with SHA-2 only, so a
+// server that accepts nothing but SHA-1 "ssh-rsa" is refused.
+func TestSSHUserKeyTypesAndNoSHA1(t *testing.T) {
+	host := syntheticSigner(t)
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, private := range map[string]any{"ecdsa-p384": p384, "rsa-2048": rsaKey} {
+		key, err := sshkey.New(private)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture := newFixture(t, fixtureOptions{host: host, user: key})
+		terminal := openFixture(t, fixture, labConfig(host, key))
+		if fixture.auth.Load() != 1 {
+			t.Fatalf("%s key did not authenticate exactly once", name)
+		}
+		_ = terminal.Close()
+	}
+	key, err := sshkey.New(rsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, algos := range [][]string{{ssh.KeyAlgoRSASHA512}, {ssh.KeyAlgoRSASHA256}} {
+		fixture := newFixture(t, fixtureOptions{host: host, user: key, userKeyAlgos: algos})
+		_ = openFixture(t, fixture, labConfig(host, key)).Close()
+	}
+	sha1Only := newFixture(t, fixtureOptions{host: host, user: key, userKeyAlgos: []string{ssh.KeyAlgoRSA}})
+	if terminal, err := connectOnce(sha1Only, labConfig(host, key)); err == nil || terminal != nil {
+		t.Fatal("an RSA key authenticated with SHA-1")
+	}
+	// A plain signer cannot be held to SHA-2, so an RSA one is refused.
+	plain, _ := ssh.NewSignerFromKey(rsaKey)
+	if _, err := validateConfig(labConfig(host, &signCounter{Signer: plain})); err != ErrInvalidConfig {
+		t.Fatal("an RSA signer without algorithm control was accepted")
+	}
+}
+
 func TestSSHRefusesNoneAuthAndAuthenticationOrPTYFailure(t *testing.T) {
 	for _, failure := range []string{"none", "auth", "pty", "shell"} {
 		t.Run(failure, func(t *testing.T) {
@@ -383,11 +539,20 @@ func TestSSHInvalidConfigurationAndCanceledRequestsNeverDial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Host keys stay Ed25519; ECDSA is accepted only as a user key.
 	config := base
 	config.HostKey = ecSigner.PublicKey().Marshal()
 	badConfigs = append(badConfigs, config)
+	weak, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weakSigner, err := ssh.NewSignerFromKey(weak)
+	if err != nil {
+		t.Fatal(err)
+	}
 	config = base
-	config.Signer = ecSigner
+	config.Signer = weakSigner
 	badConfigs = append(badConfigs, config)
 	dial := func(context.Context) (net.Conn, error) {
 		t.Fatal("invalid/canceled configuration reached network")

@@ -3,7 +3,6 @@ package identity
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/subtle"
 	"crypto/x509"
 	"fmt"
@@ -39,8 +38,10 @@ type RemoteTarget struct {
 type RDPWorker interface {
 	OpenRDP(context.Context, RDPRequest) (terminalweb.Stream, error)
 }
+
+// SSHWorker receives exactly one session credential: a key or a password.
 type SSHWorker interface {
-	OpenSSH(context.Context, *targetguard.NamedTarget, []byte, string, ssh.Signer) (terminalweb.Stream, error)
+	OpenSSH(context.Context, *targetguard.NamedTarget, []byte, string, sshkey.Credential) (terminalweb.Stream, error)
 }
 type RDPRequest struct {
 	Target             *targetguard.NamedTarget
@@ -146,8 +147,11 @@ func (l *Lab) revokeRemotesLocked(owner, connection, credential string) {
 		}
 	}
 }
+
+// SSH accepts a key or a password; RDP a password. There is no fallback from
+// one to the other: the connection's stored credential is the only one tried.
 func compatible(t RemoteTarget, c Credential) bool {
-	return c.Username != "" && (t.Protocol == "ssh" && c.Kind == "ssh-key" || t.Protocol == "rdp" && c.Kind == "password")
+	return c.Username != "" && (t.Protocol == "ssh" && (c.Kind == "ssh-key" || c.Kind == "password") || t.Protocol == "rdp" && c.Kind == "password")
 }
 
 // Opening an approved, owned connection needs a ready MFA session, not a
@@ -231,25 +235,15 @@ func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential) (ter
 		return nil, errRefused
 	}
 	e := validateCredential(&c)
-	var signer *sshkey.Key
+	var auth sshkey.Credential
 	if e == nil && t.Protocol == "ssh" {
-		var raw any
-		if c.Passphrase == "" {
-			raw, e = ssh.ParseRawPrivateKey([]byte(c.Secret))
+		if c.Kind == "password" {
+			auth, e = sshkey.NewPassword(c.Secret)
 		} else {
-			raw, e = ssh.ParseRawPrivateKeyWithPassphrase([]byte(c.Secret), []byte(c.Passphrase))
+			auth, e = openSSHKey(c)
 		}
 		if e == nil {
-			private, ok := raw.(*ed25519.PrivateKey)
-			if !ok {
-				e = errRefused
-			} else {
-				signer, e = sshkey.New(*private)
-				clear(*private)
-				if signer != nil {
-					defer signer.Close()
-				}
-			}
+			defer auth.Close()
 		}
 	}
 	<-l.derive
@@ -257,7 +251,7 @@ func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential) (ter
 		return nil, errRefused
 	}
 	if t.Protocol == "ssh" {
-		return l.remote.ssh.OpenSSH(ctx, t.Target, t.Identity, c.Username, signer)
+		return l.remote.ssh.OpenSSH(ctx, t.Target, t.Identity, c.Username, auth)
 	}
 	return l.remote.rdp.OpenRDP(ctx, RDPRequest{t.Target, append([]byte(nil), t.Identity...), c.Username, c.Secret})
 }

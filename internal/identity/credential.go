@@ -2,8 +2,6 @@ package identity
 
 import (
 	"bytes"
-	"crypto/ed25519"
-	"crypto/subtle"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -12,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/denyfirst/keybash/internal/sshkey"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/ssh"
 )
@@ -64,18 +63,32 @@ func validateCredential(c *Credential) error {
 	if c.Kind != "ssh-key" {
 		return errRefused
 	}
+	key, e := openSSHKey(*c)
+	if e != nil {
+		return errRefused
+	}
+	c.Fingerprint = ssh.FingerprintSHA256(key.PublicKey())
+	key.Close()
+	return nil
+}
+
+// openSSHKey bounds an OpenSSH private key's cost before parsing it and
+// returns it as a session key. Accepted: Ed25519, ECDSA P-256/384/521 and RSA
+// 2048–8192 bits; unencrypted, or aes256-ctr with bcrypt of at most 64 rounds.
+// The stored public half must be the private key's own. The caller closes it.
+func openSSHKey(c Credential) (*sshkey.Key, error) {
 	text := strings.TrimSpace(c.Secret)
 	if !strings.HasPrefix(text, "-----BEGIN OPENSSH PRIVATE KEY-----") {
-		return errRefused
+		return nil, errRefused
 	}
 	b, rest := pem.Decode([]byte(text))
 	if b == nil || b.Type != "OPENSSH PRIVATE KEY" || len(b.Headers) != 0 || strings.TrimSpace(string(rest)) != "" {
-		return errRefused
+		return nil, errRefused
 	}
 	defer clear(b.Bytes)
 	const magic = "openssh-key-v1\x00"
 	if !bytes.HasPrefix(b.Bytes, []byte(magic)) {
-		return errRefused
+		return nil, errRefused
 	}
 	var outer struct {
 		Cipher, KDF, Options string
@@ -83,53 +96,50 @@ func validateCredential(c *Credential) error {
 		Public, Private      []byte
 		Rest                 []byte `ssh:"rest"`
 	}
-	if ssh.Unmarshal(b.Bytes[len(magic):], &outer) != nil || outer.Count != 1 || len(outer.Rest) != 0 || len(outer.Public) > 128 || len(outer.Private) > 4096 || len(outer.Options) > 128 {
-		return errRefused
+	// An 8192-bit RSA public key is about 1 KiB and its private section 4 KiB.
+	if ssh.Unmarshal(b.Bytes[len(magic):], &outer) != nil || outer.Count != 1 || len(outer.Rest) != 0 || len(outer.Public) > 1100 || len(outer.Private) > 6144 || len(outer.Options) > 128 {
+		return nil, errRefused
 	}
-	var public struct {
-		Type string
-		Data []byte
-	}
-	if ssh.Unmarshal(outer.Public, &public) != nil || public.Type != ssh.KeyAlgoED25519 || len(public.Data) != 32 {
-		return errRefused
+	public, e := ssh.ParsePublicKey(outer.Public)
+	if e != nil || !sshkey.Allowed(public) {
+		return nil, errRefused
 	}
 	var raw any
-	var e error
 	if outer.Cipher == "none" {
 		if outer.KDF != "none" || outer.Options != "" || c.Passphrase != "" {
-			return errRefused
+			return nil, errRefused
 		}
 		raw, e = ssh.ParseRawPrivateKey([]byte(text))
 	} else {
-		var options struct {
-			Salt   string
-			Rounds uint32
-		}
-		if outer.Cipher != "aes256-ctr" || outer.KDF != "bcrypt" || ssh.Unmarshal([]byte(outer.Options), &options) != nil || len(options.Salt) < 16 || len(options.Salt) > 64 || options.Rounds < 1 || options.Rounds > 64 || c.Passphrase == "" {
-			return errRefused
+		if !encryptionAllowed(outer.Cipher, outer.KDF, outer.Options) || c.Passphrase == "" {
+			return nil, errRefused
 		}
 		raw, e = ssh.ParseRawPrivateKeyWithPassphrase([]byte(text), []byte(c.Passphrase))
 	}
 	if e != nil {
-		return errRefused
+		return nil, errRefused
 	}
-	keyPointer, ok := raw.(*ed25519.PrivateKey)
-	if !ok {
-		return errRefused
+	key, e := sshkey.New(raw)
+	sshkey.Discard(raw)
+	if e != nil {
+		return nil, errRefused
 	}
-	key := *keyPointer
-	defer clear(key)
-	derived := ed25519.NewKeyFromSeed(key[:ed25519.SeedSize])
-	defer clear(derived)
-	if subtle.ConstantTimeCompare(key, derived) != 1 {
-		return errRefused
+	if !bytes.Equal(key.PublicKey().Marshal(), outer.Public) {
+		key.Close()
+		return nil, errRefused
 	}
-	pub, e := ssh.NewPublicKey(key.Public())
-	if e != nil || !bytes.Equal(pub.Marshal(), outer.Public) {
-		return errRefused
+	return key, nil
+}
+
+// encryptionAllowed bounds a protected key's work before any decryption is
+// tried. The SSH library itself accepts up to 2048 bcrypt rounds, seconds of
+// CPU per attempt; 64 is well above what ssh-keygen writes by default (16).
+func encryptionAllowed(cipher, kdf, rawOptions string) bool {
+	var options struct {
+		Salt   string
+		Rounds uint32
 	}
-	c.Fingerprint = ssh.FingerprintSHA256(pub)
-	return nil
+	return cipher == "aes256-ctr" && kdf == "bcrypt" && ssh.Unmarshal([]byte(rawOptions), &options) == nil && len(options.Salt) >= 16 && len(options.Salt) <= 64 && options.Rounds >= 1 && options.Rounds <= 64
 }
 func credentialKey(owner, id string) []byte { return []byte(owner + "/" + id) }
 func (s *Store) credential(tx *bolt.Tx, owner, id string) (Credential, error) {

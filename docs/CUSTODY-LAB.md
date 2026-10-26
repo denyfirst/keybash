@@ -105,10 +105,12 @@ Up to 256 accounts, 256 credentials/owner, 4096 overall, 64 MiB live credential
 ciphertext and a 256 MiB DB allocation cap. File growth/IO exhaustion refuse
 writes; these limits are not a service-wide CPU/RAM/DoS guarantee.
 Credentials are independent of future connections. Password secrets up to
-4096 UTF-8 bytes, without NUL, and a single OpenSSH Ed25519 private key up to
-64 KiB are supported. Encrypted keys require aes256-ctr/bcrypt, salt 16..64
-bytes and 1..64 rounds before invoking the library. Wrong passphrases, legacy
-PEM/RSA/multiple keys/trailing data and inconsistent seed/public halves refuse.
+4096 UTF-8 bytes, without NUL, and a single OpenSSH private key up to 64 KiB
+(Ed25519, ECDSA P-256/384/521, or RSA 2048–8192 bits) are supported. Encrypted
+keys require aes256-ctr/bcrypt, salt 16..64 bytes and 1..64 rounds before
+invoking the library. Wrong passphrases, weak RSA, other curves, legacy PEM,
+multiple keys, trailing data and a stored public half that is not the private
+key's own refuse. A password serves SSH and RDP alike.
 Labels/usernames reject controls and formatting characters. RDP domain fields,
 other key formats, edit/export and sharing are not implemented in this slice.
 

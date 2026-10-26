@@ -172,11 +172,11 @@ type processOwnedFixture struct {
 	closed     chan struct{}
 }
 
-func (f *processOwnedFixture) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, signer ssh.Signer) (terminalweb.Stream, error) {
+func (f *processOwnedFixture) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
 	fixture := newFixture(f.t, fixtureOptions{host: f.host, user: f.user})
 	// Only this _test.go seam substitutes a loopback peer. Runtime OpenSSH
 	// always calls NamedTarget.DialContext before descriptor handoff.
-	stream, err := f.manager.open(ctx, target.Hostname(), func(context.Context) (net.Conn, error) { return fixture.client, nil }, pin, user, signer)
+	stream, err := f.manager.open(ctx, target.Hostname(), func(context.Context) (net.Conn, error) { return fixture.client, nil }, pin, user, auth)
 	if err == nil {
 		go func() { <-ctx.Done(); _ = stream.Close(); close(f.closed) }()
 	}

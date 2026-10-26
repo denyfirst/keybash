@@ -59,6 +59,30 @@ func TestCustodySSHRejectsCostBombAndMismatchedPublic(t *testing.T) {
 			t.Fatal("unbounded bcrypt rounds accepted")
 		}
 	}
+	// The bound itself, both ways: decryption above fails for a wrong salt
+	// anyway, so only the predicate shows where the work limit sits.
+	options := func(salt int, rounds uint32) string {
+		return string(ssh.Marshal(struct {
+			Salt   string
+			Rounds uint32
+		}{strings.Repeat("s", salt), rounds}))
+	}
+	if !encryptionAllowed("aes256-ctr", "bcrypt", original.Options) || !encryptionAllowed("aes256-ctr", "bcrypt", options(16, 64)) || !encryptionAllowed("aes256-ctr", "bcrypt", options(64, 1)) {
+		t.Fatal("a bounded key encryption was refused")
+	}
+	for name, raw := range map[string][3]string{
+		"rounds-65": {"aes256-ctr", "bcrypt", options(16, 65)},
+		"rounds-0":  {"aes256-ctr", "bcrypt", options(16, 0)},
+		"salt-15":   {"aes256-ctr", "bcrypt", options(15, 16)},
+		"salt-65":   {"aes256-ctr", "bcrypt", options(65, 16)},
+		"cipher":    {"aes128-ctr", "bcrypt", options(16, 16)},
+		"kdf":       {"aes256-ctr", "none", options(16, 16)},
+		"options":   {"aes256-ctr", "bcrypt", options(16, 16) + "x"},
+	} {
+		if encryptionAllowed(raw[0], raw[1], raw[2]) {
+			t.Fatalf("%s key encryption allowed", name)
+		}
+	}
 	plain, e := ssh.MarshalPrivateKey(private, "synthetic")
 	if e != nil {
 		t.Fatal("fixture encoding failed")

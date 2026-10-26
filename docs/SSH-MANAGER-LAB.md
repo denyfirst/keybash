@@ -48,9 +48,9 @@ namespace/seccomp/setpriv boundary described in `SSH-PROCESS-LAB.md`, then
 closes its copies of the session descriptors. It never reads SSH startup,
 keys, remote protocol or terminal bytes. The gateway waits for the isolated
 worker hello through the private pipe and sends only that session's host pin,
-username and Ed25519 seed directly to the worker. SSH verifies the pin on the
-same connected FD before key authentication. The manager's `active/v1` means
-process launch only; application readiness still requires successful SSH
+username and one credential (key or password) directly to the worker. SSH
+verifies the pin on the same connected FD before offering it. The manager's
+`active/v1` means process launch only; application readiness still requires successful SSH
 authentication, PTY and shell admission.
 
 The gateway UID is trusted to enforce target/owner/custody policy. A compromise

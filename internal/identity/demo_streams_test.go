@@ -20,9 +20,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
-	"golang.org/x/crypto/ssh"
 )
 
 const demoRemotePassword = "Synthetic desktop password, no remote account!"
@@ -31,7 +31,7 @@ type demoWorker struct{}
 
 // These workers have no dial or process execution path. Catalog addresses are
 // inert metadata. They do not implement or claim SSH/RDP authentication.
-func (*demoWorker) OpenSSH(ctx context.Context, _ *targetguard.NamedTarget, _ []byte, user string, _ ssh.Signer) (terminalweb.Stream, error) {
+func (*demoWorker) OpenSSH(ctx context.Context, _ *targetguard.NamedTarget, _ []byte, user string, _ sshkey.Credential) (terminalweb.Stream, error) {
 	if user != "synthetic-user" || ctx.Err() != nil {
 		return nil, errRefused
 	}

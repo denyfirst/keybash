@@ -17,6 +17,7 @@ import (
 
 	"github.com/denyfirst/keybash/internal/identity"
 	"github.com/denyfirst/keybash/internal/remotefixture"
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 	"golang.org/x/crypto/ssh"
@@ -28,11 +29,15 @@ type ownedSSHFixture struct {
 	closed     atomic.Bool
 }
 
-func (f *ownedSSHFixture) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, signer ssh.Signer) (terminalweb.Stream, error) {
+func (f *ownedSSHFixture) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
+	key, ok := auth.(*sshkey.Key)
+	if !ok {
+		return nil, ErrInvalidConfig
+	}
 	fixture := newFixture(f.t, fixtureOptions{host: f.host, user: f.user, shellFixture: func(c ssh.Channel) { _, _ = io.Copy(c, c) }})
 	// The ONLY loopback substitution is in this test. Production Worker uses
 	// Connect -> NamedTarget -> policy/literal dial with no override flag.
-	terminal, e := connect(ctx, target.Hostname(), func(context.Context) (net.Conn, error) { return fixture.client, nil }, Config{User: user, HostKey: pin, Signer: signer, Columns: 100, Rows: 30})
+	terminal, e := connect(ctx, target.Hostname(), func(context.Context) (net.Conn, error) { return fixture.client, nil }, Config{User: user, HostKey: pin, Signer: key, Columns: 100, Rows: 30})
 	if e == nil {
 		go func() { <-ctx.Done(); _ = terminal.Close(); f.closed.Store(true) }()
 	}
