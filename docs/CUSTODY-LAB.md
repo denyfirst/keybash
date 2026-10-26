@@ -66,8 +66,8 @@ five factor attempts per account/minute (including failures) commit durably.
 Ten random 128-bit recovery codes are shown once and only their owner-bound
 HMAC-SHA256 digests under the separate derived recovery key persist. Each is
 atomically removed when used. These random tokens are not user-chosen passwords;
-login passwords always use Argon2id. The password
-global/name budgets and KDF two-slot cap remain process-local; a restart
+login passwords always use Argon2id. The per-purpose, per-account attempt
+budgets and KDF two-slot cap remain process-local; a restart
 resets those limits but never the durable factor replay/budget state.
 
 Ready sessions expire after 15 idle minutes/eight absolute hours; status reads
