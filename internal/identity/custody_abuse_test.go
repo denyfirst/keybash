@@ -98,7 +98,10 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 	s, _, _ := bootstrapped(t)
 	now := time.Now()
 	alice, _, aliceCodes := enrollFixture(t, s, "alice", now)
-	if s.update(func(tx *bolt.Tx) error { _, e := s.createAccount(tx, "bob", accounts(t)[0].Password); return e }) != nil {
+	if s.update(func(tx *bolt.Tx) error {
+		_, _, e := s.createAccount(tx, "bob", accounts(t)[0].Password, time.Now(), true)
+		return e
+	}) != nil {
 		t.Fatal("fixture second account failed")
 	}
 	bob, _, bobCodes := enrollFixture(t, s, "bob", now)

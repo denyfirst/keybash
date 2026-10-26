@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let csrf = '', busy = false, secretTimer, pendingDelete = '', remoteEnabled = false;
+let csrf = '', busy = false, secretTimer, pendingDelete = '', remoteEnabled = false, setupRequired = false;
 let catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0;
 const notice = text => { $('notice').textContent = text; };
 const sections = ['enroll', 'challenge', 'recovery', 'vault'];
@@ -42,6 +42,7 @@ async function request(path, method = 'GET', value) {
 }
 function errorMessage(error) {
   hideSecret();
+  if (error.status === 'setup') return 'Quraşdırma kodu qəbul edilmədi. Administratordan aldığın birdəfəlik kodu yoxla; vaxtı keçibsə yenisini istə.';
   if (error.status === 403) return 'Bu əməliyyat üçün giriş şifrəsi və yeni MFA kodu ilə təkrar doğrula.';
   if (error.status === 409) return 'Fingerprint uyğun gəlmədi və ya server məlumatı dəyişib. Məlumatı yenilə və ayrıca etibarlı kanaldan yoxla.';
   if (error.status === 429) return 'Cəhd limiti dolub. Bir qədər gözlə.';
@@ -166,6 +167,7 @@ async function loadAccount() {
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
   csrf = data.csrf; $('account').textContent = data.username;
   remoteEnabled=data.remote===true;$('connections-panel').hidden=!remoteEnabled;
+  setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
   $('heading').textContent = data.stage === 'ready' ? 'Açarların öz yerində.' : data.stage === 'enroll' ? 'MFA-nı quraq.' : 'Girişini təsdiqlə.';
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false;
@@ -180,7 +182,13 @@ bind('bootstrap', async () => {
   await request('/api/bootstrap', 'POST', { code, username, password }); location.replace('/');
 });
 click('begin-enroll', async () => {
-  const data = await request('/api/mfa/enrollment', 'POST', {});
+  // An operator-created account proves its one-time setup code before a seed
+  // is shown; a bootstrap or replacement session needs none.
+  const body = setupRequired ? { setup: $('enroll-setup').value } : {}; clearInputs();
+  let data;
+  try { data = await request('/api/mfa/enrollment', 'POST', body); }
+  catch (error) { throw setupRequired && error.status === 403 ? Object.assign(new Error('setup'), { status: 'setup' }) : error; }
+  setupRequired = false; $('setup-proof').hidden = true;
   if (typeof data?.secret !== 'string' || !/^[A-Z2-7]{32}$/.test(data.secret)) throw new Error('invalid seed');
   if (document.visibilityState !== 'visible') return;
   $('seed').textContent = data.secret; $('seed-panel').hidden = false;

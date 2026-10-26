@@ -84,7 +84,7 @@ try {
       <h1>keybash<span style="color:#e34254">.</span> Demo</h1>
       <p><strong>Bu, lokal UI simulyasiyasıdır.</strong> Real Linux shell və Windows yoxdur. Öz server açarlarını və şifrələrini daxil etmə.</p>
       <button id="workspace">İş yerini aç</button>
-      <ol><li>İş yerində iki nümunə bağlantı var. <b>Qoşul</b> seç.</li><li>Terminalda <code>help</code>, <code>whoami</code>, <code>echo Salam dostum</code>, Ctrl+C və paste preview-ni sına.</li><li>Desktop-da kliklə, yaz, Backspace/Enter və tam ekranı sına. RDP clipboard/remote resize hələ bağlıdır.</li><li>İki dəqiqədən sonra yeni bağlantı üçün hesabda təkrar doğrula. Logout bütün açıq bağlantıları bağlayır.</li></ol>
+      <ol><li>İş yerində iki nümunə bağlantı var. <b>Qoşul</b> seç.</li><li>Terminalda <code>help</code>, <code>whoami</code>, <code>echo Salam dostum</code>, Ctrl+C və paste preview-ni sına.</li><li>Desktop-da kliklə, yaz, Backspace/Enter və tam ekranı sına. RDP clipboard/remote resize hələ bağlıdır.</li><li>Bağlantını yenidən açmaq üçün təkrar doğrulama lazım deyil; əlavə etmə, silmə və göstərmə üçün lazımdır. Logout bütün açıq bağlantıları bağlayır.</li></ol>
       <p>Demo istifadəçisi: <code>demo</code><br>Demo giriş şifrəsi: <code id="password"></code></p>
       <p>Hazırkı MFA kodu: <output id="otp"></output><br><small id="remaining"></small><br><small>Eyni kod bir dəfə işləyir. Açılışda işlənmiş kod üçün növbəti 30 saniyəlik kodu gözlə.</small></p>
       <details><summary>Demo MFA seed və birdəfəlik bərpa kodları</summary><p>Autentifikatora əl ilə əlavə etmək üçün: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Hər bərpa kodunu yalnız bir dəfə işlət. Bunlar yalnız bu müvəqqəti demo üçündür.</p></details>

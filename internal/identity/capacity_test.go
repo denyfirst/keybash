@@ -17,7 +17,7 @@ import (
 
 func capacityOwner(t *testing.T, l *Lab, store *Store, name, record string) (*custodyClient, string) {
 	t.Helper()
-	if store.CreateAccount(name, alicePassword) != nil {
+	if _, e := store.CreateAccount(name, alicePassword); e != nil {
 		t.Fatal("capacity account fixture failed")
 	}
 	enrollFixture(t, store, name, time.Now())

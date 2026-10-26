@@ -21,6 +21,23 @@ layihələrin konfiqurasiyasına dəyişiklik etmir. Əlavə browser quraşdırm
 Başqa development sistemində əvvəlcə `web/` üçün pinned pnpm/frozen-lockfile
 asılılıqlarını və Playwright Chromium-u mühəndislik qaydasına uyğun qurmaq lazımdır.
 
+### Node olmadan (yalnız Go)
+
+```powershell
+Set-Location C:\Users\Rash\projects\keybash
+./scripts/demo.ps1 -Serve
+```
+
+Eyni sintetik demo hesabı, açarlar və iki nümunə bağlantı Go-da hazırlanır və
+`https://127.0.0.1:8443/login` ünvanında açılır. Terminal istifadəçi adını,
+şifrəni, MFA seed-i və birdəfəlik bərpa kodlarını göstərir. Giriş üçün şifrə və
+ya autentifikator kodu, ya da bərpa kodlarından birini işlət (hər biri bir dəfə).
+
+Sertifikat hər işə salmada yenidən yaradılır və heç bir brauzer onu tanımır.
+Edge-də **Ətraflı → 127.0.0.1 ünvanına davam et** seçərək xəbərdarlığı yalnız bu
+ünvan üçün qəbul et. Əməliyyat sisteminin TLS etibarı dəyişdirilmir. Bunu real
+serverlər üçün etmə. Demo Ctrl+C ilə və ya bir saatdan sonra dayanır.
+
 Demo bir bələdçi və iş yeri səhifəsi açır. Bələdçidə **İş yerini aç** düyməsi,
 demo istifadəçisi/şifrəsi, hazırkı MFA kodu və qalan birdəfəlik bərpa kodları var.
 Hər açılışda yeni müvəqqəti instance və test açarları yaradılır. Giriş və MFA

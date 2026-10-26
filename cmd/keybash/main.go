@@ -127,10 +127,22 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		if len(parts) != 2 {
 			return refused
 		}
+		// The one-time setup code goes to the operator's terminal like the
+		// bootstrap code: hand it over separately from the password. Recovery
+		// that keeps an enrolled factor prints nothing.
+		var setup string
 		if command == "account-add" {
-			return store.CreateAccount(parts[0], parts[1])
+			setup, e = store.CreateAccount(parts[0], parts[1])
+		} else {
+			setup, e = store.RecoverAccount(parts[0], parts[1], *lost)
 		}
-		return store.RecoverAccount(parts[0], parts[1], *lost)
+		if e != nil {
+			return refused
+		}
+		if setup != "" {
+			_, e = fmt.Fprintln(output, setup)
+		}
+		return e
 	case "serve-lab", "serve-ssh-lab", "serve-remote-lab":
 		host, port, e := net.SplitHostPort(*address)
 		ip, pe := netip.ParseAddr(host)
