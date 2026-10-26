@@ -58,6 +58,7 @@ type session struct {
 	challengeEnd  time.Time
 	pendingSeed   string
 	replacing     bool
+	setupProved   bool // bootstrap or operator setup code shown for first enrollment
 	reauthUntil   time.Time
 }
 

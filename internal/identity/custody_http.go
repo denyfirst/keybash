@@ -106,6 +106,9 @@ func (l *Lab) bootstrapHTTP(w http.ResponseWriter, r *http.Request) {
 		identityError(w, e)
 		return
 	}
+	// The bootstrap code already proved operator authority for this account.
+	id, _ := tokenID(raw)
+	l.sessions[id].setupProved = true
 	http.SetCookie(w, sessionCookie(raw, int(absoluteLife.Seconds())))
 	w.WriteHeader(204)
 }
@@ -212,16 +215,43 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			CSRF     string `json:"csrf"`
 			Stage    string `json:"stage"`
 			Remote   bool   `json:"remote"`
-		}{s.username, l.csrf(id), s.stage, l.remote != nil}
+			Setup    bool   `json:"setup"` // first enrollment still needs the operator's setup code
+		}{s.username, l.csrf(id), s.stage, l.remote != nil, s.stage == "enroll" && !s.replacing && !s.setupProved}
 		l.mu.Unlock()
 		jsonReply(w, data)
 		return
 	}
 	if r.URL.Path == "/api/mfa/enrollment" && r.Method == "POST" {
-		if _, ok := readFields(w, r, 1024); !ok || s.stage != "enroll" || s.replacing && !l.now().Before(s.reauthUntil) {
+		// A first enrollment reveals a seed only after the operator's one-time
+		// setup code (or the bootstrap code) is proved; the password alone is
+		// not enough. A replacement relies on its fresh reauthentication.
+		needSetup := s.stage == "enroll" && !s.replacing && !s.setupProved
+		var fields map[string]string
+		var ok bool
+		if needSetup {
+			fields, ok = readFields(w, r, 1024, "setup")
+		} else {
+			fields, ok = readFields(w, r, 1024)
+		}
+		if !ok || s.stage != "enroll" || s.replacing && !l.now().Before(s.reauthUntil) {
 			l.mu.Unlock()
 			refuse(w, 403)
 			return
+		}
+		if needSetup {
+			if !l.attemptLocked("mfa:"+s.username, factorAttempts) {
+				l.mu.Unlock()
+				identityError(w, errLimited)
+				return
+			}
+			valid := l.store.enrollmentValid(s.owner, fields["setup"], l.now())
+			clear(fields)
+			if !valid {
+				l.mu.Unlock()
+				refuse(w, 403)
+				return
+			}
+			s.setupProved = true
 		}
 		if s.pendingSeed == "" {
 			var e error

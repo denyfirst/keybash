@@ -90,6 +90,15 @@ offline account recovery changes the password and can explicitly clear a lost
 factor, forcing new enrollment. The exclusive DB lock requires stopping the
 lab first. No HTTP reset can bypass a factor by supplying only a password.
 
+A password alone cannot enroll a first factor either. `account-add`, and any
+`account-recover` that leaves the account without a factor, print one random
+256-bit setup code. Only its SHA-256 digest and a 72-hour expiry are kept,
+inside the encrypted account record. The enrollment seed is shown only after
+that account's own unexpired code is proved; wrong codes spend the per-account
+MFA attempt budget, enrollment spends the code, and the next recovery replaces
+it. The bootstrap account needs none: its bootstrap code already proved the
+operator. Hand the code to the person separately from the password.
+
 ## Vault and browser boundary
 
 Up to 256 accounts, 256 credentials/owner, 4096 overall, 64 MiB live credential
@@ -142,7 +151,8 @@ bypass or public-listener flag. This is not yet a supported installation guide.
 `bootstrap-renew` reissues setup before initialization only. Stop the lab before
 `account-add` or `account-recover` (optional `--lost-mfa`). These read exactly two
 LF-delimited stdin lines: username, password, with an optional final LF, total
-2048 bytes. They emit neither password nor account. Supply stdin through an
+2048 bytes. They emit neither password nor account; when the account has no
+factor afterwards they print its one-time setup code (above). Supply stdin through an
 operator-controlled private mechanism, never CLI arguments, environment,
 shell history or a command containing the password. Passwords containing LF
 cannot use this offline two-line protocol. HTTP password input preserves UTF-8.

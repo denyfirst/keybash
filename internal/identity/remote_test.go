@@ -327,7 +327,7 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	l.sessions[id].revision++
 	l.mu.Unlock()
 	// This trusted fixture writes another account; HTTP cannot select an owner.
-	if store.CreateAccount("bob", alicePassword) != nil {
+	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
 		t.Fatal("second fixture account failed")
 	}
 	_, _, codes := enrollFixture(t, store, "bob", time.Now())
@@ -388,7 +388,7 @@ func TestOwnedConnectionEnvelopePersistenceAndOwnerBinding(t *testing.T) {
 	if e != nil || strings.Contains(string(data), name) {
 		t.Fatal("connection metadata persisted plaintext")
 	}
-	if store.CreateAccount("bob", alicePassword) != nil {
+	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
 		t.Fatal("fixture second account refused")
 	}
 	b, _ := store.lookup("bob")

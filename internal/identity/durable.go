@@ -93,7 +93,7 @@ func (l *Lab) finishFactorLocked(id [32]byte, code string) (string, error) {
 }
 func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recoveryCodes, error) {
 	s := l.liveLocked(id, false)
-	if s == nil || s.stage != "enroll" || s.pendingSeed == "" || s.replacing && !l.now().Before(s.reauthUntil) || !l.attemptLocked("mfa:"+s.username, factorAttempts) {
+	if s == nil || s.stage != "enroll" || s.pendingSeed == "" || !s.replacing && !s.setupProved || s.replacing && !l.now().Before(s.reauthUntil) || !l.attemptLocked("mfa:"+s.username, factorAttempts) {
 		return "", nil, errRefused
 	}
 	name := s.username
