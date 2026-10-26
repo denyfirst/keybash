@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/denyfirst/keybash/internal/sessionlimits"
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 	"golang.org/x/crypto/ssh"
@@ -26,7 +27,7 @@ import (
 
 type portableSSHWorker struct{ echo fixtureRDPWorker }
 
-func (f *portableSSHWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, _ []byte, user string, _ ssh.Signer) (terminalweb.Stream, error) {
+func (f *portableSSHWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, _ []byte, user string, _ sshkey.Credential) (terminalweb.Stream, error) {
 	return f.echo.OpenRDP(ctx, RDPRequest{Target: target, Username: user, Password: f.echo.expected})
 }
 func TestBrowserOwnedRemotePortable(t *testing.T) { runOwnedPortable(t, false, false) }

@@ -2,7 +2,6 @@ package sshtransport
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -10,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -24,7 +24,13 @@ const (
 	frameOutput      byte = 6
 	frameErrorOutput byte = 7
 	frameFailed      byte = 8
-	workerHello           = "keybash-ssh-worker/v1"
+	// v2: the start frame carries one credential (a key or a password) rather
+	// than an Ed25519 seed. A v1 peer is refused at the greeting.
+	workerHello = "keybash-ssh-worker/v2"
+	// Host, user and pin are small; the secret is at most sshkey.MaxMaterial.
+	startFrameLimit = 12 * 1024
+	methodKey       = "key"
+	methodPassword  = "password"
 )
 
 func frameLimit(kind byte) int {
@@ -32,7 +38,7 @@ func frameLimit(kind byte) int {
 	case frameHello:
 		return len(workerHello)
 	case frameStart:
-		return 1024
+		return startFrameLimit
 	case frameReady, frameFailed:
 		return 0
 	case frameResize:
@@ -93,7 +99,74 @@ func writeWorkerFrame(w io.Writer, kind byte, data []byte) error {
 type workerStart struct {
 	Version    uint32
 	Host, User string
-	Pin, Seed  []byte
+	Pin        []byte
+	Method     string // methodKey (PKCS#8) or methodPassword
+	Secret     []byte
+}
+
+// sessionHandoff validates one session credential against the connection
+// settings and encodes it for a worker's startup frame. The caller clears
+// the returned secret.
+func sessionHandoff(auth sshkey.Credential, user string, pin []byte) ([]byte, string, []byte, error) {
+	config := Config{User: user, HostKey: pin, Columns: 100, Rows: 30}
+	method := ""
+	var password []byte
+	switch credential := auth.(type) {
+	case *sshkey.Key:
+		if credential == nil {
+			return nil, "", nil, ErrProcess
+		}
+		config.Signer, method = credential, methodKey
+	case *sshkey.Password:
+		if credential == nil {
+			return nil, "", nil, ErrProcess
+		}
+		value, err := credential.Bytes()
+		if err != nil {
+			return nil, "", nil, ErrProcess
+		}
+		password, config.Password, method = value, value, methodPassword
+	default:
+		return nil, "", nil, ErrProcess
+	}
+	validated, err := validateConfig(config)
+	if err != nil {
+		clear(password)
+		return nil, "", nil, ErrProcess
+	}
+	if method == methodPassword {
+		return validated, method, password, nil
+	}
+	material, err := config.Signer.(*sshkey.Key).Material()
+	if err != nil {
+		return nil, "", nil, ErrProcess
+	}
+	return validated, method, material, nil
+}
+
+// workerConfig is the worker's side of sessionHandoff. The returned release
+// drops the decoded credential once the session no longer needs it.
+func workerConfig(start workerStart) (Config, func(), error) {
+	config := Config{User: start.User, HostKey: append([]byte(nil), start.Pin...), Columns: 100, Rows: 30}
+	if len(start.Secret) == 0 || len(start.Secret) > sshkey.MaxMaterial {
+		return Config{}, nil, ErrProcess
+	}
+	switch start.Method {
+	case methodKey:
+		key, err := sshkey.FromMaterial(start.Secret)
+		if err != nil {
+			return Config{}, nil, ErrProcess
+		}
+		config.Signer = key
+		return config, key.Close, nil
+	case methodPassword:
+		if !sshkey.ValidPassword(string(start.Secret)) {
+			return Config{}, nil, ErrProcess
+		}
+		config.Password = append([]byte(nil), start.Secret...)
+		return config, func() { clear(config.Password) }, nil
+	}
+	return Config{}, nil, ErrProcess
 }
 
 // serveSSHWorker is private. Its only runtime caller has already checked the
@@ -114,21 +187,19 @@ func serveSSHWorker(ctx context.Context, input io.ReadCloser, output io.WriteClo
 	}
 	var start workerStart
 	err = ssh.Unmarshal(data, &start)
-	if err != nil || start.Version != 1 || len(start.Host) == 0 || len(start.Host) > 253 || len(start.Seed) != ed25519.SeedSize {
+	if err != nil || start.Version != 2 || len(start.Host) == 0 || len(start.Host) > 253 {
+		clear(start.Secret)
 		clear(data)
 		return ErrProcess
 	}
-	private := ed25519.NewKeyFromSeed(start.Seed)
-	pin := append([]byte(nil), start.Pin...)
-	clear(start.Seed)
+	config, release, err := workerConfig(start)
+	clear(start.Secret)
 	clear(data)
-	signer, err := ssh.NewSignerFromKey(private)
 	if err != nil {
-		clear(private)
 		return ErrProcess
 	}
-	terminal, err := connect(ctx, start.Host, func(context.Context) (net.Conn, error) { return raw, nil }, Config{User: start.User, HostKey: pin, Signer: signer, Columns: 100, Rows: 30})
-	clear(private)
+	terminal, err := connect(ctx, start.Host, func(context.Context) (net.Conn, error) { return raw, nil }, config)
+	release()
 	if err != nil {
 		_ = writeWorkerFrame(output, frameFailed, nil)
 		return ErrProcess

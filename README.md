@@ -27,7 +27,8 @@ A separate memory-only identity lab adds named password login, Argon2id,
 bounded attempts, password change, secure cookies/CSRF and session revocation.
 A separate Linux loopback custody lab now adds durable encrypted accounts,
 one-use operator bootstrap, mandatory MFA/recovery, and owner-scoped encrypted
-Ed25519 key/password custody with fresh authentication for sensitive actions.
+SSH key (Ed25519, ECDSA, RSA 2048+) and password custody with fresh
+authentication for sensitive actions.
 Its browser interface and offline operator entry point use synthetic data.
 An owned-session lab now links MFA/custody and encrypted connection records to
 the existing SSH and isolated native RDP browser fixtures, with one-use socket

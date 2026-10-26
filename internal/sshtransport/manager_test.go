@@ -11,14 +11,17 @@ import (
 )
 
 func TestSSHManagerRefusalIsNilBeforeDial(t *testing.T) {
-	user := syntheticSigner(t)
 	w := ManagerWorker{SocketPath: "relative/untrusted.sock"}
 	called := false
 	dial := func(context.Context) (net.Conn, error) { called = true; return nil, ErrProcess }
-	for _, ctx := range []context.Context{nil, context.Background()} {
-		stream, err := w.open(ctx, "ssh.invalid", dial, syntheticSigner(t).PublicKey().Marshal(), "lab-user", user)
-		if err == nil || stream != nil || called {
-			t.Fatal("manager refusal reached dial or returned typed nil")
+	// Only a *sshkey.Key or *sshkey.Password can be a session credential; a
+	// missing or nil one refuses before any dial.
+	for _, user := range []sshkey.Credential{nil, (*sshkey.Key)(nil), (*sshkey.Password)(nil)} {
+		for _, ctx := range []context.Context{nil, context.Background()} {
+			stream, err := w.open(ctx, "ssh.invalid", dial, syntheticSigner(t).PublicKey().Marshal(), "lab-user", user)
+			if err == nil || stream != nil || called {
+				t.Fatal("manager refusal reached dial or returned typed nil")
+			}
 		}
 	}
 	if stream, err := w.OpenSSH(context.Background(), nil, nil, "", nil); err == nil || stream != nil {

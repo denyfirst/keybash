@@ -3,12 +3,16 @@ package identity
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/sshkey"
+	"github.com/denyfirst/keybash/internal/targetguard"
+	"github.com/denyfirst/keybash/internal/terminalweb"
 	"github.com/pquerna/otp/hotp"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/ssh"
@@ -341,6 +348,136 @@ func TestCustodySSHImportBoundsAndPasswordBlocklist(t *testing.T) {
 		t.Fatal("password blocklist inventory changed")
 	}
 }
+
+// ECDSA and RSA keys import like Ed25519 ones, plain or passphrase-protected;
+// a weak RSA key or one whose stored public half is another key's refuses.
+func TestCustodySSHImportKeyTypes(t *testing.T) {
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsa2048, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, private := range map[string]any{"ecdsa-p256": p256, "rsa-2048": rsa2048} {
+		for _, pass := range []string{"", "Synthetic private passphrase"} {
+			var block *pem.Block
+			if pass == "" {
+				block, err = ssh.MarshalPrivateKey(private, "synthetic")
+			} else {
+				block, err = ssh.MarshalPrivateKeyWithPassphrase(private, "synthetic", []byte(pass))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := Credential{Name: name, Kind: "ssh-key", Secret: string(pem.EncodeToMemory(block)), Passphrase: pass}
+			signer, _ := ssh.NewSignerFromKey(private)
+			if validateCredential(&c) != nil || c.Fingerprint != ssh.FingerprintSHA256(signer.PublicKey()) {
+				t.Fatalf("%s key import refused or fingerprinted wrongly", name)
+			}
+			key, err := openSSHKey(c)
+			if err != nil || !bytes.Equal(key.PublicKey().Marshal(), signer.PublicKey().Marshal()) {
+				t.Fatalf("%s key did not open as itself", name)
+			}
+			key.Close()
+		}
+	}
+	weak, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(weak, "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := (Credential{Name: "weak", Kind: "ssh-key", Secret: string(pem.EncodeToMemory(block))}); validateCredential(&c) == nil {
+		t.Fatal("a 1024-bit RSA key was imported")
+	}
+	// The outer public half of one key paired with another key's private half.
+	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	mine, _ := ssh.MarshalPrivateKey(p256, "synthetic")
+	theirs, _ := ssh.MarshalPrivateKey(other, "synthetic")
+	const magic = "openssh-key-v1\x00"
+	var a, b struct {
+		Cipher, KDF, Options string
+		Count                uint32
+		Public, Private      []byte
+	}
+	if ssh.Unmarshal(mine.Bytes[len(magic):], &a) != nil || ssh.Unmarshal(theirs.Bytes[len(magic):], &b) != nil {
+		t.Fatal("fixture parse failed")
+	}
+	a.Public = b.Public
+	mixed := pem.EncodeToMemory(&pem.Block{Type: mine.Type, Bytes: append([]byte(magic), ssh.Marshal(a)...)})
+	if c := (Credential{Name: "mixed", Kind: "ssh-key", Secret: string(mixed)}); validateCredential(&c) == nil {
+		t.Fatal("a key whose stored public half is another key's was imported")
+	}
+}
+
+type recordingSSHWorker struct{ got sshkey.Credential }
+
+func (r *recordingSSHWorker) OpenSSH(_ context.Context, _ *targetguard.NamedTarget, _ []byte, _ string, auth sshkey.Credential) (terminalweb.Stream, error) {
+	r.got = auth
+	return nil, errRefused
+}
+
+// An SSH connection opens with whichever kind its stored credential is: a key
+// becomes a session key, a password a session password. Nothing else is tried.
+func TestOwnedSSHCredentialKinds(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	_, hostKey, _ := ed25519.GenerateKey(rand.Reader)
+	hostSigner, _ := ssh.NewSignerFromKey(hostKey)
+	ip := netip.MustParseAddr("10.34.0.9")
+	policy, err := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(ip, 22)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named, err := targetguard.NewNamedTarget(policy, "ssh.invalid", 22, []netip.Addr{ip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := RemoteTarget{strings.Repeat("c", 32), "Synthetic SSH", "ssh", named, hostSigner.PublicKey().Marshal()}
+	worker := &recordingSSHWorker{}
+	l, err := NewRemoteLab("https://127.0.0.1:8443", s, []RemoteTarget{target}, worker, nil)
+	if err != nil {
+		t.Fatal("remote lab refused")
+	}
+	defer l.Close()
+	_, userKey, _ := ed25519.GenerateKey(rand.Reader)
+	block, _ := ssh.MarshalPrivateKey(userKey, "synthetic")
+	for _, c := range []Credential{
+		{Name: "key", Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(block))},
+		{Name: "password", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"},
+	} {
+		if !compatible(target, c) {
+			t.Fatalf("%s credential is not compatible with SSH", c.Kind)
+		}
+		worker.got = nil
+		_, _ = l.openRemote(context.Background(), target, c)
+		switch got := worker.got.(type) {
+		case *sshkey.Key:
+			if c.Kind != "ssh-key" {
+				t.Fatal("a password became a key")
+			}
+		case *sshkey.Password:
+			value, err := got.Bytes()
+			if c.Kind != "password" || err == nil || value != nil {
+				t.Fatal("a session password was not closed after the attempt, or a key became a password")
+			}
+		default:
+			t.Fatalf("%s credential reached the worker as %T", c.Kind, got)
+		}
+	}
+	if compatible(target, Credential{Kind: "password"}) || compatible(target, Credential{Kind: "other", Username: "deploy"}) {
+		t.Fatal("an SSH credential without a user or of another kind is compatible")
+	}
+	// RDP takes only a password; an SSH key never reaches a desktop worker.
+	rdp := RemoteTarget{Protocol: "rdp"}
+	if !compatible(rdp, Credential{Kind: "password", Username: "deploy"}) || compatible(rdp, Credential{Kind: "ssh-key", Username: "deploy"}) || compatible(RemoteTarget{Protocol: "vnc"}, Credential{Kind: "password", Username: "deploy"}) {
+		t.Fatal("a credential kind crossed protocols")
+	}
+}
+
 func TestPersistentPasswordSessionsCannotOpenVault(t *testing.T) {
 	s, _, _ := bootstrapped(t)
 	l, e := NewPersistent("https://127.0.0.1:9443", s)

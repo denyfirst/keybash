@@ -12,15 +12,17 @@ candidate audit remain required. Porch and Rootwell are untouched.
 
 `identity.NewRemoteLab` retains MFA, ownership, fresh proof for trust changes, approval binding,
 one-use capabilities, quotas and active revocation. After bounded OpenSSH import
-validation it builds one `sshkey.Key` from the authorized Ed25519 key. This
-redacted, copied material implements the existing signer interface and is closed
-after setup. The existing library worker still works. `ProcessWorker` refuses
-arbitrary signers: there is no SSH agent or reusable signing RPC/oracle.
+validation it builds one session credential: an `sshkey.Key` (Ed25519, ECDSA
+P-256/384/521, or RSA 2048–8192 bits signing only with SHA-2) or an
+`sshkey.Password`. This redacted, copied material is closed after setup. The
+existing library worker still works. `ProcessWorker` accepts only these two
+kinds: there is no SSH agent or reusable signing RPC/oracle.
 
-The process worker receives a single 32-byte Ed25519 seed through a bounded
-private startup pipe, after its sandbox hello. It receives no DB path, instance
-key, login password, MFA seed, passphrase or other vault records. The gateway
-has already parsed/decrypted an encrypted imported key within its two-slot
+The process worker receives that one credential (a PKCS#8 key of at most 8 KiB,
+or a password of at most 4096 bytes) in a version 2 start frame through a
+bounded private startup pipe, after its sandbox hello. It receives no DB path,
+instance key, login password, MFA seed, passphrase or other vault records. The
+gateway has already parsed/decrypted an encrypted imported key within its two-slot
 budget. Neither startup bytes nor native diagnostics are logged, written to a
 key file, placed in URLs/arguments/environment, or sent to browser storage.
 Best-effort clearing reduces lifetime; guaranteed RAM erasure is not claimed.
@@ -41,10 +43,12 @@ answer against its target pins and installation policy, and dial one literal
 approved endpoint. The manager hands that already-connected TCP descriptor to
 the child. The child cannot select a new host, IP, URL, port or broker address.
 It performs the existing SSH exchange on **that same connection**, using its
-copied Ed25519 host pin, supported algorithms and signing-after-verification
-gate. There is no TLS/SSH preflight-then-redial authority or TOFU fallback.
-Ready means host verification, configured key authentication and remote PTY/
-shell admission succeeded; a successful sandbox hello alone is not readiness.
+copied Ed25519 host pin, supported algorithms and its credential-after-
+verification gate (no signature or password before the pin matched). There is
+no TLS/SSH preflight-then-redial authority or TOFU fallback. Ready means host
+verification, authentication with the one configured credential (key or
+password) and remote PTY/shell admission succeeded; a successful sandbox hello
+alone is not readiness.
 
 ## Linux boundary
 

@@ -42,9 +42,9 @@ trust changes require fresh password-plus-factor proof; launching an approved
 connection needs a ready MFA session, because sign-in already proved both
 factors and launch changes no stored decision. The API accepts only exact
 named scalar fields; an `owner`, replacement target/identity or extra field
-is refused. SSH needs the owner's nonempty username/Ed25519 key; RDP needs the
-owner's nonempty username/password. No password fallback or credential export
-is added by launch. The normal custody reveal remains separately authorized.
+is refused. SSH needs the owner's nonempty username and a key or password; RDP
+needs a username and password. Only the stored credential is tried: no
+fallback or credential export is added by launch. The normal custody reveal remains separately authorized.
 
 ## Single-use capability and revocation
 

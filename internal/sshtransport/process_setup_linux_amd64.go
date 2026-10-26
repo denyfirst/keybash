@@ -17,7 +17,7 @@ func newProcessStream(ctx context.Context, cancel context.CancelFunc, in, out *o
 	return s
 }
 
-func finishProcessSetup(s *processStream, setup context.Context, host string, pin []byte, user string, seed []byte) error {
+func finishProcessSetup(s *processStream, setup context.Context, host string, pin []byte, user, method string, secret []byte) error {
 	stopSetup := context.AfterFunc(setup, s.cancel)
 	defer stopSetup()
 	deadline, _ := setup.Deadline()
@@ -28,7 +28,7 @@ func finishProcessSetup(s *processStream, setup context.Context, host string, pi
 	if err != nil || kind != frameHello || string(hello) != workerHello {
 		return ErrProcess
 	}
-	start := ssh.Marshal(&workerStart{Version: 1, Host: host, User: user, Pin: pin, Seed: seed})
+	start := ssh.Marshal(&workerStart{Version: 2, Host: host, User: user, Pin: pin, Method: method, Secret: secret})
 	err = writeWorkerFrame(s.in, frameStart, start)
 	clear(start)
 	if err != nil {

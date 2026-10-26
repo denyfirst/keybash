@@ -88,7 +88,8 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 - Denyfirst üslubunda giriş/hesab ekranı və ayrıca Linux custody lab-ı.
 - Daimi şifrələnmiş hesablar, birdəfəlik bootstrap, məcburi MFA/bərpa kodları,
   restart-dan sonra replay rəddi və ayrıca instance key.
-- Öz hesabına aid Ed25519 açar/passphrase və şifrə saxlama/göstərmə/silmə;
+- Öz hesabına aid SSH açarı (Ed25519, ECDSA, RSA 2048+)/passphrase və şifrə
+  saxlama/göstərmə/silmə; SSH-ə açarla və ya şifrə ilə qoşulma;
   həssas əməliyyatlar üçün şifrə + təzə MFA ilə təkrar doğrulama.
 
 Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağlıdır.

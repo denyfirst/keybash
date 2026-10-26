@@ -27,8 +27,9 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    Production quraşdırma və restore/rotation qalır; source worker/service
    inteqrasiyası ayrıca məcburi CI ilə izlənir.
 3. **Credential vault və istifadəçi icazələri.** Şifrələnmiş persistence, ayrıca
-   instance key, Ed25519 key/passphrase və password importu lab-da hazırdır.
-   RDP domain sahəsi və digər key formatları qalır.
+   instance key, SSH açarı (Ed25519, ECDSA, RSA 2048+)/passphrase və password
+   importu lab-da hazırdır; SSH-ə şifrə ilə qoşulma da işləyir. RDP domain
+   sahəsi qalır.
    Connection-credential əlaqəsi və sessiya icazələri artıq SSH/native RDP
    brauzer lab-ında birləşir (`OWNED-REMOTE-LAB.md`). Source SSH/RDP manager
    və root catalog inteqrasiyası var; real host qəbul sınağı qalır. Reveal/export icazəsi və başqa hesabın

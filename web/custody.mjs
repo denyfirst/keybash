@@ -98,7 +98,7 @@ async function loadRecords() {
     row.append(label, reveal, remove); $('records').append(row);
   }
   if (!records.length) $('records').textContent = 'Hələ qeyd yoxdur.';
-  if(remoteEnabled){$('connection-credential').replaceChildren();for(const record of records){const option=document.createElement('option');option.value=record.id;option.textContent=`${record.name} · ${record.kind}`;$('connection-credential').append(option);}await loadConnections();}
+  if(remoteEnabled){$('connection-credential').replaceChildren();for(const record of records){const option=document.createElement('option');option.value=record.id;option.textContent=`${record.name} · ${record.kind === 'ssh-key' ? 'SSH açarı' : 'Şifrə'}`;$('connection-credential').append(option);}await loadConnections();}
 }
 const fingerprintOK = value => typeof value === 'string' && (/^SHA256:[A-Za-z0-9+/]{43}$/.test(value) || /^SHA256:[a-f0-9]{64}$/.test(value));
 function updateTrustButtons() {
