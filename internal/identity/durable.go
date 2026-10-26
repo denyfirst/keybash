@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// Revealing, deleting or importing secrets, changing trust decisions, the
+// password or MFA require both factors proved within this window.
+const freshProof = 2 * time.Minute
+
 // NewPersistent keeps the existing HTTPS/Origin/session controls, backed by
 // encrypted transactional custody. Password-only sessions are setup/challenge
 // sessions; only confirmed MFA can reach credential operations.
@@ -74,7 +78,7 @@ func (l *Lab) finishFactorLocked(id [32]byte, code string) (string, error) {
 	if l.store.consumeFactor(s.owner, s.revision, code, l.now()) != nil {
 		return "", errRefused
 	}
-	name := s.username
+	name, passwordProof := s.username, s.created
 	l.forgetLocked(id)
 	raw, e := l.issueLocked(name, "")
 	if e != nil {
@@ -82,6 +86,9 @@ func (l *Lab) finishFactorLocked(id [32]byte, code string) (string, error) {
 	}
 	newID, _ := tokenID(raw)
 	l.sessions[newID].stage = "ready"
+	// Sign-in just proved both factors: it counts as fresh proof until the
+	// password check (the challenge session's creation) is freshProof old.
+	l.sessions[newID].reauthUntil = passwordProof.Add(freshProof)
 	return raw, nil
 }
 func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recoveryCodes, error) {
@@ -90,6 +97,12 @@ func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recover
 		return "", nil, errRefused
 	}
 	name := s.username
+	// A first enrollment proved the password when its session was created; a
+	// replacement carries the fresh window its reauthentication granted.
+	proofUntil := s.created.Add(freshProof)
+	if s.replacing {
+		proofUntil = s.reauthUntil
+	}
 	codes, e := l.store.enroll(s.owner, s.revision, s.pendingSeed, code, l.now(), s.replacing)
 	if e != nil {
 		return "", nil, e
@@ -101,6 +114,7 @@ func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recover
 	}
 	newID, _ := tokenID(raw)
 	l.sessions[newID].stage = "ready"
+	l.sessions[newID].reauthUntil = proofUntil
 	return raw, codes, nil
 }
 func (l *Lab) reauthenticate(ctx context.Context, id [32]byte, password, code string) error {
@@ -126,6 +140,6 @@ func (l *Lab) reauthenticate(ctx context.Context, id [32]byte, password, code st
 	if l.store.consumeFactor(s.owner, revision, code, l.now()) != nil {
 		return errRefused
 	}
-	s.reauthUntil = l.now().Add(2 * time.Minute)
+	s.reauthUntil = l.now().Add(freshProof)
 	return nil
 }

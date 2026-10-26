@@ -38,6 +38,8 @@ try {
   await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30) - 1)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
   await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#recovery-codes').inputValue(), '');
+  // Completing sign-in counts as fresh proof for two minutes; let it lapse.
+  await fixture('tick'); await fixture('tick');
   assert.equal((await api('/api/credentials', { name: 'x', kind: 'password', username: '', secret: vaultSecret, passphrase: '' })).status(), 403, 'fresh factor bypass');
   await reauth(otp());
   await page.locator('#credential').evaluate(el => { el.parentElement.open = true; });

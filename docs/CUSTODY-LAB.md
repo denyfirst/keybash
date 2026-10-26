@@ -77,8 +77,11 @@ sweep cancels changed cached generations. Password/factor/recovery changes
 revoke previous sessions. Expired, canceled, corrupted or stale work cannot
 grant fresh authority. Sensitive create/reveal/delete, password replacement,
 factor replacement and recovery regeneration require password plus a fresh
-factor proof no older than two minutes. A previously used TOTP must wait for
-the next code; recovery codes can provide immediate fresh proof.
+factor proof no older than two minutes. Completing sign-in counts as that
+proof until the password check is two minutes old, so an action right after
+login needs no second code. Later, a previously used TOTP must wait for the
+next code; recovery codes can provide immediate fresh proof. Opening an
+already approved connection needs only a ready MFA session.
 
 Factor replacement retains the old seed until the new seed/code is confirmed.
 Abandoning replacement leaves the old factor working. If the two-minute proof

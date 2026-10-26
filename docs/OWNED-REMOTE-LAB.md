@@ -37,8 +37,10 @@ per owner and 2048 overall, within the existing 256 MiB DB cap. The optional
 namespace's deletion is an availability loss, not a new authority. Old backup/
 whole-record rollback limits from `CUSTODY-LAB.md` still apply.
 
-Connections can be created/listed/deleted after MFA. Creation/deletion and
-launch require fresh password-plus-factor proof. The API accepts only exact
+Connections can be created/listed/deleted after MFA. Creation, deletion and
+trust changes require fresh password-plus-factor proof; launching an approved
+connection needs a ready MFA session, because sign-in already proved both
+factors and launch changes no stored decision. The API accepts only exact
 named scalar fields; an `owner`, replacement target/identity or extra field
 is refused. SSH needs the owner's nonempty username/Ed25519 key; RDP needs the
 owner's nonempty username/password. No password fallback or credential export
@@ -50,8 +52,8 @@ is added by launch. The normal custody reveal remains separately authorized.
 admission lifetime. Only its digest is retained. It is bound to the exact
 browser session, account owner, connection and credential; another browser
 of the same account cannot consume it. Both grant and consumption check ready
-MFA state, fresh proof, current account revision, owner records, protocol/kind
-and approval fingerprint. There are at most two pending/active leases per
+MFA state, current account revision, owner records, protocol/kind and approval
+fingerprint. There are at most two pending/active leases per
 owner and eight overall. Failed/closed setup consumes the capability too.
 
 WebSocket upgrade uses the exact fixed `/api/remote/socket` path, secure

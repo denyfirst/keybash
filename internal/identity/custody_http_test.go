@@ -100,6 +100,16 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	}
 	stale := custodyClient{t: t, l: l, cookie: setupCookie}
 	stale.expect("GET", "/api/session", "", 401)
+	// Completing sign-in proved both factors: it is fresh proof until the
+	// password check is freshProof old, then sensitive actions refuse.
+	signedIn, _ := tokenID(c.cookie.Value)
+	l.mu.Lock()
+	freshAfterSignIn := l.readyLocked(signedIn, true) != nil
+	l.mu.Unlock()
+	if !freshAfterSignIn {
+		t.Fatal("completed sign-in did not count as fresh proof")
+	}
+	advance(l, &now, freshProof)
 	c.expect("GET", "/api/credentials", "", 200)
 	c.expect("POST", "/api/credentials", `{"name":"x","kind":"password","username":"u","secret":"s","passphrase":""}`, 403)
 	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": otpCode(t, seed.Secret, now.Unix()/30)}), 204)
@@ -310,6 +320,44 @@ func FuzzCustodyFields(f *testing.F) {
 }
 
 // Cancellation never consumes a factor or grants fresh authority.
+// Sign-in freshness is bounded by the older proof, the password check, so a
+// slow factor entry cannot stretch it past freshProof.
+func TestSignInFreshnessStartsAtPasswordCheck(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	_, _, codes := enrollFixture(t, s, "alice", time.Now())
+	l, e := NewPersistent("https://127.0.0.1:8443", s)
+	if e != nil {
+		t.Fatal("persistent lab refused")
+	}
+	defer l.Close()
+	now := time.Now()
+	l.mu.Lock()
+	l.now = func() time.Time { return now }
+	l.mu.Unlock()
+	raw, e := l.login(context.Background(), "alice", alicePassword, "")
+	if e != nil {
+		t.Fatal("login refused")
+	}
+	id, _ := tokenID(raw)
+	advance(l, &now, 90*time.Second)
+	l.mu.Lock()
+	raw, e = l.finishFactorLocked(id, codes[0])
+	l.mu.Unlock()
+	if e != nil {
+		t.Fatal("factor refused")
+	}
+	id, _ = tokenID(raw)
+	fresh := func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.readyLocked(id, true) != nil }
+	advance(l, &now, freshProof-90*time.Second-time.Second)
+	if !fresh() {
+		t.Fatal("sign-in was not fresh within two minutes of the password check")
+	}
+	advance(l, &now, time.Second)
+	if fresh() {
+		t.Fatal("sign-in freshness outlived the password check by more than two minutes")
+	}
+}
+
 func TestCustodyCancelledReauthentication(t *testing.T) {
 	s, _, _ := bootstrapped(t)
 	_, _, codes := enrollFixture(t, s, "alice", time.Now())
@@ -318,6 +366,10 @@ func TestCustodyCancelledReauthentication(t *testing.T) {
 		t.Fatal("persistent lab refused")
 	}
 	defer l.Close()
+	now := time.Now()
+	l.mu.Lock()
+	l.now = func() time.Time { return now }
+	l.mu.Unlock()
 	raw, e := l.login(context.Background(), "alice", alicePassword, "")
 	if e != nil {
 		t.Fatal("login refused")
@@ -330,6 +382,7 @@ func TestCustodyCancelledReauthentication(t *testing.T) {
 		t.Fatal("factor refused")
 	}
 	id, _ = tokenID(raw)
+	advance(l, &now, freshProof) // let the sign-in proof lapse first
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if l.reauthenticate(ctx, id, alicePassword, codes[1]) == nil {

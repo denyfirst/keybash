@@ -10,7 +10,7 @@ candidate audit remain required. Porch and Rootwell are untouched.
 
 ## Admission and custody
 
-`identity.NewRemoteLab` retains MFA, fresh proof, ownership, approval binding,
+`identity.NewRemoteLab` retains MFA, ownership, fresh proof for trust changes, approval binding,
 one-use capabilities, quotas and active revocation. After bounded OpenSSH import
 validation it builds one `sshkey.Key` from the authorized Ed25519 key. This
 redacted, copied material implements the existing signer interface and is closed
