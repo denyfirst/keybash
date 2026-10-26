@@ -154,7 +154,7 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	if s == nil || l.remote == nil {
 		return "", errRefused
 	}
-	if !l.attemptLocked("remote:" + s.username) {
+	if !l.attemptLocked("remote:"+s.username, remoteAttempts) {
 		return "", errLimited
 	}
 	l.sweepRemotesLocked()
@@ -470,7 +470,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 401
 			return
 		}
-		if !l.attemptLocked("trust:" + s.username) {
+		if !l.attemptLocked("trust:"+s.username, trustAttempts) {
 			status = 429
 			return
 		}
@@ -513,7 +513,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 409
 			return
 		}
-		if !l.attemptLocked("trust:" + s.username) {
+		if !l.attemptLocked("trust:"+s.username, trustAttempts) {
 			status = 429
 			return
 		}

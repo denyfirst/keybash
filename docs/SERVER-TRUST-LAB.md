@@ -52,8 +52,8 @@ stores the decision under its existing instance/kind/owner/ID/revision envelope.
 Reapproval checks the exact previous encrypted revision transactionally, increments
 it and consumes the normal global seal budget. Unknown/duplicate/coerced fields
 and caller-selected owners or endpoints refuse.
-Valid creation/reapproval shares a five-per-owner-per-minute trust budget and
-the existing twenty-attempt global authentication/mutation window. Stale or
+Valid creation/reapproval shares a five-per-owner-per-minute trust budget,
+separate from login and other accounts' budgets. Stale or
 malformed reviews cannot spend encryption seals or revoke sessions. This is a
 bounded write policy, not an authenticated-user or whole-service DDoS guarantee.
 

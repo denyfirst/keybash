@@ -74,7 +74,7 @@ func (l *Lab) bootstrapHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clear(fields)
 	l.mu.Lock()
-	allowed := !l.closed && l.attemptLocked("bootstrap:")
+	allowed := !l.closed && l.attemptLocked("bootstrap:", setupAttempts)
 	now := l.now()
 	l.mu.Unlock()
 	if !allowed {
@@ -389,7 +389,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			Codes recoveryCodes `json:"codes"`
 		}{codes})
 	case r.URL.Path == "/api/credentials" && r.Method == "POST":
-		if !l.attemptLocked("import:" + s.username) {
+		if !l.attemptLocked("import:"+s.username, importAttempts) {
 			l.mu.Unlock()
 			identityError(w, errLimited)
 			return
