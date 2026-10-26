@@ -24,11 +24,11 @@ func (d Data) word(offset uint32) (uint32, bool) {
 	case offset == 4:
 		return d.Arch, true
 	case offset >= 16 && offset < 64 && offset%4 == 0:
-		arg := d.Args[(offset-16)/8]
-		if (offset-16)%8 == 0 {
-			return uint32(arg), true // little-endian low word
-		}
-		return uint32(arg >> 32), true
+		// Read the word from the argument's little-endian bytes, exactly as
+		// the kernel lays out seccomp_data on amd64.
+		var raw [8]byte
+		binary.LittleEndian.PutUint64(raw[:], d.Args[(offset-16)/8])
+		return binary.LittleEndian.Uint32(raw[(offset-16)%8:]), true
 	}
 	return 0, false
 }
