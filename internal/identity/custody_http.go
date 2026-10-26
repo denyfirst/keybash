@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/denyfirst/keybash/web"
 )
 
 func readFields(w http.ResponseWriter, r *http.Request, limit int, names ...string) (map[string]string, bool) {
@@ -147,6 +149,12 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			return
 		case "/custody.css":
 			serveAsset(w, "custody.css")
+			return
+		case "/keybash.css":
+			serveAsset(w, "keybash.css")
+			return
+		case web.FontPath:
+			serveAsset(w, "schibsted-grotesk.woff2")
 			return
 		case "/api/setup":
 			ready, e := l.store.initialized()

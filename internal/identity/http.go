@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/denyfirst/keybash/web"
@@ -22,7 +23,7 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=()")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'")
 	peer, _, err := net.SplitHostPort(r.RemoteAddr)
 	ip, ipErr := netip.ParseAddr(peer)
 	if l == nil || err != nil || ipErr != nil || !ip.Unmap().IsLoopback() || r.Host != l.host || r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || r.URL.RawQuery != "" || r.URL.Path != r.URL.EscapedPath() {
@@ -57,7 +58,7 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		assets := map[string]string{"/login": "auth-login.html", "/auth.mjs": "auth.mjs", "/auth.css": "auth.css"}
+		assets := map[string]string{"/login": "auth-login.html", "/auth.mjs": "auth.mjs", "/auth.css": "auth.css", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2"}
 		if name := assets[r.URL.Path]; name != "" {
 			serveAsset(w, name)
 			return
@@ -151,10 +152,13 @@ func serveAsset(w http.ResponseWriter, name string) {
 		return
 	}
 	typeName := "text/html; charset=utf-8"
-	if name == "auth.mjs" || name == "custody.mjs" {
+	switch {
+	case strings.HasSuffix(name, ".mjs"):
 		typeName = "text/javascript; charset=utf-8"
-	} else if name == "auth.css" || name == "custody.css" {
+	case strings.HasSuffix(name, ".css"):
 		typeName = "text/css; charset=utf-8"
+	case strings.HasSuffix(name, ".woff2"):
+		typeName = "font/woff2"
 	}
 	w.Header().Set("Content-Type", typeName)
 	_, _ = w.Write(data)

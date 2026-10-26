@@ -1,5 +1,18 @@
 # Protocol dependency review
 
+## Interface typeface (2026-10-26)
+
+The pages adopt the Denyfirst design Porch established, including its typeface:
+Schibsted Grotesk, the variable Latin subset from
+`@fontsource-variable/schibsted-grotesk` 5.3.0, under the SIL Open Font License
+1.1 (`third-party/schibsted-grotesk-LICENSE.txt`). The file is byte-identical
+to the one Porch pinned (SHA-256 `4c8b93f4…a75e05`), copied rather than
+fetched; `web/assets_test.go` pins the hash, so a different file is a reviewed
+change. A font is a program the browser parses, so it is served only from this
+server with an exact `font/woff2` type and `nosniff`, every page policy limits
+fonts to `font-src 'self'`, and no stylesheet loads any other URL or import.
+It adds no Go or JavaScript dependency and nothing at runtime outside the page.
+
 ## Toolchain security update (2026-10-21)
 
 The current pin is Go 1.26.10. The live vulnerability gate reported

@@ -269,6 +269,26 @@ func TestOwnedRemoteSocketEchoLogoutAndLateSetup(t *testing.T) {
 		})
 	}
 }
+
+// The session page is told which owned connection it serves through its body
+// tag, whatever classes the design gives that tag. Without the mark the page
+// falls back to the lab login, so an unmarked page is never served.
+func TestOwnedRemotePageCarriesItsConnection(t *testing.T) {
+	_, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	w := c.expect("GET", "/remote/rdp/"+record, "", 200)
+	page := w.Body.String()
+	start := strings.Index(page, "<body ")
+	end := strings.Index(page[start:], ">")
+	if start < 0 || end < 0 {
+		t.Fatal("owned page has no body tag")
+	}
+	tag := page[start : start+end]
+	if !strings.Contains(tag, `data-owned-remote="rdp"`) || !strings.Contains(tag, `data-connection="`+record+`"`) || !strings.Contains(tag, `class="workspace"`) || strings.Count(page, "data-owned-remote") != 1 {
+		t.Fatalf("owned page body tag is not marked for its connection: %s", tag)
+	}
+	c.expect("GET", "/remote/ssh/"+record, "", 404)
+}
+
 func TestOwnedRemoteConstructorAndMalformedRequests(t *testing.T) {
 	store, _, _ := bootstrapped(t)
 	target := remoteTargetFixture(t)
