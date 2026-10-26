@@ -34,6 +34,64 @@ func namedFixture(t *testing.T, port uint16) (*NamedTarget, *Policy) {
 	return target, p
 }
 
+// A server without a DNS name is approved by address alone: nothing is ever
+// resolved, and only the approved literal is dialed, through the policy.
+func TestAddressTargetDialsTheApprovedLiteralWithoutDNS(t *testing.T) {
+	for _, given := range []string{"10.20.30.40", "::ffff:10.20.30.40", "fd42::5"} {
+		_, p := namedFixture(t, 22)
+		target, err := NewAddressTarget(p, netip.MustParseAddr(given), 22)
+		if err != nil {
+			t.Fatal("approved literal refused")
+		}
+		want := netip.MustParseAddr(given).Unmap()
+		if !target.Literal() || target.Hostname() != want.String() {
+			t.Fatal("address target lost its canonical literal")
+		}
+		if snap := target.Snapshot(); snap.Hostname != want.String() || snap.Port != 22 || len(snap.Addresses) != 1 || snap.Addresses[0] != want.String() {
+			t.Fatal("address target snapshot differs from its approval")
+		}
+		target.lookup = func(context.Context, string, string) ([]netip.Addr, error) {
+			t.Fatal("an address target resolved a name")
+			return nil, nil
+		}
+		client, server := net.Pipe()
+		dials := 0
+		p.dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dials++
+			if network != "tcp" || addr != netip.AddrPortFrom(want, 22).String() {
+				t.Fatal("address target dialed something other than its literal")
+			}
+			return client, nil
+		}
+		conn, err := target.DialContext(context.Background())
+		if err != nil || conn != client || dials != 1 {
+			t.Fatal("approved literal was not dialed exactly once")
+		}
+		_ = server.Close()
+		_ = conn.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := target.DialContext(ctx); err == nil || dials != 1 {
+			t.Fatal("a canceled request dialed")
+		}
+	}
+	_, p := namedFixture(t, 22)
+	for _, bad := range []struct {
+		addr string
+		port uint16
+	}{{"10.99.0.5", 22}, {"10.20.30.40", 23}, {"10.20.30.40", 0}, {"127.0.0.1", 22}, {"169.254.169.254", 22}, {"fe80::1%eth0", 22}} {
+		if target, err := NewAddressTarget(p, netip.MustParseAddr(bad.addr), bad.port); err == nil || target != nil {
+			t.Fatalf("%s port %d was approved as an address target", bad.addr, bad.port)
+		}
+	}
+	if target, err := NewAddressTarget(nil, netip.MustParseAddr("10.20.30.40"), 22); err == nil || target != nil {
+		t.Fatal("an address target was approved without a policy")
+	}
+	if named, _ := namedFixture(t, 22); named.Literal() {
+		t.Fatal("a named target reported itself as a bare address")
+	}
+}
+
 func TestNamedTargetResolvesOnceAndDialsPinnedLiteral(t *testing.T) {
 	for _, port := range []uint16{22, 3389} {
 		for _, address := range []string{"10.20.30.40", "fd42::5", "::ffff:10.20.30.40"} {

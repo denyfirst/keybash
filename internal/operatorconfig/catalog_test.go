@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +110,37 @@ func TestOperatorCatalogRejectsAmbiguousAndForbidden(t *testing.T) {
 	}
 	if _, err := Parse(nil); err != ErrConfiguration {
 		t.Fatal("nil reader accepted")
+	}
+}
+
+// An SSH server with no DNS name is approved by its address alone, with no
+// addresses list to contradict it; RDP keeps a name its certificate is checked
+// against.
+func TestOperatorCatalogAddressOnlySSHTarget(t *testing.T) {
+	good := fixture(t)
+	addressOnly := func(hostname string) string {
+		return strings.Replace(strings.Replace(good, `"hostname":"ssh.invalid"`, `"hostname":"`+hostname+`"`, 1), `"addresses":["10.44.0.8"],`, ``, 1)
+	}
+	for _, host := range []string{"10.44.0.8", "fd44::8"} {
+		targets, err := Parse(strings.NewReader(addressOnly(host)))
+		if err != nil || len(targets) != 1 {
+			t.Fatalf("address-only SSH target %s refused", host)
+		}
+		snap := targets[0].Target.Snapshot()
+		if !targets[0].Target.Literal() || targets[0].Target.Hostname() != host || snap.Port != 22 || len(snap.Addresses) != 1 || snap.Addresses[0] != host {
+			t.Fatalf("address-only target %s lost its approval", host)
+		}
+	}
+	for i, raw := range []string{
+		strings.Replace(good, `"hostname":"ssh.invalid"`, `"hostname":"10.44.0.8"`, 1), // with a second source
+		addressOnly("::ffff:10.44.0.8"), addressOnly("10.99.0.8"), addressOnly("127.0.0.1"),
+		addressOnly("169.254.169.254"), addressOnly("fe80::1%eth0"), addressOnly("FD44::8"),
+		addressOnly("010.44.0.8"), addressOnly("ssh.invalid"), // a name still needs its pins
+		strings.Replace(addressOnly("10.44.0.8"), `"protocol":"ssh"`, `"protocol":"rdp"`, 1),
+	} {
+		if targets, err := Parse(strings.NewReader(raw)); err != ErrConfiguration || targets != nil {
+			t.Fatalf("invalid address-only entry accepted at case %d", i)
+		}
 	}
 }
 
@@ -222,6 +254,15 @@ func TestOperatorCatalogRDPCertificate(t *testing.T) {
 	cert.IsCA = false
 	cert.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 	check(false)
+	// Even a certificate that names the address cannot make an RDP target
+	// address-only: the native identity check is against a name.
+	cert.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	cert.IPAddresses = []net.IP{net.ParseIP("10.44.0.8")}
+	entry["hostname"] = "10.44.0.8"
+	delete(entry, "addresses")
+	check(false)
+	entry["hostname"], entry["addresses"] = "ssh.invalid", []string{"10.44.0.8"}
+	check(true)
 	entry["rdp_certificate"] = "not-a-certificate"
 	raw, _ := json.Marshal(root)
 	if targets, err := Parse(bytes.NewReader(raw)); err != ErrConfiguration || targets != nil {
