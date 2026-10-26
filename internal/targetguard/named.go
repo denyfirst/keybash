@@ -15,12 +15,34 @@ const maxTargetAddresses = 16
 // approval authority: pins must come from independently trusted configuration.
 // A nil or zero target denies access. Recreate the target when approvals change.
 type NamedTarget struct {
-	policy *Policy
-	host   string
-	port   uint16
-	pins   map[netip.Addr]struct{}
-	lookup func(context.Context, string, string) ([]netip.Addr, error)
+	policy  *Policy
+	host    string
+	port    uint16
+	pins    map[netip.Addr]struct{}
+	lookup  func(context.Context, string, string) ([]netip.Addr, error)
+	literal netip.AddrPort // set only by NewAddressTarget; then there is no DNS
 }
+
+// NewAddressTarget approves one literal address and port for a server that has
+// no DNS name, which is common on a small office network. Nothing is ever
+// resolved, so there is no name to rebind or poison; the policy still decides
+// at the dial. Hostname returns the canonical address, a label only: an SSH
+// connection's identity remains its approved host key.
+func NewAddressTarget(policy *Policy, address netip.Addr, port uint16) (*NamedTarget, error) {
+	if port == 0 || !address.IsValid() || address.Zone() != "" {
+		return nil, ErrInvalidPolicy
+	}
+	endpoint, allowed := policy.permitted(netip.AddrPortFrom(address, port))
+	if !allowed {
+		return nil, ErrInvalidPolicy
+	}
+	return &NamedTarget{policy: policy, host: endpoint.Addr().String(), port: port,
+		pins: map[netip.Addr]struct{}{endpoint.Addr(): {}}, literal: endpoint}, nil
+}
+
+// Literal reports whether the target is a bare address with no DNS name.
+// Protocols whose identity check needs a name (RDP certificates) refuse it.
+func (t *NamedTarget) Literal() bool { return t != nil && t.literal.IsValid() }
 
 // NewNamedTarget validates every pin against the installation policy and copies
 // the pin set. host is an ASCII DNS name (IDNA A-labels may be supplied), not a
@@ -78,7 +100,7 @@ func (t *NamedTarget) Snapshot() Snapshot {
 // to Policy.DialContext as a literal IP; there is no second hostname lookup.
 // The first returned address is used, without fallback or automatic reapproval.
 func (t *NamedTarget) DialContext(ctx context.Context) (net.Conn, error) {
-	if t == nil || t.policy == nil || t.lookup == nil || len(t.pins) == 0 || ctx == nil {
+	if t == nil || t.policy == nil || len(t.pins) == 0 || ctx == nil {
 		return nil, ErrDenied
 	}
 	if err := ctx.Err(); err != nil {
@@ -86,6 +108,13 @@ func (t *NamedTarget) DialContext(ctx context.Context) (net.Conn, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	if t.literal.IsValid() {
+		// The approved literal itself; the policy rechecks it at the dial.
+		return t.policy.DialContext(ctx, t.literal)
+	}
+	if t.lookup == nil {
+		return nil, ErrDenied
+	}
 	// A root dot prevents OS search domains from changing the configured name.
 	addresses, err := t.lookup(ctx, "ip", t.host+".")
 	if cancelErr := ctx.Err(); cancelErr != nil {
