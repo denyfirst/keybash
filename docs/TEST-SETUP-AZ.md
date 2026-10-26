@@ -189,11 +189,12 @@ Bu tapşırıqları yoxla və gözlənilən/faktiki nəticəni qeyd et:
 6. Yanlış password, dəyişmiş host key/sertifikat və başqa owner resursları rədd
    edilsin. Real credential-larla bunları sınama.
 
-İlkin source test axınında 8 MiB lifetime output, native instruction/pixel-work,
-32 KiB text, hər istiqamətdə 128 clipboard əməliyyatı, saniyədə 4 resize və
-finite session/CPU/RAM/pids hədləri var. Bunlar test containment üçündür;
-uzun gündəlik sessiya və geniş brauzer/Windows matrisi hələ qəbul edilməyib.
-Resurs tükənməsi aktiv sessiyanı da bağlaya bilər; limitsiz rejim yoxdur.
+İlkin source test axınında ömürlük output limiti yoxdur: native output,
+instruction və pixel işi saniyəlik büdcə ilə tənzimlənir (aşanda sessiya
+bağlanmır, yavaşıyır). 32 KiB text, hər istiqamətdə 128 clipboard əməliyyatı
+(saniyədə bir bərpa olunur), saniyədə 4 resize və finite session/CPU/RAM/pids
+hədləri var. Uzun gündəlik sessiya və geniş brauzer/Windows matrisi hələ
+ölçülməyib. Resurs tükənməsi aktiv sessiyanı da bağlaya bilər.
 
 Sınaqdan sonra `systemctl stop keybash-gateway keybash-ssh-manager keybash-rdp-manager`
 ilə xidmətləri dayandır və disposable VM-ləri snapshot siyasətinə uyğun saxla

@@ -52,8 +52,10 @@ func (b *nativeBroker) serve(ctx context.Context, worker net.Conn) error {
 	stopTarget := context.AfterFunc(ctx, func() { _ = target.Close() })
 	defer stopTarget()
 	done := make(chan struct{}, 2)
+	// No lifetime total on the raw pipe (see relayRDP); EOF, failure or
+	// cancellation in either direction closes both.
 	copyDirection := func(dst net.Conn, src net.Conn) {
-		_, _ = io.CopyBuffer(dst, io.LimitReader(src, 16*1024*1024), make([]byte, 32*1024))
+		_, _ = io.CopyBuffer(dst, src, make([]byte, 32*1024))
 		_ = dst.Close()
 		_ = src.Close()
 		done <- struct{}{}

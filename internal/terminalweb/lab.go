@@ -43,6 +43,7 @@ type Lab struct {
 	origin, host string
 	factory      Factory
 	outputLimit  int
+	creditWait   time.Duration
 	desktop      bool
 	mu           sync.Mutex
 	bootstrap    [32]byte
@@ -71,7 +72,7 @@ func New(origin string, factory Factory) (*Lab, string, error) {
 	if err != nil {
 		return nil, "", ErrInvalidLab
 	}
-	return &Lab{origin: origin, host: u.Host, factory: factory, outputLimit: 8 * 1024 * 1024, bootstrap: sha256.Sum256([]byte(code)), bootstrapEnd: time.Now().Add(5 * time.Minute)}, code, nil
+	return &Lab{origin: origin, host: u.Host, factory: factory, outputLimit: 8 * 1024 * 1024, creditWait: creditTimeout, bootstrap: sha256.Sum256([]byte(code)), bootstrapEnd: time.Now().Add(5 * time.Minute)}, code, nil
 }
 
 // NewDesktop uses the same loopback/TLS/owner/session boundary with a fixed
@@ -248,5 +249,5 @@ func (l *Lab) socket(w http.ResponseWriter, r *http.Request) {
 	defer stream.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.CloseNow(); _ = stream.Close() })
 	defer stop()
-	run(ctx, cancel, conn, stream, l.outputLimit)
+	run(ctx, cancel, conn, stream, l.outputLimit, l.creditWait)
 }

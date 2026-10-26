@@ -246,6 +246,41 @@ func TestProcessOutputDrainsAfterCleanWorkerExit(t *testing.T) {
 	}
 }
 
+// A long session's output passes the former 16 MiB worker total; bounded
+// frames and queues, not a lifetime count, keep the gateway's memory finite.
+func TestProcessOutputHasNoLifetimeTotal(t *testing.T) {
+	const total = 20 * 1024 * 1024
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal("pipe failed")
+	}
+	defer outR.Close()
+	_, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal("pipe failed")
+	}
+	defer inW.Close()
+	s := &processStream{ctx: ctx, cancel: cancel, in: inW, out: outR}
+	s.stdout = processOutput{ctx: ctx, queue: make(chan []byte, 2)}
+	s.stderr = processOutput{ctx: ctx, queue: make(chan []byte, 2)}
+	go func() {
+		chunk := bytes.Repeat([]byte("o"), 8192)
+		for sent := 0; sent < total; sent += len(chunk) {
+			if writeWorkerFrame(outW, frameOutput, chunk) != nil {
+				return
+			}
+		}
+		_ = outW.Close()
+	}()
+	go s.demux()
+	got, err := io.Copy(io.Discard, s)
+	if err != nil || got != total || ctx.Err() != nil {
+		t.Fatalf("worker output ended after %d of %d bytes", got, total)
+	}
+}
+
 func TestProcessRefusalReturnsNilStream(t *testing.T) {
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

@@ -298,19 +298,49 @@ func TestViewerPartialImageAndCancellationCloseReaders(t *testing.T) {
 	}
 }
 
-func TestViewerTotalDecodeAndRenderWorkAreBounded(t *testing.T) {
+// pacedViewer freezes time so a test can see exactly when work waits.
+func pacedViewer(t *testing.T) (*viewerStream, *time.Duration) {
 	s, _, _ := viewerFixture(t)
-	s.renderPixels = 128*1024*1024 - 4
-	if !s.drawing(instruction{"copy", "0", "0", "0", "2", "2", "14", "0", "0", "0"}) {
-		t.Fatal("exact render work budget refused")
+	now := time.Unix(1000, 0)
+	slept := new(time.Duration)
+	s.clock = func() time.Time { return now }
+	s.sleep = func(d time.Duration) { *slept += d; now = now.Add(d) }
+	s.render.last, s.decode.last = now, now
+	return s, slept
+}
+
+func TestViewerDecodeAndRenderWorkArePacedNotEnded(t *testing.T) {
+	s, slept := pacedViewer(t)
+	s.render.debt = renderBurst - 4
+	if !s.drawing(instruction{"copy", "0", "0", "0", "2", "2", "14", "0", "0", "0"}) || *slept != 0 {
+		t.Fatal("render work within the burst was refused or delayed")
 	}
-	if s.drawing(instruction{"copy", "0", "0", "0", "1", "1", "14", "0", "0", "0"}) {
-		t.Fatal("excess render work accepted")
+	if !s.drawing(instruction{"copy", "0", "0", "0", "1", "1", "14", "0", "0", "0"}) || *slept <= 0 {
+		t.Fatal("render work beyond the burst ended the session instead of pacing it")
 	}
-	s, _, _ = viewerFixture(t)
-	s.decodedPixels = 64*1024*1024 - 3
+	// The former lifetime total (128M pixels) is not a session end any more.
+	for i := 0; i < 200; i++ {
+		if !s.drawing(instruction{"copy", "0", "0", "0", "1024", "768", "14", "0", "0", "0"}) {
+			t.Fatal("long desktop session ended at its former render total")
+		}
+	}
+	s, slept = pacedViewer(t)
+	s.decode.debt = decodeBurst
 	s.images["0"] = &viewerImage{layer: 0, pixels: fixturePNG(t)}
-	if s.drawing(instruction{"end", "0"}) {
-		t.Fatal("excess decoded pixels accepted")
+	if !s.drawing(instruction{"end", "0"}) || *slept <= 0 {
+		t.Fatal("decode beyond the burst ended the session instead of pacing it")
+	}
+	// A cost larger than any burst refuses outright.
+	if s.spend(&s.render, renderBurst+1, renderBurst, renderPerSecond) {
+		t.Fatal("unbounded single render cost accepted")
+	}
+}
+
+func TestViewerRevocationEndsAPacedWait(t *testing.T) {
+	s, _ := pacedViewer(t)
+	s.render.debt = renderBurst
+	s.sleep = func(time.Duration) { s.closed.Store(true) }
+	if s.drawing(instruction{"copy", "0", "0", "0", "1", "1", "14", "0", "0", "0"}) {
+		t.Fatal("revoked viewer kept drawing after its pause")
 	}
 }

@@ -69,8 +69,8 @@ silinir; məcburi process/kompüter dayananda OS temp-də yalnız synthetic encr
 test qalıqları qala bilər. Instance encryption key və synthetic private key
 yalnız process yaddaşında olur; demo restart-dan sonra davam etmir. Browser
 profilinin zəmanətli forensic silinməsi iddia edilmir.
-Mövcud iki aktiv/pending bağlantı və hər axında 8 MiB output kimi lab limitləri
-qüvvədədir. Limitə çatanda bağlantı bağlana bilər; ayrıca yeni sessiya aç.
+Mövcud iki aktiv/pending bağlantı limiti qüvvədədir. Ömürlük output limiti
+yoxdur; çox çıxış olanda axın yavaşıyır, bağlanmır.
 
 ## Avtomatik yoxlama və rəy
 

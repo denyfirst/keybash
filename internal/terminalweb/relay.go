@@ -26,5 +26,5 @@ func Relay(ctx context.Context, conn *websocket.Conn, stream Stream) {
 	conn.SetReadLimit(32768)
 	stop := context.AfterFunc(ctx, func() { _ = conn.CloseNow(); _ = stream.Close() })
 	defer stop()
-	run(ctx, cancel, conn, stream, 8*1024*1024)
+	run(ctx, cancel, conn, stream, 0, creditTimeout)
 }

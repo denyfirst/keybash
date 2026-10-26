@@ -216,9 +216,12 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	return nil // private PID namespace/manager kill owns all remaining descendants
 }
 
+// A raw RDP byte pipe has no lifetime total: TCP flow control and the bounded
+// copy buffer bound memory, and session revocation/lifetime bound duration.
+// The former 16 MiB per direction ended ordinary desktops within minutes.
 func relayRDP(a, b net.Conn) {
 	copyOne := func(dst, src net.Conn) {
-		_, _ = io.CopyBuffer(dst, io.LimitReader(src, 16*1024*1024), make([]byte, 32*1024))
+		_, _ = io.CopyBuffer(dst, src, make([]byte, 32*1024))
 		_ = dst.Close()
 		_ = src.Close()
 	}

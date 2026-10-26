@@ -53,25 +53,52 @@ func parseControl(data []byte) (control, bool) {
 	return control{}, false
 }
 
+// At most outputWindow frames await their in-order render credit. One frame
+// per round trip made bulk output unusable over any real link; a window keeps
+// browser memory bounded while letting long sessions keep pace.
+const outputWindow = 32
+
+// A browser that stops acknowledging (closed laptop, stalled tab) releases the
+// stream after this long with a full window. Background tabs are throttled, so
+// this is deliberately longer than a timer-clamped render callback.
+const creditTimeout = 2 * time.Minute
+
 type flow struct {
-	mu       sync.Mutex
-	sequence uint32
-	acked    bool
-	credit   chan struct{}
+	mu          sync.Mutex
+	sent, acked uint32
+	credit      chan struct{}
 }
 
+// acknowledge accepts only the next unacknowledged frame that was actually
+// sent. Duplicate, out-of-order or future credit refuses.
 func (f *flow) acknowledge(sequence uint32) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if sequence != f.sequence || sequence == 0 || f.acked {
+	if sequence == 0 || sequence != f.acked+1 || sequence > f.sent {
 		return false
 	}
-	f.acked = true
-	f.credit <- struct{}{}
+	f.acked = sequence
+	select {
+	case f.credit <- struct{}{}:
+	default:
+	}
 	return true
 }
 
-func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, stream Stream, outputLimit int) {
+// reserve assigns the next sequence when the window has room.
+func (f *flow) reserve() (uint32, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sent-f.acked >= outputWindow {
+		return 0, false
+	}
+	f.sent++
+	return f.sent, true
+}
+
+// outputLimit <= 0 means no lifetime ceiling; the window, the bounded queues
+// and the session's idle/absolute lifetime bound an owned stream instead.
+func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, stream Stream, outputLimit int, wait time.Duration) {
 	chunks := make(chan []byte, 2)
 	var readers, workers sync.WaitGroup
 	// Never block the socket reader on remote input writes: output credits
@@ -129,38 +156,40 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 	window := &flow{credit: make(chan struct{}, 1)}
 	workers.Go(func() {
 		defer cancel()
-		var sequence uint32
 		sentBytes := 0
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case data, ok := <-chunks:
-				if !ok || sequence == ^uint32(0) || len(data) > outputLimit-sentBytes {
+				if !ok || outputLimit > 0 && len(data) > outputLimit-sentBytes {
 					return
 				}
 				sentBytes += len(data)
-				sequence++
+				sequence, ok := window.reserve()
+				for !ok {
+					timer := time.NewTimer(wait)
+					select {
+					case <-window.credit:
+						timer.Stop()
+					case <-timer.C:
+						return
+					case <-ctx.Done():
+						timer.Stop()
+						return
+					}
+					sequence, ok = window.reserve()
+				}
+				if sequence == ^uint32(0) {
+					return
+				}
 				frame := make([]byte, 4+len(data))
 				binary.BigEndian.PutUint32(frame, sequence)
 				copy(frame[4:], data)
-				window.mu.Lock()
-				window.sequence, window.acked = sequence, false
-				window.mu.Unlock()
 				writeCtx, stop := context.WithTimeout(ctx, 10*time.Second)
 				err := conn.Write(writeCtx, websocket.MessageBinary, frame)
 				stop()
 				if err != nil {
-					return
-				}
-				timer := time.NewTimer(10 * time.Second)
-				select {
-				case <-window.credit:
-					timer.Stop()
-				case <-timer.C:
-					return
-				case <-ctx.Done():
-					timer.Stop()
 					return
 				}
 			}
@@ -173,6 +202,21 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 		if err != nil {
 			return
 		}
+		var command control
+		if kind != websocket.MessageBinary {
+			var ok bool
+			if command, ok = parseControl(data); !ok {
+				return
+			}
+			// Valid credit is bounded by frames the server chose to send, so it
+			// does not spend the input budget. Any invalid credit closes.
+			if command.Type == "ack" {
+				if !window.acknowledge(command.Sequence) {
+					return
+				}
+				continue
+			}
+		}
 		if time.Since(start) >= time.Second {
 			start, frames, inputBytes = time.Now(), 0, 0
 		}
@@ -181,35 +225,19 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 		if frames > 128 || inputBytes > 256*1024 {
 			return
 		}
+		next := inputFrame{columns: command.Columns, rows: command.Rows}
 		if kind == websocket.MessageBinary {
 			if len(data) == 0 {
 				continue
 			}
-			select {
-			case input <- inputFrame{data: data}:
-			case <-ctx.Done():
-				return
-			default:
-				return
-			}
-			continue
+			next = inputFrame{data: data}
 		}
-		command, ok := parseControl(data)
-		if !ok {
+		select {
+		case input <- next:
+		case <-ctx.Done():
 			return
-		}
-		if command.Type == "ack" {
-			if !window.acknowledge(command.Sequence) {
-				return
-			}
-		} else {
-			select {
-			case input <- inputFrame{columns: command.Columns, rows: command.Rows}:
-			case <-ctx.Done():
-				return
-			default:
-				return
-			}
+		default:
+			return
 		}
 	}
 }

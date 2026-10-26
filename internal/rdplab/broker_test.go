@@ -42,14 +42,17 @@ func TestNativeBrokerBindsIdentityToGuardedTarget(t *testing.T) {
 	}
 }
 
-func TestNativeBrokerQuotaClosesBothDirections(t *testing.T) {
+// A desktop's raw stream passes the former 16 MiB per-direction total intact;
+// the end of one direction closes both.
+func TestNativeBrokerLongStreamAndEndClosesBothDirections(t *testing.T) {
+	const total = 24 * 1024 * 1024
 	for _, reverse := range []bool{false, true} {
 		t.Run(fmt.Sprintf("reverse_%t", reverse), func(t *testing.T) {
 			worker, bridge := net.Pipe()
 			target, server := net.Pipe()
 			defer worker.Close()
 			defer server.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			broker := &nativeBroker{dial: func(context.Context) (net.Conn, error) { return target, nil }}
 			done := make(chan error, 1)
@@ -60,22 +63,23 @@ func TestNativeBrokerQuotaClosesBothDirections(t *testing.T) {
 			}
 			wrote := make(chan struct{})
 			go func() {
-				_, _ = io.Copy(source, bytes.NewReader(make([]byte, 16*1024*1024+1)))
+				_, _ = io.Copy(source, bytes.NewReader(make([]byte, total)))
+				_ = source.Close()
 				close(wrote)
 			}()
 			count, err := io.Copy(io.Discard, destination)
-			if err != nil || count != 16*1024*1024 || ctx.Err() != nil {
-				t.Fatal("broker exceeded quota or did not close at boundary")
+			if err != nil || count != total || ctx.Err() != nil {
+				t.Fatalf("broker relayed %d of %d bytes", count, total)
 			}
 			select {
 			case <-done:
 			case <-ctx.Done():
-				t.Fatal("quota leaked broker")
+				t.Fatal("ended direction leaked broker")
 			}
 			select {
 			case <-wrote:
 			case <-ctx.Done():
-				t.Fatal("quota leaked writer")
+				t.Fatal("ended direction leaked writer")
 			}
 		})
 	}

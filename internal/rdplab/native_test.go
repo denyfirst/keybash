@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,24 +164,43 @@ func TestNativeStreamRefusesUnsolicitedStreamsAndBoundsOutput(t *testing.T) {
 		}
 		<-done
 	}
-	for _, quota := range []string{"bytes", "frames"} {
-		client, server := net.Pipe()
-		stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true }}
-		if quota == "bytes" {
-			stream.output = 8*1024*1024 - 1
-		} else {
-			stream.frames = 8192
+	// An exhausted budget pauses the reader (backpressure) rather than ending
+	// the session; revocation during that pause still ends it.
+	for _, budget := range []string{"bytes", "frames"} {
+		for _, revoke := range []bool{false, true} {
+			client, server := net.Pipe()
+			now := time.Unix(1000, 0)
+			var slept time.Duration
+			stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true }, clock: func() time.Time { return now }}
+			stream.sleep = func(d time.Duration) {
+				slept += d
+				now = now.Add(d)
+				if revoke {
+					stream.closed.Store(true)
+				}
+			}
+			stream.output.last, stream.frames.last = now, now
+			if budget == "bytes" {
+				stream.output.debt = nativeByteBurst
+			} else {
+				stream.frames.debt = nativeInstructionBurst
+			}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				defer server.Close()
+				_ = writeInstruction(server, instruction{"sync", "1"})
+			}()
+			in, err := stream.next()
+			if revoke && (err != errNative || in != nil) {
+				t.Fatal("revocation during a native output pause escaped")
+			}
+			if !revoke && (err != nil || len(in) != 2 || slept <= 0) {
+				t.Fatal("native output beyond its rate was refused or not paced")
+			}
+			<-done
+			stream.close()
 		}
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			defer server.Close()
-			_ = writeInstruction(server, instruction{"sync", "1"})
-		}()
-		if in, err := stream.next(); err != errNative || in != nil {
-			t.Fatal("native output exceeded quota")
-		}
-		<-done
 	}
 	client, server := net.Pipe()
 	stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true }}
@@ -193,5 +213,33 @@ func TestNativeStreamRefusesUnsolicitedStreamsAndBoundsOutput(t *testing.T) {
 	}()
 	if in, err := stream.next(); err != nil || len(in) != 2 || in[1] != "123" {
 		t.Fatal("valid native output refused")
+	}
+}
+
+// A long desktop session passes the former lifetime instruction total; the
+// continuous budget only spreads the excess over time.
+func TestNativeStreamLongSessionIsPacedNotEnded(t *testing.T) {
+	const total = 40000 // the former lifetime ceiling was 8192 instructions
+	client, server := net.Pipe()
+	now := time.Unix(1000, 0)
+	var slept time.Duration
+	stream := &nativeStream{raw: client, reader: bufio.NewReader(client), stop: func() bool { return true },
+		clock: func() time.Time { return now }, sleep: func(d time.Duration) { slept += d; now = now.Add(d) }}
+	defer stream.close()
+	go func() {
+		w := bufio.NewWriter(server)
+		for i := 0; i < total; i++ {
+			_ = writeInstruction(w, instruction{"sync", strconv.Itoa(i)})
+		}
+		_ = w.Flush()
+	}()
+	for i := 0; i < total; i++ {
+		if in, err := stream.next(); err != nil || in[1] != strconv.Itoa(i) {
+			t.Fatalf("long native session ended at instruction %d", i)
+		}
+	}
+	expected := time.Duration(float64(total-nativeInstructionBurst) / nativeInstructionsPerSec * float64(time.Second))
+	if slept < expected-time.Millisecond || slept > expected+time.Millisecond {
+		t.Fatalf("native pacing slept %v, expected about %v", slept, expected)
 	}
 }

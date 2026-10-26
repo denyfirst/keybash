@@ -78,8 +78,9 @@ Binary frames carry a one-byte type and a four-byte length checked before
 allocation. Startup is at most 1024 bytes, terminal input 32 KiB, resize eight
 bytes, and output chunks 8192 bytes. Only one startup is accepted; input and
 resize cannot change connection parameters. Two output queues per stream are
-bounded to two chunks each. The child and stream adapter independently cap total
-output to 16 MiB; the browser relay's existing 8 MiB ceiling remains stricter.
+bounded to two chunks each. There is no lifetime output total: bounded frames,
+pipes and queues backpressure the SSH channel window, the browser relay keeps
+at most 32 frames unacknowledged, and session lifetime/revocation end the child.
 The child has no listener or child-selected second connection. The separate
 manager's authenticated Unix control listener is described in `SSH-MANAGER-LAB.md`.
 

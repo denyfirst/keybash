@@ -12,7 +12,6 @@ term.parser.registerOscHandler(8, () => true);  // No remotely supplied clickabl
 term.write('\x1b[2mKeybash terminal lab\r\nSessiyanı açmaq üçün birdəfəlik giriş kodunu daxil et.\x1b[0m\r\n');
 let socket = null, expected = 1, pendingPaste = '', connected = false;
 let retired = false;
-let outputBytes=0;
 function retireTerminal() {
   if (retired) return;
   retired = true; term.dispose(); $('terminal').replaceChildren();
@@ -114,9 +113,9 @@ function connect(proof=null) {
     if(ownedRemote&&!connected){if(event.data!=='{"type":"ready"}'){socket.close();return;}clearTimeout(timer);activate();return;}
     if (!connected || retired) return;
     try {
+      // Each frame is acknowledged after xterm has parsed it; the server keeps
+      // at most a small window unacknowledged, so long output stays bounded.
       const frame = decodeOutput(event.data, expected++);
-      outputBytes+=frame.bytes.byteLength;
-      if(outputBytes>8*1024*1024) throw new Error('output quota');
       term.write(frame.bytes, () => {
         if (connected && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ack', sequence: frame.sequence }));
       });
