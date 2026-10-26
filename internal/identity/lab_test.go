@@ -310,23 +310,100 @@ func TestIdentityAttemptBucketsAreUniformAndBounded(t *testing.T) {
 	defer l.mu.Unlock()
 	l.now = func() time.Time { return now }
 	for i := range 6 {
-		known, unknown := l.attemptLocked("alice"), l.attemptLocked("not-registered")
+		known, unknown := l.attemptLocked("login:alice", loginAttempts), l.attemptLocked("login:not-registered", loginAttempts)
 		if known != unknown || known != (i < 5) {
 			t.Fatal("known/unknown attempt limits differ or are bypassed")
 		}
 	}
-	now = now.Add(time.Minute)
-	for i := range 21 {
-		if l.attemptLocked(fmt.Sprint("untrusted-", i)) != (i < 20) {
-			t.Fatal("global attempt budget escaped")
+	// Exhausting many names, or one purpose, spends no other account's or
+	// purpose's budget: there is no shared window to lock everyone out.
+	for i := range 200 {
+		if !l.attemptLocked(fmt.Sprint("login:untrusted-", i), loginAttempts) {
+			t.Fatal("one name's attempts spent another name's budget")
 		}
 	}
-	if len(l.attempts) != 20 {
+	if !l.attemptLocked("login:bob", loginAttempts) || !l.attemptLocked("mfa:alice", factorAttempts) || !l.attemptLocked("reauth:alice", reauthAttempts) {
+		t.Fatal("a shared window let one caller lock out other accounts or purposes")
+	}
+	// State stays bounded: a full table refuses new keys instead of evicting
+	// (and so resetting) another account's counter.
+	for i := len(l.attempts); i < maxAttemptKeys; i++ {
+		l.attempts[fmt.Sprint("filler-", i)] = &window{start: now}
+	}
+	if l.attemptLocked("login:new-name", loginAttempts) || len(l.attempts) != maxAttemptKeys {
 		t.Fatal("attacker-selected attempt state is not bounded")
 	}
+	if l.attemptLocked("login:alice", loginAttempts) {
+		t.Fatal("a full table reset an exhausted counter")
+	}
 	now = now.Add(time.Minute)
-	if !l.attemptLocked("alice") || len(l.attempts) != 1 {
-		t.Fatal("expired attempt window did not recover")
+	l.sweepLocked()
+	if len(l.attempts) != 0 || !l.attemptLocked("login:alice", loginAttempts) {
+		t.Fatal("expired attempt windows were not reclaimed")
+	}
+}
+
+// Failed logins against one account, plus a flood of other names, neither
+// lock out another account's login nor the target's own signed-in session.
+func TestIdentityFailedLoginsCannotLockOutOthers(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	_, _, codes := enrollFixture(t, s, "alice", time.Now())
+	if s.CreateAccount("bob", bobPassword) != nil {
+		t.Fatal("second account fixture refused")
+	}
+	l, e := NewPersistent("https://127.0.0.1:8443", s)
+	if e != nil {
+		t.Fatal("persistent lab refused")
+	}
+	defer l.Close()
+	raw, e := l.login(context.Background(), "alice", alicePassword, "")
+	if e != nil {
+		t.Fatal("login refused")
+	}
+	id, _ := tokenID(raw)
+	l.mu.Lock()
+	raw, e = l.finishFactorLocked(id, codes[0])
+	l.mu.Unlock()
+	if e != nil {
+		t.Fatal("factor refused")
+	}
+	id, _ = tokenID(raw)
+	// The successful sign-in above spent one of the five per-minute attempts.
+	for i := range 5 {
+		if _, e := l.login(context.Background(), "alice", bobPassword, ""); i < 4 && e != errRefused || i == 4 && e != errLimited {
+			t.Fatal("per-account login budget not enforced")
+		}
+	}
+	for i := range 30 {
+		if _, e := l.login(context.Background(), fmt.Sprint("flood-", i), bobPassword, ""); e != errRefused {
+			t.Fatal("an unknown name was limited by other names' attempts")
+		}
+	}
+	if _, e := l.login(context.Background(), "bob", bobPassword, ""); e != nil {
+		t.Fatal("another account was locked out by failed logins")
+	}
+	if l.reauthenticate(context.Background(), id, alicePassword, codes[1]) != nil {
+		t.Fatal("failed logins on a name locked its signed-in owner out of reauthentication")
+	}
+}
+
+// A request refused for KDF capacity records no attempt, so attacker-chosen
+// names cannot be added faster than Argon2id runs.
+func TestIdentityCapacityRefusalCreatesNoAttemptState(t *testing.T) {
+	l := fixture(t)
+	l.derive <- struct{}{}
+	l.derive <- struct{}{}
+	for i := range 50 {
+		if _, err := l.login(context.Background(), fmt.Sprint("name-", i), bobPassword, ""); err != errLimited {
+			t.Fatal("login without a derive slot was not limited")
+		}
+	}
+	<-l.derive
+	<-l.derive
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.attempts) != 0 {
+		t.Fatal("capacity refusals created attacker-chosen attempt state")
 	}
 }
 

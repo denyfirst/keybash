@@ -68,7 +68,7 @@ func (l *Lab) readyLocked(id [32]byte, fresh bool) *session {
 }
 func (l *Lab) finishFactorLocked(id [32]byte, code string) (string, error) {
 	s := l.liveLocked(id, false)
-	if s == nil || s.stage != "challenge" || !l.attemptLocked("mfa:"+s.username) {
+	if s == nil || s.stage != "challenge" || !l.attemptLocked("mfa:"+s.username, factorAttempts) {
 		return "", errRefused
 	}
 	if l.store.consumeFactor(s.owner, s.revision, code, l.now()) != nil {
@@ -86,7 +86,7 @@ func (l *Lab) finishFactorLocked(id [32]byte, code string) (string, error) {
 }
 func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recoveryCodes, error) {
 	s := l.liveLocked(id, false)
-	if s == nil || s.stage != "enroll" || s.pendingSeed == "" || s.replacing && !l.now().Before(s.reauthUntil) || !l.attemptLocked("mfa:"+s.username) {
+	if s == nil || s.stage != "enroll" || s.pendingSeed == "" || s.replacing && !l.now().Before(s.reauthUntil) || !l.attemptLocked("mfa:"+s.username, factorAttempts) {
 		return "", nil, errRefused
 	}
 	name := s.username
@@ -106,7 +106,7 @@ func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recover
 func (l *Lab) reauthenticate(ctx context.Context, id [32]byte, password, code string) error {
 	l.mu.Lock()
 	s := l.readyLocked(id, false)
-	if s == nil || !l.attemptLocked(s.username) {
+	if s == nil || !l.attemptLocked("reauth:"+s.username, reauthAttempts) {
 		l.mu.Unlock()
 		return errRefused
 	}

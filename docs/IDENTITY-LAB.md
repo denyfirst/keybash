@@ -39,11 +39,16 @@ The appearance follows the existing Denyfirst dark palette and restrained red.
   decoded field and valid UTF-8/scalar escapes. Unpaired surrogates are refused
   before Go's JSON decoder can silently repair them.
 - At most two concurrent KDF operations, with no waiting request queue. A
-  fixed one-minute window permits 20 checks globally and five per supplied name;
-  known and unknown names use the same policy and KDF cost. At most 20 name
-  counters exist, cleared at window rollover. Success does not reset budgets.
-  The fixed-window burst boundary and deliberate one-minute service/account
-  denial through exhausted budgets remain limitations, not DDoS protection.
+  login takes a KDF slot before its attempt is recorded, then a fixed one-minute
+  window permits five checks per supplied name; known and unknown names use the
+  same policy and KDF cost. There is no window shared across names or purposes:
+  MFA, reauthentication, password change, import, trust and connection opens
+  each have their own per-account window, so failed logins cannot lock other
+  accounts or a signed-in owner out. At most 8192 counters exist; a full table
+  refuses new names rather than evicting another account's counter, and expired
+  windows are reclaimed every second. Success does not reset budgets. Repeated
+  failures against one name still deny that name for a minute; per-source
+  limits belong to network ingress, which does not exist yet.
 - Fresh 256-bit opaque session tokens; only SHA-256 token digests are stored.
   `__Host-` Secure/HttpOnly/SameSite=Strict cookie, Path=/, no Domain. Duplicate,
   malformed, forged and revoked cookies cannot select a session. Successful

@@ -71,8 +71,7 @@ type Lab struct {
 	dummy        PasswordHash
 	sessions     map[[32]byte]*session
 	csrfKey      [32]byte
-	global       window
-	attempts     map[string]int // at most 20 names per global window, known or unknown
+	attempts     map[string]*window // purpose:account keys; see attemptLocked
 	derive       chan struct{}
 	now          func() time.Time
 	closed       bool
@@ -104,7 +103,7 @@ func NewLab(origin string, accounts []Account) (*Lab, error) {
 	if err != nil || ipErr != nil || !ip.IsLoopback() || ip.Zone() != "" || portErr != nil || portNum < 1 || strconv.FormatUint(portNum, 10) != port || len(accounts) == 0 || len(accounts) > 256 {
 		return nil, errRefused
 	}
-	l := &Lab{origin: origin, host: u.Host, accounts: make(map[string]*account), sessions: make(map[[32]byte]*session), attempts: make(map[string]int),
+	l := &Lab{origin: origin, host: u.Host, accounts: make(map[string]*account), sessions: make(map[[32]byte]*session), attempts: make(map[string]*window),
 		derive: make(chan struct{}, 2), now: time.Now, stop: make(chan struct{}), done: make(chan struct{})}
 	for _, a := range accounts {
 		if !usernameInput(a.Username) || !a.Password.valid() || l.accounts[a.Username] != nil {
@@ -173,6 +172,11 @@ func (l *Lab) sweepLocked() {
 			l.forgetLocked(id)
 		}
 	}
+	for key, w := range l.attempts {
+		if now.Sub(w.start) >= time.Minute {
+			delete(l.attempts, key)
+		}
+	}
 	l.sweepRemotesLocked()
 }
 
@@ -198,20 +202,36 @@ func (l *Lab) csrf(id [32]byte) string {
 	_, _ = h.Write(id[:])
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
-func (l *Lab) attemptLocked(username string) bool {
-	if l.global.start.IsZero() || l.now().Sub(l.global.start) >= time.Minute {
-		clear(l.attempts)
+
+// Per-minute attempt budgets. Each key is one purpose for one account; there
+// is deliberately no window shared across accounts or purposes, so one caller
+// exhausting a key cannot lock every user out of login, MFA or their own open
+// sessions. Argon2id CPU stays bounded separately by the two derive slots.
+const (
+	loginAttempts    = 5  // per submitted username, registered or not
+	factorAttempts   = 5  // per account; the store keeps its own durable budget
+	reauthAttempts   = 5  // per account, separate from unauthenticated login
+	passwordAttempts = 5  // per account
+	importAttempts   = 5  // per account
+	trustAttempts    = 5  // per account
+	remoteAttempts   = 20 // connection opens per account
+	setupAttempts    = 5  // the single pre-initialization bootstrap
+	// Only login creates attacker-chosen keys, and only after taking a derive
+	// slot, so creation is bounded by KDF throughput far below this ceiling.
+	maxAttemptKeys = 8192
+)
+
+func (l *Lab) attemptLocked(key string, limit int) bool {
+	now := l.now()
+	w := l.attempts[key]
+	if w == nil {
+		if len(l.attempts) >= maxAttemptKeys {
+			return false // refuse rather than evict another account's counter
+		}
+		w = &window{}
+		l.attempts[key] = w
 	}
-	if !l.global.allow(l.now(), 20) {
-		return false
-	}
-	// Unknown and registered names share the same policy. Separate unknown-user
-	// buckets would expose account existence through different 429 responses.
-	if l.attempts[username] >= 5 {
-		return false
-	}
-	l.attempts[username]++
-	return true
+	return w.allow(now, limit)
 }
 func (l *Lab) slot(ctx context.Context) bool {
 	if ctx.Err() != nil {
@@ -226,8 +246,17 @@ func (l *Lab) slot(ctx context.Context) bool {
 }
 
 func (l *Lab) login(ctx context.Context, username, password, previous string) (string, error) {
+	// Take a derive slot before recording the attempt: refused-for-capacity
+	// requests then create no per-name state, so attacker-chosen names can
+	// only be added at Argon2id speed.
+	if !l.slot(ctx) {
+		return "", errLimited
+	}
+	defer func() { <-l.derive }()
 	l.mu.Lock()
-	if l.closed || !l.attemptLocked(username) {
+	// Unknown and registered names share the same policy. Separate unknown-user
+	// buckets would expose account existence through different 429 responses.
+	if l.closed || !l.attemptLocked("login:"+username, loginAttempts) {
 		l.mu.Unlock()
 		return "", errLimited
 	}
@@ -242,10 +271,6 @@ func (l *Lab) login(ctx context.Context, username, password, previous string) (s
 	oldID, oldValid := tokenID(previous)
 	oldSession := l.sessions[oldID]
 	l.mu.Unlock()
-	if !l.slot(ctx) {
-		return "", errLimited
-	}
-	defer func() { <-l.derive }()
 	valid := hash.verify(password)
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -317,7 +342,7 @@ func (l *Lab) change(ctx context.Context, id [32]byte, current, replacement stri
 		return errRefused
 	}
 	a := l.accounts[s.username]
-	if !l.attemptLocked(s.username) {
+	if !l.attemptLocked("password:"+s.username, passwordAttempts) {
 		l.mu.Unlock()
 		return errLimited
 	}

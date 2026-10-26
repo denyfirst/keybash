@@ -102,7 +102,7 @@ func TestRemoteCapacityConcurrentAdmissionAndExpiry(t *testing.T) {
 	l.mu.Unlock()
 	id, _ := tokenID(c.cookie.Value)
 	var wg sync.WaitGroup
-	for range 5 {
+	for range remoteAttempts {
 		wg.Go(func() { l.mu.Lock(); defer l.mu.Unlock(); _, _ = l.grantRemoteLocked(id, record) })
 	}
 	wg.Wait()
