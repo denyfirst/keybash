@@ -99,7 +99,7 @@ func parseCapacity(raw []byte) (sessionlimits.Limits, error) {
 func parseTarget(raw []byte, protected []netip.Prefix) (identity.RemoteTarget, error) {
 	var zero identity.RemoteTarget
 	fields, err := object(raw, "id", "name", "protocol", "hostname", "port", "addresses", "ssh_host_key", "rdp_certificate")
-	if err != nil || len(fields) != 7 {
+	if err != nil || len(fields) != 7 && len(fields) != 6 {
 		return zero, ErrConfiguration
 	}
 	id, e1 := text(fields["id"])
@@ -112,30 +112,50 @@ func parseTarget(raw []byte, protected []netip.Prefix) (identity.RemoteTarget, e
 		!validName(name) || json.Unmarshal(fields["port"], &port) != nil || port == 0 {
 		return zero, ErrConfiguration
 	}
-	addresses, err := array(fields["addresses"], 16)
-	if err != nil {
-		return zero, ErrConfiguration
-	}
-	pins := make([]netip.Addr, 0, len(addresses))
-	endpoints := make([]netip.AddrPort, 0, len(addresses))
-	seen := make(map[netip.Addr]bool)
-	for _, raw := range addresses {
-		value, e := text(raw)
-		ip, pe := netip.ParseAddr(value)
-		if e != nil || pe != nil || ip.Zone() != "" || ip.Is4In6() || value != ip.String() || seen[ip] {
+	var target *targetguard.NamedTarget
+	if literal, literalErr := netip.ParseAddr(host); literalErr == nil {
+		// A server with no DNS name: the address itself is the approval and
+		// nothing is resolved. An addresses list alongside it would be a second,
+		// possibly contradicting source, so it is refused. RDP certificates are
+		// checked against a name, so RDP needs one.
+		if len(fields) != 6 || fields["addresses"] != nil || protocol != "ssh" || literal.Zone() != "" || literal.Is4In6() || host != literal.String() {
 			return zero, ErrConfiguration
 		}
-		seen[ip] = true
-		pins = append(pins, ip)
-		endpoints = append(endpoints, netip.AddrPortFrom(ip, port))
-	}
-	policy, err := targetguard.New(endpoints, protected)
-	if err != nil {
-		return zero, ErrConfiguration
-	}
-	target, err := targetguard.NewNamedTarget(policy, host, port, pins)
-	if err != nil {
-		return zero, ErrConfiguration
+		policy, err := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(literal, port)}, protected)
+		if err != nil {
+			return zero, ErrConfiguration
+		}
+		if target, err = targetguard.NewAddressTarget(policy, literal, port); err != nil {
+			return zero, ErrConfiguration
+		}
+	} else {
+		if len(fields) != 7 {
+			return zero, ErrConfiguration
+		}
+		addresses, err := array(fields["addresses"], 16)
+		if err != nil {
+			return zero, ErrConfiguration
+		}
+		pins := make([]netip.Addr, 0, len(addresses))
+		endpoints := make([]netip.AddrPort, 0, len(addresses))
+		seen := make(map[netip.Addr]bool)
+		for _, raw := range addresses {
+			value, e := text(raw)
+			ip, pe := netip.ParseAddr(value)
+			if e != nil || pe != nil || ip.Zone() != "" || ip.Is4In6() || value != ip.String() || seen[ip] {
+				return zero, ErrConfiguration
+			}
+			seen[ip] = true
+			pins = append(pins, ip)
+			endpoints = append(endpoints, netip.AddrPortFrom(ip, port))
+		}
+		policy, err := targetguard.New(endpoints, protected)
+		if err != nil {
+			return zero, ErrConfiguration
+		}
+		if target, err = targetguard.NewNamedTarget(policy, host, port, pins); err != nil {
+			return zero, ErrConfiguration
+		}
 	}
 	var approved []byte
 	switch protocol {

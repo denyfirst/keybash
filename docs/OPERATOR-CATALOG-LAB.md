@@ -24,9 +24,9 @@ Each target requires these six shared fields and exactly one public identity:
 | `id` | Stable independently generated random 128-bit lowercase hex ID |
 | `name` | Nonempty UTF-8 label, up to 160 bytes |
 | `protocol` | Exactly `ssh` or `rdp` |
-| `hostname` | Existing guard's ASCII DNS name; no URL, IP literal or host:port |
+| `hostname` | Existing guard's ASCII DNS name, or for SSH only a canonical IPv4/IPv6 address; no URL or host:port |
 | `port` | Integer 1–65535; no numeric string or fractional value |
-| `addresses` | Explicit canonical IPv4/IPv6 pins; no zones/mapped aliases |
+| `addresses` | Explicit canonical IPv4/IPv6 pins; no zones/mapped aliases. Absent when `hostname` is an address |
 | `ssh_host_key` | One canonical OpenSSH Ed25519 public key, without options/comment/newline |
 | `rdp_certificate` | Canonical padded base64 of the full approved leaf DER, up to 32 KiB |
 
@@ -55,6 +55,14 @@ networks using independently verified installation values before validation):
   }]
 }
 ```
+
+A server with no DNS name, common on an office network, is approved by its
+address alone: `"hostname": "192.168.10.20"` with no `addresses` field. Nothing
+is resolved for it, so there is no name to rebind or poison, and the dial still
+passes the target's own policy and the protected networks. A second list beside
+the address is refused rather than reconciled. The SSH host key remains the
+server's identity; the address is only where to reach it. RDP keeps a name,
+because both the import and the native worker check its certificate against one.
 
 `protected_networks` is mandatory and nonempty to require an explicit deployment
 decision. The operator must actually list database/control/host infrastructure

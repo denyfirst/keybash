@@ -67,6 +67,7 @@ no external server dials and load no real credentials.
 | DNS is not a target approval authority, including other globally approved servers | per-target copied IP pins | `TestNamedTargetRebindingDoesNotApproveAnotherServer`, `TestNamedTargetCopiesPinsAndSupportsConcurrentReads` |
 | The entire DNS result is checked before any target TCP activity | policy and pin checks for every answer, maximum 16 answers | `TestNamedTargetRejectsWholeAnswerBeforeAnyTCP` |
 | One logical lookup, exact rooted hostname, literal-IP TCP dial | `NamedTarget.DialContext` | `TestNamedTargetResolvesOnceAndDialsPinnedLiteral` |
+| A server with no DNS name is approved by one canonical SSH address with no addresses list; it never resolves a name and dials only that literal through its policy; RDP keeps a name | `NewAddressTarget`, catalog literal branch | `TestAddressTargetDialsTheApprovedLiteralWithoutDNS`, `TestOperatorCatalogAddressOnlySSHTarget`, `TestOperatorCatalogRDPCertificate` |
 | Failure does not silently switch to another address | one selected literal endpoint | `TestNamedTargetUsesFirstPinnedAnswerWithoutFallback` |
 | Bad hostname, missing pins, wrong port or missing policy cannot create a named target | `NewNamedTarget` | `TestNamedTargetConfigurationFailsClosed`, `FuzzCanonicalHostname` |
 | Resolver errors and partial answers disclose no diagnostics and cause no TCP dial | fixed errors and shared deadline | `TestNamedTargetDNSFailureAndCancellationPerformNoTCP` |
