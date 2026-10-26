@@ -73,9 +73,11 @@ type durableAccount struct {
 	FactorWindow int64
 	FactorCount  int
 	// Digest and expiry of the one-time setup code an operator hands over
-	// with a new or factor-reset account; zero once MFA is enrolled.
-	Enrollment    [32]byte
-	EnrollmentEnd int64
+	// with a new or factor-reset account; absent once MFA is enrolled. Omitted
+	// when empty so records without a pending code keep the earlier schema,
+	// which an older binary (strict about unknown fields) can still read.
+	Enrollment    []byte `json:",omitempty"`
+	EnrollmentEnd int64  `json:",omitempty"`
 }
 
 // A password alone must not let whoever learns it first enroll their own
@@ -88,7 +90,8 @@ func issueEnrollment(a *durableAccount, now time.Time) (string, error) {
 	if e != nil {
 		return "", errRefused
 	}
-	a.Enrollment, _ = tokenID(code)
+	digest, _ := tokenID(code)
+	a.Enrollment = digest[:]
 	a.EnrollmentEnd = now.Add(enrollmentLife).Unix()
 	return code, nil
 }
@@ -429,7 +432,7 @@ func (s *Store) readAccount(tx *bolt.Tx, id string) (durableAccount, error) {
 	if decodeRecord(plain, &a, 16*1024) != nil || a.ID != id || !usernameInput(a.Username) || !a.password().valid() || a.Revision != rev || len(a.Recovery) > 10 || a.LastCounter < -1 || a.FactorCount < 0 || a.FactorCount > 5 {
 		return durableAccount{}, errRefused
 	}
-	if a.Seed != "" && !validSeed(a.Seed) || a.EnrollmentEnd < 0 || a.Seed != "" && (a.EnrollmentEnd != 0 || a.Enrollment != [32]byte{}) {
+	if a.Seed != "" && !validSeed(a.Seed) || a.EnrollmentEnd < 0 || len(a.Enrollment) != 0 && len(a.Enrollment) != 32 || (len(a.Enrollment) == 0) != (a.EnrollmentEnd == 0) || a.Seed != "" && len(a.Enrollment) != 0 {
 		return durableAccount{}, errRefused
 	}
 	return a, nil
@@ -524,7 +527,7 @@ func (s *Store) enrollmentValid(id, code string, now time.Time) bool {
 	}
 	return s.view(func(tx *bolt.Tx) error {
 		a, e := s.readAccount(tx, id)
-		if e != nil || a.Seed != "" || now.Unix() >= a.EnrollmentEnd || subtle.ConstantTimeCompare(digest[:], a.Enrollment[:]) != 1 {
+		if e != nil || a.Seed != "" || len(a.Enrollment) != 32 || now.Unix() >= a.EnrollmentEnd || subtle.ConstantTimeCompare(digest[:], a.Enrollment) != 1 {
 			return errRefused
 		}
 		return nil

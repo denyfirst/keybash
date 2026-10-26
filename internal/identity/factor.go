@@ -143,8 +143,7 @@ func (s *Store) enroll(id string, revision uint64, seed, code string, now time.T
 				return e
 			}
 			a.Seed, a.LastCounter, a.Recovery = seed, counter, hashes
-			clear(a.Enrollment[:]) // the one-time setup code is spent
-			a.EnrollmentEnd = 0
+			a.Enrollment, a.EnrollmentEnd = nil, 0 // the one-time setup code is spent
 			a.Revision++
 			accepted = true
 		}

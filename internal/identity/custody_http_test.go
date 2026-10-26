@@ -370,8 +370,14 @@ func TestFirstEnrollmentNeedsOperatorSetupCode(t *testing.T) {
 	}
 	bob.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, now.Unix()/30)}), 200)
 	bob.session("ready")
-	if a, e := s.lookup("bob"); e != nil || a.Seed == "" || a.Enrollment != ([32]byte{}) || a.EnrollmentEnd != 0 {
+	a, e := s.lookup("bob")
+	if e != nil || a.Seed == "" || len(a.Enrollment) != 0 || a.EnrollmentEnd != 0 {
 		t.Fatal("enrollment did not spend the setup code")
+	}
+	// Without a pending code the record keeps the earlier schema, which an
+	// older binary that refuses unknown fields can still read.
+	if plain, _ := json.Marshal(a); strings.Contains(string(plain), "Enrollment") {
+		t.Fatal("an enrolled account still serializes setup-code fields")
 	}
 	// The budget is per account, and wrong codes spend it.
 	carol := custodyClient{t: t, l: l}
@@ -386,6 +392,39 @@ func TestFirstEnrollmentNeedsOperatorSetupCode(t *testing.T) {
 	carol.expect("POST", "/api/session", inputJSON(map[string]string{"username": "carol", "password": bobPassword}), 204)
 	carol.session("enroll")
 	carol.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": carolSetup}), 403)
+}
+
+// A record whose setup-code fields disagree, or that keeps a code beside an
+// enrolled factor, is refused rather than interpreted.
+func TestAccountSetupFieldsMustBeConsistent(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	original, e := s.lookup("alice")
+	if e != nil {
+		t.Fatal("fixture account missing")
+	}
+	seeded, _ := newSeed()
+	for _, mutate := range []func(*durableAccount){
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = make([]byte, 31), 1 },
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = make([]byte, 32), 0 },
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = nil, 1 },
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = make([]byte, 32), -1 },
+		func(a *durableAccount) { a.Seed, a.Enrollment, a.EnrollmentEnd = seeded, make([]byte, 32), 1 },
+	} {
+		bad := original
+		mutate(&bad)
+		if s.update(func(tx *bolt.Tx) error { return s.saveAccount(tx, bad) }) != nil {
+			t.Fatal("fixture write failed")
+		}
+		if _, e := s.lookup("alice"); e == nil {
+			t.Fatal("an inconsistent setup-code record was accepted")
+		}
+	}
+	if s.update(func(tx *bolt.Tx) error { return s.saveAccount(tx, original) }) != nil {
+		t.Fatal("fixture restore failed")
+	}
+	if _, e := s.lookup("alice"); e != nil {
+		t.Fatal("a consistent record was refused")
+	}
 }
 
 // Lost-factor recovery issues a new code and invalidates the old one; recovery
