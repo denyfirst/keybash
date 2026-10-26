@@ -72,6 +72,28 @@ type durableAccount struct {
 	Recovery     [][32]byte
 	FactorWindow int64
 	FactorCount  int
+	// Digest and expiry of the one-time setup code an operator hands over
+	// with a new or factor-reset account; absent once MFA is enrolled. Omitted
+	// when empty so records without a pending code keep the earlier schema,
+	// which an older binary (strict about unknown fields) can still read.
+	Enrollment    []byte `json:",omitempty"`
+	EnrollmentEnd int64  `json:",omitempty"`
+}
+
+// A password alone must not let whoever learns it first enroll their own
+// factor. Operator-created and factor-reset accounts need this separate
+// one-time code, which expires so an unclaimed account cannot be taken later.
+const enrollmentLife = 72 * time.Hour
+
+func issueEnrollment(a *durableAccount, now time.Time) (string, error) {
+	code, e := token()
+	if e != nil {
+		return "", errRefused
+	}
+	digest, _ := tokenID(code)
+	a.Enrollment = digest[:]
+	a.EnrollmentEnd = now.Add(enrollmentLife).Unix()
+	return code, nil
 }
 
 func (durableAccount) Format(w fmt.State, _ rune) { _, _ = io.WriteString(w, "[account redacted]") }
@@ -410,7 +432,7 @@ func (s *Store) readAccount(tx *bolt.Tx, id string) (durableAccount, error) {
 	if decodeRecord(plain, &a, 16*1024) != nil || a.ID != id || !usernameInput(a.Username) || !a.password().valid() || a.Revision != rev || len(a.Recovery) > 10 || a.LastCounter < -1 || a.FactorCount < 0 || a.FactorCount > 5 {
 		return durableAccount{}, errRefused
 	}
-	if a.Seed != "" && !validSeed(a.Seed) {
+	if a.Seed != "" && !validSeed(a.Seed) || a.EnrollmentEnd < 0 || len(a.Enrollment) != 0 && len(a.Enrollment) != 32 || (len(a.Enrollment) == 0) != (a.EnrollmentEnd == 0) || a.Seed != "" && len(a.Enrollment) != 0 {
 		return durableAccount{}, errRefused
 	}
 	return a, nil
@@ -468,23 +490,48 @@ func (s *Store) bootstrapValid(code string, now time.Time) bool {
 		return nil
 	}) == nil
 }
-func (s *Store) createAccount(tx *bolt.Tx, name string, hash PasswordHash) (durableAccount, error) {
+
+// setup is the one-time enrollment code to issue, or "" when the caller has
+// already proved operator authority (the bootstrap code).
+func (s *Store) createAccount(tx *bolt.Tx, name string, hash PasswordHash, now time.Time, withSetup bool) (durableAccount, string, error) {
 	a := durableAccount{}
 	if !usernameInput(name) || !hash.valid() || tx.Bucket(nameBucket).Get(s.nameIndex(name)) != nil || tx.Bucket(accountBucket).Stats().KeyN >= 256 {
-		return a, errRefused
+		return a, "", errRefused
 	}
 	id, e := randomID()
 	if e != nil {
-		return a, e
+		return a, "", e
 	}
 	if tx.Bucket(accountBucket).Get([]byte(id)) != nil {
-		return a, errRefused
+		return a, "", errRefused
 	}
 	a = durableAccount{ID: id, Username: name, Hash: storedPassword(hash), Revision: 1, LastCounter: -1}
-	if s.saveAccount(tx, a) != nil || tx.Bucket(nameBucket).Put(s.nameIndex(name), []byte(id)) != nil {
-		return durableAccount{}, errRefused
+	setup := ""
+	if withSetup {
+		if setup, e = issueEnrollment(&a, now); e != nil {
+			return durableAccount{}, "", e
+		}
 	}
-	return a, nil
+	if s.saveAccount(tx, a) != nil || tx.Bucket(nameBucket).Put(s.nameIndex(name), []byte(id)) != nil {
+		return durableAccount{}, "", errRefused
+	}
+	return a, setup, nil
+}
+
+// enrollmentValid checks an operator-issued first-enrollment code for an
+// account that has no factor yet. It never consumes the code; enroll does.
+func (s *Store) enrollmentValid(id, code string, now time.Time) bool {
+	digest, ok := tokenID(code)
+	if !ok {
+		return false
+	}
+	return s.view(func(tx *bolt.Tx) error {
+		a, e := s.readAccount(tx, id)
+		if e != nil || a.Seed != "" || len(a.Enrollment) != 32 || now.Unix() >= a.EnrollmentEnd || subtle.ConstantTimeCompare(digest[:], a.Enrollment) != 1 {
+			return errRefused
+		}
+		return nil
+	}) == nil
 }
 func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time) error {
 	digest, ok := tokenID(code)
@@ -496,7 +543,7 @@ func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time) e
 		if e != nil || m.Initialized || now.Unix() >= m.BootstrapEnd || subtle.ConstantTimeCompare(digest[:], m.Bootstrap[:]) != 1 || tx.Bucket(accountBucket).Stats().KeyN != 0 {
 			return errRefused
 		}
-		if _, e = s.createAccount(tx, name, hash); e != nil {
+		if _, _, e = s.createAccount(tx, name, hash, now, false); e != nil {
 			return e
 		}
 		m, e = s.meta(tx)
@@ -512,19 +559,26 @@ func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time) e
 
 // CreateAccount is an offline operator operation: the exclusive DB lock prevents
 // running it beside the service. HTTP has no registration or owner selector.
-func (s *Store) CreateAccount(name, password string) error {
+// The returned one-time setup code is required, with the password, for the
+// account's first MFA enrollment; hand both over separately.
+func (s *Store) CreateAccount(name, password string) (string, error) {
 	h, e := HashPassword(password)
 	if e != nil {
-		return e
+		return "", e
 	}
-	return s.update(func(tx *bolt.Tx) error {
+	var setup string
+	e = s.update(func(tx *bolt.Tx) error {
 		m, e := s.meta(tx)
 		if e != nil || !m.Initialized {
 			return errRefused
 		}
-		_, e = s.createAccount(tx, name, h)
+		_, setup, e = s.createAccount(tx, name, h, time.Now(), true)
 		return e
 	})
+	if e != nil {
+		return "", errRefused
+	}
+	return setup, nil
 }
 
 // RenewBootstrap is an offline operator action. It cannot reopen registration
@@ -551,13 +605,16 @@ func (s *Store) RenewBootstrap() (string, error) {
 
 // RecoverAccount requires the local instance key and exclusive DB lock. This
 // trusted operator operation is deliberately absent from the HTTP router.
-// Password replacement and optional lost-factor reset commit atomically.
-func (s *Store) RecoverAccount(name, password string, lostFactor bool) error {
+// Password replacement and optional lost-factor reset commit atomically. An
+// account left without a factor gets a fresh one-time setup code, returned
+// here; one that keeps its factor returns "".
+func (s *Store) RecoverAccount(name, password string, lostFactor bool) (string, error) {
 	next, e := HashPassword(password)
 	if e != nil {
-		return e
+		return "", e
 	}
-	return s.update(func(tx *bolt.Tx) error {
+	var setup string
+	e = s.update(func(tx *bolt.Tx) error {
 		if _, e := s.meta(tx); e != nil {
 			return e
 		}
@@ -573,6 +630,15 @@ func (s *Store) RecoverAccount(name, password string, lostFactor bool) error {
 			a.Recovery = nil
 			a.LastCounter = -1
 		}
+		if a.Seed == "" {
+			if setup, e = issueEnrollment(&a, time.Now()); e != nil {
+				return e
+			}
+		}
 		return s.saveAccount(tx, a)
 	})
+	if e != nil {
+		return "", errRefused
+	}
+	return setup, nil
 }

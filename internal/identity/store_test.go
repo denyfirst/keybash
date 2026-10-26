@@ -224,7 +224,7 @@ func (s *Store) enrollAcceptsWrongMode(t *testing.T, a durableAccount, seed stri
 
 func TestCustodyCiphertextOwnerBindingTamperAndPlaintextAbsence(t *testing.T) {
 	s, key, dir := bootstrapped(t)
-	if s.CreateAccount("bob", bobPassword) != nil {
+	if _, e := s.CreateAccount("bob", bobPassword); e != nil {
 		t.Fatal("offline account creation refused")
 	}
 	now := time.Now()

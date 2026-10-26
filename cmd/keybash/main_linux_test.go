@@ -68,17 +68,30 @@ func TestOperatorLinuxInitBootstrapAndOfflineRecovery(t *testing.T) {
 	if call("bootstrap-renew", "") == nil {
 		t.Fatal("operator reopened registration")
 	}
+	// Each operation that leaves an account without a factor prints exactly one
+	// fresh one-time setup code, and never the account name or password.
+	setupCode := func(what string) string {
+		t.Helper()
+		printed := output.String()
+		output.Reset()
+		code := strings.TrimSuffix(printed, "\n")
+		if len(code) != 43 || strings.ContainsAny(code, "\n ") || strings.Contains(printed, password) || strings.Contains(printed, "bob") {
+			t.Fatalf("%s printed something other than one setup code", what)
+		}
+		return code
+	}
 	if call("account-add", "bob\n"+password+"\n") != nil {
 		t.Fatal("operator account add refused")
 	}
-	if call("account-add", "bob\n"+password+"\n") == nil {
-		t.Fatal("duplicate account accepted")
+	added := setupCode("account add")
+	if call("account-add", "bob\n"+password+"\n") == nil || output.Len() != 0 {
+		t.Fatal("duplicate account accepted or printed a code")
 	}
 	if call("account-recover", "alice\nSynthetic replacement fixture 83!\n", "--lost-mfa") != nil {
 		t.Fatal("operator recovery refused")
 	}
-	if output.Len() != 0 {
-		t.Fatal("operator leaked account or secret")
+	if recovered := setupCode("lost-factor recovery"); recovered == added {
+		t.Fatal("setup codes were reused")
 	}
 	if call("serve-lab", "", "--listen", "0.0.0.0:8443") == nil {
 		t.Fatal("public listener accepted")

@@ -348,7 +348,7 @@ func TestIdentityAttemptBucketsAreUniformAndBounded(t *testing.T) {
 func TestIdentityFailedLoginsCannotLockOutOthers(t *testing.T) {
 	s, _, _ := bootstrapped(t)
 	_, _, codes := enrollFixture(t, s, "alice", time.Now())
-	if s.CreateAccount("bob", bobPassword) != nil {
+	if _, e := s.CreateAccount("bob", bobPassword); e != nil {
 		t.Fatal("second account fixture refused")
 	}
 	l, e := NewPersistent("https://127.0.0.1:8443", s)

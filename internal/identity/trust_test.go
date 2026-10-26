@@ -339,7 +339,7 @@ func TestServerTrustFreshMFAOwnerAndCSRF(t *testing.T) {
 	other.session("challenge")
 	other.expect("GET", "/api/targets/"+row.Target, "", 403)
 	other.expect("POST", "/api/connections/"+record+"/trust", body, 403)
-	if store.CreateAccount("bob", alicePassword) != nil {
+	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
 		t.Fatal("second account failed")
 	}
 	_, _, codes := enrollFixture(t, store, "bob", time.Now())

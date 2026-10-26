@@ -106,7 +106,7 @@ The manager socket is validated on launch; HTTPS readiness alone does not
 prove a worker or remote server is available. Existing manager image/hash,
 namespace, descriptor and cancellation checks remain mandatory.
 
-Login/MFA/owner/fresh proof, explicit full fingerprint, one-use lease, guarded
+Login/MFA/owner checks, fresh proof for trust decisions, explicit full fingerprint, one-use lease, guarded
 DNS/TCP and logout/revocation remain unchanged. SIGINT/SIGTERM close the lab
 and shut down HTTPS; credentials/configuration contents are never logged.
 Use synthetic credentials until installation, recovery and independent review

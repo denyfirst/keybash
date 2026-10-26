@@ -149,8 +149,14 @@ func (l *Lab) revokeRemotesLocked(owner, connection, credential string) {
 func compatible(t RemoteTarget, c Credential) bool {
 	return c.Username != "" && (t.Protocol == "ssh" && c.Kind == "ssh-key" || t.Protocol == "rdp" && c.Kind == "password")
 }
+
+// Opening an approved, owned connection needs a ready MFA session, not a
+// fresh password and new code each time: sign-in already proved both factors,
+// and the one-use 30-second lease stays bound to this session and owner.
+// Changing what may be opened (trust, creation, deletion) and revealing or
+// changing secrets still require fresh proof.
 func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
-	s := l.readyLocked(id, true)
+	s := l.readyLocked(id, false)
 	if s == nil || l.remote == nil {
 		return "", errRefused
 	}
@@ -196,7 +202,7 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 // failed setup. Another browser/account cannot consume or use this capability.
 func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteTarget, Credential, context.Context, error) {
 	key, ok := tokenID(raw)
-	s := l.readyLocked(id, true)
+	s := l.readyLocked(id, false)
 	if !ok || s == nil || l.remote == nil {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
@@ -262,7 +268,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := tokenID(requestToken(r))
 	l.mu.Lock()
-	s := l.readyLocked(id, true)
+	s := l.readyLocked(id, false)
 	allowed := ok && s != nil && l.remote != nil
 	capacityFull := allowed && !l.reserveRemoteSocketLocked(s.owner)
 	l.mu.Unlock()
@@ -440,6 +446,32 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		result = rows
 		return
 	}
+	// Opening an already approved connection needs only the ready session
+	// (see grantRemoteLocked); everything below changes stored decisions.
+	if r.Method == "POST" && r.URL.Path == "/api/remote/open" {
+		fields, ok := readFields(w, r, 1024, "connection")
+		if !ok {
+			status = 400
+			return
+		}
+		raw, e := l.grantRemoteLocked(id, fields["connection"])
+		clear(fields)
+		if e != nil {
+			status = 401
+			if e == errRemoteCapacity {
+				markRemoteCapacity(w)
+				status = 503
+			}
+			if e == errLimited {
+				status = 429
+			}
+			return
+		}
+		result = struct {
+			Lease string `json:"lease"`
+		}{raw}
+		return
+	}
 	if l.readyLocked(id, true) != s {
 		status = 403
 		return
@@ -522,28 +554,6 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			return
 		}
 		l.revokeRemotesLocked(s.owner, record, "")
-	case r.Method == "POST" && r.URL.Path == "/api/remote/open":
-		fields, ok := readFields(w, r, 1024, "connection")
-		if !ok {
-			status = 400
-			return
-		}
-		raw, e := l.grantRemoteLocked(id, fields["connection"])
-		clear(fields)
-		if e != nil {
-			status = 401
-			if e == errRemoteCapacity {
-				markRemoteCapacity(w)
-				status = 503
-			}
-			if e == errLimited {
-				status = 429
-			}
-			return
-		}
-		result = struct {
-			Lease string `json:"lease"`
-		}{raw}
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/connections/"):
 		record := strings.TrimPrefix(r.URL.Path, "/api/connections/")
 		if _, ok := readFields(w, r, 1024); !ok || !validID(record) {

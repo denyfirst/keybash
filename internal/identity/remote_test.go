@@ -292,19 +292,42 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	if e != nil {
 		t.Fatal("connection missing")
 	}
-	// A fresh grant still needs the same fresh, ready session on consumption.
-	raw := grantFixture(t, c, record)
+	// Opening an approved connection needs a ready session, not fresh proof;
+	// changing stored decisions still needs fresh proof.
 	l.mu.Lock()
 	saved := l.sessions[id].reauthUntil
 	l.sessions[id].reauthUntil = time.Time{}
-	if _, _, _, _, e = l.redeemRemoteLocked(id, raw); e == nil {
+	l.mu.Unlock()
+	staleRaw := grantFixture(t, c, record)
+	l.mu.Lock()
+	staleLease, _, _, _, e := l.redeemRemoteLocked(id, staleRaw)
+	if e != nil {
 		l.mu.Unlock()
-		t.Fatal("stale proof redeemed lease")
+		t.Fatal("a ready session without fresh proof could not open its own connection")
 	}
+	staleLease.cancel()
+	staleKey, _ := tokenID(staleRaw)
+	delete(l.remote.leases, staleKey)
+	l.mu.Unlock()
+	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"fingerprint": row.Fingerprint, "approval": row.Approval, "revision": "1"}), 403)
+	c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "again", "target": row.Target, "credential": row.Credential, "fingerprint": row.Fingerprint, "approval": row.Approval}), 403)
+	c.expect("DELETE", "/api/connections/"+record, "{}", 403)
+	c.expect("DELETE", "/api/credentials/"+row.Credential, "{}", 403)
+	l.mu.Lock()
 	l.sessions[id].reauthUntil = saved
 	l.mu.Unlock()
+	// Readiness (current account revision) is still required on consumption.
+	raw := grantFixture(t, c, record)
+	l.mu.Lock()
+	l.sessions[id].revision--
+	if _, _, _, _, e = l.redeemRemoteLocked(id, raw); e == nil {
+		l.mu.Unlock()
+		t.Fatal("a session from an older account revision redeemed a lease")
+	}
+	l.sessions[id].revision++
+	l.mu.Unlock()
 	// This trusted fixture writes another account; HTTP cannot select an owner.
-	if store.CreateAccount("bob", alicePassword) != nil {
+	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
 		t.Fatal("second fixture account failed")
 	}
 	_, _, codes := enrollFixture(t, store, "bob", time.Now())
@@ -365,7 +388,7 @@ func TestOwnedConnectionEnvelopePersistenceAndOwnerBinding(t *testing.T) {
 	if e != nil || strings.Contains(string(data), name) {
 		t.Fatal("connection metadata persisted plaintext")
 	}
-	if store.CreateAccount("bob", alicePassword) != nil {
+	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
 		t.Fatal("fixture second account refused")
 	}
 	b, _ := store.lookup("bob")

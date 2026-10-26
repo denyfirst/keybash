@@ -100,6 +100,16 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	}
 	stale := custodyClient{t: t, l: l, cookie: setupCookie}
 	stale.expect("GET", "/api/session", "", 401)
+	// Completing sign-in proved both factors: it is fresh proof until the
+	// password check is freshProof old, then sensitive actions refuse.
+	signedIn, _ := tokenID(c.cookie.Value)
+	l.mu.Lock()
+	freshAfterSignIn := l.readyLocked(signedIn, true) != nil
+	l.mu.Unlock()
+	if !freshAfterSignIn {
+		t.Fatal("completed sign-in did not count as fresh proof")
+	}
+	advance(l, &now, freshProof)
 	c.expect("GET", "/api/credentials", "", 200)
 	c.expect("POST", "/api/credentials", `{"name":"x","kind":"password","username":"u","secret":"s","passphrase":""}`, 403)
 	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": otpCode(t, seed.Secret, now.Unix()/30)}), 204)
@@ -181,14 +191,14 @@ func TestCustodyOfflineRecoveryBootstrapRenewalAndSealLimit(t *testing.T) {
 		t.Fatal("initialized registration reopened")
 	}
 	a, _, _ := enrollFixture(t, s, "alice", time.Now())
-	if s.RecoverAccount("alice", nextPassword, false) != nil {
+	if _, e := s.RecoverAccount("alice", nextPassword, false); e != nil {
 		t.Fatal("operator recovery refused")
 	}
 	b, e := s.lookup("alice")
 	if e != nil || b.ID != a.ID || b.Revision != a.Revision+1 || b.Seed != a.Seed || !b.password().verify(nextPassword) {
 		t.Fatal("operator recovery lost account or factor")
 	}
-	if s.RecoverAccount("alice", alicePassword, true) != nil {
+	if _, e := s.RecoverAccount("alice", alicePassword, true); e != nil {
 		t.Fatal("lost-factor recovery refused")
 	}
 	b, _ = s.lookup("alice")
@@ -310,6 +320,180 @@ func FuzzCustodyFields(f *testing.F) {
 }
 
 // Cancellation never consumes a factor or grants fresh authority.
+// An operator-created account's password alone cannot enroll a factor: the
+// seed is revealed only after that account's own unexpired one-time setup
+// code, which enrollment then spends.
+func TestFirstEnrollmentNeedsOperatorSetupCode(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	bobSetup, e := s.CreateAccount("bob", bobPassword)
+	carolSetup, ce := s.CreateAccount("carol", bobPassword)
+	if e != nil || ce != nil || len(bobSetup) != 43 || bobSetup == carolSetup {
+		t.Fatal("operator account fixtures refused")
+	}
+	l, e := NewPersistent("https://127.0.0.1:8443", s)
+	if e != nil {
+		t.Fatal("persistent lab refused")
+	}
+	defer l.Close()
+	now := time.Now()
+	l.mu.Lock()
+	l.now = func() time.Time { return now }
+	l.mu.Unlock()
+	bob := custodyClient{t: t, l: l}
+	bob.expect("POST", "/api/session", inputJSON(map[string]string{"username": "bob", "password": bobPassword}), 204)
+	bob.session("enroll")
+	var state struct{ Setup bool }
+	if json.Unmarshal(bob.expect("GET", "/api/session", "", 200).Body.Bytes(), &state) != nil || !state.Setup {
+		t.Fatal("session did not report the missing setup proof")
+	}
+	bob.expect("POST", "/api/mfa/enrollment", "{}", 403)
+	bob.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": "not-a-code"}), 403)
+	bob.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": carolSetup}), 403) // another account's code
+	bob.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": "123456"}), 401)
+	// Confirmation checks the proof itself too, even if a seed were issued.
+	bobID, _ := tokenID(bob.cookie.Value)
+	forged, _ := newSeed()
+	l.mu.Lock()
+	l.sessions[bobID].pendingSeed = forged
+	_, _, e = l.confirmEnrollmentLocked(bobID, otpCode(t, forged, now.Unix()/30))
+	if s := l.sessions[bobID]; s != nil { // a wrongful enrollment revokes it
+		s.pendingSeed = ""
+	}
+	l.mu.Unlock()
+	if e == nil {
+		t.Fatal("confirmation enrolled a factor without the setup proof")
+	}
+	w := bob.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": bobSetup}), 200)
+	var seed struct{ Secret string }
+	if json.Unmarshal(w.Body.Bytes(), &seed) != nil || !validSeed(seed.Secret) {
+		t.Fatal("proved setup did not reveal a seed")
+	}
+	bob.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, now.Unix()/30)}), 200)
+	bob.session("ready")
+	a, e := s.lookup("bob")
+	if e != nil || a.Seed == "" || len(a.Enrollment) != 0 || a.EnrollmentEnd != 0 {
+		t.Fatal("enrollment did not spend the setup code")
+	}
+	// Without a pending code the record keeps the earlier schema, which an
+	// older binary that refuses unknown fields can still read.
+	if plain, _ := json.Marshal(a); strings.Contains(string(plain), "Enrollment") {
+		t.Fatal("an enrolled account still serializes setup-code fields")
+	}
+	// The budget is per account, and wrong codes spend it.
+	carol := custodyClient{t: t, l: l}
+	carol.expect("POST", "/api/session", inputJSON(map[string]string{"username": "carol", "password": bobPassword}), 204)
+	carol.session("enroll")
+	for range factorAttempts {
+		carol.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": bobSetup}), 403)
+	}
+	carol.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": carolSetup}), 429)
+	// An unclaimed code expires.
+	advance(l, &now, enrollmentLife)
+	carol.expect("POST", "/api/session", inputJSON(map[string]string{"username": "carol", "password": bobPassword}), 204)
+	carol.session("enroll")
+	carol.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": carolSetup}), 403)
+}
+
+// A record whose setup-code fields disagree, or that keeps a code beside an
+// enrolled factor, is refused rather than interpreted.
+func TestAccountSetupFieldsMustBeConsistent(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	original, e := s.lookup("alice")
+	if e != nil {
+		t.Fatal("fixture account missing")
+	}
+	seeded, _ := newSeed()
+	for _, mutate := range []func(*durableAccount){
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = make([]byte, 31), 1 },
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = make([]byte, 32), 0 },
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = nil, 1 },
+		func(a *durableAccount) { a.Enrollment, a.EnrollmentEnd = make([]byte, 32), -1 },
+		func(a *durableAccount) { a.Seed, a.Enrollment, a.EnrollmentEnd = seeded, make([]byte, 32), 1 },
+	} {
+		bad := original
+		mutate(&bad)
+		if s.update(func(tx *bolt.Tx) error { return s.saveAccount(tx, bad) }) != nil {
+			t.Fatal("fixture write failed")
+		}
+		if _, e := s.lookup("alice"); e == nil {
+			t.Fatal("an inconsistent setup-code record was accepted")
+		}
+	}
+	if s.update(func(tx *bolt.Tx) error { return s.saveAccount(tx, original) }) != nil {
+		t.Fatal("fixture restore failed")
+	}
+	if _, e := s.lookup("alice"); e != nil {
+		t.Fatal("a consistent record was refused")
+	}
+}
+
+// Lost-factor recovery issues a new code and invalidates the old one; recovery
+// that keeps an enrolled factor issues none.
+func TestRecoverySetupCodes(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	first, e := s.CreateAccount("bob", bobPassword)
+	if e != nil {
+		t.Fatal("operator account fixture refused")
+	}
+	bob, _ := s.lookup("bob")
+	second, e := s.RecoverAccount("bob", nextPassword, false)
+	if e != nil || len(second) != 43 || second == first {
+		t.Fatal("recovery of an unenrolled account did not reissue its setup code")
+	}
+	if s.enrollmentValid(bob.ID, first, time.Now()) || !s.enrollmentValid(bob.ID, second, time.Now()) {
+		t.Fatal("a superseded setup code stayed valid")
+	}
+	enrollFixture(t, s, "alice", time.Now())
+	if code, e := s.RecoverAccount("alice", nextPassword, false); e != nil || code != "" {
+		t.Fatal("recovery that keeps a factor issued a setup code")
+	}
+	alice, _ := s.lookup("alice")
+	if s.enrollmentValid(alice.ID, second, time.Now()) {
+		t.Fatal("a setup code worked for another account")
+	}
+	if code, e := s.RecoverAccount("alice", alicePassword, true); e != nil || !s.enrollmentValid(alice.ID, code, time.Now()) {
+		t.Fatal("lost-factor recovery did not issue a working setup code")
+	}
+}
+
+// Sign-in freshness is bounded by the older proof, the password check, so a
+// slow factor entry cannot stretch it past freshProof.
+func TestSignInFreshnessStartsAtPasswordCheck(t *testing.T) {
+	s, _, _ := bootstrapped(t)
+	_, _, codes := enrollFixture(t, s, "alice", time.Now())
+	l, e := NewPersistent("https://127.0.0.1:8443", s)
+	if e != nil {
+		t.Fatal("persistent lab refused")
+	}
+	defer l.Close()
+	now := time.Now()
+	l.mu.Lock()
+	l.now = func() time.Time { return now }
+	l.mu.Unlock()
+	raw, e := l.login(context.Background(), "alice", alicePassword, "")
+	if e != nil {
+		t.Fatal("login refused")
+	}
+	id, _ := tokenID(raw)
+	advance(l, &now, 90*time.Second)
+	l.mu.Lock()
+	raw, e = l.finishFactorLocked(id, codes[0])
+	l.mu.Unlock()
+	if e != nil {
+		t.Fatal("factor refused")
+	}
+	id, _ = tokenID(raw)
+	fresh := func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.readyLocked(id, true) != nil }
+	advance(l, &now, freshProof-90*time.Second-time.Second)
+	if !fresh() {
+		t.Fatal("sign-in was not fresh within two minutes of the password check")
+	}
+	advance(l, &now, time.Second)
+	if fresh() {
+		t.Fatal("sign-in freshness outlived the password check by more than two minutes")
+	}
+}
+
 func TestCustodyCancelledReauthentication(t *testing.T) {
 	s, _, _ := bootstrapped(t)
 	_, _, codes := enrollFixture(t, s, "alice", time.Now())
@@ -318,6 +502,10 @@ func TestCustodyCancelledReauthentication(t *testing.T) {
 		t.Fatal("persistent lab refused")
 	}
 	defer l.Close()
+	now := time.Now()
+	l.mu.Lock()
+	l.now = func() time.Time { return now }
+	l.mu.Unlock()
 	raw, e := l.login(context.Background(), "alice", alicePassword, "")
 	if e != nil {
 		t.Fatal("login refused")
@@ -330,6 +518,7 @@ func TestCustodyCancelledReauthentication(t *testing.T) {
 		t.Fatal("factor refused")
 	}
 	id, _ = tokenID(raw)
+	advance(l, &now, freshProof) // let the sign-in proof lapse first
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if l.reauthenticate(ctx, id, alicePassword, codes[1]) == nil {
