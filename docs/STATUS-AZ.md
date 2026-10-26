@@ -91,6 +91,8 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 - Öz hesabına aid SSH açarı (Ed25519, ECDSA, RSA 2048+)/passphrase və şifrə
   saxlama/göstərmə/silmə; SSH-ə açarla və ya şifrə ilə qoşulma;
   həssas əməliyyatlar üçün şifrə + təzə MFA ilə təkrar doğrulama.
+- Oflayn şifrələnmiş backup, instance açarının bərpa kodu və təmiz qovluğa
+  restore; restore hər hesabın MFA-sını sıfırlayır (`BACKUP-AZ.md`).
 
 Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağlıdır.
 Native sınaqlarda yalnız test fayllarına aid sintetik loopback bağlantısı var.
@@ -108,7 +110,7 @@ məhdudiyyətlər: `INTERACTIVE-DEMO-AZ.md`.
 
 Production quraşdırıcı və public HTTPS ingress, gündəlik məhsul workspace-i,
 real Windows/şəbəkə hostları və tam browser/keyboard matrisi, uzun sessiya/yük
-ölçüləri, upgrade/backup/restore/key rotation, offline release paketi və ayrıca
+ölçüləri, upgrade, xidməti dayandırmadan backup və key rotation, offline release paketi və ayrıca
 audit olunmuş imzalı buraxılış hələ hazırlanmayıb. Mənbə systemd/RDP xidmət
 inteqrasiyası production deployment və ya hazır installer deyil.
 

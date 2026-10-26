@@ -48,6 +48,7 @@ type Store struct {
 	wrap               cipher.AEAD
 	indexKey, checkKey [32]byte
 	recoveryKey        [32]byte
+	backupKey          [32]byte
 	closed             bool
 }
 
@@ -239,7 +240,7 @@ func OpenStore(dir string, key []byte) (*Store, error) {
 	if privateDirectory(dir) != nil {
 		return nil, errRefused
 	}
-	return openStore(dir, key, false)
+	return openStore(dir, key)
 }
 func createStore(dir string, key []byte) (*Store, string, error) {
 	if len(key) != 32 {
@@ -261,7 +262,11 @@ func createStore(dir string, key []byte) (*Store, string, error) {
 	}
 	_ = f.Close()
 	_ = r.Close()
-	s, e := openStore(dir, key, true)
+	instance, e := randomID()
+	if e != nil {
+		return nil, "", errRefused
+	}
+	s, e := openDB(dir, key, instance)
 	if e != nil {
 		return nil, "", errRefused
 	}
@@ -285,8 +290,13 @@ func createStore(dir string, key []byte) (*Store, string, error) {
 	}
 	return s, code, nil
 }
-func openStore(dir string, key []byte, initial bool) (*Store, error) {
-	if len(key) != 32 {
+func openStore(dir string, key []byte) (*Store, error) { return openDB(dir, key, "") }
+
+// openDB opens the pinned database. With no instance it reads the stored one
+// and checks the state's tag against the key; a given instance is for a
+// database still being written, by creation or restore, before it has state.
+func openDB(dir string, key []byte, instance string) (*Store, error) {
+	if len(key) != 32 || instance != "" && !validID(instance) {
 		return nil, errRefused
 	}
 	r, e := os.OpenRoot(dir)
@@ -330,8 +340,9 @@ func openStore(dir string, key []byte, initial bool) (*Store, error) {
 	if e != nil {
 		return nil, errRefused
 	}
+	initial := instance != ""
 	if initial {
-		s.instance, e = randomID()
+		s.instance = instance
 	} else {
 		e = s.db.View(func(tx *bolt.Tx) error {
 			var m storeMeta
@@ -345,19 +356,18 @@ func openStore(dir string, key []byte, initial bool) (*Store, error) {
 	if e != nil {
 		return nil, errRefused
 	}
-	salt, _ := hex.DecodeString(s.instance)
 	for _, item := range []struct {
 		name   string
 		target *[32]byte
-	}{{"index", &s.indexKey}, {"check", &s.checkKey}, {"recovery", &s.recoveryKey}} {
-		b, e := hkdf.Key(sha256.New, key, salt, "keybash/custody/v1/"+item.name, 32)
+	}{{"index", &s.indexKey}, {"check", &s.checkKey}, {"recovery", &s.recoveryKey}, {"backup", &s.backupKey}} {
+		b, e := instanceSubkey(key, s.instance, item.name)
 		if e != nil {
 			return nil, errRefused
 		}
 		copy(item.target[:], b)
 		clear(b)
 	}
-	wrapKey, e := hkdf.Key(sha256.New, key, salt, "keybash/custody/v1/wrap", 32)
+	wrapKey, e := instanceSubkey(key, s.instance, "wrap")
 	if e != nil {
 		return nil, errRefused
 	}
@@ -373,6 +383,16 @@ func openStore(dir string, key []byte, initial bool) (*Store, error) {
 	}
 	ok = true
 	return s, nil
+}
+
+// instanceSubkey derives one purpose's key from the instance key, salted by
+// the instance ID.
+func instanceSubkey(key []byte, instance, purpose string) ([]byte, error) {
+	salt, e := hex.DecodeString(instance)
+	if e != nil || len(salt) != 16 {
+		return nil, errRefused
+	}
+	return hkdf.Key(sha256.New, key, salt, "keybash/custody/v1/"+purpose, 32)
 }
 func (s *Store) view(fn func(*bolt.Tx) error) error {
 	s.mu.RLock()
@@ -408,6 +428,7 @@ func (s *Store) Close() error {
 	clear(s.indexKey[:])
 	clear(s.checkKey[:])
 	clear(s.recoveryKey[:])
+	clear(s.backupKey[:])
 	s.wrap = nil
 	if e != nil {
 		return errRefused

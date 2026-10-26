@@ -142,7 +142,7 @@ func TestServerTrustReopenAndStaleRevision(t *testing.T) {
 		t.Fatal("stale trust revision accepted")
 	}
 	_ = store.Close()
-	reopened, e := openStore(dir, key, false)
+	reopened, e := openStore(dir, key)
 	if e != nil {
 		t.Fatal("trust reopen refused")
 	}
