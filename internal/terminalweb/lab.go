@@ -137,9 +137,9 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request refused", http.StatusMethodNotAllowed)
 		return
 	}
-	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css"}
+	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css"}
 	if l.desktop {
-		assets = map[string]string{"/": "desktop.html", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/paste.mjs": "paste.mjs", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
+		assets = map[string]string{"/": "desktop.html", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/paste.mjs": "paste.mjs", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
 	}
 	path, ok := assets[r.URL.Path]
 	if !ok {
@@ -156,6 +156,8 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		typeName = "text/css; charset=utf-8"
 	} else if strings.HasSuffix(path, ".html") {
 		typeName = "text/html; charset=utf-8"
+	} else if strings.HasSuffix(path, ".woff2") {
+		typeName = "font/woff2"
 	}
 	w.Header().Set("Content-Type", typeName)
 	_, _ = w.Write(data)

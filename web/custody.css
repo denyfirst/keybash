@@ -1,3 +1,60 @@
-body[data-screen=account] main{width:min(840px,100%)}[hidden]{display:none!important}h2{font-weight:550;font-size:19px;margin-top:30px}summary{cursor:pointer;color:#ccd0da;font-size:13px;padding:17px 0}details{border-top:1px solid #30333c;margin-top:24px}details form{margin-top:0}select,textarea{width:100%;background:#0c0d10;border:1px solid #363944;color:#eee;border-radius:6px;padding:11px 12px;font:13px ui-monospace,monospace}textarea{min-height:160px;resize:vertical}select{font-family:inherit}select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid #ed949a;outline-offset:3px}output{display:block;word-break:break-all;background:#0b0c0f;border:1px solid #343742;border-radius:6px;padding:16px;font:14px/1.8 ui-monospace,monospace}#records{display:grid;gap:10px}.record{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:17px;border:1px solid #333641;border-radius:7px}.record span{flex:1 1 100%;overflow-wrap:anywhere;font-size:13px;color:#b9bdc8}.record button{width:auto;margin:0}dialog{width:min(660px,90vw);border:1px solid #434752;border-radius:12px;background:#14161b;color:#eee;padding:28px}dialog::backdrop{background:#000a}dialog input{margin-top:12px}#recovery-codes{line-height:1.8;min-height:270px}
+/* The workspace's own parts: lists of records and connections, and the
+   values a person compares by eye. Tokens and components are keybash.css. */
 
-#connection-server,#trust-server{white-space:pre-wrap;font-size:12px;margin:14px 0}.trust-state[data-trust=changed],.trust-state[data-trust=unverified],.trust-state[data-trust=unavailable]{color:#ffb5b9}#connections{display:grid;gap:10px}#trust-previous{overflow-wrap:anywhere}
+/* Until MFA is done there is nothing to navigate to. */
+body.workspace:not([data-stage="ready"]) .rail-caption,
+body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
+
+#vault { display: grid; gap: 1.2rem; }
+#vault > .panel + .panel { margin-top: 0; }
+#vault > .panel { scroll-margin-top: 1.2rem; }
+
+#records, #connections { display: grid; gap: 0.6rem; margin: 0.4rem 0 0.8rem; }
+
+/* A record or connection: its name and facts on the first lines, its actions
+   after them. Names and fingerprints break anywhere rather than overflow. */
+.record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.record > span {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+.record > span:first-child { color: var(--ink); font-weight: 600; }
+.record button, .record a { margin: 0; }
+.record button { padding: 0.45rem 0.9rem; font-size: 0.86rem; }
+/* Connect is the record's main action: a link drawn as the accent button. */
+.record a {
+  display: inline-block;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #ffffff;
+  text-decoration: none;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.record a:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* A server identity's state, in words and in its colour. */
+.trust-state { font-weight: 600; }
+.trust-state[data-trust=verified] { color: var(--strong); }
+.trust-state[data-trust=unverified] { color: var(--weak); }
+.trust-state[data-trust=changed],
+.trust-state[data-trust=unavailable] { color: var(--insecure); }
+
+#seed { font-size: 1.05rem; letter-spacing: 0.08em; }
+#recovery-codes { min-height: 16rem; line-height: 1.8; }
+#connection-server, #trust-server { font-size: 0.82rem; }
+#trust-previous { overflow-wrap: anywhere; }
+dialog input { margin-top: 0.8rem; }

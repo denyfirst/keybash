@@ -1,1 +1,81 @@
-:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:#0c0d0f;color:#eeeeef;font-synthesis:none}*{box-sizing:border-box}body{margin:0;display:flex;min-height:100vh}aside{width:230px;padding:35px 26px;border-right:1px solid #25262b;background:#101114;display:flex;flex-direction:column}.brand{display:flex;align-items:center;font-size:27px;letter-spacing:-1.2px;font-weight:650;color:inherit;text-decoration:none;margin-bottom:66px}.brand-mark{font-size:22px;display:grid;place-items:center;background:#cc393a;color:white;width:31px;height:31px;border-radius:8px;margin-right:11px}.brand-dot{color:#e65558}.eyebrow{font-size:10px;letter-spacing:1.7px;font-weight:650;color:#82848e;margin-bottom:13px}.nav-item{padding:12px 14px;border-radius:6px;font-size:13px}.nav-item span{margin-right:12px;color:#e5696b}.active{background:#232026;border:1px solid #3e2a30}.sidebar-note{margin-top:auto;font-size:12px;line-height:1.9;color:#a8aab2}.sidebar-note span{font-size:10px;color:#676a75}main{flex:1;min-width:0;padding:48px 52px 26px;max-width:1600px}header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:30px}h1{margin:0;font-weight:550;font-size:34px;letter-spacing:-1px}header p{color:#898c97;font-size:12px;margin-top:12px}#status{font-size:11px;border:1px solid #34363e;border-radius:20px;padding:7px 13px;margin-top:24px;color:#a5a8b3}#status.connected{border-color:#2c4d41;color:#91c8ac}.login-panel{margin-bottom:22px;padding:16px 20px;border:1px solid #2a2c33;background:#121317;border-radius:8px}.login-panel label{font-size:12px;color:#a3a6b0}.login-row{display:flex;gap:12px;margin-top:9px}.login-row input{flex:1;min-width:0;background:#0c0d0f;color:#eee;border:1px solid #363843;border-radius:5px;padding:9px}button{font:inherit;font-size:11px;background:#1b1d23;color:#d1d3dc;border:1px solid #363841;border-radius:5px;padding:8px 13px;cursor:pointer}button:disabled{opacity:.4;cursor:default}button:hover:enabled{background:#282b34}button.primary,.login-row button{background:#c23c40;border-color:#c23c40;color:white}button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible{outline:2px solid #ee8c8e;outline-offset:3px}.workspace{border:1px solid #30323a;border-radius:9px;overflow:hidden;box-shadow:0 14px 50px #0003}.toolbar{height:52px;display:flex;align-items:center;justify-content:space-between;background:#16171c;border-bottom:1px solid #30323a;padding:0 15px}.tab{align-self:stretch;display:flex;gap:10px;align-items:center;border-bottom:2px solid #d04c50;padding:0 15px;font-size:12px;font-weight:550}.tab-dot{height:6px;width:6px;border-radius:50%;background:#93959f}.connected+.workspace .tab-dot{background:#91c8ac}.tab-type{font-size:9px;color:#717580;margin-left:22px}.tools{display:flex;gap:7px}.tools button{padding:5px 11px}#terminal{height:460px;padding:23px;background:#0c0d0f}footer{padding:12px 23px;border-top:1px solid #25272e;display:flex;justify-content:space-between;font-size:10px;color:#6e727f;background:#121318}footer i{margin:0 10px;font-style:normal;color:#373b45}.help{font-size:11px;line-height:1.7;color:#696e7c;margin-top:19px}.notice{min-height:20px;font-size:12px;color:#d89192}dialog{width:min(600px,90vw);background:#181a20;color:#e6e7eb;border:1px solid #424550;border-radius:12px;padding:28px;box-shadow:0 25px 80px #0009}dialog::backdrop{background:#0009}dialog h2{font-size:22px;font-weight:550;margin:5px 0 14px}dialog p{font-size:12px;color:#9297a6;line-height:1.8}textarea{width:100%;min-height:190px;background:#0c0d10;color:#dedfe5;border:1px solid #373b47;border-radius:5px;padding:14px;resize:vertical;font:12px/1.7 ui-monospace,monospace}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}[hidden]{display:none!important}@media(max-width:800px){aside{width:70px;padding:28px 18px}.brand{font-size:0}.brand-mark{margin:0}.brand-dot,.nav-item,.sidebar-note,aside .eyebrow{display:none}main{padding:28px 20px}h1{font-size:27px}header{gap:15px}header p{max-width:270px}#terminal{padding:14px;height:420px}footer span:first-child{max-width:220px;line-height:1.7}.tools{gap:4px}.tools button{padding:5px 7px}}
+/* A remote session page: the terminal or the desktop, drawn on a panel that is
+   dark in both schemes (a terminal's colours are the remote's, not ours). */
+
+#status {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+#status.connected { color: var(--strong); border-color: color-mix(in srgb, var(--strong) 45%, var(--rule)); }
+
+.login-panel { margin-bottom: 1.2rem; }
+.login-row { display: flex; gap: 0.6rem; }
+.login-row button { margin: 0; }
+
+.session {
+  overflow: hidden;
+  background: var(--term-bg);
+  border: 1px solid var(--term-rule);
+  border-radius: calc(var(--radius) + 2px);
+  box-shadow: 0 14px 50px var(--edge);
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-height: 3.1rem;
+  padding: 0 0.9rem;
+  background: var(--term-bar);
+  border-bottom: 1px solid var(--term-rule);
+}
+.tab {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.6rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--term-ink);
+  border-bottom: 2px solid var(--tool);
+}
+.tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--term-faint); }
+body:has(#status.connected) .tab-dot { background: var(--term-live); }
+.tab-type { margin-left: 0.8rem; font-size: 0.7rem; letter-spacing: 0.1em; color: var(--term-faint); }
+.tools { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+/* Tool buttons sit on the dark bar in both schemes. */
+.tools button {
+  margin: 0;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  color: var(--term-ink);
+  background: transparent;
+  border-color: var(--term-rule);
+}
+.tools button:hover:not(:disabled) { background: var(--term-rule); border-color: var(--term-faint); }
+.tools button:disabled { color: var(--term-faint); background: transparent; border-color: var(--term-rule); }
+
+#terminal { height: 30rem; padding: 1.2rem; background: var(--term-bg); }
+.session-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1.2rem;
+  font-size: 0.78rem;
+  color: var(--term-faint);
+  background: var(--term-bar);
+  border-top: 1px solid var(--term-rule);
+}
+.session-foot i { margin: 0 0.5rem; font-style: normal; }
+
+.help { margin-top: 1rem; }
+
+@media (max-width: 760px) {
+  #terminal { height: 26rem; padding: 0.8rem; }
+  .session-foot span:first-child { max-width: 14rem; }
+}

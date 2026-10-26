@@ -86,7 +86,7 @@ jobs:
           test -z "$(gofmt -l cmd internal web)"
           grep -ohE '`(Test|Fuzz)[A-Za-z0-9_]+' docs/SECURITY-INVARIANTS.md \
             | tr -d '`' | sort -u > "${RUNNER_TEMP}/cited"
-          grep -rhoE '^func (Test|Fuzz)[A-Za-z0-9_]+' --include='*_test.go' cmd internal \
+          grep -rhoE '^func (Test|Fuzz)[A-Za-z0-9_]+' --include='*_test.go' cmd internal web \
             | sed -E 's/^func //' | sort -u > "${RUNNER_TEMP}/defined"
           test -z "$(comm -23 "${RUNNER_TEMP}/cited" "${RUNNER_TEMP}/defined")"
 
