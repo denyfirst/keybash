@@ -34,7 +34,9 @@ the real Windows/browser matrix, production installer, restore or release gates.
    and fresh proof now have a Linux loopback lab; see `CUSTODY-LAB.md`.
    Remote-resource ownership and revocation now connect the synthetic SSH/native
    RDP browser fixtures (`OWNED-REMOTE-LAB.md`). Installed isolated workers,
-   operator configuration, restore/rotation and audited release remain gates.
+   operator configuration, key rotation and audited release remain gates.
+   Offline backup, instance key recovery and restore to a clean directory
+   exist (`BACKUP-RESTORE.md`).
    The SSH process boundary now has an authenticated separate Unix manager for
    an unprivileged gateway (`SSH-MANAGER-LAB.md`). Source service identities,
    aggregate cgroups and a separate RDP manager are implemented; packaged

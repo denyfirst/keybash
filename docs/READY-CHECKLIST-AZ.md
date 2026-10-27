@@ -65,6 +65,10 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
 7. **Backup və bərpa.** Şifrələnmiş export, ayrıca key recovery, təmiz instansiyaya
    restore və itmiş açarın nəticəsinin aydın izahı. Təkcə backup faylı yaratmaq
    kifayət etmir — onunla faktiki bərpa sınağı tələb olunur.
+   Oflayn `backup`, açarın bərpa kodu (`key-export`/`key-import`) və boş
+   qovluğa `restore` (hər hesabın MFA-sı sıfırlanır) var; Linux CI-da təmiz
+   hosta tam bərpa sınanır (`BACKUP-AZ.md`). Xidməti dayandırmadan və cədvəllə
+   backup, backup faylına ayrıca parol və açar rotation qalır.
 8. **Real istifadə və buraxılış yoxlamaları.** Windows/Linux serverləri,
    Chrome/Edge/Firefox/Safari və OS klaviatura/clipboard matrisi, yük/performance,
    pis bağlantı, upgrade/restore və hesablararası hücum sınaqları. Dəstək iddiaları

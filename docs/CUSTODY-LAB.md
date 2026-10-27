@@ -36,11 +36,11 @@ sizes and access patterns are visible metadata; its state is HMAC protected.
 
 Wrong keys and changed tags/owner bindings fail closed. Whole-file rollback,
 record replay within an old authenticated database snapshot, arbitrary corrupt
-bbolt files and offline deletion are not solved by AEAD. In particular an old
-backup can resurrect a consumed code: restore must invalidate recovery/factors
-before service, in a future tested restore workflow. Filesystem quotas, crash/
-power-loss fault injection, key rotation, migration and encrypted export/restore
-remain gates. Do not copy a live DB file as a backup. Losing the instance key
+bbolt files and offline deletion are not solved by AEAD. An old backup could
+resurrect a consumed code, so restore (`BACKUP-RESTORE.md`) resets every
+account's factor and recovery codes in the same transaction that writes the
+records. Filesystem quotas, crash/power-loss fault injection, key rotation and
+migration remain gates. Do not copy a live DB file as a backup. Losing the instance key
 loses access; host root or DB plus key can decrypt the records. Go/browser RAM,
 swap, core dumps, already delivered bytes and clipboard retention cannot be
 guaranteed erased by clearing local buffers or hiding a field.

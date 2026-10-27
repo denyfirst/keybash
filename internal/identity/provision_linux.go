@@ -101,26 +101,38 @@ func InitializeFiles(dir, keyPath string) (*Store, string, error) {
 		return nil, "", errRefused
 	}
 	defer clear(key[:])
-	f, e := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if e != nil {
+	if writeKeyFile(root, name, key[:]) != nil {
 		return nil, "", errRefused
 	}
-	n, we := f.Write(key[:])
+	return InitializeStore(dir, key[:])
+}
+
+// writeKeyFile exclusively creates a durable 0600 key file; it never
+// replaces one.
+func writeKeyFile(root *os.Root, name string, key []byte) error {
+	if len(key) != 32 {
+		return errRefused
+	}
+	f, e := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if e != nil {
+		return errRefused
+	}
+	n, we := f.Write(key)
 	se := f.Sync()
 	ce := f.Close()
 	if we != nil || se != nil || ce != nil || n != 32 {
-		return nil, "", errRefused
+		return errRefused
 	}
 	parent, e := root.Open(".")
 	if e != nil {
-		return nil, "", errRefused
+		return errRefused
 	}
 	e = parent.Sync()
 	_ = parent.Close()
 	if e != nil {
-		return nil, "", errRefused
+		return errRefused
 	}
-	return InitializeStore(dir, key[:])
+	return nil
 }
 func OpenFiles(dir, keyPath string) (*Store, error) {
 	root, name, e := keyRoot(dir, keyPath)
