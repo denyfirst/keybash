@@ -82,7 +82,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return refused
 		}
 		_, e = fmt.Fprintf(output, "Target configuration valid (%d servers; capacity %d total, %d per owner).\n", len(targets), snapshot.Capacity.Total, snapshot.Capacity.PerOwner)
-		return e
+		return reportUnavailable(output, e, targets, time.Now())
 	}
 	if *data == "" || *key == "" || command != "serve-ssh-lab" && command != "serve-remote-lab" && (*catalog != "" || *manager != "" || *rdpManager != "") || command != "serve-remote-lab" && *rdpManager != "" {
 		return refused
@@ -262,6 +262,17 @@ func sshOnly(targets []identity.RemoteTarget) bool {
 		}
 	}
 	return true
+}
+
+// reportUnavailable names each valid target that cannot be used now, which
+// for RDP means Windows has usually renewed the certificate approved for it.
+func reportUnavailable(output io.Writer, e error, targets []identity.RemoteTarget, now time.Time) error {
+	for _, target := range targets {
+		if e == nil && !target.UsableAt(now) {
+			_, e = fmt.Fprintf(output, "Unavailable until its approved certificate is replaced: %q (%s).\n", target.Name, target.ID)
+		}
+	}
+	return e
 }
 
 // exposure checks the listener and returns the origin browsers use. A

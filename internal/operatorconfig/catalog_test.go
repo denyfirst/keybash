@@ -242,9 +242,13 @@ func TestOperatorCatalogRDPCertificate(t *testing.T) {
 		}
 	}
 	check(true)
+	// Outside its validity period (Windows renewed it, or it starts later) the
+	// approved certificate still loads: only its server is unavailable.
 	cert.NotAfter = time.Now().Add(-time.Minute)
-	check(false)
-	cert.NotAfter = time.Now().Add(time.Hour)
+	check(true)
+	cert.NotBefore, cert.NotAfter = time.Now().Add(time.Hour), time.Now().Add(2*time.Hour)
+	check(true)
+	cert.NotBefore, cert.NotAfter = time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
 	cert.DNSNames = []string{"other.invalid"}
 	check(false)
 	cert.DNSNames = []string{"ssh.invalid"}

@@ -60,8 +60,9 @@ bounded write policy, not an authenticated-user or whole-service DDoS guarantee.
 On replacement, all active and pending leases for that owner's connection are
 revoked before another request can redeem them. Other connections remain live.
 Both grant and consumption require the full current decision. The remote page
-also refuses a mismatched decision before serving its workspace. RDP certificate
-expiry makes the target unavailable for new approval and launch.
+also refuses a mismatched decision before serving its workspace. An RDP
+certificate outside its validity period makes only that target unavailable for
+new approval and launch; the gateway still starts and other targets work.
 
 The interface shows verified, changed, unverified or unavailable. Changed and
 unverified rows have no Connect link. The review dialog shows the previous

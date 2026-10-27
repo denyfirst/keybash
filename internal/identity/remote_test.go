@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
@@ -23,9 +24,11 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/denyfirst/keybash/internal/sessionlimits"
+	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 	bolt "go.etcd.io/bbolt"
+	"golang.org/x/crypto/ssh"
 )
 
 type fixtureRDPWorker struct {
@@ -516,5 +519,67 @@ func TestOwnedRemoteOutputDrivenRDPDoesNotExtendIdle(t *testing.T) {
 	l.mu.Unlock()
 	if !touched {
 		t.Fatal("valid user activity did not refresh idle")
+	}
+}
+
+// When Windows renews its RDP certificate, the approved one expires. The lab
+// still starts; only that server is unavailable, and every other one works.
+func TestExpiredRDPCertificateDisablesOnlyItsServer(t *testing.T) {
+	store, _, _ := bootstrapped(t)
+	now := time.Now()
+	key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if e != nil {
+		t.Fatal("fixture key failed")
+	}
+	period := func(from, until time.Time) []byte {
+		cert := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{"rdp.invalid"}, NotBefore: from, NotAfter: until, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+		der, e := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
+		if e != nil {
+			t.Fatal("fixture cert failed")
+		}
+		return der
+	}
+	expired, future := remoteTargetFixture(t), remoteTargetFixture(t)
+	expired.Identity = period(now.Add(-2*time.Hour), now.Add(-time.Hour))
+	future.ID, future.Identity = strings.Repeat("b", 32), period(now.Add(time.Hour), now.Add(2*time.Hour))
+	_, hostKey, _ := ed25519.GenerateKey(rand.Reader)
+	hostSigner, _ := ssh.NewSignerFromKey(hostKey)
+	ip := netip.MustParseAddr("10.34.0.9")
+	policy, e := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(ip, 22)}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	named, e := targetguard.NewNamedTarget(policy, "ssh.invalid", 22, []netip.Addr{ip})
+	if e != nil {
+		t.Fatal(e)
+	}
+	sshTarget := RemoteTarget{strings.Repeat("c", 32), "Synthetic SSH", "ssh", named, hostSigner.PublicKey().Marshal()}
+	worker := &recordingSSHWorker{}
+	l, e := NewRemoteLab("https://127.0.0.1:8443", store, []RemoteTarget{expired, future, sshTarget}, worker, &fixtureRDPWorker{closed: make(chan struct{})})
+	if e != nil {
+		t.Fatal("one RDP certificate outside its period stopped the whole lab")
+	}
+	defer l.Close()
+	for _, target := range []RemoteTarget{expired, future} {
+		if describeTarget(target, now).Available || target.UsableAt(now) || acceptTargetProof(target, identityFingerprint(target), approvalFingerprint(target), now) {
+			t.Fatal("an RDP server outside its certificate period is usable")
+		}
+	}
+	if !describeTarget(sshTarget, now).Available || !sshTarget.UsableAt(now) || !acceptTargetProof(sshTarget, identityFingerprint(sshTarget), approvalFingerprint(sshTarget), now) {
+		t.Fatal("another server became unavailable")
+	}
+	if !future.UsableAt(now.Add(90 * time.Minute)) {
+		t.Fatal("a future certificate did not become usable in its period")
+	}
+	_, _ = l.openRemote(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"})
+	if _, ok := worker.got.(*sshkey.Password); !ok {
+		t.Fatal("the SSH server stopped working beside an expired RDP certificate")
+	}
+	// A certificate that is wrong apart from its period still stops the lab.
+	wrong := remoteTargetFixture(t)
+	wrong.Identity = []byte("not a certificate")
+	if other, e := NewRemoteLab("https://127.0.0.1:8443", store, []RemoteTarget{wrong}, nil, &fixtureRDPWorker{closed: make(chan struct{})}); e == nil {
+		_ = other.Close()
+		t.Fatal("a malformed RDP certificate loaded")
 	}
 }
