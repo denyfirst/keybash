@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +23,7 @@ import (
 	"time"
 
 	"github.com/denyfirst/keybash/internal/identity"
+	"github.com/denyfirst/keybash/internal/ingress"
 	"github.com/denyfirst/keybash/internal/operatorconfig"
 	"github.com/denyfirst/keybash/internal/rdplab"
 	"github.com/denyfirst/keybash/internal/sessionlimits"
@@ -48,14 +51,16 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	flags.SetOutput(io.Discard)
 	data := flags.String("data", "", "existing owned 0700 data directory")
 	key := flags.String("key-file", "", "separate owned 0600 instance key path")
-	address := flags.String("listen", "127.0.0.1:8443", "numeric loopback TLS listener")
+	address := flags.String("listen", "127.0.0.1:8443", "numeric TLS listener address; loopback unless --allow-from is given")
+	allowFrom := flags.String("allow-from", "", "networks an exposed listener admits, e.g. 192.168.1.0/24")
+	serverName := flags.String("server-name", "", "DNS name browsers use for an exposed listener; its TLS certificate must cover it")
 	cert := flags.String("tls-cert", "", "operator TLS certificate path")
 	tlsKey := flags.String("tls-key", "", "operator TLS private key path")
 	lost := flags.Bool("lost-mfa", false, "offline recovery also clears a lost factor")
 	catalog := flags.String("config", "", "root-owned operator target catalog")
 	rdpManager := flags.String("rdp-manager", "", "fixed root RDP manager socket")
 	manager := flags.String("ssh-manager", "", "fixed root SSH manager socket")
-	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" {
+	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" || (*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") {
 		return refused
 	}
 	var targets []identity.RemoteTarget
@@ -144,31 +149,38 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		}
 		return e
 	case "serve-lab", "serve-ssh-lab", "serve-remote-lab":
-		host, port, e := net.SplitHostPort(*address)
-		ip, pe := netip.ParseAddr(host)
-		if e != nil || pe != nil || !ip.Unmap().IsLoopback() || port == "0" || *cert == "" || *tlsKey == "" {
+		origin, sources, ok := exposure(*address, *allowFrom, *serverName)
+		if !ok || *cert == "" || *tlsKey == "" {
 			return refused
 		}
-		origin := "https://" + *address
+		pair, e := tls.LoadX509KeyPair(*cert, *tlsKey)
+		if e != nil {
+			return refused
+		}
+		// An exposed origin must be one the certificate covers, today; a loopback
+		// lab keeps its operator-managed certificate as before.
+		if sources != nil && !covers(pair, origin, time.Now()) {
+			return refused
+		}
+		var options []identity.Option
+		if sources != nil {
+			options = append(options, identity.FromSources(sources))
+		}
 		var lab *identity.Lab
 		if command == "serve-ssh-lab" || command == "serve-remote-lab" {
 			var worker identity.RDPWorker
 			if command == "serve-remote-lab" {
 				worker = rdplab.ManagerWorker{SocketPath: *rdpManager}
 			}
-			lab, e = identity.NewRemoteLabWithLimits(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, worker, limits)
+			lab, e = identity.NewRemoteLabWithLimits(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, worker, limits, options...)
 		} else {
-			lab, e = identity.NewPersistent(origin, store)
+			lab, e = identity.NewPersistent(origin, store, options...)
 		}
 		if e != nil {
 			return refused
 		}
 		defer lab.Close()
-		pair, e := tls.LoadX509KeyPair(*cert, *tlsKey)
-		if e != nil {
-			return refused
-		}
-		listener, e := net.Listen("tcp", *address)
+		listener, e := listen(*address, sources)
 		if e != nil {
 			return refused
 		}
@@ -206,4 +218,56 @@ func sshOnly(targets []identity.RemoteTarget) bool {
 		}
 	}
 	return true
+}
+
+// exposure checks the listener and returns the origin browsers use. A
+// loopback listener takes no networks or name. Any other must be a specific
+// global-unicast address (so never all interfaces) with the networks it
+// admits; its origin is the server name, if given, or the address.
+func exposure(address, allowFrom, serverName string) (string, []netip.Prefix, bool) {
+	host, port, e := net.SplitHostPort(address)
+	ip, pe := netip.ParseAddr(host)
+	if e != nil || pe != nil || ip.Zone() != "" || ip.String() != host || ip.Is4In6() || port == "0" {
+		return "", nil, false
+	}
+	if ip.IsLoopback() {
+		if allowFrom != "" || serverName != "" {
+			return "", nil, false
+		}
+		return "https://" + address, nil, true
+	}
+	sources, e := ingress.ParseSources(allowFrom)
+	if e != nil || !ip.IsGlobalUnicast() {
+		return "", nil, false
+	}
+	name := host
+	if serverName != "" {
+		name = serverName
+	}
+	return "https://" + net.JoinHostPort(name, port), sources, true
+}
+
+// covers reports whether the certificate is valid now for the origin's host.
+func covers(pair tls.Certificate, origin string, now time.Time) bool {
+	if len(pair.Certificate) == 0 {
+		return false
+	}
+	leaf, e := x509.ParseCertificate(pair.Certificate[0])
+	u, ue := url.Parse(origin)
+	return e == nil && ue == nil && leaf.VerifyHostname(u.Hostname()) == nil && !now.Before(leaf.NotBefore) && now.Before(leaf.NotAfter)
+}
+
+// listen opens the TCP listener; an exposed one admits only its networks,
+// within the per-source and total connection limits.
+func listen(address string, sources []netip.Prefix) (net.Listener, error) {
+	listener, e := net.Listen("tcp", address)
+	if e != nil || sources == nil {
+		return listener, e
+	}
+	wrapped, e := ingress.Wrap(listener, sources, ingress.PerSource, ingress.Total)
+	if e != nil {
+		_ = listener.Close()
+		return nil, e
+	}
+	return wrapped, nil
 }

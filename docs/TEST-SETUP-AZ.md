@@ -12,9 +12,10 @@ icra edilir. Porch və Rootwell-in yerləşdiyi hostda sınaq aparılmır.
 - Keybash VM-dən hədəflərə LAN/VPN yolu və sabit DNS adları/IP-lər.
 - İlk sınaqda bir neçə GiB RAM olan VM ayır; aşağıdakı 1 GiB xidmət həddi hostun
   minimum RAM tövsiyəsi deyil. Ölçülmüş hardware profili hələ yoxdur.
-- Tətbiq hələ `127.0.0.1:8443` üzərindədir. PC-dən ilk baxış üçün administrator
-  SSH tunnel açır. Public HTTPS ingress və gündəlik tunnelsiz quraşdırma ayrıca
-  mərhələdir; proxy ilə Host/Origin yoxlaması zəiflədilmir.
+- Tətbiq standart olaraq `127.0.0.1:8443` üzərindədir və PC-dən SSH tunnel ilə
+  açılır. İstəsən, aşağıdakı "Lokal şəbəkədən" bölməsi ilə yalnız göstərdiyin
+  LAN/VPN şəbəkələrinə açarsan. Internetə açıq (public) giriş hələ yoxdur;
+  proxy ilə Host/Origin yoxlaması zəiflədilmir.
 
 Hədəflərdə yalnız test məlumatı saxla. RDP clipboard testində fayl, şəkil,
 printer, disk və audio ötürülməsi gözlənilmir. Windows-un konkret versiyası və
@@ -173,6 +174,27 @@ PC-də 8443 boş olsun. Browser-dən etibarlı test HTTPS ilə
 hazırlığı → test SSH key/password importu → connection → tam server fingerprint-i
 ayrıca təsdiqlə → Connect ardıcıllığını keç. Status və stale trust xətası varsa
 sertifikat/IP/saatı düzəlt; blanket trust vermə.
+
+### Lokal şəbəkədən (tunnelsiz)
+
+Ofisdə və ya VPN-də hər kəs tunnelsiz qoşulsun deyə Keybash-i VM-in LAN
+ünvanında aç. Yalnız `--allow-from`-da yazdığın şəbəkələr qəbul edilir; qalan
+bağlantılar TLS-dən əvvəl bağlanır. Ətraflı: `LAN-INGRESS.md`.
+
+1. Gateway sertifikatının SAN-ında brauzerin işlədəcəyi ad (`DNS:keybash.lan`)
+   və ya ünvan (`IP:192.168.1.10`) olsun. Sertifikat bu adı əhatə etməsə və ya
+   müddəti bitibsə, xidmət başlamır.
+2. Xidmətin əmrində `--listen 127.0.0.1:8443` əvəzinə bunları yaz:
+   ```sh
+   --listen 192.168.1.10:8443 --allow-from 192.168.1.0/24 --server-name keybash.lan
+   ```
+   `0.0.0.0` (bütün interfeyslər) və `0.0.0.0/0` (bütün internet) qəbul
+   edilmir. Bir neçə şəbəkə vergüllə yazılır (ən çoxu 16).
+3. Lokal DNS-də (və ya PC-lərin hosts faylında) `keybash.lan` adını
+   `192.168.1.10`-a yönəlt və brauzerdə `https://keybash.lan:8443` aç.
+
+Bir mənbədən dəqiqədə ən çoxu 30 giriş cəhdi və eyni anda 64 bağlantı qəbul
+olunur. Reverse proxy arxasında işlətmə: bütün istifadəçilər bir mənbə sayılar.
 
 Bu tapşırıqları yoxla və gözlənilən/faktiki nəticəni qeyd et:
 

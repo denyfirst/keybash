@@ -73,13 +73,13 @@ type remoteLease struct {
 // Stock SSH uses the guarded/pinned connector. A nil RDP launcher refuses RDP.
 // Targets are immutable for this process; restart kills every pending/active
 // lease. Production isolation, operator configuration and audit remain gates.
-func NewRemoteLab(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker) (*Lab, error) {
-	return NewRemoteLabWithLimits(origin, store, targets, worker, rdp, sessionlimits.Default())
+func NewRemoteLab(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, options ...Option) (*Lab, error) {
+	return NewRemoteLabWithLimits(origin, store, targets, worker, rdp, sessionlimits.Default(), options...)
 }
 
 // NewRemoteLabWithLimits copies an administrator-selected immutable capacity.
 // Browser requests cannot change it; restart revokes old sessions and leases.
-func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, limits sessionlimits.Limits) (*Lab, error) {
+func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, limits sessionlimits.Limits, options ...Option) (*Lab, error) {
 	if !limits.Valid() || len(targets) == 0 || len(targets) > 256 {
 		return nil, errRefused
 	}
@@ -111,7 +111,7 @@ func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget,
 		t.Identity = append([]byte(nil), t.Identity...)
 		config.targets[t.ID] = t
 	}
-	l, e := NewPersistent(origin, store)
+	l, e := NewPersistent(origin, store, options...)
 	if e != nil {
 		return nil, e
 	}

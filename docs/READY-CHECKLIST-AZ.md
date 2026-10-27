@@ -62,6 +62,9 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
 6. **Self-host paket.** Linux quraşdırma, müştərinin HTTPS-i, publish edilməyən
    DB/guacd portları, lokal/offline asset-lər, versiyalı migration/yeniləmə,
    dependency/license/SBOM və məhdud metadata audit.
+   Gateway-i yalnız göstərilən LAN/VPN şəbəkələrinə açmaq (`--allow-from`,
+   ad üçün sertifikat yoxlaması, mənbə üzrə limitlər) artıq var
+   (`LAN-INGRESS.md`); public internet girişi və quraşdırıcı qalır.
 7. **Backup və bərpa.** Şifrələnmiş export, ayrıca key recovery, təmiz instansiyaya
    restore və itmiş açarın nəticəsinin aydın izahı. Təkcə backup faylı yaratmaq
    kifayət etmir — onunla faktiki bərpa sınağı tələb olunur.
