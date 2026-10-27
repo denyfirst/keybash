@@ -179,7 +179,9 @@ func parseTarget(raw []byte, protected []netip.Prefix) (identity.RemoteTarget, e
 		if e != nil || base64.StdEncoding.EncodeToString(approved) != value {
 			return zero, ErrConfiguration
 		}
-		if _, e = rdplab.NewIdentity(target.Hostname(), approved); e != nil {
+		// The validity period is checked per connection, not here: an expired
+		// certificate makes only this server unavailable, not the catalog.
+		if rdplab.CheckIdentity(target.Hostname(), approved) != nil {
 			return zero, ErrConfiguration
 		}
 	default:

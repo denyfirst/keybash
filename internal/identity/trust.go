@@ -64,6 +64,11 @@ func usableTarget(t RemoteTarget, now time.Time) bool {
 	return e == nil && !now.Before(cert.NotBefore) && now.Before(cert.NotAfter)
 }
 
+// UsableAt reports whether the target's approved identity can authorize a
+// connection at now. An RDP certificate outside its validity period cannot;
+// the target still loads and shows as unavailable.
+func (t RemoteTarget) UsableAt(now time.Time) bool { return usableTarget(t, now) }
+
 func acceptTargetProof(t RemoteTarget, fingerprint, approval string, now time.Time) bool {
 	return usableTarget(t, now) && validFingerprint(fingerprint) && fingerprint == identityFingerprint(t) && approval == approvalFingerprint(t)
 }

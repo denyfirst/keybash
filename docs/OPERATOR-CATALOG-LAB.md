@@ -71,8 +71,13 @@ Protected ranges override every target approval. Existing loopback, link-local,
 metadata, non-unicast and unsupported translation/tunnel exclusions stay in
 force. Each target receives a separate immutable policy containing only its
 own IP/port pairs; neither another target nor DNS can expand that authority.
-RDP imports reuse the existing certificate name/time/purpose/key-strength and
-critical-extension checks. They do not replace the native worker's own TLS check.
+RDP imports reuse the existing certificate name/purpose/key-strength and
+critical-extension checks. The validity period is not an import check: Windows
+renews its own certificate, and the approved one then expires. Such a target
+still loads and only it is unavailable (no approval, no launch) while every
+other target keeps working; `check-targets` names it until its certificate is
+replaced. Imports do not replace the native worker's own TLS check, which
+requires the period at every connection.
 
 ## Linux file provenance
 

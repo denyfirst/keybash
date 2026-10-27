@@ -42,21 +42,39 @@ type Identity struct {
 // DNS identity. Importing the certificate is an independent trust decision,
 // never automatic acceptance of a certificate observed over this connection.
 func NewIdentity(name string, approvedDER []byte) (*Identity, error) {
-	if len(name) == 0 || len(name) > 253 || len(approvedDER) == 0 || len(approvedDER) > 32*1024 {
-		return nil, ErrConfiguration
-	}
-	cert, err := x509.ParseCertificate(append([]byte(nil), approvedDER...))
-	name = strings.ToLower(strings.TrimSuffix(name, "."))
+	cert, name, err := approvedLeaf(name, approvedDER)
 	if err != nil {
-		return nil, ErrConfiguration
+		return nil, err
 	}
 	pin := sha256.Sum256(cert.Raw)
-	if verifyLeaf(cert, pin, time.Now()) != nil || cert.VerifyHostname(name) != nil {
+	if verifyLeaf(cert, pin, time.Now()) != nil {
 		return nil, ErrConfiguration
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(cert)
 	return &Identity{name: name, pin: pin, roots: roots, der: cert.Raw}, nil
+}
+
+// CheckIdentity applies every NewIdentity check except the validity period.
+// An approved certificate that has expired (Windows renews its own) or is not
+// yet valid is still a well-formed operator decision: it loads, and only its
+// server stays unavailable, because NewIdentity and every connection check
+// the period again.
+func CheckIdentity(name string, approvedDER []byte) error {
+	_, _, err := approvedLeaf(name, approvedDER)
+	return err
+}
+
+func approvedLeaf(name string, approvedDER []byte) (*x509.Certificate, string, error) {
+	if len(name) == 0 || len(name) > 253 || len(approvedDER) == 0 || len(approvedDER) > 32*1024 {
+		return nil, "", ErrConfiguration
+	}
+	cert, err := x509.ParseCertificate(append([]byte(nil), approvedDER...))
+	name = strings.ToLower(strings.TrimSuffix(name, "."))
+	if err != nil || checkLeaf(cert, sha256.Sum256(cert.Raw)) != nil || cert.VerifyHostname(name) != nil {
+		return nil, "", ErrConfiguration
+	}
+	return cert, name, nil
 }
 
 // Probe verifies an independently approved leaf, its SHA-256 digest and name
@@ -149,12 +167,19 @@ func acceptConfirmation(p [19]byte) bool {
 }
 
 func verifyLeaf(cert *x509.Certificate, pin [sha256.Size]byte, now time.Time) error {
+	if checkLeaf(cert, pin) != nil || now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) {
+		return ErrIdentity
+	}
+	return nil
+}
+
+// checkLeaf is everything verifyLeaf requires except the validity period.
+func checkLeaf(cert *x509.Certificate, pin [sha256.Size]byte) error {
 	if cert == nil || len(cert.Raw) == 0 || pin == [sha256.Size]byte{} {
 		return ErrIdentity
 	}
 	digest := sha256.Sum256(cert.Raw)
-	if subtle.ConstantTimeCompare(digest[:], pin[:]) != 1 ||
-		now.Before(cert.NotBefore) || !now.Before(cert.NotAfter) || cert.IsCA || len(cert.UnhandledCriticalExtensions) != 0 ||
+	if subtle.ConstantTimeCompare(digest[:], pin[:]) != 1 || cert.IsCA || len(cert.UnhandledCriticalExtensions) != 0 ||
 		cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
 		return ErrIdentity
 	}

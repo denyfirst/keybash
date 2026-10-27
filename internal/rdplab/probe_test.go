@@ -18,6 +18,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -490,4 +491,54 @@ func FuzzRDPConfirmation(f *testing.F) {
 			t.Fatal("invalid NLA selection")
 		}
 	})
+}
+
+// Catalog loading applies every identity check except the validity period;
+// NewIdentity, used for each connection, still requires it.
+func TestApprovedIdentityCheckedApartFromItsPeriod(t *testing.T) {
+	for name, change := range map[string]func(*x509.Certificate){
+		"expired": func(c *x509.Certificate) {
+			c.NotBefore, c.NotAfter = time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour)
+		},
+		"future": func(c *x509.Certificate) {
+			c.NotBefore, c.NotAfter = time.Now().Add(time.Hour), time.Now().Add(2*time.Hour)
+		},
+	} {
+		cert, _ := labCertificate(t, change)
+		if CheckIdentity("synthetic-rdp.invalid", cert.Certificate[0]) != nil {
+			t.Fatalf("%s approved certificate refused at load", name)
+		}
+		if _, err := NewIdentity("synthetic-rdp.invalid", cert.Certificate[0]); err != ErrConfiguration {
+			t.Fatalf("%s certificate authorized a connection", name)
+		}
+	}
+	valid, _ := labCertificate(t, nil)
+	if CheckIdentity("synthetic-rdp.invalid", valid.Certificate[0]) != nil || CheckIdentity("SYNTHETIC-RDP.invalid.", valid.Certificate[0]) != nil {
+		t.Fatal("valid approved certificate refused")
+	}
+	for name, change := range map[string]func(*x509.Certificate){
+		"name":    func(c *x509.Certificate) { c.DNSNames = nil },
+		"purpose": func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} },
+		"usage":   func(c *x509.Certificate) { c.KeyUsage = x509.KeyUsageKeyEncipherment },
+		"ca":      func(c *x509.Certificate) { c.BasicConstraintsValid, c.IsCA = true, true },
+		"critical": func(c *x509.Certificate) {
+			c.ExtraExtensions = []pkix.Extension{{Id: []int{1, 2, 3, 4}, Critical: true, Value: []byte{5, 0}}}
+		},
+	} {
+		bad, _ := labCertificate(t, func(c *x509.Certificate) {
+			change(c)
+			c.NotBefore, c.NotAfter = time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour)
+		})
+		if CheckIdentity("synthetic-rdp.invalid", bad.Certificate[0]) != ErrConfiguration {
+			t.Fatalf("expired certificate with a wrong %s loaded", name)
+		}
+	}
+	for name, der := range map[string][]byte{"empty": nil, "garbage": []byte("not a certificate"), "huge": make([]byte, 32*1024+1)} {
+		if CheckIdentity("synthetic-rdp.invalid", der) != ErrConfiguration {
+			t.Fatalf("%s certificate loaded", name)
+		}
+	}
+	if CheckIdentity("", valid.Certificate[0]) != ErrConfiguration || CheckIdentity(strings.Repeat("a", 254), valid.Certificate[0]) != ErrConfiguration {
+		t.Fatal("certificate loaded without a valid name")
+	}
 }

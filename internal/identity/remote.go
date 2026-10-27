@@ -102,7 +102,9 @@ func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget,
 				return nil, errRefused
 			}
 			cert, e := x509.ParseCertificate(t.Identity)
-			if e != nil || cert.VerifyHostname(t.Target.Hostname()) != nil || time.Now().Before(cert.NotBefore) || !time.Now().Before(cert.NotAfter) {
+			// An expired or not yet valid certificate still loads; usableTarget
+			// keeps only this server unavailable until the operator replaces it.
+			if e != nil || cert.VerifyHostname(t.Target.Hostname()) != nil {
 				return nil, errRefused
 			}
 		default:
