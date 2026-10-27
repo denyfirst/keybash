@@ -395,7 +395,7 @@ func TestOwnedConnectionEnvelopePersistenceAndOwnerBinding(t *testing.T) {
 		t.Fatal("valid connection refused")
 	}
 	_ = store.Close()
-	store, e = openStore(dir, key, false)
+	store, e = openStore(dir, key)
 	if e != nil {
 		t.Fatal("connection store reopen refused")
 	}

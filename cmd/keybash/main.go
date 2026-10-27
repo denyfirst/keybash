@@ -43,7 +43,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	command := args[0]
 	switch command {
-	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab":
+	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab", "backup", "restore", "key-export", "key-import":
 	default:
 		return refused
 	}
@@ -60,7 +60,10 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	catalog := flags.String("config", "", "root-owned operator target catalog")
 	rdpManager := flags.String("rdp-manager", "", "fixed root RDP manager socket")
 	manager := flags.String("ssh-manager", "", "fixed root SSH manager socket")
-	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" || (*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") {
+	out := flags.String("out", "", "new backup file, never beside the instance key")
+	in := flags.String("in", "", "backup file to restore")
+	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" || (*out != "") != (command == "backup") || (*in != "") != (command == "restore") ||
+		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") {
 		return refused
 	}
 	var targets []identity.RemoteTarget
@@ -97,7 +100,8 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return refused
 		}
 	}
-	if command == "init" {
+	switch command {
+	case "init":
 		store, code, e := identity.InitializeFiles(*data, *key)
 		if e != nil {
 			return refused
@@ -105,6 +109,38 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		defer store.Close()
 		_, e = fmt.Fprintln(output, code)
 		return e
+	case "restore":
+		codes, summary, e := identity.RestoreFiles(*data, *key, *in, time.Now())
+		if e != nil {
+			return refused
+		}
+		// Every factor was reset: hand each user their code, as with account-add.
+		_, e = fmt.Fprintf(output, "Restored instance %s from a backup made %s by %s: %d accounts, %d credentials, %d connections.\nMFA was reset for every account. Give each user their one-time setup code:\n",
+			summary.Instance, summary.Created.Format(time.RFC3339), summary.Program, summary.Accounts, summary.Credentials, summary.Connections)
+		for _, c := range codes {
+			if e == nil {
+				_, e = fmt.Fprintf(output, "%s\t%s\n", c.Username, c.Code)
+			}
+		}
+		return e
+	case "key-export":
+		code, e := identity.ExportKeyFiles(*data, *key)
+		if e != nil {
+			return refused
+		}
+		_, e = fmt.Fprintln(output, code)
+		return e
+	case "key-import":
+		// The recovery code arrives on stdin, never in arguments or environment.
+		raw, e := io.ReadAll(io.LimitReader(input, 257))
+		if e != nil || len(raw) > 256 {
+			return refused
+		}
+		defer clear(raw)
+		if identity.ImportKeyFiles(*data, *key, string(raw)) != nil {
+			return refused
+		}
+		return nil
 	}
 	store, e := identity.OpenFiles(*data, *key)
 	if e != nil {
@@ -112,6 +148,14 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	defer store.Close()
 	switch command {
+	case "backup":
+		summary, e := identity.WriteBackup(store, *out, *key, time.Now())
+		if e != nil {
+			return refused
+		}
+		_, e = fmt.Fprintf(output, "Backup of instance %s written %s: %d accounts, %d credentials, %d connections. It opens only with the instance key; keep the key's recovery code apart from it.\n",
+			summary.Instance, summary.Created.Format(time.RFC3339), summary.Accounts, summary.Credentials, summary.Connections)
+		return e
 	case "bootstrap-renew":
 		code, e := store.RenewBootstrap()
 		if e != nil {

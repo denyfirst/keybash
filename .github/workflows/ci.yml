@@ -116,6 +116,7 @@ jobs:
           go test ./internal/rdplab -run='^$' -fuzz='^FuzzViewerDrawingSchemas$' -fuzztime=2000000x -timeout=3m
           go test ./internal/identity -run='^$' -fuzz='^FuzzIdentityJSON$' -fuzztime=2000000x -timeout=3m
           go test ./internal/identity -run='^$' -fuzz='^FuzzCustodyFields$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/identity -run='^$' -fuzz='^FuzzBackupFile$' -fuzztime=2000000x -timeout=3m
           go test ./internal/operatorconfig -run='^$' -fuzz='^FuzzOperatorCatalog$' -fuzztime=2000000x -timeout=3m
           go test -tags=browserlab -race -run='^TestBrowserPasswordLogin$' -timeout=90s ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserDurableCustody$' -timeout=2m ./internal/identity

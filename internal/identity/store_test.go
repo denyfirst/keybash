@@ -107,7 +107,7 @@ func TestCustodyBootstrapSingleUseExpiryAndExclusiveOpen(t *testing.T) {
 	if success.Load() != 1 || s.bootstrapValid(code, time.Now()) {
 		t.Fatal("bootstrap was not consumed atomically once")
 	}
-	if duplicate, e := openStore(dir, key, false); e == nil {
+	if duplicate, e := openStore(dir, key); e == nil {
 		_ = duplicate.Close()
 		t.Fatal("second database writer admitted")
 	}
@@ -122,7 +122,7 @@ func TestCustodyBootstrapSingleUseExpiryAndExclusiveOpen(t *testing.T) {
 	if e != nil {
 		t.Fatal("fixture DB read failed")
 	}
-	if other, e := openStore(dir, wrong, false); e == nil {
+	if other, e := openStore(dir, wrong); e == nil {
 		_ = other.Close()
 		t.Fatal("wrong instance key opened custody")
 	}
@@ -130,7 +130,7 @@ func TestCustodyBootstrapSingleUseExpiryAndExclusiveOpen(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("failed key check changed database")
 	}
-	reopened, e := openStore(dir, key, false)
+	reopened, e := openStore(dir, key)
 	if e != nil {
 		t.Fatal("correct key could not reopen custody")
 	}
@@ -169,7 +169,7 @@ func TestCustodyMFAReplayRecoveryAndRestart(t *testing.T) {
 		t.Fatal("fresh pre-restart OTP refused")
 	}
 	_ = s.Close()
-	s, e := openStore(dir, key, false)
+	s, e := openStore(dir, key)
 	if e != nil {
 		t.Fatal("MFA store restart failed")
 	}
@@ -197,7 +197,7 @@ func TestCustodyFactorFailuresPersistAndReplacementKeepsOldMFA(t *testing.T) {
 		}
 	}
 	_ = s.Close()
-	s, e := openStore(dir, key, false)
+	s, e := openStore(dir, key)
 	if e != nil {
 		t.Fatal("factor budget restart failed")
 	}
