@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/denyfirst/keybash/internal/ingress"
 	"github.com/denyfirst/keybash/web"
 )
 
@@ -24,9 +25,9 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=()")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; object-src 'none'")
-	peer, _, err := net.SplitHostPort(r.RemoteAddr)
-	ip, ipErr := netip.ParseAddr(peer)
-	if l == nil || err != nil || ipErr != nil || !ip.Unmap().IsLoopback() || r.Host != l.host || r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || r.URL.RawQuery != "" || r.URL.Path != r.URL.EscapedPath() {
+	// Browsers ignore HSTS for an address origin; a named one stays HTTPS-only.
+	w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+	if l == nil || !l.admitted(r) || r.Host != l.host || r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || r.URL.RawQuery != "" || r.URL.Path != r.URL.EscapedPath() {
 		refuse(w, http.StatusForbidden)
 		return
 	}
@@ -47,7 +48,7 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		previous := requestToken(r)
-		raw, err := l.login(r.Context(), fields["username"], fields["password"], previous)
+		raw, err := l.loginFrom(r.Context(), l.source(r), fields["username"], fields["password"], previous)
 		clear(fields)
 		if err != nil {
 			identityError(w, err)
@@ -248,4 +249,32 @@ func parseInput(data []byte, first, second string) (map[string]string, bool) {
 		return nil, false
 	}
 	return fields, true
+}
+
+// admitted accepts loopback clients on a loopback lab, and clients from the
+// configured networks on an exposed one; the listener has already applied the
+// same networks.
+func (l *Lab) admitted(r *http.Request) bool {
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	ip, ipErr := netip.ParseAddr(peer)
+	if err != nil || ipErr != nil || ip.Zone() != "" {
+		return false
+	}
+	if l.sources == nil {
+		return ip.Unmap().IsLoopback()
+	}
+	return ingress.Allowed(l.sources, ip)
+}
+
+// source names the client's limit unit on an exposed lab, "" on a loopback one.
+func (l *Lab) source(r *http.Request) string {
+	if l.sources == nil {
+		return ""
+	}
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	ip, ipErr := netip.ParseAddr(peer)
+	if err != nil || ipErr != nil {
+		return "invalid"
+	}
+	return ingress.Source(ip).String()
 }

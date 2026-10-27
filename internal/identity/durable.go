@@ -12,7 +12,7 @@ const freshProof = 2 * time.Minute
 // NewPersistent keeps the existing HTTPS/Origin/session controls, backed by
 // encrypted transactional custody. Password-only sessions are setup/challenge
 // sessions; only confirmed MFA can reach credential operations.
-func NewPersistent(origin string, store *Store) (*Lab, error) {
+func NewPersistent(origin string, store *Store, options ...Option) (*Lab, error) {
 	if store == nil {
 		return nil, errRefused
 	}
@@ -27,7 +27,7 @@ func NewPersistent(origin string, store *Store) (*Lab, error) {
 	if e != nil {
 		return nil, e
 	}
-	l, e := NewLab(origin, []Account{{Username: "internal-dummy", Password: hash}})
+	l, e := NewLab(origin, []Account{{Username: "internal-dummy", Password: hash}}, options...)
 	if e != nil {
 		return nil, e
 	}

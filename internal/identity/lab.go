@@ -9,9 +9,13 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/denyfirst/keybash/internal/ingress"
 )
 
 const cookieName = "__Host-keybash-session"
@@ -79,6 +83,7 @@ type Lab struct {
 	stop, done   chan struct{}
 	store        *Store
 	remote       *remoteConfig
+	sources      []netip.Prefix // nil: loopback clients only
 }
 
 func usernameInput(value string) bool {
@@ -93,19 +98,83 @@ func usernameInput(value string) bool {
 	return true
 }
 
-func NewLab(origin string, accounts []Account) (*Lab, error) {
+// Option sets how a lab is reached. Without one, it serves loopback clients at
+// a loopback origin only.
+type Option func(*Lab) error
+
+// FromSources admits clients from these networks only, at a non-loopback
+// origin: a numeric global-unicast address or a DNS name the operator's TLS
+// certificate covers. Pre-authentication login attempts then also count per
+// source. A loopback origin refuses it.
+func FromSources(sources []netip.Prefix) Option {
+	return func(l *Lab) error {
+		if len(sources) == 0 || len(sources) > ingress.MaxSources || l.sources != nil {
+			return errRefused
+		}
+		for _, prefix := range sources {
+			if !prefix.IsValid() || prefix.Masked() != prefix || prefix.Bits() == 0 {
+				return errRefused
+			}
+		}
+		l.sources = slices.Clone(sources)
+		return nil
+	}
+}
+
+// originHost checks an exact https origin and returns its host:port. A
+// loopback origin is numeric. An exposed one is a numeric global-unicast
+// address or a canonical DNS name that no URL parser would read as an IPv4
+// address, never localhost.
+func originHost(origin string, exposed bool) (string, bool) {
 	u, err := url.Parse(origin)
 	if err != nil || u.Scheme != "https" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.String() != origin {
-		return nil, errRefused
+		return "", false
 	}
 	host, port, err := net.SplitHostPort(u.Host)
-	ip, ipErr := netip.ParseAddr(host)
 	portNum, portErr := strconv.ParseUint(port, 10, 16)
-	if err != nil || ipErr != nil || !ip.IsLoopback() || ip.Zone() != "" || portErr != nil || portNum < 1 || strconv.FormatUint(portNum, 10) != port || len(accounts) == 0 || len(accounts) > 256 {
+	if err != nil || portErr != nil || portNum < 1 || strconv.FormatUint(portNum, 10) != port {
+		return "", false
+	}
+	if ip, e := netip.ParseAddr(host); e == nil {
+		if ip.Zone() != "" || ip.String() != host || ip.Is4In6() || ip.IsLoopback() == exposed || exposed && !ip.IsGlobalUnicast() {
+			return "", false
+		}
+		return u.Host, true
+	}
+	if !exposed || len(host) > 253 || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return "", false
+	}
+	labels := strings.Split(host, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", false
+		}
+		for _, c := range []byte(label) {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return "", false
+			}
+		}
+	}
+	// A last label of digits makes "10.1" or "1.2.3.4.5" an address to browsers.
+	if strings.Trim(labels[len(labels)-1], "0123456789") == "" {
+		return "", false
+	}
+	return u.Host, true
+}
+
+func NewLab(origin string, accounts []Account, options ...Option) (*Lab, error) {
+	l := &Lab{origin: origin, accounts: make(map[string]*account), sessions: make(map[[32]byte]*session), attempts: make(map[string]*window),
+		derive: make(chan struct{}, 2), now: time.Now, stop: make(chan struct{}), done: make(chan struct{})}
+	for _, option := range options {
+		if option == nil || option(l) != nil {
+			return nil, errRefused
+		}
+	}
+	host, ok := originHost(origin, l.sources != nil)
+	if !ok || len(accounts) == 0 || len(accounts) > 256 {
 		return nil, errRefused
 	}
-	l := &Lab{origin: origin, host: u.Host, accounts: make(map[string]*account), sessions: make(map[[32]byte]*session), attempts: make(map[string]*window),
-		derive: make(chan struct{}, 2), now: time.Now, stop: make(chan struct{}), done: make(chan struct{})}
+	l.host = host
 	for _, a := range accounts {
 		if !usernameInput(a.Username) || !a.Password.valid() || l.accounts[a.Username] != nil {
 			return nil, errRefused
@@ -217,6 +286,9 @@ const (
 	trustAttempts    = 5  // per account
 	remoteAttempts   = 20 // connection opens per account
 	setupAttempts    = 5  // the single pre-initialization bootstrap
+	// Per client source (an IPv4 address or IPv6 /64) on an exposed lab, across
+	// every name it tries; loopback labs have one shared source and skip it.
+	sourceAttempts = 30
 	// Only login creates attacker-chosen keys, and only after taking a derive
 	// slot, so creation is bounded by KDF throughput far below this ceiling.
 	maxAttemptKeys = 8192
@@ -247,6 +319,12 @@ func (l *Lab) slot(ctx context.Context) bool {
 }
 
 func (l *Lab) login(ctx context.Context, username, password, previous string) (string, error) {
+	return l.loginFrom(ctx, "", username, password, previous)
+}
+
+// loginFrom counts the attempt against its source first, when there is one, so
+// a refused source creates no per-name state.
+func (l *Lab) loginFrom(ctx context.Context, source, username, password, previous string) (string, error) {
 	// Take a derive slot before recording the attempt: refused-for-capacity
 	// requests then create no per-name state, so attacker-chosen names can
 	// only be added at Argon2id speed.
@@ -257,7 +335,7 @@ func (l *Lab) login(ctx context.Context, username, password, previous string) (s
 	l.mu.Lock()
 	// Unknown and registered names share the same policy. Separate unknown-user
 	// buckets would expose account existence through different 429 responses.
-	if l.closed || !l.attemptLocked("login:"+username, loginAttempts) {
+	if l.closed || source != "" && !l.attemptLocked("source:"+source, sourceAttempts) || !l.attemptLocked("login:"+username, loginAttempts) {
 		l.mu.Unlock()
 		return "", errLimited
 	}

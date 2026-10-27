@@ -2,7 +2,8 @@
 
 This file describes only code that exists. Durable login/MFA, encrypted custody
 and separate SSH/RDP source service integrations exist for Linux loopback tests;
-production ingress, packaging and release remain product gates. Tests use synthetic targets,
+an operator can expose the gateway to listed LAN/VPN networks
+(`LAN-INGRESS.md`). Public ingress, packaging and release remain product gates. Tests use synthetic targets,
 in-memory connections and ephemeral loopback SSH/browser fixtures. They perform
 no external server dials and load no real credentials.
 
@@ -129,7 +130,9 @@ no external server dials and load no real credentials.
 | Failed logins, from one name or a flood of names, cannot lock out another account or a signed-in owner's reauthentication; capacity refusals create no attempt state and a full table never evicts a counter | no shared window; KDF slot before recording; refusal at 8192 keys; one-second expiry sweep | `TestIdentityFailedLoginsCannotLockOutOthers`, `TestIdentityCapacityRefusalCreatesNoAttemptState`, `TestIdentityAttemptBucketsAreUniformAndBounded` |
 | Status polling cannot extend idle/absolute sessions; expiry cancels without another request | idle/absolute checks plus one-second background sweep | `TestIdentityIdleAbsoluteExpiryAndStatusDoesNotExtend`, `TestIdentityBackgroundExpiryCancelsWithoutRequest` |
 | Stale password derivation, logout and service closure cannot commit late authentication changes | revision/context/live-session recheck under lock | `TestIdentityRevocationDuringDerivationAndClose`, `TestIdentityPasswordChangeCannotFinishAfterLogout` |
-| Missing/duplicate identities or non-loopback origins cannot initialize login | copied account configuration and numeric origin checks | `TestIdentityConfigurationRefusesMissingDuplicateOrUntrusted` |
+| Missing/duplicate identities or non-loopback origins cannot initialize login, unless exposed to listed networks | copied account configuration and exact origin checks: numeric loopback, or a canonical global-unicast address or DNS name only with networks | `TestIdentityConfigurationRefusesMissingDuplicateOrUntrusted`, `TestOriginsAreExactForLoopbackAndExposedLabs` |
+| An exposed gateway admits only the listed networks, before TLS and on every request, at its exact origin | specific global-unicast listener, required canonical network list without loopback or the whole space, listener closes others and caps connections per source and in total, request peer and Host checks, HSTS, certificate must cover the origin | `TestParseSourcesIsExactAndBounded`, `TestAllowedAndSourceUnits`, `TestListenerAdmitsOnlyListedSourcesWithinLimits`, `TestWrapRefusesBadLimits`, `TestExposedLabAdmitsOnlyListedNetworks`, `TestExposureNeedsNetworksAndASpecificAddress`, `TestExposedCertificateMustCoverTheOrigin`, `TestExposedListenerAdmitsOnlyItsNetworks` |
+| On an exposed gateway one source cannot guess passwords across many names | 30 sign-in attempts per source (IPv4 address or IPv6 /64) per minute, checked before the per-name window | `TestExposedLoginCountsPerSource` |
 | Browser login/change/logout preserve password clearing, protected navigation and truthful failure state | local fixed assets, bounded response/deadline, no storage or secret URLs | `TestBrowserPasswordLogin` |
 
 Browser evidence is additionally enforced by `web/paste.test.mjs` and the
@@ -145,9 +148,9 @@ The separate identity lab implements password-only, memory-resident accounts
 and owner sessions. It has no persistent IDs/hash storage, operator bootstrap,
 blocklist, MFA/recovery, vault or remote-resource authorization. Its cookie is
 not accepted by the protocol labs and opens no worker. See `IDENTITY-LAB.md`.
-Failures against one name still deny that name for a minute, and per-source
-limits await network ingress; KDF concurrency is not a process-memory or DDoS
-guarantee. Production durability/ownership and independent
+Failures against one name still deny that name for a minute. Only an exposed
+gateway (`LAN-INGRESS.md`) also counts sign-ins per source; KDF concurrency is
+not a process-memory or DDoS guarantee. Production durability/ownership and independent
 candidate review remain gates before real credentials or remote access.
 
 The initial RDP probe is a pre-credential experiment and private text prototype. The
