@@ -178,7 +178,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 400)
 			return
 		}
-		raw, e := l.login(r.Context(), fields["username"], fields["password"], requestToken(r))
+		raw, e := l.loginFrom(r.Context(), l.source(r), fields["username"], fields["password"], requestToken(r))
 		clear(fields)
 		if e != nil {
 			identityError(w, e)

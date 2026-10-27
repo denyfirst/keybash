@@ -93,6 +93,9 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
   həssas əməliyyatlar üçün şifrə + təzə MFA ilə təkrar doğrulama.
 - Oflayn şifrələnmiş backup, instance açarının bərpa kodu və təmiz qovluğa
   restore; restore hər hesabın MFA-sını sıfırlayır (`BACKUP-AZ.md`).
+- Gateway-i yalnız göstərilən LAN/VPN şəbəkələrinə açmaq: icazəli şəbəkə
+  siyahısı, sertifikatın adı əhatə etməsi, mənbə üzrə bağlantı və giriş
+  limitləri (`LAN-INGRESS.md`).
 
 Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağlıdır.
 Native sınaqlarda yalnız test fayllarına aid sintetik loopback bağlantısı var.
@@ -108,7 +111,7 @@ məhdudiyyətlər: `INTERACTIVE-DEMO-AZ.md`.
 
 ## Hələ hazırlanmayıb
 
-Production quraşdırıcı və public HTTPS ingress, gündəlik məhsul workspace-i,
+Production quraşdırıcı və public internet girişi, gündəlik məhsul workspace-i,
 real Windows/şəbəkə hostları və tam browser/keyboard matrisi, uzun sessiya/yük
 ölçüləri, upgrade, xidməti dayandırmadan backup və key rotation, offline release paketi və ayrıca
 audit olunmuş imzalı buraxılış hələ hazırlanmayıb. Mənbə systemd/RDP xidmət

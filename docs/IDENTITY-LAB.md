@@ -47,8 +47,8 @@ The appearance follows the existing Denyfirst dark palette and restrained red.
   accounts or a signed-in owner out. At most 8192 counters exist; a full table
   refuses new names rather than evicting another account's counter, and expired
   windows are reclaimed every second. Success does not reset budgets. Repeated
-  failures against one name still deny that name for a minute; per-source
-  limits belong to network ingress, which does not exist yet.
+  failures against one name still deny that name for a minute. An exposed
+  gateway (`LAN-INGRESS.md`) also allows 30 sign-ins per source per minute.
 - Fresh 256-bit opaque session tokens; only SHA-256 token digests are stored.
   `__Host-` Secure/HttpOnly/SameSite=Strict cookie, Path=/, no Domain. Duplicate,
   malformed, forged and revoked cookies cannot select a session. Successful
