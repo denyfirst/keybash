@@ -115,7 +115,7 @@ try {
       });
     } else {
       assert.match(await guide.locator('#otp').textContent(), /^[0-9]{6}$/);
-      assert.equal((await guide.locator('#recovery').inputValue()).split('\n').length, 9);
+      assert.equal((await guide.locator('#recovery').inputValue()).split('\n').length, 10); // no step-up spends one any more
       await guide.locator('#workspace').click();
       await account.waitForFunction(() => document.visibilityState === 'visible');
       await guide.close();
