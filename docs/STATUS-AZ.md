@@ -90,7 +90,9 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
   restart-dan sonra replay rəddi və ayrıca instance key.
 - Öz hesabına aid SSH açarı (Ed25519, ECDSA, RSA 2048+)/passphrase və şifrə
   saxlama/göstərmə/silmə; SSH-ə açarla və ya şifrə ilə qoşulma;
-  həssas əməliyyatlar üçün şifrə + təzə MFA ilə təkrar doğrulama.
+  göstərmə, silmə və hesab dəyişiklikləri üçün yalnız telefondakı kodla
+  təsdiq (girişdən sonrakı 10 dəqiqədə soruşulmur; 5 səhv kod sessiyanı
+  bağlayır).
 - Oflayn şifrələnmiş backup, instance açarının bərpa kodu və təmiz qovluğa
   restore; restore hər hesabın MFA-sını sıfırlayır (`BACKUP-AZ.md`).
 - Gateway-i yalnız göstərilən LAN/VPN şəbəkələrinə açmaq: icazəli şəbəkə

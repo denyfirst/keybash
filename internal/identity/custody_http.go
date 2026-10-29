@@ -345,12 +345,12 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/reauth" && r.Method == "POST" {
 		l.mu.Unlock()
-		fields, ok := readFields(w, r, 4096, "password", "code")
-		if !ok || !passwordInput(fields["password"]) {
+		fields, ok := readFields(w, r, 1024, "code")
+		if !ok {
 			refuse(w, 400)
 			return
 		}
-		e := l.reauthenticate(r.Context(), id, fields["password"], fields["code"])
+		e := l.stepUp(r.Context(), id, fields["code"])
 		clear(fields)
 		if e != nil {
 			identityError(w, e)
@@ -369,9 +369,13 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, items)
 		return
 	}
-	if l.readyLocked(id, true) != s {
+	// Adding a record only needs the ready session. Everything else here
+	// reveals, removes or changes account security and asks for a factor
+	// proved within freshProof; 428 tells the page to ask for a code.
+	adding := r.URL.Path == "/api/credentials" && r.Method == "POST"
+	if !adding && l.readyLocked(id, true) != s {
 		l.mu.Unlock()
-		refuse(w, 403)
+		refuse(w, http.StatusPreconditionRequired)
 		return
 	}
 	s.last = l.now()
@@ -457,7 +461,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		l.mu.Lock()
-		if l.readyLocked(id, true) != s || r.Context().Err() != nil {
+		if l.readyLocked(id, false) != s || r.Context().Err() != nil {
 			l.mu.Unlock()
 			refuse(w, 401)
 			return

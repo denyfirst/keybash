@@ -48,12 +48,7 @@ try {
   await account.locator('#recovery').waitFor({state: 'visible'}); await settle();
   const recovery = (await account.locator('#recovery-codes').inputValue()).split('\n');
   await account.locator('#saved-recovery').click(); await account.locator('#vault').waitFor({state: 'visible'}); await settle();
-  await account.locator('#reauth-password').fill(config.Password);
-  // Consume an ordinary one-use recovery code for initial reauthentication;
-  // this avoids reusing the enrollment TOTP or a wall-clock boundary race.
-  await account.locator('#reauth-code').fill(recovery[0]);
-  await account.locator('#reauth button').click();
-  await account.locator('#notice').filter({hasText: 'Doğrulandı'}).waitFor(); await settle();
+  // Records and connections need a ready session only; no step-up here.
   stage = 'sample connections';
   const state = await (await account.request.get(config.Origin + '/api/session')).json();
   const headers = {Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf};
@@ -84,7 +79,7 @@ try {
       <h1>keybash<span style="color:#e34254">.</span> Demo</h1>
       <p><strong>Bu, lokal UI simulyasiyasıdır.</strong> Real Linux shell və Windows yoxdur. Öz server açarlarını və şifrələrini daxil etmə.</p>
       <button id="workspace">İş yerini aç</button>
-      <ol><li>İş yerində iki nümunə bağlantı var. <b>Qoşul</b> seç.</li><li>Terminalda <code>help</code>, <code>whoami</code>, <code>echo Salam dostum</code>, Ctrl+C və paste preview-ni sına.</li><li>Desktop-da kliklə, yaz, Backspace/Enter və tam ekranı sına. RDP clipboard/remote resize hələ bağlıdır.</li><li>Bağlantını yenidən açmaq üçün təkrar doğrulama lazım deyil; əlavə etmə, silmə və göstərmə üçün lazımdır. Logout bütün açıq bağlantıları bağlayır.</li></ol>
+      <ol><li>İş yerində iki nümunə bağlantı var. <b>Qoşul</b> seç.</li><li>Terminalda <code>help</code>, <code>whoami</code>, <code>echo Salam dostum</code>, Ctrl+C və paste preview-ni sına.</li><li>Desktop-da kliklə, yaz, Backspace/Enter və tam ekranı sına. RDP clipboard/remote resize hələ bağlıdır.</li><li>Qoşulmaq, açar və bağlantı əlavə etmək üçün kod soruşulmur; göstərmə və silmə üçün telefondakı kod soruşulur (girişdən sonrakı 10 dəqiqədə soruşulmur). Logout bütün açıq bağlantıları bağlayır.</li></ol>
       <p>Demo istifadəçisi: <code>demo</code><br>Demo giriş şifrəsi: <code id="password"></code></p>
       <p>Hazırkı MFA kodu: <output id="otp"></output><br><small id="remaining"></small><br><small>Eyni kod bir dəfə işləyir. Açılışda işlənmiş kod üçün növbəti 30 saniyəlik kodu gözlə.</small></p>
       <details><summary>Demo MFA seed və birdəfəlik bərpa kodları</summary><p>Autentifikatora əl ilə əlavə etmək üçün: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Hər bərpa kodunu yalnız bir dəfə işlət. Bunlar yalnız bu müvəqqəti demo üçündür.</p></details>
@@ -93,7 +88,7 @@ try {
     await guide.locator('#rdp-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.RDPFingerprint);
     await guide.locator('#password').evaluate((el, value) => { el.textContent = value; }, config.Password);
     await guide.locator('#seed').evaluate((el, value) => { el.textContent = value; }, seed);
-    await guide.locator('#recovery').evaluate((el, value) => { el.value = value; }, recovery.slice(1).join('\n'));
+    await guide.locator('#recovery').evaluate((el, value) => { el.value = value; }, recovery.join('\n'));
     await guide.exposeFunction('openWorkspace', async () => {
       if (!account.isClosed()) await account.bringToFront();
       else await (await context.newPage()).goto(config.Origin + '/');

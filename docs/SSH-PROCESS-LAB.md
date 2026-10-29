@@ -10,7 +10,7 @@ candidate audit remain required. Porch and Rootwell are untouched.
 
 ## Admission and custody
 
-`identity.NewRemoteLab` retains MFA, ownership, fresh proof for trust changes, approval binding,
+`identity.NewRemoteLab` retains MFA, ownership, ready-session trust changes, approval binding,
 one-use capabilities, quotas and active revocation. After bounded OpenSSH import
 validation it builds one session credential: an `sshkey.Key` (Ed25519, ECDSA
 P-256/384/521, or RSA 2048–8192 bits signing only with SHA-2) or an

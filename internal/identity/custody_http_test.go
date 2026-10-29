@@ -127,8 +127,8 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	}
 	advance(l, &now, freshProof)
 	c.expect("GET", "/api/credentials", "", 200)
-	c.expect("POST", "/api/credentials", `{"name":"x","kind":"password","username":"u","secret":"s","passphrase":""}`, 403)
-	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": otpCode(t, seed.Secret, now.Unix()/30)}), 204)
+	// Adding a record needs the ready session only; the checks below run
+	// after the sign-in proof has lapsed.
 	oldCSRF := c.csrf
 	c.csrf = "wrong"
 	c.expect("POST", "/api/credentials", `{}`, 403)
@@ -145,14 +145,23 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	if strings.Contains(listed.Body.String(), "synthetic-custody-secret") {
 		t.Fatal("metadata leaked secret")
 	}
+	// Revealing asks for fresh proof, with a status the page turns into a
+	// code prompt; the code alone renews it, and a password field refuses.
+	if w := c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 428); strings.Contains(w.Body.String(), "synthetic-custody-secret") {
+		t.Fatal("stale reveal leaked the secret")
+	}
+	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": otpCode(t, seed.Secret, now.Unix()/30)}), 400)
+	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, now.Unix()/30)}), 204)
 	revealed := c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 200)
 	if !strings.Contains(revealed.Body.String(), "synthetic-custody-secret") {
 		t.Fatal("owner reveal failed")
 	}
 	c.expect("POST", "/api/credentials/"+strings.Repeat("a", 32)+"/reveal", "{}", 404)
-	advance(l, &now, 121*time.Second)
-	c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 403)
-	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": recovery.Codes[0]}), 204)
+	advance(l, &now, freshProof-time.Second)
+	c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 200) // still inside the step-up window
+	advance(l, &now, time.Second)
+	c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 428)
+	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": recovery.Codes[0]}), 204)
 	// Reset enters enrollment but leaves old MFA active until confirmation.
 	c.expect("POST", "/api/mfa/reset", "{}", 204)
 	c.session("enroll")
@@ -171,7 +180,7 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	c.expect("DELETE", "/api/session", "{}", 204)
 	c.expect("GET", "/api/session", "", 401)
 	advance(l, &now, 61*time.Second)
-	other.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": recovery.Codes[2]}), 204)
+	other.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": recovery.Codes[2]}), 204)
 	other.expect("DELETE", "/api/credentials/"+record.ID, "{}", 204)
 	other.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 404)
 	other.expect("POST", "/api/password", inputJSON(map[string]string{"password": alicePassword, "next": nextPassword}), 204)
@@ -570,7 +579,7 @@ func TestCustodyCancelledReauthentication(t *testing.T) {
 	advance(l, &now, freshProof) // let the sign-in proof lapse first
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if l.reauthenticate(ctx, id, alicePassword, codes[1]) == nil {
+	if l.stepUp(ctx, id, codes[1]) == nil {
 		t.Fatal("cancelled reauth accepted")
 	}
 	l.mu.Lock()

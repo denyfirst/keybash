@@ -147,6 +147,35 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
   text-indent: 0.4em; /* balances the spacing after the last digit */
   text-align: center;
 }
+/* Step-up: one short question, asked only when an action needs it. */
+dialog.stepup { width: min(27rem, 92vw); padding: 1.8rem 1.8rem 1.4rem; }
+.stepup-glyph {
+  display: block;
+  width: 2.6rem;
+  height: 2.6rem;
+  margin-bottom: 0.9rem;
+  padding: 0.5rem;
+  fill: none;
+  stroke: var(--tool);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  background: color-mix(in srgb, var(--tool) 10%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--tool) 35%, var(--rule));
+  border-radius: 50%;
+}
+dialog.stepup h2 { margin-bottom: 0.4rem; }
+dialog.stepup label { margin-top: 1.2rem; }
+dialog.stepup input {
+  margin-top: 0;
+  font-family: var(--mono);
+  font-size: 1.3rem;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em; /* balances the spacing after the last character */
+  text-align: center;
+}
+#stepup-error { min-height: 1.3rem; margin: 0.6rem 0 0; font-size: 0.88rem; font-weight: 500; color: var(--ink); }
+.stepup-foot { margin: 1.1rem 0 0; padding-top: 0.9rem; border-top: 1px solid var(--rule); }
 #recovery-codes { min-height: 16rem; line-height: 1.8; }
 #connection-server, #trust-server { font-size: 0.82rem; }
 #trust-previous { overflow-wrap: anywhere; }

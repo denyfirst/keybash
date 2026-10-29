@@ -37,13 +37,16 @@ function clearAll() {
   for (const id of sections) if ($(id)) $(id).hidden = true;
   delete document.body.dataset.stage;
 }
-async function request(path, method = 'GET', value) {
+async function request(path, method = 'GET', value, retried = false) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const headers = { 'X-Keybash-Request': '1' };
     if (method !== 'GET') { headers['Content-Type'] = 'application/json'; headers['X-Keybash-CSRF'] = csrf; }
     const response = await fetch(path, { method, headers, body: value === undefined ? undefined : JSON.stringify(value), credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: controller.signal });
+    // 428: this action needs a factor proved in the last ten minutes. Ask for
+    // the code once, then send the same request again.
+    if (response.status === 428 && !retried) { clearTimeout(timer); await stepUp(); return request(path, method, value, true); }
     if (!response.ok) throw Object.assign(new Error('request refused'), { status: response.status });
     if (response.status === 204) return null;
     if (response.headers.get('Content-Type') !== 'application/json; charset=utf-8') throw new Error('invalid response');
@@ -58,10 +61,49 @@ async function request(path, method = 'GET', value) {
     return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   } finally { clearTimeout(timer); }
 }
+// The step-up dialog: the second factor alone renews the fresh window. It
+// settles the waiting action's request: resolved after the server accepts a
+// code, rejected on cancel or when the session has ended (five wrong codes
+// end it, and the person signs in again).
+let stepping = null;
+function stepUp() {
+  if (stepping) return stepping;
+  stepping = new Promise((resolve, reject) => {
+    const dialog = $('stepup-dialog'), input = $('stepup-code'), submit = $('stepup-submit');
+    let sending = false;
+    const finish = error => {
+      $('stepup-form').removeEventListener('submit', send); $('stepup-cancel').removeEventListener('click', cancel); dialog.removeEventListener('cancel', cancel);
+      input.value = ''; $('stepup-error').textContent = ''; if (dialog.open) dialog.close(); stepping = null;
+      if (error) reject(error); else resolve();
+    };
+    async function send(event) {
+      event.preventDefault();
+      const code = input.value.trim(); input.value = '';
+      if (sending || !code) return;
+      sending = true; submit.disabled = true; $('stepup-error').textContent = '';
+      try { await request('/api/reauth', 'POST', { code }); finish(); return; }
+      catch (error) {
+        if (error.status === 401) {
+          try { await request('/api/session'); }
+          catch { finish(Object.assign(new Error('session ended'), { status: 'ended' })); clearAll(); location.replace('/login'); return; }
+          $('stepup-error').textContent = 'Kod qəbul edilmədi. Tətbiqdəki hazırkı kodu yaz: eyni kod iki dəfə qəbul edilmir.';
+        } else $('stepup-error').textContent = error.status === 429 ? 'Cəhd limiti dolub. Bir dəqiqə gözlə və yenidən yaz.' : 'Kodu yoxlamaq alınmadı. Bağlantını yoxla və yenidən yaz.';
+      } finally { sending = false; submit.disabled = false; }
+      input.focus();
+    }
+    function cancel(event) { event?.preventDefault(); finish(Object.assign(new Error('cancelled'), { status: 'cancelled' })); }
+    $('stepup-form').addEventListener('submit', send); $('stepup-cancel').addEventListener('click', cancel); dialog.addEventListener('cancel', cancel);
+    input.value = ''; $('stepup-error').textContent = ''; submit.disabled = false; dialog.showModal(); input.focus();
+  });
+  return stepping;
+}
 function errorMessage(error) {
   hideSecret();
+  if (error.status === 'cancelled') return 'Təsdiq ləğv edildi. Heç nə dəyişmədi.';
+  if (error.status === 'ended') return 'Çox səhv kod yazıldı və sessiya bağlandı. Yenidən daxil ol.';
   if (error.status === 'setup') return 'Quraşdırma kodu qəbul edilmədi. Administratordan aldığın birdəfəlik kodu yoxla; vaxtı keçibsə yenisini istə.';
-  if (error.status === 403) return 'Bu əməliyyat üçün giriş şifrəsi və yeni MFA kodu ilə təkrar doğrula.';
+  if (error.status === 403) return 'Bu əməliyyata icazə verilmədi. Səhifəni yenilə və yenidən yoxla.';
+  if (error.status === 428) return 'Bu əməliyyat telefondakı kodla təsdiq tələb edir. Yenidən yoxla.';
   if (error.status === 409) return 'Fingerprint uyğun gəlmədi və ya server məlumatı dəyişib. Məlumatı yenilə və ayrıca etibarlı kanaldan yoxla.';
   if (error.status === 429) return 'Cəhd limiti dolub. Bir qədər gözlə.';
   if (error.status === 401) return 'Doğrulama qəbul edilmədi və ya sessiya bitib. Kodu yoxla; lazım olsa yenidən daxil ol.';
@@ -71,7 +113,8 @@ function errorMessage(error) {
 async function run(action) {
   if (busy) return;
   busy = true; notice('');
-  const buttons = [...document.querySelectorAll('button')]; buttons.forEach(el => { el.disabled = true; });
+  // The step-up dialog stays usable while the action that opened it waits.
+  const buttons = [...document.querySelectorAll('button')].filter(el => !el.closest('#stepup-dialog')); buttons.forEach(el => { el.disabled = true; });
   try { await action(); } catch (error) { notice(errorMessage(error)); }
   finally { busy = false; buttons.forEach(el => { el.disabled = false; }); updateTrustButtons(); }
 }
@@ -213,10 +256,6 @@ click('begin-enroll', async () => {
 });
 bind('enrollment', async () => { const code = $('enrollment-code').value; clearInputs(); showCodes(await request('/api/mfa/confirm', 'POST', { code })); });
 bind('factor', async () => { const code = $('factor-code').value; clearInputs(); await request('/api/mfa/verify', 'POST', { code }); await loadAccount(); });
-bind('reauth', async () => {
-  const password = $('reauth-password').value, code = $('reauth-code').value; clearInputs();
-  await request('/api/reauth', 'POST', { password, code }); notice('Doğrulandı. Həssas əməliyyatlar iki dəqiqə ərzində mümkündür.');
-});
 bind('credential', async () => {
   const kind = $('credential-kind').value;
   const value = { name: $('credential-name').value, kind, username: $('credential-user').value, secret: $(kind === 'password' ? 'credential-password' : 'credential-key').value, passphrase: kind === 'ssh-key' ? $('credential-passphrase').value : '' };

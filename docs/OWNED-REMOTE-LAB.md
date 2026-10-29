@@ -37,10 +37,11 @@ per owner and 2048 overall, within the existing 256 MiB DB cap. The optional
 namespace's deletion is an availability loss, not a new authority. Old backup/
 whole-record rollback limits from `CUSTODY-LAB.md` still apply.
 
-Connections can be created/listed/deleted after MFA. Creation, deletion and
-trust changes require fresh password-plus-factor proof; launching an approved
-connection needs a ready MFA session, because sign-in already proved both
-factors and launch changes no stored decision. The API accepts only exact
+Connections can be created/listed/deleted after MFA. Creation, trust changes
+and launching need a ready MFA session: sign-in already proved both factors,
+and creation and trust bind only an owned credential to the operator-approved
+identity that launch would use anyway. Deletion asks for a factor proved
+within ten minutes (see `CUSTODY-LAB.md`). The API accepts only exact
 named scalar fields; an `owner`, replacement target/identity or extra field
 is refused. SSH needs the owner's nonempty username and a key or password; RDP
 needs a username and password. Only the stored credential is tried: no

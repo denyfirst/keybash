@@ -159,8 +159,8 @@ func compatible(t RemoteTarget, c Credential) bool {
 // Opening an approved, owned connection needs a ready MFA session, not a
 // fresh password and new code each time: sign-in already proved both factors,
 // and the one-use 30-second lease stays bound to this session and owner.
-// Changing what may be opened (trust, creation, deletion) and revealing or
-// changing secrets still require fresh proof.
+// Creating and trusting connections need the same; deleting them, and
+// revealing or deleting secrets, need fresh proof (see freshProof).
 func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	s := l.readyLocked(id, false)
 	if s == nil || l.remote == nil {
@@ -468,8 +468,11 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		}{raw}
 		return
 	}
-	if l.readyLocked(id, true) != s {
-		status = 403
+	// Creating a connection or trusting a target binds only an owned
+	// credential to an operator-approved identity, which acceptTargetProof
+	// checks; it is no more than opening needs. Deleting asks for fresh proof.
+	if r.Method == "DELETE" && l.readyLocked(id, true) != s {
+		status = http.StatusPreconditionRequired
 		return
 	}
 	switch {

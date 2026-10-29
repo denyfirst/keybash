@@ -63,6 +63,7 @@ type session struct {
 	replacing     bool
 	setupProved   bool // bootstrap or operator setup code shown for first enrollment
 	reauthUntil   time.Time
+	stepFailures  int // wrong step-up codes in this session; see stepUpFailures
 }
 
 // Lab is a single-process, loopback HTTPS identity boundary. NewLab is memory-

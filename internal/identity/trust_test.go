@@ -330,7 +330,9 @@ func TestServerTrustFreshMFAOwnerAndCSRF(t *testing.T) {
 	l.sessions[id].reauthUntil = time.Time{}
 	l.mu.Unlock()
 	c.expect("GET", "/api/targets/"+row.Target, "", 200)
-	c.expect("POST", "/api/connections/"+record+"/trust", body, 403)
+	// Trust needs the ready session, not fresh proof: without it a stale
+	// revision still reaches the revision check instead of a factor prompt.
+	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"fingerprint": identityFingerprint(target), "approval": approvalFingerprint(target), "revision": "999"}), 409)
 	l.mu.Lock()
 	l.sessions[id].reauthUntil = fresh
 	l.mu.Unlock()
@@ -348,7 +350,7 @@ func TestServerTrustFreshMFAOwnerAndCSRF(t *testing.T) {
 	bob.session("challenge")
 	bob.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
 	bob.session("ready")
-	bob.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": codes[1]}), 204)
+	bob.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
 	bob.expect("POST", "/api/connections/"+record+"/trust", body, 404)
 	c.expect("POST", "/api/connections/"+record+"/trust", body, 204)
 }

@@ -20,8 +20,9 @@ port, approved IP set, identity type and fingerprint. These are configuration
 values, not observations of a live remote peer. The user compares the complete
 target and fingerprint against a server console or another independently trusted
 channel, then enters the full fingerprint. The field is never prefilled. Creating
-the connection or replacing its approval requires fresh password plus MFA/recovery
-proof under the existing two-minute policy, ownership, CSRF and TLS boundary.
+the connection or replacing its approval needs a ready MFA session, ownership,
+CSRF and the TLS boundary. Only the catalog's current identity can be approved,
+so no fresh step-up is asked; deleting the connection asks for one.
 
 SSH uses the standard OpenSSH `SHA256:` fingerprint of the wire public key,
 with unpadded base64. RDP uses `SHA256:` followed by 64 lowercase hex digits

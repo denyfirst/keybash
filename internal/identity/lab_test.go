@@ -382,7 +382,7 @@ func TestIdentityFailedLoginsCannotLockOutOthers(t *testing.T) {
 	if _, e := l.login(context.Background(), "bob", bobPassword, ""); e != nil {
 		t.Fatal("another account was locked out by failed logins")
 	}
-	if l.reauthenticate(context.Background(), id, alicePassword, codes[1]) != nil {
+	if l.stepUp(context.Background(), id, codes[1]) != nil {
 		t.Fatal("failed logins on a name locked its signed-in owner out of reauthentication")
 	}
 }

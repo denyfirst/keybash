@@ -75,17 +75,24 @@ do not extend idle. Sessions/CSRF material are memory-only and die on restart.
 Live operations recheck durable account identity/revision, and a one-second
 sweep cancels changed cached generations. Password/factor/recovery changes
 revoke previous sessions. Expired, canceled, corrupted or stale work cannot
-grant fresh authority. Sensitive create/reveal/delete, password replacement,
-factor replacement and recovery regeneration require password plus a fresh
-factor proof no older than two minutes. Completing sign-in counts as that
-proof until the password check is two minutes old, so an action right after
-login needs no second code. Later, a previously used TOTP must wait for the
-next code; recovery codes can provide immediate fresh proof. Opening an
-already approved connection needs only a ready MFA session.
+grant fresh authority. Revealing or deleting a record or a connection,
+password replacement, factor replacement and recovery regeneration need a
+factor proved within ten minutes (`freshProof`). Completing sign-in counts
+until its password check is ten minutes old. After that the server answers
+`428`, and the page asks for the authenticator code, or an unused recovery
+code, in a dialog and resends the action. The step-up takes the code alone
+(`POST /api/reauth {"code"}`): the session proved the password at sign-in,
+and what a stolen or unattended session lacks is the phone. Wrong codes spend
+the durable factor budget and the per-account step-up limit, and five in a
+row end that session (`stepUpFailures`), so a stolen session gets five
+guesses rather than one every few seconds for eight hours. A previously used
+TOTP must wait for the next code. Adding a record, creating a connection,
+trusting a catalog identity and opening an approved connection need only a
+ready MFA session.
 
 Factor replacement retains the old seed until the new seed/code is confirmed.
-Abandoning replacement leaves the old factor working. If the two-minute proof
-expires during replacement, sign out and reauthenticate before retrying. Local
+Abandoning replacement leaves the old factor working. If the ten-minute proof
+expires during replacement, sign out and sign in again before retrying. Local
 offline account recovery changes the password and can explicitly clear a lost
 factor, forcing new enrollment. The exclusive DB lock requires stopping the
 lab first. No HTTP reset can bypass a factor by supplying only a password.
