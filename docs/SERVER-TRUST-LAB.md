@@ -17,9 +17,15 @@ performs no DNS, TCP, SSH, RDP or credential-worker operation.
 
 A ready MFA account can select a configured server and inspect its hostname,
 port, approved IP set, identity type and fingerprint. These are configuration
-values, not observations of a live remote peer. The user compares the complete
-target and fingerprint against a server console or another independently trusted
-channel, then enters the full fingerprint. The field is never prefilled. Creating
+values, not observations of a live remote peer. The catalog pin is the identity:
+the administrator who adds a server compares its key once, against the server
+console, and every connection then rests on that pin, which each handshake
+checks. People no longer retype the fingerprint; a typed value added nothing
+because the page showed the same value it asked for. Creating a connection
+confirms the snapshot shown (`approval`, bound to the catalog's host, port,
+addresses and key), so a catalog that changed in between refuses with 409 and
+shows the new identity. A changed identity blocks the connection until its
+owner accepts the new one in a dialog that shows old and new. Creating
 the connection or replacing its approval needs a ready MFA session, ownership,
 CSRF and the TLS boundary. Only the catalog's current identity can be approved,
 so no fresh step-up is asked; deleting the connection asks for one.

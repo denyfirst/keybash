@@ -477,7 +477,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 	}
 	switch {
 	case r.Method == "POST" && r.URL.Path == "/api/connections":
-		fields, ok := readFields(w, r, 2048, "name", "target", "credential", "fingerprint", "approval")
+		fields, ok := readFields(w, r, 2048, "name", "target", "credential", "approval")
 		if !ok {
 			status = 400
 			return
@@ -488,7 +488,9 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 403
 			return
 		}
-		if !acceptTargetProof(target, fields["fingerprint"], fields["approval"], l.now()) {
+		// The identity is the operator catalog's pin; the person confirms the
+		// snapshot they were shown (approval), not a fingerprint they retype.
+		if !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
 			status = 409
 			return
 		}
@@ -505,7 +507,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 429
 			return
 		}
-		record, e := l.store.putConnection(s.owner, connection{Name: fields["name"], Target: fields["target"], Credential: fields["credential"], Approval: approvalFingerprint(target), Fingerprint: fields["fingerprint"]})
+		record, e := l.store.putConnection(s.owner, connection{Name: fields["name"], Target: fields["target"], Credential: fields["credential"], Approval: approvalFingerprint(target), Fingerprint: identityFingerprint(target)})
 		if e != nil {
 			status = 400
 			return
@@ -515,7 +517,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		}{record}
 	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/connections/") && strings.HasSuffix(r.URL.Path, "/trust"):
 		record := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/connections/"), "/trust")
-		fields, ok := readFields(w, r, 2048, "fingerprint", "approval", "revision")
+		fields, ok := readFields(w, r, 2048, "approval", "revision")
 		if !ok || !validID(record) {
 			status = 400
 			return
@@ -527,7 +529,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			return
 		}
 		target, ok := l.remote.targets[row.Target]
-		if !ok || !acceptTargetProof(target, fields["fingerprint"], fields["approval"], l.now()) {
+		if !ok || !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
 			status = 409
 			return
 		}
@@ -548,7 +550,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 429
 			return
 		}
-		if l.store.trustConnection(s.owner, record, fields["revision"], fields["approval"], fields["fingerprint"]) != nil {
+		if l.store.trustConnection(s.owner, record, fields["revision"], fields["approval"], identityFingerprint(target)) != nil {
 			status = 409
 			return
 		}

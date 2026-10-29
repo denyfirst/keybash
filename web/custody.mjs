@@ -11,7 +11,7 @@ function hideSecret() {
 }
 function clearInputs() {
   document.querySelectorAll('input[type=password], input[autocomplete=one-time-code]').forEach(el => { el.value = ''; });
-  for (const id of ['credential-key', 'key-file', 'connection-fingerprint', 'trust-fingerprint']) if ($(id)) $(id).value = '';
+  for (const id of ['credential-key', 'key-file']) if ($(id)) $(id).value = '';
 }
 // The MFA seed, as a QR code and as text, is on screen only while it is
 // needed and the page is in view.
@@ -104,7 +104,7 @@ function errorMessage(error) {
   if (error.status === 'setup') return 'Quraşdırma kodu qəbul edilmədi. Administratordan aldığın birdəfəlik kodu yoxla; vaxtı keçibsə yenisini istə.';
   if (error.status === 403) return 'Bu əməliyyata icazə verilmədi. Səhifəni yenilə və yenidən yoxla.';
   if (error.status === 428) return 'Bu əməliyyat telefondakı kodla təsdiq tələb edir. Yenidən yoxla.';
-  if (error.status === 409) return 'Fingerprint uyğun gəlmədi və ya server məlumatı dəyişib. Məlumatı yenilə və ayrıca etibarlı kanaldan yoxla.';
+  if (error.status === 409) return 'Server məlumatı bu arada dəyişib. Səhifəni yenilə və yenidən yoxla.';
   if (error.status === 429) return 'Cəhd limiti dolub. Bir qədər gözlə.';
   if (error.status === 401) return 'Doğrulama qəbul edilmədi və ya sessiya bitib. Kodu yoxla; lazım olsa yenidən daxil ol.';
   if (error.status === 400) return 'Məlumat qəbul edilmədi. Şifrəni, kodu və açarın formatını yoxla.';
@@ -177,11 +177,11 @@ function validateTarget(data, id) {
   return data;
 }
 function serverText(data) {
-  return `${data.hostname}:${data.port} · ${data.protocol.toUpperCase()}\nİcazəli IP-lər: ${data.addresses.join(', ')}\n${data.algorithm}\n${data.fingerprint}${data.available ? '' : '\nServer kimliyi hazırda istifadəyə yararlı deyil.'}`;
+  return `Ünvan: ${data.hostname}:${data.port} · ${data.protocol.toUpperCase()}\nIP: ${data.addresses.join(', ')}\nKimlik (barmaq izi): ${data.fingerprint}${data.available ? '' : '\nBu serverin kimliyi hazırda istifadəyə yararlı deyil.'}`;
 }
 async function chooseTarget() {
   const id = $('connection-target').value, generation = ++targetGeneration;
-  selectedTarget = null; $('connection-fingerprint').value = ''; $('connection-server').textContent = 'Server məlumatı yoxlanır…'; updateTrustButtons();
+  selectedTarget = null; $('connection-server').textContent = 'Server məlumatı yoxlanır…'; updateTrustButtons();
   if (!idOK(id)) { $('connection-server').textContent = 'Operator tərəfindən icazəli server yoxdur.'; return; }
   try {
     const target = validateTarget(await request(`/api/targets/${id}`), id);
@@ -192,13 +192,12 @@ async function chooseTarget() {
 function closeReview() {
   ++reviewGeneration; reviewing = null;
   if ($('trust-dialog')?.open) $('trust-dialog').close();
-  if ($('trust-fingerprint')) $('trust-fingerprint').value = '';
   updateTrustButtons();
 }
 async function openReview(record) {
   closeReview(); const generation = ++reviewGeneration;
   $('trust-title').textContent = record.name; $('trust-server').textContent = 'Server məlumatı yoxlanır…';
-  $('trust-previous').textContent = record.fingerprint ? `Əvvəl təsdiqlədiyin fingerprint: ${record.fingerprint}` : 'Bu bağlantı üçün ayrıca kimlik təsdiqi yoxdur.';
+  $('trust-previous').textContent = record.fingerprint ? `Əvvəl qəbul etdiyin kimlik: ${record.fingerprint}` : 'Bu bağlantı üçün ayrıca kimlik təsdiqi yoxdur.';
   $('trust-dialog').showModal(); updateTrustButtons();
   const target = validateTarget(await request(`/api/targets/${record.target}`), record.target);
   if (generation !== reviewGeneration || !$('trust-dialog').open) return;
@@ -294,16 +293,18 @@ bind('credential', async () => {
   clearInputs(); await request('/api/credentials', 'POST', value); $('credential').reset(); await loadRecords(); notice('Şifrələnmiş qeyd saxlanıldı.');
 });
 bind('connection', async () => {
-  const target = selectedTarget, fingerprint = $('connection-fingerprint').value; $('connection-fingerprint').value = '';
+  // The approval binds this choice to the identity shown; if the catalog
+  // changed meanwhile the server refuses and the page shows the new one.
+  const target = selectedTarget;
   if (!target?.available || target.id !== $('connection-target').value || !catalog.has(target.id)) throw new Error('server review missing');
-  await request('/api/connections', 'POST', {name: $('connection-name').value, target: target.id, credential: $('connection-credential').value, fingerprint, approval: target.approval});
-  $('connection-name').value = ''; await loadConnections(); notice('Server kimliyi təsdiqləndi, bağlantı saxlanıldı.');
+  await request('/api/connections', 'POST', {name: $('connection-name').value, target: target.id, credential: $('connection-credential').value, approval: target.approval});
+  $('connection-name').value = ''; await loadConnections(); notice('Bağlantı saxlanıldı.');
 });
 bind('trust-confirm', async () => {
-  const current = reviewing, fingerprint = $('trust-fingerprint').value; $('trust-fingerprint').value = '';
+  const current = reviewing;
   if (!current?.target.available) throw new Error('server review missing');
-  await request(`/api/connections/${current.record.id}/trust`, 'POST', {fingerprint, approval: current.target.approval, revision: current.record.revision});
-  closeReview(); await loadConnections(); notice('Server kimliyi yenidən təsdiqləndi. Bu bağlantının əvvəlki sessiyaları bağlandı.');
+  await request(`/api/connections/${current.record.id}/trust`, 'POST', {approval: current.target.approval, revision: current.record.revision});
+  closeReview(); await loadConnections(); notice('Yeni kimlik qəbul edildi. Bu bağlantının əvvəlki sessiyaları bağlandı.');
 });
 $('connection-target')?.addEventListener('change', () => { void chooseTarget().catch(error => notice(errorMessage(error))); });
 $('cancel-trust')?.addEventListener('click', closeReview);

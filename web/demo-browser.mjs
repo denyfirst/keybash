@@ -53,7 +53,6 @@ try {
   const state = await (await account.request.get(config.Origin + '/api/session')).json();
   const headers = {Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf};
   const connections = {};
-  const fingerprints = {ssh: config.SSHFingerprint, rdp: config.RDPFingerprint};
   for (const [mode, name, secret, target] of [
     ['ssh', 'Linux SSH · UI simulyasiyası', config.SSHSecret, config.SSH],
     ['rdp', 'Desktop · UI simulyasiyası (Windows deyil)', config.RDPSecret, config.RDP]
@@ -61,7 +60,7 @@ try {
     const saved = await account.request.post(config.Origin + '/api/credentials', {headers, data: {name, kind: mode === 'ssh' ? 'ssh-key' : 'password', username: 'synthetic-user', secret, passphrase: ''}});
     assert.equal(saved.status(), 200);
     const credential = await saved.json();
-    const linked = await account.request.post(config.Origin + '/api/connections', {headers, data: {name, target, credential: credential.id, fingerprint: fingerprints[mode], approval: (await (await account.request.get(config.Origin + '/api/targets/' + target)).json()).approval}});
+    const linked = await account.request.post(config.Origin + '/api/connections', {headers, data: {name, target, credential: credential.id, approval: (await (await account.request.get(config.Origin + '/api/targets/' + target)).json()).approval}});
     assert.equal(linked.status(), 200);
     connections[mode] = (await linked.json()).id;
   }
@@ -83,7 +82,7 @@ try {
       <p>Demo istifadəçisi: <code>demo</code><br>Demo giriş şifrəsi: <code id="password"></code></p>
       <p>Hazırkı MFA kodu: <output id="otp"></output><br><small id="remaining"></small><br><small>Eyni kod bir dəfə işləyir. Açılışda işlənmiş kod üçün növbəti 30 saniyəlik kodu gözlə.</small></p>
       <details><summary>Demo MFA seed və birdəfəlik bərpa kodları</summary><p>Autentifikatora əl ilə əlavə etmək üçün: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Hər bərpa kodunu yalnız bir dəfə işlət. Bunlar yalnız bu müvəqqəti demo üçündür.</p></details>
-      <details><summary>Demo server kimlikləri</summary><p>Yeni demo bağlantısını təsdiqləmək üçün ayrıca fixture məlumatı:</p><p>SSH: <code id="ssh-fingerprint"></code></p><p>RDP: <code id="rdp-fingerprint"></code></p></details><p><small>Bütün demo pəncərələrini bağlayanda və ya bir saatdan sonra sessiya bitir. Hər işə salma yeni, müvəqqəti məlumatlarla başlayır.</small></p></html>`);
+      <details><summary>Demo server kimlikləri</summary><p>Bağlantı yaradanda kimlik yazılmır; Keybash onu serverlər siyahısından götürür. Bunlar yalnız məlumat üçündür:</p><p>SSH: <code id="ssh-fingerprint"></code></p><p>RDP: <code id="rdp-fingerprint"></code></p></details><p><small>Bütün demo pəncərələrini bağlayanda və ya bir saatdan sonra sessiya bitir. Hər işə salma yeni, müvəqqəti məlumatlarla başlayır.</small></p></html>`);
     await guide.locator('#ssh-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.SSHFingerprint);
     await guide.locator('#rdp-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.RDPFingerprint);
     await guide.locator('#password').evaluate((el, value) => { el.textContent = value; }, config.Password);

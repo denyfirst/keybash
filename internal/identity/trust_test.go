@@ -153,7 +153,7 @@ func TestServerTrustReopenAndStaleRevision(t *testing.T) {
 	}
 }
 func trustBody(row connection, target RemoteTarget) string {
-	return inputJSON(map[string]string{"fingerprint": identityFingerprint(target), "approval": approvalFingerprint(target), "revision": strconv.FormatUint(row.Revision, 10)})
+	return inputJSON(map[string]string{"approval": approvalFingerprint(target), "revision": strconv.FormatUint(row.Revision, 10)})
 }
 func connectionState(t *testing.T, c *custodyClient, want string) {
 	t.Helper()
@@ -173,8 +173,18 @@ func TestServerTrustProofRefusalAndMetadata(t *testing.T) {
 		t.Fatal("server identity metadata differs")
 	}
 	connectionState(t, c, "verified")
-	base := map[string]string{"name": "reviewed", "target": row.Target, "credential": row.Credential, "fingerprint": row.Fingerprint, "approval": row.Approval}
-	for _, field := range []string{"fingerprint", "approval"} {
+	base := map[string]string{"name": "reviewed", "target": row.Target, "credential": row.Credential, "approval": row.Approval}
+	// The catalog pin is the identity; a typed fingerprint is no longer a field,
+	// even a correct one, and for trust neither.
+	withPrint := map[string]string{"fingerprint": row.Fingerprint}
+	for k, v := range base {
+		withPrint[k] = v
+	}
+	c.expect("POST", "/api/connections", inputJSON(withPrint), 400)
+	trustWithPrint := map[string]string{"approval": row.Approval, "revision": strconv.FormatUint(row.Revision, 10)}
+	trustWithPrint["fingerprint"] = row.Fingerprint
+	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(trustWithPrint), 400)
+	for _, field := range []string{"approval"} {
 		bad := make(map[string]string)
 		for k, v := range base {
 			bad[k] = v
@@ -255,7 +265,7 @@ func TestServerTrustChangeReapprovalRevokesAndCAS(t *testing.T) {
 func TestServerTrustReplacementKeepsOtherConnection(t *testing.T) {
 	l, store, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	row, target := trustRow(t, l, store, record)
-	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "other", "target": row.Target, "credential": row.Credential, "fingerprint": row.Fingerprint, "approval": row.Approval}), 200)
+	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "other", "target": row.Target, "credential": row.Credential, "approval": row.Approval}), 200)
 	var other struct{ ID string }
 	if json.Unmarshal(w.Body.Bytes(), &other) != nil {
 		t.Fatal("other connection fixture failed")
@@ -332,7 +342,7 @@ func TestServerTrustFreshMFAOwnerAndCSRF(t *testing.T) {
 	c.expect("GET", "/api/targets/"+row.Target, "", 200)
 	// Trust needs the ready session, not fresh proof: without it a stale
 	// revision still reaches the revision check instead of a factor prompt.
-	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"fingerprint": identityFingerprint(target), "approval": approvalFingerprint(target), "revision": "999"}), 409)
+	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"approval": approvalFingerprint(target), "revision": "999"}), 409)
 	l.mu.Lock()
 	l.sessions[id].reauthUntil = fresh
 	l.mu.Unlock()
@@ -393,7 +403,7 @@ func TestServerTrustExpiredUnavailableAndRevisionBounds(t *testing.T) {
 	l, store, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	row, target := trustRow(t, l, store, record)
 	for _, rev := range []string{"0", "01", "-1", "2147483648", "18446744073709551616"} {
-		body := inputJSON(map[string]string{"fingerprint": row.Fingerprint, "approval": row.Approval, "revision": rev})
+		body := inputJSON(map[string]string{"approval": row.Approval, "revision": rev})
 		c.expect("POST", "/api/connections/"+record+"/trust", body, 409)
 	}
 	l.mu.Lock()
