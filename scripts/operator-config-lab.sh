@@ -7,11 +7,14 @@ case "${lab}" in /tmp/keybash-operator-config.*) ;; *) exit 1 ;; esac
 case "${build}" in /tmp/keybash-operator-build.*) ;; *) exit 1 ;; esac
 cp internal/operatorconfig/catalog.go "${build}/catalog.original"
 cp internal/operatorconfig/load_linux.go "${build}/load.original"
+cp internal/operatorconfig/replace_linux.go "${build}/replace.original"
 restore_sources() {
   cp "${build}/catalog.original" internal/operatorconfig/catalog.go
   cp "${build}/load.original" internal/operatorconfig/load_linux.go
+  cp "${build}/replace.original" internal/operatorconfig/replace_linux.go
   cmp "${build}/catalog.original" internal/operatorconfig/catalog.go
   cmp "${build}/load.original" internal/operatorconfig/load_linux.go
+  cmp "${build}/replace.original" internal/operatorconfig/replace_linux.go
 }
 trap 'restore_sources; sudo -n rm -rf -- "${lab}"; rm -rf -- "${build}"' EXIT
 CGO_ENABLED=0 go build -trimpath -o "${lab}/keybash" ./cmd/keybash
@@ -50,6 +53,32 @@ PY
   fi
   assertion='unsafe catalog file accepted'
   if test "${mutation}" = file-owner-refuse; then assertion='valid root-owned catalog refused'; fi
+  grep -q "${assertion}" "${build}/mutation.log"
+  echo "Operator ${mutation} mutation failed its intended assertion"
+  restore_sources
+done
+# The guided edit (keybash server-add) replaces the catalog only if nobody
+# changed it since it was read, and a valid replacement is not refused.
+for mutation in replace-swap-bypass replace-refuse; do
+  python3 - "${mutation}" <<'PY'
+from pathlib import Path
+import sys
+p = Path('internal/operatorconfig/replace_linux.go')
+s = p.read_text()
+old, new = {
+ 'replace-swap-bypass': ('!bytes.Equal(held, previous)', 'false'),
+ 'replace-refuse': ('if out.Close() != nil ||', 'if true ||'),
+}[sys.argv[1]]
+assert s.count(old) == 1
+p.write_text(s.replace(old, new))
+PY
+  go test -c -race -o "${build}/mutant.test" ./internal/operatorconfig
+  sudo -n install -o root -g root -m 555 "${build}/mutant.test" "${lab}/catalog.test"
+  if sudo -n env -i "${lab}/catalog.test" -test.run='^TestOperatorCatalogReplace' -test.timeout=40s -test.v > "${build}/mutation.log" 2>&1; then
+    echo 'operator catalog replace mutation escaped its assertion' >&2; exit 1
+  fi
+  assertion='unsafe catalog replacement accepted'
+  if test "${mutation}" = replace-refuse; then assertion='valid root-owned catalog refused'; fi
   grep -q "${assertion}" "${build}/mutation.log"
   echo "Operator ${mutation} mutation failed its intended assertion"
   restore_sources

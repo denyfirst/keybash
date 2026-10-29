@@ -89,6 +89,30 @@ sudo setpriv --reuid=keybash-gateway --regid=keybash-gateway --clear-groups --re
 sudo systemctl start keybash-gateway
 ```
 
+## Sonradan server əlavə etmək
+
+Siyahıya JSON yazmadan və açarı əl ilə köçürmədən server əlavə etmək üçün:
+
+```sh
+sudo /usr/local/libexec/keybash/keybash server-add --config=/etc/keybash/targets.json \
+  --name="Veb server" --host=192.168.1.20 --port=22
+```
+
+Keybash serverin kimliyini (Ed25519 host key) özü oxuyur, barmaq izini göstərir
+və heç nəyi dəyişmədən soruşur. Həmin serverin öz konsolunda
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` ilə müqayisə et və eynidirsə
+`yes` yaz. Sonra siyahını oxuması üçün Keybash-i yenidən başlat. Bu zaman açıq
+sessiyalar bağlanır:
+
+```sh
+sudo systemctl restart keybash-ssh-manager keybash-gateway
+```
+
+Qorunan şəbəkələrdəki, loopback və ya link-local ünvanlar, eyni ünvan və port
+ikinci dəfə əlavə olunmur. Belə ünvanlara qoşulmağa heç cəhd edilmir. Siyahı
+yalnız oxunduğu andan bəri dəyişməyibsə və yeni siyahı Keybash-in özü kimi
+yüklənə bilirsə əvəz olunur.
+
 ## Silmək
 
 ```sh
