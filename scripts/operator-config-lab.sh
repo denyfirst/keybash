@@ -66,7 +66,7 @@ import sys
 p = Path('internal/operatorconfig/replace_linux.go')
 s = p.read_text()
 old, new = {
- 'replace-swap-bypass': ('!bytes.Equal(held, previous)', 'false'),
+ 'replace-swap-bypass': ('!bytes.Equal(held, previous)', 'len(held) < 0'),
  'replace-refuse': ('if out.Close() != nil ||', 'if true ||'),
 }[sys.argv[1]]
 assert s.count(old) == 1
