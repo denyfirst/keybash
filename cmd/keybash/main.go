@@ -43,7 +43,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	command := args[0]
 	switch command {
-	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab", "backup", "restore", "key-export", "key-import":
+	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab", "backup", "restore", "key-export", "key-import", "check-tls":
 	default:
 		return refused
 	}
@@ -62,15 +62,16 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	manager := flags.String("ssh-manager", "", "fixed root SSH manager socket")
 	out := flags.String("out", "", "new backup file, never beside the instance key")
 	in := flags.String("in", "", "backup file to restore")
+	sshOnlyCatalog := flags.Bool("ssh-only", false, "check-targets: also refuse any target that is not SSH")
 	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" || (*out != "") != (command == "backup") || (*in != "") != (command == "restore") ||
-		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") {
+		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") && command != "check-tls" || *sshOnlyCatalog && command != "check-targets" {
 		return refused
 	}
 	var targets []identity.RemoteTarget
 	limits := sessionlimits.Default()
 	if command == "check-targets" {
 		validFlags := true
-		flags.Visit(func(f *flag.Flag) { validFlags = validFlags && f.Name == "config" })
+		flags.Visit(func(f *flag.Flag) { validFlags = validFlags && (f.Name == "config" || f.Name == "ssh-only") })
 		if !validFlags || *catalog == "" {
 			return refused
 		}
@@ -78,11 +79,29 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		var snapshot operatorconfig.Catalog
 		snapshot, e = operatorconfig.LoadCatalog(*catalog)
 		targets = snapshot.Targets
-		if e != nil {
+		if e != nil || *sshOnlyCatalog && !sshOnly(targets) {
 			return refused
 		}
 		_, e = fmt.Fprintf(output, "Target configuration valid (%d servers; capacity %d total, %d per owner).\n", len(targets), snapshot.Capacity.Total, snapshot.Capacity.PerOwner)
 		return reportUnavailable(output, e, targets, time.Now())
+	}
+	if command == "check-tls" {
+		// Read-only, before anything is installed: the pair loads as the
+		// gateway loads it and covers the origin browsers will use, now.
+		validFlags := true
+		flags.Visit(func(f *flag.Flag) {
+			validFlags = validFlags && (f.Name == "tls-cert" || f.Name == "tls-key" || f.Name == "listen" || f.Name == "allow-from" || f.Name == "server-name")
+		})
+		origin, _, e := ingress.Exposure(*address, *allowFrom, *serverName)
+		if !validFlags || e != nil || *cert == "" || *tlsKey == "" {
+			return refused
+		}
+		pair, e := tls.LoadX509KeyPair(*cert, *tlsKey)
+		if e != nil || !covers(pair, origin, time.Now()) {
+			return refused
+		}
+		_, e = fmt.Fprintf(output, "TLS certificate valid for %s.\n", origin)
+		return e
 	}
 	if *data == "" || *key == "" || command != "serve-ssh-lab" && command != "serve-remote-lab" && (*catalog != "" || *manager != "" || *rdpManager != "") || command != "serve-remote-lab" && *rdpManager != "" {
 		return refused
@@ -193,8 +212,8 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		}
 		return e
 	case "serve-lab", "serve-ssh-lab", "serve-remote-lab":
-		origin, sources, ok := exposure(*address, *allowFrom, *serverName)
-		if !ok || *cert == "" || *tlsKey == "" {
+		origin, sources, e := ingress.Exposure(*address, *allowFrom, *serverName)
+		if e != nil || *cert == "" || *tlsKey == "" {
 			return refused
 		}
 		pair, e := tls.LoadX509KeyPair(*cert, *tlsKey)
@@ -273,33 +292,6 @@ func reportUnavailable(output io.Writer, e error, targets []identity.RemoteTarge
 		}
 	}
 	return e
-}
-
-// exposure checks the listener and returns the origin browsers use. A
-// loopback listener takes no networks or name. Any other must be a specific
-// global-unicast address (so never all interfaces) with the networks it
-// admits; its origin is the server name, if given, or the address.
-func exposure(address, allowFrom, serverName string) (string, []netip.Prefix, bool) {
-	host, port, e := net.SplitHostPort(address)
-	ip, pe := netip.ParseAddr(host)
-	if e != nil || pe != nil || ip.Zone() != "" || ip.String() != host || ip.Is4In6() || port == "0" {
-		return "", nil, false
-	}
-	if ip.IsLoopback() {
-		if allowFrom != "" || serverName != "" {
-			return "", nil, false
-		}
-		return "https://" + address, nil, true
-	}
-	sources, e := ingress.ParseSources(allowFrom)
-	if e != nil || !ip.IsGlobalUnicast() {
-		return "", nil, false
-	}
-	name := host
-	if serverName != "" {
-		name = serverName
-	}
-	return "https://" + net.JoinHostPort(name, port), sources, true
 }
 
 // covers reports whether the certificate is valid now for the origin's host.

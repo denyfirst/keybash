@@ -45,3 +45,7 @@ restore_source
 CGO_ENABLED=0 go build -trimpath -o "${mutation}/manager" ./cmd/keybash-ssh-manager
 sudo -n install -o root -g root -m 555 "${mutation}/manager" "${build}/keybash-ssh-manager"
 run_service
+
+# The source installer on this same runner, after the lab above has removed
+# its units and accounts: install, refusals, uninstall and mutations.
+sh scripts/install-lab.sh

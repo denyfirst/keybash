@@ -123,3 +123,39 @@ func TestServiceCheckOutsideInstalledBoundaryRefuses(t *testing.T) {
 		t.Fatal("uninstalled service boundary accepted")
 	}
 }
+
+func TestServicePlanListenerFollowsTheGatewayRule(t *testing.T) {
+	c := fixtureConfig()
+	files, e := Render(c)
+	if e != nil || !strings.Contains(files["keybash-gateway.service"], " --listen=127.0.0.1:8443 --tls-cert=") || strings.Contains(files["keybash-gateway.service"], "--allow-from") {
+		t.Fatal("default plan is not loopback-only")
+	}
+	c.Listen, c.AllowFrom, c.ServerName = "192.168.1.10:8443", "192.168.1.0/24,10.8.0.0/16", "keybash.lan"
+	files, e = Render(c)
+	gateway := files["keybash-gateway.service"]
+	if e != nil || !strings.Contains(gateway, " --listen=192.168.1.10:8443 --tls-cert=") ||
+		!strings.Contains(gateway, "--ssh-manager=/run/keybash-manager/control.sock --allow-from=192.168.1.0/24,10.8.0.0/16 --server-name=keybash.lan\n") {
+		t.Fatal("exposed listener missing from the gateway unit")
+	}
+	c.RDPWorkerDigest, c.RDPRuntimeDigest = strings.Repeat("b", 64), strings.Repeat("c", 64)
+	if files, e = Render(c); e != nil || !strings.Contains(files["keybash-gateway.service"], "--rdp-manager=/run/keybash-rdp-manager/control.sock --allow-from=192.168.1.0/24,10.8.0.0/16 --server-name=keybash.lan\n") {
+		t.Fatal("exposed listener lost with RDP")
+	}
+	for name, bad := range map[string]func(*Config){
+		"empty":          func(c *Config) { c.Listen, c.AllowFrom, c.ServerName = "", "", "" },
+		"all-interfaces": func(c *Config) { c.Listen = "0.0.0.0:8443" },
+		"no-networks":    func(c *Config) { c.AllowFrom, c.ServerName = "", "" },
+		"loopback-lan":   func(c *Config) { c.Listen = "127.0.0.1:8443" },
+		"name-injection": func(c *Config) { c.ServerName = "keybash.lan\nExecStartPre=/bin/sh" },
+		"name-argument":  func(c *Config) { c.ServerName = "keybash.lan --tls-key=/tmp/k" },
+		"nets-injection": func(c *Config) { c.AllowFrom = "192.168.1.0/24\nUser=root" },
+		"listen-inject":  func(c *Config) { c.Listen = "192.168.1.10:8443\nUser=root" },
+		"specifier":      func(c *Config) { c.ServerName = "keybash%n" },
+	} {
+		copy := c
+		bad(&copy)
+		if _, e := Render(copy); e == nil {
+			t.Fatalf("%s listener accepted", name)
+		}
+	}
+}

@@ -23,6 +23,9 @@ func main() {
 	flag.Uint64Var(&c.CPUPercent, "cpu-percent", c.CPUPercent, "aggregate CPU percent of one core")
 	flag.Uint64Var(&c.MemoryMiB, "memory-mib", c.MemoryMiB, "aggregate memory MiB")
 	flag.Uint64Var(&c.Tasks, "tasks", c.Tasks, "aggregate processes and threads")
+	flag.StringVar(&c.Listen, "listen", c.Listen, "gateway listener; loopback unless --allow-from is given")
+	flag.StringVar(&c.AllowFrom, "allow-from", "", "networks an exposed gateway admits")
+	flag.StringVar(&c.ServerName, "server-name", "", "DNS name browsers use for an exposed gateway")
 	output := flag.String("output", "", "new staging directory; must not exist")
 	flag.Parse()
 	if flag.NArg() != 0 || gu > 2147483647 || gg > 2147483647 || wu > 2147483647 || wg > 2147483647 || !filepath.IsAbs(*output) || filepath.Clean(*output) != *output {

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -137,4 +138,53 @@ func (c *conn) Close() error {
 	e := c.Conn.Close()
 	c.once.Do(c.release)
 	return e
+}
+
+// Name reports whether host is a server name browsers may use for an exposed
+// gateway: canonical lowercase LDH labels, not localhost, and with a last
+// label that is not all digits ("10.1" is an IPv4 address to a browser).
+func Name(host string) bool {
+	if len(host) == 0 || len(host) > 253 || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range []byte(label) {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
+}
+
+// Exposure checks a gateway's listener and returns the origin browsers use.
+// A loopback listener takes no networks or name. Any other must be a specific
+// global-unicast address (so never all interfaces) with the networks it
+// admits; its origin is the server name, if given, or the address.
+func Exposure(listen, allowFrom, serverName string) (string, []netip.Prefix, error) {
+	host, port, e := net.SplitHostPort(listen)
+	ip, pe := netip.ParseAddr(host)
+	number, ne := strconv.ParseUint(port, 10, 16)
+	if e != nil || pe != nil || ne != nil || number == 0 || strconv.FormatUint(number, 10) != port || ip.Zone() != "" || ip.String() != host || ip.Is4In6() {
+		return "", nil, ErrIngress
+	}
+	if ip.IsLoopback() {
+		if allowFrom != "" || serverName != "" {
+			return "", nil, ErrIngress
+		}
+		return "https://" + listen, nil, nil
+	}
+	sources, e := ParseSources(allowFrom)
+	if e != nil || !ip.IsGlobalUnicast() || serverName != "" && !Name(serverName) {
+		return "", nil, ErrIngress
+	}
+	name := host
+	if serverName != "" {
+		name = serverName
+	}
+	return "https://" + net.JoinHostPort(name, port), sources, nil
 }

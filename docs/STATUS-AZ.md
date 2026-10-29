@@ -96,6 +96,8 @@ vermədiyi üçün istifadəçi public repository-yə keçidi təsdiqlədi.
 - Gateway-i yalnız göstərilən LAN/VPN şəbəkələrinə açmaq: icazəli şəbəkə
   siyahısı, sertifikatın adı əhatə etməsi, mənbə üzrə bağlantı və giriş
   limitləri (`LAN-INGRESS.md`).
+- Təmiz Linux hostu üçün mənbədən quraşdırıcı və silmə skripti; test üçün
+  yalnız bir ada icazəli HTTPS sertifikatı (`INSTALL-AZ.md`).
 
 Guard SSH kitabxanasına və native RDP broker kitabxanasının girişinə bağlıdır.
 Native sınaqlarda yalnız test fayllarına aid sintetik loopback bağlantısı var.
@@ -111,7 +113,7 @@ məhdudiyyətlər: `INTERACTIVE-DEMO-AZ.md`.
 
 ## Hələ hazırlanmayıb
 
-Production quraşdırıcı və public internet girişi, gündəlik məhsul workspace-i,
+Paketlənmiş production quraşdırıcı, yeniləmə və public internet girişi, gündəlik məhsul workspace-i,
 real Windows/şəbəkə hostları və tam browser/keyboard matrisi, uzun sessiya/yük
 ölçüləri, upgrade, xidməti dayandırmadan backup və key rotation, offline release paketi və ayrıca
 audit olunmuş imzalı buraxılış hələ hazırlanmayıb. Mənbə systemd/RDP xidmət

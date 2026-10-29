@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/denyfirst/keybash/internal/ingress"
 )
 
 var ErrPolicy = errors.New("service policy refused")
@@ -20,9 +22,15 @@ type Config struct {
 	CPUPercent                        uint64
 	MemoryMiB                         uint64
 	Tasks                             uint64
+	// The gateway's listener: loopback by default, or an exposed LAN/VPN
+	// address with the networks it admits and an optional server name, held
+	// to exactly the rules the gateway itself applies (ingress.Exposure).
+	Listen, AllowFrom, ServerName string
 }
 
-func Default() Config { return Config{CPUPercent: 200, MemoryMiB: 1024, Tasks: 512} }
+func Default() Config {
+	return Config{CPUPercent: 200, MemoryMiB: 1024, Tasks: 512, Listen: "127.0.0.1:8443"}
+}
 
 func (c Config) HasRDP() bool { return c.RDPWorkerDigest != "" && c.RDPRuntimeDigest != "" }
 func validDigest(s string) bool {
@@ -37,6 +45,9 @@ func (c Config) Valid() bool {
 		if id < 1 || id > 2147483647 || id == 65534 {
 			return false
 		}
+	}
+	if _, _, err := ingress.Exposure(c.Listen, c.AllowFrom, c.ServerName); err != nil {
+		return false
 	}
 	digest, err := hex.DecodeString(c.WorkerDigest)
 	return c.GatewayUID != c.WorkerUID && c.GatewayGID != c.WorkerGID &&
@@ -53,6 +64,13 @@ func Render(c Config) (map[string]string, error) {
 	args := fmt.Sprintf("--gateway-uid=%d --gateway-gid=%d --worker-uid=%d --worker-gid=%d --worker-digest=%s --cpu-percent=%d --memory-mib=%d --tasks=%d", c.GatewayUID, c.GatewayGID, c.WorkerUID, c.WorkerGID, c.WorkerDigest, c.CPUPercent, c.MemoryMiB, c.Tasks)
 	if c.HasRDP() {
 		args += " --rdp-worker-digest=" + c.RDPWorkerDigest + " --rdp-runtime-digest=" + c.RDPRuntimeDigest
+	}
+	exposed := ""
+	if c.AllowFrom != "" {
+		exposed = " --allow-from=" + c.AllowFrom
+	}
+	if c.ServerName != "" {
+		exposed += " --server-name=" + c.ServerName
 	}
 	common := `Slice=keybash.slice
 Type=exec
@@ -94,11 +112,11 @@ MemoryDenyWriteExecute=yes
 ReadWritePaths=/var/lib/keybash
 InaccessiblePaths=-/etc/keybash/worker-private
 ExecStartPre=/usr/local/libexec/keybash/keybash-service-check --role=gateway %s
-ExecStart=/usr/local/libexec/keybash/keybash serve-ssh-lab --data=/var/lib/keybash --key-file=/etc/keybash/keys/instance.key --listen=127.0.0.1:8443 --tls-cert=/etc/keybash/tls/cert.pem --tls-key=/etc/keybash/tls/key.pem --config=/etc/keybash/targets.json --ssh-manager=/run/keybash-manager/control.sock
+ExecStart=/usr/local/libexec/keybash/keybash serve-ssh-lab --data=/var/lib/keybash --key-file=/etc/keybash/keys/instance.key --listen=%s --tls-cert=/etc/keybash/tls/cert.pem --tls-key=/etc/keybash/tls/key.pem --config=/etc/keybash/targets.json --ssh-manager=/run/keybash-manager/control.sock%s
 
 [Install]
 WantedBy=multi-user.target
-`, c.GatewayUID, c.GatewayGID, common, args)
+`, c.GatewayUID, c.GatewayGID, common, args, c.Listen, exposed)
 	manager := fmt.Sprintf(`[Unit]
 Description=Keybash fixed SSH worker manager
 

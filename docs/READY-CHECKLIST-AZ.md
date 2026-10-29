@@ -64,7 +64,9 @@ Hələ real credential saxlamaq və öz serverlərinə qoşulmaq üçün məhsul
    dependency/license/SBOM və məhdud metadata audit.
    Gateway-i yalnız göstərilən LAN/VPN şəbəkələrinə açmaq (`--allow-from`,
    ad üçün sertifikat yoxlaması, mənbə üzrə limitlər) artıq var
-   (`LAN-INGRESS.md`); public internet girişi və quraşdırıcı qalır.
+   (`LAN-INGRESS.md`); public internet girişi qalır. Təmiz Linux hostu üçün
+   mənbədən quraşdırıcı (`scripts/install.sh`, `INSTALL-AZ.md`) var və CI-da
+   real systemd üzərində sınanır; paket, yeniləmə və imzalı buraxılış qalır.
 7. **Backup və bərpa.** Şifrələnmiş export, ayrıca key recovery, təmiz instansiyaya
    restore və itmiş açarın nəticəsinin aydın izahı. Təkcə backup faylı yaratmaq
    kifayət etmir — onunla faktiki bərpa sınağı tələb olunur.

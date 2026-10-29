@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -141,22 +140,7 @@ func originHost(origin string, exposed bool) (string, bool) {
 		}
 		return u.Host, true
 	}
-	if !exposed || len(host) > 253 || host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return "", false
-	}
-	labels := strings.Split(host, ".")
-	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return "", false
-		}
-		for _, c := range []byte(label) {
-			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
-				return "", false
-			}
-		}
-	}
-	// A last label of digits makes "10.1" or "1.2.3.4.5" an address to browsers.
-	if strings.Trim(labels[len(labels)-1], "0123456789") == "" {
+	if !exposed || !ingress.Name(host) {
 		return "", false
 	}
 	return u.Host, true

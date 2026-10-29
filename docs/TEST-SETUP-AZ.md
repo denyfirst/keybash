@@ -5,6 +5,11 @@ production installer və ya audit olunmuş məhsul deyil. Sənin hazırda ayrıc
 yoxdur; aşağıdakı hazırlıq VM-lər yaradıldıqdan sonra administrator tərəfindən
 icra edilir. Porch və Rootwell-in yerləşdiyi hostda sınaq aparılmır.
 
+**Qısa yol:** "Mənbəni hazırlamaq", "Ayrı HTTPS test sertifikatı" və "Mənbə
+xidmətlərinin yerləşdirilməsi" addımlarını indi `scripts/build-stage.sh`,
+`keybash-test-tls` və `scripts/install.sh` edir — `INSTALL-AZ.md`-ə bax. Aşağıdakı
+əl addımları nə edildiyini başa düşmək və yoxlamaq üçün qalır.
+
 ## Lazım olan mühit
 
 - Keybash üçün ayrıca **Ubuntu 24.04 x86-64, systemd və cgroup v2** VM.
