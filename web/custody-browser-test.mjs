@@ -35,6 +35,19 @@ try {
   await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
   assert.equal((await page.request.get(config.Origin + '/api/credentials')).status(), 403, 'password-only vault access');
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); seed = await page.locator('#seed').textContent(); assert.match(seed, /^[A-Z2-7]{32}$/); await settled();
+  // The QR code is the server's drawing of this seed, module for module, with a
+  // four-module quiet margin; a repeated request shows the same seed.
+  const drawn = await page.locator('#seed-qr').evaluate(svg => ({ box: svg.getAttribute('viewBox'), d: svg.querySelector('path')?.getAttribute('d') ?? '' }));
+  const again = await (await api('/api/mfa/enrollment', {})).json(); assert.equal(again.secret, seed);
+  const cells = new Set(); for (const m of drawn.d.matchAll(/M(\d+) (\d+)h(\d+)v1h-\d+z/g)) for (let i = 0; i < +m[3]; i++) cells.add(`${+m[1] + i},${m[2]}`);
+  assert.equal(drawn.box, `-4 -4 ${again.qr.length + 8} ${again.qr.length + 8}`);
+  again.qr.forEach((row, y) => [...row].forEach((c, x) => { if (cells.has(`${x},${y}`) !== (c === '1')) assert.fail('QR module differs from the seed'); }));
+  assert.equal(cells.size, again.qr.join('').split('1').length - 1);
+  assert.equal(await page.locator('#seed').evaluate(el => el.value), seed, 'grouped key copies with spaces');
+  // Leaving the page takes the code and the key off the screen.
+  await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); delete document.visibilityState; });
+  assert.equal(await page.locator('#seed-qr path').count(), 0); assert.equal(await page.locator('#seed').textContent(), ''); assert(await page.locator('#qr-start').isVisible());
+  await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); assert.equal(await page.locator('#seed').textContent(), seed); await settled();
   await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30) - 1)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
   await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#recovery-codes').inputValue(), '');

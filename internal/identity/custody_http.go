@@ -270,11 +270,17 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		seed := s.pendingSeed
+		seed, username := s.pendingSeed, s.username
 		l.mu.Unlock()
+		modules, e := seedQR(username, seed)
+		if e != nil {
+			refuse(w, 503)
+			return
+		}
 		jsonReply(w, struct {
-			Secret string `json:"secret"`
-		}{seed})
+			Secret string   `json:"secret"`
+			QR     []string `json:"qr"` // the same seed, for a phone to scan
+		}{seed, modules})
 		return
 	}
 	if r.URL.Path == "/api/mfa/confirm" && r.Method == "POST" {

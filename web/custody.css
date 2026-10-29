@@ -53,7 +53,100 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 .trust-state[data-trust=changed],
 .trust-state[data-trust=unavailable] { color: var(--insecure); }
 
-#seed { font-size: 1.05rem; letter-spacing: 0.08em; }
+/* MFA setup: three numbered steps joined by a thread, the QR code as the
+   middle one's object. */
+#enroll { max-width: 46rem; padding: 1.8rem 2rem 2rem; }
+.enroll-lead { max-width: var(--measure); margin: 0 0 1.6rem; color: var(--ink-soft); }
+.steps { display: grid; gap: 1.9rem; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.steps > li { position: relative; padding-left: 3rem; counter-increment: step; }
+.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  top: -0.1rem;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--tool);
+  background: color-mix(in srgb, var(--tool) 10%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--tool) 35%, var(--rule));
+  border-radius: 50%;
+}
+.steps > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 2.3rem;
+  bottom: -1.6rem;
+  left: calc(1rem - 0.5px);
+  width: 1px;
+  background: color-mix(in srgb, var(--ink-faint) 45%, var(--rule));
+}
+.steps h2 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+.steps .hint { margin-bottom: 0; }
+
+/* Before it is shown: a quiet, dashed place where the code will appear. */
+.qr-start {
+  display: grid;
+  justify-items: center;
+  gap: 0.2rem;
+  width: min(100%, 17rem);
+  margin-top: 1rem;
+  padding: 1.6rem 1.2rem 1.4rem;
+  text-align: center;
+  background: var(--paper-sunk);
+  border: 1px dashed color-mix(in srgb, var(--ink-faint) 55%, var(--rule));
+  border-radius: calc(var(--radius) + 6px);
+}
+.qr-glyph {
+  width: 2.6rem;
+  height: 2.6rem;
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* An account the administrator made first proves its setup code here. */
+.qr-start:has(#setup-proof:not([hidden])) { width: min(100%, 24rem); }
+.qr-start #setup-proof { width: 100%; text-align: left; }
+.qr-start input { background: var(--card); }
+.qr-start #setup-proof label { margin-top: 0.6rem; }
+.qr-start button { margin-top: 0.9rem; }
+
+/* A scanner reads dark modules on white with a quiet margin, so the code is
+   printed that way in both schemes, on a card that lifts it off the page. */
+#seed-qr {
+  display: block;
+  width: min(100%, 15rem);
+  height: auto;
+  margin-top: 1rem;
+  background: #ffffff;
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) + 6px);
+  box-shadow: 0 12px 32px var(--edge);
+}
+#seed-qr path { fill: #000000; }
+.seed-manual { max-width: var(--measure); margin-top: 1.2rem; border-top: 0; }
+.seed-manual summary { width: fit-content; padding: 0; font-size: 0.9rem; font-weight: 500; color: var(--link); }
+.seed-manual summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+.seed-manual[open] summary { margin-bottom: 0.4rem; }
+.seed-manual .hint { margin: 0.2rem 0 0; }
+.seed-manual button { margin-top: 0.4rem; }
+/* The key in groups of four, spaced by layout so a copy has no spaces. */
+#seed { display: flex; flex-wrap: wrap; gap: 0.15rem 0.7rem; font-size: 1.05rem; letter-spacing: 0.08em; }
+.qr-care { margin-top: 0.9rem; }
+#enrollment label { margin-top: 0.9rem; }
+#enrollment-code {
+  max-width: 12rem;
+  font-family: var(--mono);
+  font-size: 1.35rem;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em; /* balances the spacing after the last digit */
+  text-align: center;
+}
 #recovery-codes { min-height: 16rem; line-height: 1.8; }
 #connection-server, #trust-server { font-size: 0.82rem; }
 #trust-previous { overflow-wrap: anywhere; }

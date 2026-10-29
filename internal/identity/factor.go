@@ -8,9 +8,12 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"io"
+	"net/url"
 	"time"
 
+	"github.com/boombuler/barcode/qr"
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/hotp"
 	bolt "go.etcd.io/bbolt"
@@ -26,6 +29,43 @@ func newSeed() (string, error) {
 		return "", errRefused
 	}
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:]), nil
+}
+
+// seedURI is the standard authenticator key URI for a seed. SHA1, six digits
+// and 30 seconds are the format's defaults and exactly what factorCounter
+// checks, so they stay implicit and the code stays small enough to scan.
+func seedURI(username, seed string) string {
+	return "otpauth://totp/Keybash:" + url.PathEscape(username) + "?secret=" + seed + "&issuer=Keybash"
+}
+
+// seedQR draws seedURI as QR modules, one string per row from the top with
+// "1" for a dark module; the browser adds the quiet zone. It carries exactly
+// the seed the page already shows as text, under the same gate, and only
+// values this server made or validated are ever encoded.
+func seedQR(username, seed string) ([]string, error) {
+	if !usernameInput(username) || !validSeed(seed) {
+		return nil, errRefused
+	}
+	code, e := qr.Encode(seedURI(username, seed), qr.M, qr.Auto)
+	if e != nil {
+		return nil, errRefused
+	}
+	n := code.Bounds().Dx()
+	if n < 21 || n > 57 || (n-17)%4 != 0 || code.Bounds() != image.Rect(0, 0, n, n) {
+		return nil, errRefused
+	}
+	rows := make([]string, n)
+	row := make([]byte, n)
+	for y := range n {
+		for x := range n {
+			row[x] = '0'
+			if gray, _, _, _ := code.At(x, y).RGBA(); gray == 0 {
+				row[x] = '1'
+			}
+		}
+		rows[y] = string(row)
+	}
+	return rows, nil
 }
 
 type recoveryCodes []string
