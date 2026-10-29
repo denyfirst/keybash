@@ -80,6 +80,10 @@ func TestOperatorLinuxInitBootstrapAndOfflineRecovery(t *testing.T) {
 		}
 		return code
 	}
+	// A catalog-only flag is refused, not ignored, by every other command.
+	if call("account-add", "carol\n"+password+"\n", "--ssh-only") == nil || output.Len() != 0 {
+		t.Fatal("account-add accepted the catalog flag")
+	}
 	if call("account-add", "bob\n"+password+"\n") != nil {
 		t.Fatal("operator account add refused")
 	}

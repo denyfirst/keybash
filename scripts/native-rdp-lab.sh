@@ -105,3 +105,6 @@ cmp "${identity}" "${repo}/native/identity.c"
 rebuild_identity
 sudo -n env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH="${prefix}/lib" KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=5m -test.v
+
+# The installer's RDP path, with the same normal runtime the managers use.
+sh scripts/install-lab.sh "${prefix}/runtime-stage"

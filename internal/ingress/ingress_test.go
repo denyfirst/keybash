@@ -215,3 +215,58 @@ func TestWrapRefusesBadLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestExposureNeedsNetworksAndASpecificAddress(t *testing.T) {
+	for _, valid := range []struct{ listen, allow, name, origin string }{
+		{"127.0.0.1:8443", "", "", "https://127.0.0.1:8443"},
+		{"192.168.1.10:8443", "192.168.1.0/24", "", "https://192.168.1.10:8443"},
+		{"192.168.1.10:8443", "192.168.1.0/24,10.8.0.0/16", "keybash.lan", "https://keybash.lan:8443"},
+		{"[fd00:1::10]:8443", "fd00:1::/64", "", "https://[fd00:1::10]:8443"},
+		{"192.168.1.10:65535", "192.168.1.0/24", "keybash", "https://keybash:65535"},
+	} {
+		origin, sources, e := Exposure(valid.listen, valid.allow, valid.name)
+		if e != nil || origin != valid.origin || (sources == nil) != (valid.allow == "") {
+			t.Fatalf("%s with %q refused or misread", valid.listen, valid.allow)
+		}
+	}
+	for name, invalid := range map[string][3]string{
+		"loopback-networks": {"127.0.0.1:8443", "192.168.1.0/24", ""},
+		"loopback-name":     {"127.0.0.1:8443", "", "keybash.lan"},
+		"lan-no-networks":   {"192.168.1.10:8443", "", ""},
+		"lan-name-only":     {"192.168.1.10:8443", "", "keybash.lan"},
+		"all-interfaces":    {"0.0.0.0:8443", "192.168.1.0/24", ""},
+		"all-interfaces6":   {"[::]:8443", "fd00:1::/64", ""},
+		"link-local":        {"169.254.1.1:8443", "169.254.0.0/16", ""},
+		"zero-port":         {"192.168.1.10:0", "192.168.1.0/24", ""},
+		"empty-port":        {"192.168.1.10:", "192.168.1.0/24", ""},
+		"big-port":          {"192.168.1.10:65536", "192.168.1.0/24", ""},
+		"padded-port":       {"192.168.1.10:08443", "192.168.1.0/24", ""},
+		"signed-port":       {"192.168.1.10:+8443", "192.168.1.0/24", ""},
+		"hostname-listen":   {"keybash.lan:8443", "192.168.1.0/24", ""},
+		"bad-networks":      {"192.168.1.10:8443", "192.168.1.7/24", ""},
+		"everything":        {"192.168.1.10:8443", "0.0.0.0/0", ""},
+		"mapped":            {"[::ffff:192.168.1.10]:8443", "192.168.1.0/24", ""},
+		"no-port":           {"192.168.1.10", "192.168.1.0/24", ""},
+		"uppercase-name":    {"192.168.1.10:8443", "192.168.1.0/24", "Keybash.lan"},
+		"spaced-name":       {"192.168.1.10:8443", "192.168.1.0/24", "keybash.lan --listen=0.0.0.0:1"},
+		"localhost-name":    {"192.168.1.10:8443", "192.168.1.0/24", "localhost"},
+		"numeric-name":      {"192.168.1.10:8443", "192.168.1.0/24", "10.1"},
+	} {
+		if _, _, e := Exposure(invalid[0], invalid[1], invalid[2]); e == nil {
+			t.Fatalf("%s exposure accepted", name)
+		}
+	}
+}
+
+func TestNameIsCanonicalAndNeverAnAddress(t *testing.T) {
+	for _, valid := range []string{"keybash", "keybash.lan", "xn--bcher-kva.lan", "a-1.b2", strings.Repeat("a", 63) + ".lan"} {
+		if !Name(valid) {
+			t.Fatalf("%q refused", valid)
+		}
+	}
+	for _, invalid := range []string{"", "Keybash.lan", "localhost", "vault.localhost", "10.1", "1.2.3.4.5", "keybash.lan.", ".lan", "-keybash.lan", "keybash-.lan", "keybash_lan", "key bash", "keybash.lan%", strings.Repeat("a", 64) + ".lan", strings.Repeat("a.", 127) + "lan"} {
+		if Name(invalid) {
+			t.Fatalf("%q accepted", invalid)
+		}
+	}
+}

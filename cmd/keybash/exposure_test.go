@@ -1,56 +1,24 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"math/big"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/denyfirst/keybash/internal/ingress"
 )
-
-func TestExposureNeedsNetworksAndASpecificAddress(t *testing.T) {
-	for _, valid := range []struct{ listen, allow, name, origin string }{
-		{"127.0.0.1:8443", "", "", "https://127.0.0.1:8443"},
-		{"192.168.1.10:8443", "192.168.1.0/24", "", "https://192.168.1.10:8443"},
-		{"192.168.1.10:8443", "192.168.1.0/24,10.8.0.0/16", "keybash.lan", "https://keybash.lan:8443"},
-		{"[fd00:1::10]:8443", "fd00:1::/64", "", "https://[fd00:1::10]:8443"},
-	} {
-		origin, sources, ok := exposure(valid.listen, valid.allow, valid.name)
-		if !ok || origin != valid.origin || (sources == nil) != (valid.allow == "") {
-			t.Fatalf("%s with %q refused or misread", valid.listen, valid.allow)
-		}
-	}
-	for name, invalid := range map[string][3]string{
-		"loopback-networks": {"127.0.0.1:8443", "192.168.1.0/24", ""},
-		"loopback-name":     {"127.0.0.1:8443", "", "keybash.lan"},
-		"lan-no-networks":   {"192.168.1.10:8443", "", ""},
-		"lan-name-only":     {"192.168.1.10:8443", "", "keybash.lan"},
-		"all-interfaces":    {"0.0.0.0:8443", "192.168.1.0/24", ""},
-		"all-interfaces6":   {"[::]:8443", "fd00:1::/64", ""},
-		"link-local":        {"169.254.1.1:8443", "169.254.0.0/16", ""},
-		"zero-port":         {"192.168.1.10:0", "192.168.1.0/24", ""},
-		"hostname-listen":   {"keybash.lan:8443", "192.168.1.0/24", ""},
-		"bad-networks":      {"192.168.1.10:8443", "192.168.1.7/24", ""},
-		"everything":        {"192.168.1.10:8443", "0.0.0.0/0", ""},
-		"mapped":            {"[::ffff:192.168.1.10]:8443", "192.168.1.0/24", ""},
-		"no-port":           {"192.168.1.10", "192.168.1.0/24", ""},
-	} {
-		if _, _, ok := exposure(invalid[0], invalid[1], invalid[2]); ok {
-			t.Fatalf("%s exposure accepted", name)
-		}
-	}
-	if _, _, ok := exposure("192.168.1.10:8443", "192.168.1.0/24", "Keybash.lan"); !ok {
-		// The name itself is checked by the lab; exposure only places it.
-		t.Fatal("exposure rejected a name it does not judge")
-	}
-}
 
 func certificate(t *testing.T, names []string, ips []string, notBefore, notAfter time.Time) tls.Certificate {
 	t.Helper()
@@ -127,5 +95,62 @@ func TestExposedListenerAdmitsOnlyItsNetworks(t *testing.T) {
 	case <-accepted:
 		t.Fatal("an unlisted source reached the server")
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// pemFiles writes a pair as check-tls and the gateway read it.
+func pemFiles(t *testing.T, pair tls.Certificate) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	der, e := x509.MarshalPKCS8PrivateKey(pair.PrivateKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	cert, key := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	if os.WriteFile(cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: pair.Certificate[0]}), 0600) != nil ||
+		os.WriteFile(key, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0600) != nil {
+		t.Fatal("fixture TLS files failed")
+	}
+	return cert, key
+}
+
+func TestCheckTLSBeforeInstalling(t *testing.T) {
+	now := time.Now()
+	valid := certificate(t, []string{"keybash.lan"}, []string{"127.0.0.1", "192.168.1.10"}, now.Add(-time.Hour), now.Add(time.Hour))
+	cert, key := pemFiles(t, valid)
+	check := func(extra ...string) (string, error) {
+		var out bytes.Buffer
+		e := run(append([]string{"check-tls", "--tls-cert", cert, "--tls-key", key}, extra...), nil, &out)
+		return out.String(), e
+	}
+	for _, args := range [][]string{
+		nil,
+		{"--listen", "192.168.1.10:8443", "--allow-from", "192.168.1.0/24"},
+		{"--listen", "192.168.1.10:8443", "--allow-from", "192.168.1.0/24", "--server-name", "keybash.lan"},
+	} {
+		if out, e := check(args...); e != nil || !strings.HasPrefix(out, "TLS certificate valid for https://") {
+			t.Fatalf("valid TLS refused with %v", args)
+		}
+	}
+	for name, args := range map[string][]string{
+		"other-name":      {"--listen", "192.168.1.10:8443", "--allow-from", "192.168.1.0/24", "--server-name", "vault.lan"},
+		"other-address":   {"--listen", "192.168.1.11:8443", "--allow-from", "192.168.1.0/24"},
+		"lan-no-networks": {"--listen", "192.168.1.10:8443"},
+		"other-flag":      {"--data", t.TempDir()},
+	} {
+		if out, e := check(args...); e == nil || out != "" {
+			t.Fatalf("%s TLS check passed", name)
+		}
+	}
+	expired, expiredKey := pemFiles(t, certificate(t, nil, []string{"127.0.0.1"}, now.Add(-2*time.Hour), now.Add(-time.Hour)))
+	other, otherKey := pemFiles(t, certificate(t, nil, []string{"127.0.0.1"}, now.Add(-time.Hour), now.Add(time.Hour)))
+	for name, pair := range map[string][2]string{"expired": {expired, expiredKey}, "mismatched": {cert, otherKey}, "missing-key": {other, ""}} {
+		if run([]string{"check-tls", "--tls-cert", pair[0], "--tls-key", pair[1]}, nil, &bytes.Buffer{}) == nil {
+			t.Fatalf("%s TLS pair passed", name)
+		}
+	}
+	// The catalog-only flag belongs to check-targets alone.
+	if run([]string{"check-tls", "--tls-cert", cert, "--tls-key", key, "--ssh-only"}, nil, &bytes.Buffer{}) == nil {
+		t.Fatal("check-tls accepted a catalog flag")
 	}
 }
