@@ -171,6 +171,9 @@ if test "${rdp}" = yes; then
 fi
 # shellcheck disable=SC2086
 "${libexec}/keybash-service-plan" ${plan_args} "$@" --output="${work}/plan" >/dev/null || refuse 'service plan refused'
+# Ubuntu ships sysusers.d under /usr/lib; create /etc's only when absent, so
+# an existing directory's owner and mode are never changed.
+test -d /etc/sysusers.d || install -d -o root -g root -m 0755 /etc/sysusers.d
 install -o root -g root -m 0644 "${work}/plan/keybash.conf" /etc/sysusers.d/keybash.conf
 for unit in ${units}; do
   if test -f "${work}/plan/${unit}"; then install -o root -g root -m 0644 "${work}/plan/${unit}" "/etc/systemd/system/${unit}"; fi
