@@ -125,8 +125,15 @@ custom request header, CSRF, secure HttpOnly SameSite Strict host cookie,
 no-store, self-only CSP and fixed public errors remain enforced.
 
 All assets are local; no CDN, external authentication, telemetry, QR image URL,
-browser persistent storage or automatic clipboard read/write. Seeds are manually
-entered in the authenticator. Clipboard writes require an explicit copy action;
+browser persistent storage or automatic clipboard read/write. The enrollment
+reply carries the seed twice: as text and as QR modules of the standard key
+URI (`otpauth://totp/Keybash:<account>?secret=…&issuer=Keybash`, SHA1/6/30 by
+the format's defaults). The server encodes only its own seed and a validated
+account name; the page draws the modules as one SVG path through DOM calls,
+with a four-module white margin in both schemes, and removes code and text when
+the page is hidden or the step ends. A QR code is a secret on screen like the
+text: a camera that sees it can enroll the same factor. Confirmation with a
+current code remains the proof that the phone holds the seed. Clipboard writes require an explicit copy action;
 rejection gives manual selection guidance. Revealed secrets auto-hide after
 60 seconds and on background/pagehide. One-time recovery codes survive a tab
 switch for saving, but clear on pagehide/logout or acknowledgment. BFCache

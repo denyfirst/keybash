@@ -13,9 +13,26 @@ function clearInputs() {
   document.querySelectorAll('input[type=password], input[autocomplete=one-time-code]').forEach(el => { el.value = ''; });
   for (const id of ['credential-key', 'key-file', 'connection-fingerprint', 'trust-fingerprint']) if ($(id)) $(id).value = '';
 }
+// The MFA seed, as a QR code and as text, is on screen only while it is
+// needed and the page is in view.
+const qrOK = rows => Array.isArray(rows) && rows.length >= 21 && rows.length <= 57 && (rows.length - 17) % 4 === 0 && rows.every(row => typeof row === 'string' && row.length === rows.length && /^[01]+$/.test(row));
+function hideSeed() {
+  if (!$('seed-panel')) return;
+  $('seed').replaceChildren(); $('seed-qr').replaceChildren(); $('seed-qr').removeAttribute('viewBox');
+  $('seed-panel').hidden = true; $('qr-start').hidden = false; $('seed-panel').querySelector('details').open = false;
+}
+function showSeed(secret, rows) {
+  // One path of dark runs, drawn by DOM calls; four modules of white margin.
+  let d = '';
+  rows.forEach((row, y) => { for (const run of row.matchAll(/1+/g)) d += `M${run.index} ${y}h${run[0].length}v1h-${run[0].length}z`; });
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d);
+  $('seed-qr').setAttribute('viewBox', `-4 -4 ${rows.length + 8} ${rows.length + 8}`); $('seed-qr').replaceChildren(path);
+  $('seed').replaceChildren(...secret.match(/.{4}/g).map(group => { const span = document.createElement('span'); span.textContent = group; return span; }));
+  $('qr-start').hidden = true; $('seed-panel').hidden = false;
+}
 function clearAll() {
-  hideSecret(); clearInputs(); closeReview(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration;
-  for (const id of ['seed', 'account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
+  hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration;
+  for (const id of ['account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
   delete document.body.dataset.stage;
@@ -70,7 +87,7 @@ async function copy(id) {
 }
 function showCodes(data) {
   if (!Array.isArray(data?.codes) || data.codes.length !== 10 || !data.codes.every(code => typeof code === 'string' && /^[A-Za-z0-9_-]{22}$/.test(code))) throw new Error('invalid codes');
-  clearInputs(); hideSecret(); $('seed').textContent = ''; $('seed-panel').hidden = true;
+  clearInputs(); hideSecret(); hideSeed();
   sections.forEach(id => { $(id).hidden = id !== 'recovery'; });
   $('heading').textContent = 'Bərpa kodların hazırdır.';
   $('recovery-codes').value = data.codes.join('\n');
@@ -190,9 +207,9 @@ click('begin-enroll', async () => {
   try { data = await request('/api/mfa/enrollment', 'POST', body); }
   catch (error) { throw setupRequired && error.status === 403 ? Object.assign(new Error('setup'), { status: 'setup' }) : error; }
   setupRequired = false; $('setup-proof').hidden = true;
-  if (typeof data?.secret !== 'string' || !/^[A-Z2-7]{32}$/.test(data.secret)) throw new Error('invalid seed');
+  if (typeof data?.secret !== 'string' || !/^[A-Z2-7]{32}$/.test(data.secret) || !qrOK(data.qr)) throw new Error('invalid seed');
   if (document.visibilityState !== 'visible') return;
-  $('seed').textContent = data.secret; $('seed-panel').hidden = false;
+  showSeed(data.secret, data.qr);
 });
 bind('enrollment', async () => { const code = $('enrollment-code').value; clearInputs(); showCodes(await request('/api/mfa/confirm', 'POST', { code })); });
 bind('factor', async () => { const code = $('factor-code').value; clearInputs(); await request('/api/mfa/verify', 'POST', { code }); await loadAccount(); });
@@ -244,7 +261,7 @@ $('hide-secret')?.addEventListener('click', hideSecret);
 $('secret-dialog')?.addEventListener('close', hideSecret);
 click('confirm-delete', async () => { const id = pendingDelete; pendingDelete = ''; $('delete-dialog').close(); if (!idOK(id)) return; await request(`/api/credentials/${id}`, 'DELETE', {}); hideSecret(); await loadRecords(); notice('Qeyd silindi.'); });
 $('cancel-delete')?.addEventListener('click', () => { pendingDelete = ''; $('delete-dialog').close(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { hideSecret(); clearInputs(); closeReview(); if ($('seed')) { $('seed').textContent = ''; $('seed-panel').hidden = true; } } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { hideSecret(); clearInputs(); closeReview(); hideSeed(); } });
 window.addEventListener('pagehide', clearAll);
 window.addEventListener('pageshow', event => { if (event.persisted) { clearAll(); location.reload(); } });
 void run(async () => {

@@ -84,9 +84,25 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	c.expect("POST", "/api/credentials", `{"name":"x","kind":"password","username":"u","secret":"s","passphrase":""}`, 403)
 	setupCookie := c.cookie
 	w := c.expect("POST", "/api/mfa/enrollment", "{}", 200)
-	var seed struct{ Secret string }
+	var seed struct {
+		Secret string
+		QR     []string
+	}
 	if json.Unmarshal(w.Body.Bytes(), &seed) != nil || !validSeed(seed.Secret) {
 		t.Fatal("enrollment seed missing")
+	}
+	if want, e := seedQR("alice", seed.Secret); e != nil || strings.Join(seed.QR, "\n") != strings.Join(want, "\n") {
+		t.Fatal("enrollment QR is not this account's seed")
+	}
+	// Asking again before confirming shows the same seed, so a phone that
+	// already scanned it keeps working.
+	w = c.expect("POST", "/api/mfa/enrollment", "{}", 200)
+	var again struct {
+		Secret string
+		QR     []string
+	}
+	if json.Unmarshal(w.Body.Bytes(), &again) != nil || again.Secret != seed.Secret || strings.Join(again.QR, "") != strings.Join(seed.QR, "") {
+		t.Fatal("a repeated enrollment request changed the seed or its QR")
 	}
 	c.expect("POST", "/api/mfa/confirm", `{"code":"x"}`, 401)
 	w = c.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, now.Unix()/30-1)}), 200)
@@ -370,9 +386,12 @@ func TestFirstEnrollmentNeedsOperatorSetupCode(t *testing.T) {
 	if json.Unmarshal(bob.expect("GET", "/api/session", "", 200).Body.Bytes(), &state) != nil || !state.Setup {
 		t.Fatal("session did not report the missing setup proof")
 	}
-	bob.expect("POST", "/api/mfa/enrollment", "{}", 403)
-	bob.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": "not-a-code"}), 403)
-	bob.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": carolSetup}), 403) // another account's code
+	// Without the proof neither the seed nor its QR code is shown.
+	for _, body := range []string{"{}", inputJSON(map[string]string{"setup": "not-a-code"}), inputJSON(map[string]string{"setup": carolSetup})} { // the last is another account's code
+		if w := bob.expect("POST", "/api/mfa/enrollment", body, 403); strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "qr") {
+			t.Fatal("a refused enrollment revealed the seed")
+		}
+	}
 	bob.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": "123456"}), 401)
 	// Confirmation checks the proof itself too, even if a seed were issued.
 	bobID, _ := tokenID(bob.cookie.Value)
@@ -388,9 +407,15 @@ func TestFirstEnrollmentNeedsOperatorSetupCode(t *testing.T) {
 		t.Fatal("confirmation enrolled a factor without the setup proof")
 	}
 	w := bob.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": bobSetup}), 200)
-	var seed struct{ Secret string }
+	var seed struct {
+		Secret string
+		QR     []string
+	}
 	if json.Unmarshal(w.Body.Bytes(), &seed) != nil || !validSeed(seed.Secret) {
 		t.Fatal("proved setup did not reveal a seed")
+	}
+	if want, e := seedQR("bob", seed.Secret); e != nil || strings.Join(seed.QR, "") != strings.Join(want, "") {
+		t.Fatal("proved setup did not show bob's seed as a QR code")
 	}
 	bob.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, now.Unix()/30)}), 200)
 	bob.session("ready")

@@ -15,7 +15,21 @@
 <header class="topbar"><p class="topbar-path"><span>İş yeri</span><span class="topbar-slash" aria-hidden="true">/</span><strong>Açarlar və bağlantılar</strong></p></header>
 <main>
 <div class="work-heading"><h1 id="heading">Hesabın yoxlanır.</h1></div>
-<section id="enroll" class="panel" hidden><p class="hint">Autentifikator tətbiqini qoş. MFA təsdiqlənənədək açar və şifrələr bağlı qalır.</p><div id="setup-proof" hidden><label for="enroll-setup">Administratorun verdiyi birdəfəlik quraşdırma kodu</label><input id="enroll-setup" type="password" autocomplete="off" spellcheck="false" maxlength="43"><p class="hint">Şifrə tək bəs deyil: bu kod hesabın ilk MFA-sını yalnız sənin qurmağını təmin edir.</p></div><button id="begin-enroll" type="button">Autentifikatoru qur</button><div id="seed-panel" hidden><p class="hint">Tətbiqdə yeni hesab seç: Keybash, TOTP, SHA1, 6 rəqəm, 30 saniyə. Bu açarı əl ilə əlavə et.</p><output id="seed"></output><button id="copy-seed" type="button" class="secondary">Açarı kopyala</button></div><form id="enrollment" method="post" action="/api/mfa/confirm"><label for="enrollment-code">Tətbiqdəki kod</label><input id="enrollment-code" name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><button type="submit">MFA-nı təsdiqlə</button></form></section>
+<section id="enroll" class="panel" hidden>
+<p class="enroll-lead">Girişini telefonunla da qoruyaq. Bu addım bitənədək açar və şifrələr bağlı qalır.</p>
+<ol class="steps">
+<li><h2>Telefonda autentifikator tətbiqini aç</h2><p class="hint">Google Authenticator, Microsoft Authenticator, Aegis və ya 2FAS: hansı varsa, o olar.</p></li>
+<li><h2>QR kodu skan et</h2><p class="hint">Tətbiqdə yeni hesab əlavə et və kameranı QR koda tut.</p>
+<div id="qr-start" class="qr-start"><svg class="qr-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.2"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 20.5h1M20.5 14v1"/></svg><div id="setup-proof" hidden><label for="enroll-setup">Administratorun verdiyi birdəfəlik kod</label><input id="enroll-setup" type="password" autocomplete="off" spellcheck="false" maxlength="43"><p class="hint">Şifrə tək bəs deyil: bu kod hesabın ilk MFA-sını yalnız sənin qurmağını təmin edir.</p></div><button id="begin-enroll" type="button">QR kodu göstər</button></div>
+<div id="seed-panel" hidden>
+<svg id="seed-qr" role="img" aria-label="Autentifikator tətbiqi üçün QR kod" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges"></svg>
+<details class="seed-manual"><summary>Skan alınmır? Açarı əl ilə yaz</summary><p class="hint">Tətbiqdə “açarı daxil et” seç. Hesab adı: Keybash, növ: vaxta əsaslanan (TOTP).</p><output id="seed"></output><button id="copy-seed" type="button" class="secondary">Açarı kopyala</button></details>
+<p class="hint qr-care">Bu QR kod hesabının gizli açarıdır: şəklini çəkmə, heç kimə göstərmə. Başqa tab-a keçsən, təhlükəsizlik üçün gizlənir.</p>
+</div></li>
+<li><h2>Tətbiqdəki 6 rəqəmli kodu yaz</h2><p class="hint">Kod hər 30 saniyədən bir yenilənir. Hazırkı kodu yaz.</p>
+<form id="enrollment" method="post" action="/api/mfa/confirm"><label for="enrollment-code">Tətbiqdəki kod</label><input id="enrollment-code" name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required><button type="submit">MFA-nı təsdiqlə</button></form></li>
+</ol>
+</section>
 <section id="challenge" class="panel" hidden><p class="hint">Autentifikator kodunu və ya birdəfəlik bərpa kodunu daxil et.</p><form id="factor" method="post" action="/api/mfa/verify"><label for="factor-code">Doğrulama kodu</label><input id="factor-code" name="code" autocomplete="one-time-code" maxlength="22" required><button type="submit">Davam et</button></form></section>
 <section id="recovery" class="panel" hidden><h2>Bərpa kodlarını saxla.</h2><p class="hint">Bunlar yalnız indi göstərilir. Hər kod bir dəfə işləyir. Ayrı, təhlükəsiz yerdə saxla.</p><textarea id="recovery-codes" readonly aria-label="Bərpa kodları"></textarea><div class="actions"><button id="copy-recovery" type="button">Kodları kopyala</button><button id="saved-recovery" type="button" class="secondary">Saxladım, davam et</button></div></section>
 <section id="vault" hidden>

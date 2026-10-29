@@ -79,10 +79,28 @@ calls the six-digit SHA1 HMAC OTP API and owns transactional replay/budget
 enforcement, not the cryptographic algorithm. The root library imports
 `github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc` (MIT), sum
 `h1:biVzkmvwrH8WK8raXaxBx6fRVTlJILwEwQGL1I/ByEI=`. This older transitive
-dependency is retained explicitly in the inventory; no QR/image generation or
-untrusted barcode input path is invoked. Maintenance age limits this adoption;
-monitor the OTP/module advisories, and review removal/update before release.
-Do not silently update either dependency or widen the parser/import surface.
+dependency is retained explicitly in the inventory. Maintenance age limits this
+adoption; monitor the OTP/module advisories, and review removal/update before
+release. Do not silently update either dependency or widen the parser/import
+surface.
+
+## QR enrollment (2026-10-29)
+
+The same pinned barcode module now becomes a direct dependency for one call:
+`qr.Encode(uri, qr.M, qr.Auto)` in `identity.seedQR`, the encoder pquerna/otp's
+own `Key.Image` uses. Reviewed at the pin: a pure-Go encoder with no I/O,
+`unsafe` or reflection imports. Its module iteration runs two internal
+goroutines that the same call drains to completion. No decoder and no image
+codec is reached. The input is
+only `otpauth://totp/Keybash:` with a validated account name, a server-made
+base32 seed and a fixed issuer (at most 142 bytes), so no untrusted or
+unbounded data is ever encoded. The output is checked to be a square of 21 to
+57 modules before use. No barcode parsing, other symbology or `barcode.Scale`
+is used. `TestSeedQRCarriesExactlyTheSeed` checks the drawing against an
+independent reading of the QR format information (level M, both copies,
+reading order), so a transposed or mirrored code fails. A full content decoder
+is not part of the test; the factor confirmation with a current code remains
+the end-to-end proof. The module and sum are unchanged.
 
 Licenses are in `docs/third-party/`. `go list -deps`/`govulncheck` inventory
 includes the existing crypto/sys packages, bbolt, OTP and barcode. Sum-file
