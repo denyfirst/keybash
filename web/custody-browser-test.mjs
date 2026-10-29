@@ -102,6 +102,17 @@ try {
   assert.equal((await (await page.request.get(config.Origin + '/api/credentials')).json()).length, 1, 'restart lost vault');
   await page.getByRole('button', { name: 'Sil', exact: true }).click(); await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: 'silindi' }).waitFor(); await settled();
   assert.equal((await (await page.request.get(config.Origin + '/api/credentials')).json()).length, 0);
+  // A key made here: only its public line comes back, as the one command to
+  // install it, and its row has no Göstər.
+  await page.locator('#generate-fold').evaluate(el => { el.open = true; });
+  await page.locator('#generate-name').fill('Made here'); await page.locator('#generate-user').fill('deploy'); await page.locator('#generate button').click();
+  await page.locator('#install-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.match(await page.locator('#install-command').textContent(), /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'ssh-ed25519 [A-Za-z0-9+/]+=*' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/);
+  await page.locator('#close-install').click();
+  const made = page.locator('.record', { hasText: 'Made here' });
+  assert.equal(await made.getByRole('button', { name: 'Göstər', exact: true }).count(), 0, 'a key made here offered Göstər');
+  assert.equal(await made.getByRole('button', { name: 'Serverə əlavə et', exact: true }).count(), 1);
+  assert(!(await page.content()).includes('b3BlbnNzaC1rZXktdjE'), 'the page holds a private key'); // every OpenSSH private key body starts so
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'qəbul edilmədi' }).waitFor();
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
   console.log('Browser custody: bootstrap, mandatory MFA, code-only step-up, encrypted record UX, restart, replay refusal and failure handling passed');

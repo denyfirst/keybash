@@ -131,6 +131,15 @@ cannot be retracted. The loopback/numeric exact Host, TLS 1.3, exact Origin,
 custom request header, CSRF, secure HttpOnly SameSite Strict host cookie,
 no-store, self-only CSP and fixed public errors remain enforced.
 
+A person without an SSH key can have one made here
+(`POST /api/credentials/generate {"name","username"}`, a ready session like any
+new record). It is an Ed25519 key sealed like every record; its private half
+is never revealed (`reveal` answers 403) and the API never returns it. Only
+its public `authorized_keys` line leaves, shown as one command to append it
+on the server, which the person pastes through the terminal's paste review.
+Imported records cannot claim to be made here. Encrypted backups hold it like
+any record, so a restore keeps it working.
+
 The workspace has a page per path, one document behind the session:
 `/` connections (or the keys when there is no operator catalog), `/keys`
 and `/account`. The script shows the part the path names, and the menu marks

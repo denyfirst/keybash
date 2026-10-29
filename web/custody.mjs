@@ -140,12 +140,20 @@ async function loadRecords() {
   if (!Array.isArray(records) || records.length > 256) throw new Error('invalid records');
   $('records').replaceChildren();
   for (const record of records) {
-    if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string') throw new Error('invalid record');
+    if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
     const row = document.createElement('div'); row.className = 'record';
     const label = document.createElement('span'); label.textContent = record.name;
-    const meta = document.createElement('span'); meta.textContent = `${record.kind === 'ssh-key' ? 'SSH açarı' : 'Şifrə'} · istifadəçi: ${record.username}`;
+    const meta = document.createElement('span'); meta.textContent = `${record.kind === 'ssh-key' ? 'SSH açarı' : 'Şifrə'}${record.generated ? ' · Keybash-də yaradılıb' : ''} · istifadəçi: ${record.username}`;
     row.append(label, meta);
     if (record.fingerprint) { const print = document.createElement('span'); print.className = 'fingerprint'; print.textContent = record.fingerprint; row.append(print); }
+    // A key made here is never shown; its row offers the install command instead.
+    if (record.generated) {
+      const install = document.createElement('button'); install.type = 'button'; install.textContent = 'Serverə əlavə et';
+      install.addEventListener('click', () => showInstall(record.public));
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'secondary'; remove.textContent = 'Sil';
+      remove.addEventListener('click', () => { pendingDelete = record.id; $('delete-name').textContent = record.name; $('delete-dialog').showModal(); });
+      row.append(install, remove); $('records').append(row); continue;
+    }
     const reveal = document.createElement('button'); reveal.type = 'button'; reveal.textContent = 'Göstər';
     reveal.addEventListener('click', () => { void run(async () => {
       hideSecret();
@@ -287,6 +295,21 @@ click('begin-enroll', async () => {
 });
 bind('enrollment', async () => { const code = $('enrollment-code').value; clearInputs(); showCodes(await request('/api/mfa/confirm', 'POST', { code })); });
 bind('factor', async () => { const code = $('factor-code').value; clearInputs(); await request('/api/mfa/verify', 'POST', { code }); await loadAccount(); });
+// The one line a server needs: append the key's public half for its user.
+const publicOK = value => typeof value === 'string' && value.length < 200 && /^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(value);
+function showInstall(publicLine) {
+  if (!publicOK(publicLine)) return;
+  $('install-command').textContent = `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${publicLine}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
+  $('install-dialog').showModal();
+}
+bind('generate', async () => {
+  const name = $('generate-name').value, username = $('generate-user').value;
+  const made = await request('/api/credentials/generate', 'POST', { name, username });
+  if (!idOK(made?.id) || !publicOK(made.public)) throw new Error('invalid key');
+  $('generate').reset(); $('generate-fold').open = false; await loadRecords(); notice('Açar yaradıldı. İndi onu serverə əlavə et.'); showInstall(made.public);
+});
+click('copy-install', () => copy('install-command'));
+$('close-install')?.addEventListener('click', () => $('install-dialog').close());
 bind('credential', async () => {
   const kind = $('credential-kind').value;
   const value = { name: $('credential-name').value, kind, username: $('credential-user').value, secret: $(kind === 'password' ? 'credential-password' : 'credential-key').value, passphrase: kind === 'ssh-key' ? $('credential-passphrase').value : '' };

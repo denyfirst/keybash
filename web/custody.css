@@ -203,6 +203,12 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
   text-indent: 0.4em; /* balances the spacing after the last digit */
   text-align: center;
 }
+/* A key made here leaves only as this one command, read before it is sent. */
+dialog.install { width: min(44rem, 92vw); }
+.install-steps { margin: 0.7rem 0 0.2rem; padding-left: 1.3rem; font-size: 0.9rem; color: var(--ink-soft); }
+.install-steps li { margin: 0.25rem 0; }
+#install-command { font-size: 0.8rem; }
+
 /* Step-up: one short question, asked only when an action needs it. */
 dialog.stepup { width: min(27rem, 92vw); padding: 1.8rem 1.8rem 1.4rem; }
 .stepup-glyph {
