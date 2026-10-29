@@ -221,7 +221,7 @@ async function loadConnections() {
     const state = document.createElement('span'); state.className = 'trust-state'; state.dataset.trust = record.trust;
     state.textContent = ({verified: 'Server kimliyi təsdiqlənib', changed: 'Server kimliyi və ya ünvanı dəyişib — bağlantı bağlıdır', unverified: 'Server kimliyini təsdiqlə — bağlantı bağlıdır', unavailable: 'Server hazırda əlçatan siyahıda deyil'})[record.trust]; row.append(name, state);
     const target = approved.get(record.target);
-    if (target && record.trust === 'verified') { const link = document.createElement('a'); link.textContent = 'Qoşul'; link.href = `/remote/${target.protocol}/${record.id}`; row.append(link); }
+    if (target && record.trust === 'verified') { const link = document.createElement('a'); link.textContent = 'Qoşul'; link.href = `/remote/${target.protocol}/${record.id}`; link.target = '_blank'; link.rel = 'noopener'; // each session in its own tab row.append(link); }
     if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server kimliyi'; review.addEventListener('click', () => { void run(() => openReview(record)); }); row.append(review); }
     const remove = document.createElement('button'); remove.textContent = 'Bağlantını sil'; remove.type = 'button'; remove.className = 'secondary'; remove.addEventListener('click', () => { void run(async () => { await request(`/api/connections/${record.id}`, 'DELETE', {}); await loadConnections(); }); }); row.append(remove); rows.append(row);
   }

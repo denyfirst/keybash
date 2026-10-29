@@ -1,6 +1,6 @@
 import { Guacamole } from './vendor/guacamole.mjs';
 import { workspaceControls } from './desktop-workspace.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, railToggle, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
@@ -19,6 +19,7 @@ function end() {
   keyboard?.reset(); client?.disconnect(); socket?.close();
   $('display').replaceChildren();
   for (const id of ['disconnect','special','fullscreen']) $(id).disabled = true;
+  if (document.fullscreenElement) void document.exitFullscreen().catch(()=>{});
   $('status').textContent = 'Sessiya bitdi';
 }
 function fit() {
@@ -131,10 +132,12 @@ $('special').addEventListener('click', () => {
   $('desktop').focus();
 });
 $('fullscreen').addEventListener('click', () => {
-  if (!stopped) void $('desktop').requestFullscreen().catch(()=>{});
+  if (document.fullscreenElement) void document.exitFullscreen().catch(()=>{});
+  else if (!stopped) void enterFullscreen($('desktop')).then(() => $('desktop').focus()).catch(()=>{});
 });
+railToggle();
+watchFullscreen($('fullscreen'), fit);
 window.addEventListener('resize', fit);
-document.addEventListener('fullscreenchange', fit);
 window.addEventListener('pagehide', ()=>{retired=true;end();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
-if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired){stopped=false;begin(proof);}}).catch(error=>{$('notice').textContent=remoteErrorMessage(error);});}
+if(ownedRemote){$('login-panel').hidden=true;void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired){stopped=false;begin(proof);}}).catch(error=>{$('notice').textContent=remoteErrorMessage(error);});}

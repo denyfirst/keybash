@@ -1,5 +1,5 @@
 import { inspectPaste, decodeOutput, MAX_INPUT } from './paste.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, railToggle, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const encoder = new TextEncoder();
@@ -22,7 +22,8 @@ function updateState(active) {
   connected = active;
   $('status').textContent = active ? 'Qoşulub' : 'Bağlı deyil';
   $('status').classList.toggle('connected', active);
-  for (const id of ['copy', 'paste', 'disconnect']) $(id).disabled = !active;
+  for (const id of ['copy', 'paste', 'fullscreen', 'disconnect']) $(id).disabled = !active;
+  if (!active && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
 }
 function sendInput(data) {
   if (!connected || socket?.readyState !== WebSocket.OPEN) return;
@@ -145,6 +146,12 @@ $('disconnect').addEventListener('click', async () => {
   socket?.close();
   if(!ownedRemote)try { await fetch('/lab/logout', { method: 'POST', headers: { 'X-Keybash-Lab': '1' }, credentials: 'same-origin', signal: AbortSignal.timeout(5000) }); } catch {}
 });
+railToggle();
+watchFullscreen($('fullscreen'), () => { if (!retired) term.focus(); });
+$('fullscreen').addEventListener('click', () => {
+  if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  else if (connected) void enterFullscreen(document.querySelector('.session')).catch(() => notice('Brauzer tam ekrana icazə vermədi.'));
+});
 window.addEventListener('pagehide',()=>{socket?.close();retireTerminal();clearPaste();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
-if(ownedRemote){$('login-panel').hidden=true;void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(error=>notice(remoteErrorMessage(error)));}
+if(ownedRemote){$('login-panel').hidden=true;void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(error=>notice(remoteErrorMessage(error)));}
