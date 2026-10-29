@@ -53,6 +53,15 @@ try {
   await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#recovery-codes').inputValue(), '');
   assert.equal(await page.locator('#reauth, #reauth-password').count(), 0, 'standing re-verification form');
+  // A page per path. Without an operator catalog "/" shows the keys, the menu
+  // marks it and hides Connections; Account is its own page.
+  assert(await page.locator('#records-panel').isVisible()); assert(!(await page.locator('#account-panel').isVisible()));
+  assert.equal(await page.locator('.rail-item[aria-current=page]').getAttribute('data-page'), 'keys');
+  assert(!(await page.locator('.rail-item[data-page=connections]').isVisible()));
+  assert(await page.locator('#credential-fold').evaluate(el => el.open), 'empty keys page did not open the add form');
+  await page.locator('.rail-item[data-page=account]').click(); await page.waitForURL(config.Origin + '/account'); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
+  assert(!(await page.locator('#records-panel').isVisible())); assert.equal(await page.locator('h1').textContent(), 'Hesab'); assert.equal(await page.title(), 'Keybash · Hesab');
+  await page.locator('.rail-item[data-page=keys]').click(); await page.waitForURL(config.Origin + '/keys'); await page.locator('#records-panel').waitFor({ state: 'visible' }); await settled();
   // Completing sign-in counts as fresh proof for ten minutes; let it lapse.
   // Adding a record needs the ready session only.
   await lapse();

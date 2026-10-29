@@ -131,6 +131,11 @@ cannot be retracted. The loopback/numeric exact Host, TLS 1.3, exact Origin,
 custom request header, CSRF, secure HttpOnly SameSite Strict host cookie,
 no-store, self-only CSP and fixed public errors remain enforced.
 
+The workspace has a page per path, one document behind the session:
+`/` connections (or the keys when there is no operator catalog), `/keys`
+and `/account`. The script shows the part the path names, and the menu marks
+it. Before the first connection a short guide lists the three steps.
+
 All assets are local; no CDN, external authentication, telemetry, QR image URL,
 browser persistent storage or automatic clipboard read/write. The enrollment
 reply carries the seed twice: as text and as QR modules of the standard key

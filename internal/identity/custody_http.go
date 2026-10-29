@@ -188,12 +188,15 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
+	// The workspace is one document with a page per path; the script shows
+	// the part the path names. Loading a page counts as activity.
+	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account")
 	id, valid := tokenID(requestToken(r))
 	l.mu.Lock()
-	s := l.liveLocked(id, r.URL.Path == "/" && r.Method == "GET")
+	s := l.liveLocked(id, page)
 	if !valid || s == nil {
 		l.mu.Unlock()
-		if r.URL.Path == "/" && r.Method == "GET" {
+		if page {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 		} else {
 			refuse(w, 401)
@@ -212,7 +215,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	if r.URL.Path == "/" && r.Method == "GET" {
+	if page {
 		l.mu.Unlock()
 		serveAsset(w, "custody-workspace.html")
 		return

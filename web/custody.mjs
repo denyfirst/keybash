@@ -142,7 +142,10 @@ async function loadRecords() {
   for (const record of records) {
     if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string') throw new Error('invalid record');
     const row = document.createElement('div'); row.className = 'record';
-    const label = document.createElement('span'); label.textContent = `${record.name} · ${record.kind === 'ssh-key' ? 'SSH' : 'Şifrə'} · ${record.username}${record.fingerprint ? ' · ' + record.fingerprint : ''}`;
+    const label = document.createElement('span'); label.textContent = record.name;
+    const meta = document.createElement('span'); meta.textContent = `${record.kind === 'ssh-key' ? 'SSH açarı' : 'Şifrə'} · istifadəçi: ${record.username}`;
+    row.append(label, meta);
+    if (record.fingerprint) { const print = document.createElement('span'); print.className = 'fingerprint'; print.textContent = record.fingerprint; row.append(print); }
     const reveal = document.createElement('button'); reveal.type = 'button'; reveal.textContent = 'Göstər';
     reveal.addEventListener('click', () => { void run(async () => {
       hideSecret();
@@ -155,9 +158,12 @@ async function loadRecords() {
     }); });
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'secondary'; remove.textContent = 'Sil';
     remove.addEventListener('click', () => { pendingDelete = record.id; $('delete-name').textContent = record.name; $('delete-dialog').showModal(); });
-    row.append(label, reveal, remove); $('records').append(row);
+    row.append(reveal, remove); $('records').append(row);
   }
-  if (!records.length) $('records').textContent = 'Hələ qeyd yoxdur.';
+  if (!records.length) {
+    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'Hələ açar və ya şifrə yoxdur. Aşağıda “Yeni açar və ya şifrə” ilə əlavə et.';
+    $('records').append(empty); $('credential-fold').open = true;
+  }
   if(remoteEnabled){$('connection-credential').replaceChildren();for(const record of records){const option=document.createElement('option');option.value=record.id;option.textContent=`${record.name} · ${record.kind === 'ssh-key' ? 'SSH açarı' : 'Şifrə'}`;$('connection-credential').append(option);}await loadConnections();}
 }
 const fingerprintOK = value => typeof value === 'string' && (/^SHA256:[A-Za-z0-9+/]{43}$/.test(value) || /^SHA256:[a-f0-9]{64}$/.test(value));
@@ -220,17 +226,43 @@ async function loadConnections() {
     const remove = document.createElement('button'); remove.textContent = 'Bağlantını sil'; remove.type = 'button'; remove.className = 'secondary'; remove.addEventListener('click', () => { void run(async () => { await request(`/api/connections/${record.id}`, 'DELETE', {}); await loadConnections(); }); }); row.append(remove); rows.append(row);
   }
   catalog = approved; $('connection-target').replaceChildren(options); if (approved.has(previous)) $('connection-target').value = previous; $('connections').replaceChildren(rows);
-  if (!connections.length) $('connections').textContent = 'Hələ bağlantı yoxdur.';
+  // With no connection yet, the first steps say what to do, and which is done.
+  const hasRecords = $('connection-credential').options.length > 0;
+  $('first-steps').hidden = connections.length > 0; $('first-step-key').dataset.done = String(hasRecords);
+  if (!connections.length) {
+    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'Hələ bağlantı yoxdur.';
+    $('connections').append(empty); if (hasRecords) $('connection-fold').open = true;
+  }
   await chooseTarget();
+}
+// One document, three pages: the path picks what a ready session sees. Without
+// an operator catalog there is nothing to connect to, so "/" shows the keys.
+const pages = {
+  connections: { path: '/', panel: 'connections-panel', title: 'Bağlantılar', lead: 'Serverlərinə buradan qoşul.' },
+  keys: { path: '/keys', panel: 'records-panel', title: 'Açarlar və şifrələr', lead: 'Serverlərə girmək üçün açar və şifrələrin. Hamısı bu serverdə şifrələnmiş saxlanır.' },
+  account: { path: '/account', panel: 'account-panel', title: 'Hesab', lead: 'Giriş şifrən, telefonundakı autentifikator və bərpa kodların.' },
+};
+function showPage(ready) {
+  let name = Object.keys(pages).find(key => pages[key].path === location.pathname) ?? 'connections';
+  if (name === 'connections' && !remoteEnabled) name = 'keys';
+  for (const [key, page] of Object.entries(pages)) $(page.panel).hidden = !ready || key !== name;
+  document.querySelectorAll('.rail-item').forEach(item => {
+    if (item.dataset.page === name) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
+    item.hidden = item.dataset.page === 'connections' && !remoteEnabled;
+  });
+  $('topbar-page').textContent = ready ? pages[name].title : 'Giriş';
+  $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
+  if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
 }
 async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
   csrf = data.csrf; $('account').textContent = data.username; document.body.dataset.stage = data.stage;
-  remoteEnabled=data.remote===true;$('connections-panel').hidden=!remoteEnabled;
+  remoteEnabled = data.remote === true;
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
-  $('heading').textContent = data.stage === 'ready' ? 'Açarların öz yerində.' : data.stage === 'enroll' ? 'MFA-nı quraq.' : 'Girişini təsdiqlə.';
+  $('heading').textContent = data.stage === 'enroll' ? 'MFA-nı quraq.' : 'Girişini təsdiqlə.';
+  showPage(data.stage === 'ready');
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false;
   if (data.stage === 'ready') await loadRecords();
 }

@@ -46,6 +46,62 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 }
 .record a:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
+.record > span.fingerprint { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
+#records > .empty, #connections > .empty { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
+
+/* Before the first connection: three steps, the done ones ticked. */
+.first-steps {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0 0 1.6rem;
+  padding: 1.1rem 1.2rem;
+  list-style: none;
+  counter-reset: step;
+  background: color-mix(in srgb, var(--tool) 6%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--tool) 25%, var(--rule));
+  border-radius: calc(var(--radius) + 2px);
+}
+.first-steps > li { position: relative; padding-left: 2.2rem; font-size: 0.92rem; color: var(--ink-soft); counter-increment: step; }
+.first-steps > li strong { color: var(--ink); font-weight: 600; }
+.first-steps > li::before {
+  content: counter(step);
+  position: absolute;
+  top: 0.05rem;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--tool);
+  border: 1px solid color-mix(in srgb, var(--tool) 40%, var(--rule));
+  border-radius: 50%;
+}
+.first-steps > li[data-done="true"]::before { content: "✓"; color: var(--strong); border-color: color-mix(in srgb, var(--strong) 45%, var(--rule)); }
+
+/* The account page: one row per thing that protects the account. */
+.settings { display: grid; }
+.setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.4rem 1.5rem;
+  padding: 1.2rem 0;
+  border-top: 1px solid var(--rule);
+}
+.setting:first-child { padding-top: 0; border-top: 0; }
+.setting:last-child { padding-bottom: 0; }
+.setting h2 { margin: 0 0 0.2rem; font-size: 1rem; }
+.setting .hint { margin: 0; }
+.setting > button { margin-top: 0; white-space: nowrap; }
+.setting > details { grid-column: 1 / -1; margin-top: 0; border-top: 0; }
+.setting > details > summary { padding-top: 0.2rem; font-size: 0.92rem; color: var(--link); width: fit-content; }
+.setting > details form { max-width: 26rem; }
+@media (max-width: 640px) {
+  .setting { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* A server identity's state, in words and in its colour. */
 .trust-state { font-weight: 600; }
 .trust-state[data-trust=verified] { color: var(--strong); }

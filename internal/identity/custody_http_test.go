@@ -284,6 +284,49 @@ func TestPagesServeTheSharedDesignFromHere(t *testing.T) {
 	}
 }
 
+// The workspace has a page per path, all one document behind the session:
+// signed out they send the person to sign in and reveal nothing, signed in
+// they serve the same page. Other paths stay private.
+func TestWorkspacePagesAreOneDocumentBehindTheSession(t *testing.T) {
+	s, _, _, code := custodyFixture(t)
+	l, e := NewPersistent("https://127.0.0.1:8443", s)
+	if e != nil {
+		t.Fatal("persistent lab refused")
+	}
+	defer l.Close()
+	c := custodyClient{t: t, l: l}
+	pages := []string{"/", "/keys", "/account"}
+	for _, path := range pages {
+		if w := c.expect("GET", path, "", 303); w.Header().Get("Location") != "/login" || strings.Contains(w.Body.String(), "records-panel") {
+			t.Fatalf("signed-out %s did not go to sign-in", path)
+		}
+	}
+	c.expect("POST", "/api/bootstrap", inputJSON(map[string]string{"code": code, "username": "alice", "password": alicePassword}), 204)
+	var first string
+	for _, path := range pages {
+		w := c.expect("GET", path, "", 200)
+		if w.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(w.Body.String(), `id="records-panel"`) {
+			t.Fatalf("%s did not serve the workspace", path)
+		}
+		if first == "" {
+			first = w.Body.String()
+		} else if w.Body.String() != first {
+			t.Fatalf("%s served another document", path)
+		}
+	}
+	for _, path := range []string{"/keys/", "/Keys", "/account/x", "/connections", "/index.html"} {
+		if w := c.call("GET", path, ""); w.Code == 200 || strings.Contains(w.Body.String(), "records-panel") {
+			t.Fatalf("%s served the workspace", path)
+		}
+	}
+	c.session("enroll") // a valid CSRF token, so only the method can refuse
+	for _, path := range pages {
+		if c.call("POST", path, "{}").Code == 200 {
+			t.Fatalf("POST %s served the workspace", path)
+		}
+	}
+}
+
 func TestCustodyStrictFieldsAndSlowBodyIsolation(t *testing.T) {
 	for _, raw := range []string{`{"code":"a","code":"b"}`, `{"code":null}`, `{"code":"\ud800"}`, `{"code":"a"} {}`, `{"code":"a","extra":"b"}`, `[]`} {
 		if _, ok := parseFields([]byte(raw), 1024, "code"); ok {
