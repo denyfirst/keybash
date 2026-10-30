@@ -23,7 +23,7 @@ page.on('pageerror',e=>errors.push(e.name+': '+e.message));
 page.on('request',r=>{if(!r.url().startsWith(config.Origin+'/'))outbound.push('external request');});
 try{
   await page.goto(config.Origin);await page.locator('#code').fill(config.Code);await page.getByRole('button',{name:'Open session',exact:true}).click();
-  await page.locator('#status').filter({hasText:'Connected'}).waitFor();
+  await page.locator('#status').filter({hasText:/^Connected$/}).waitFor();
   const remote=config.Native?'Remote Azərbaycan 🔑':'Remote Azərbaycan 🔑 <img src=x onerror=alert(1)>';
   await page.waitForFunction(expected=>document.getElementById('remote-text').value===expected,remote,{timeout:10000});
   assert.equal(await page.locator('#copy-remote').isEnabled(),true);

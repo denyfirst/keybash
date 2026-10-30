@@ -51,7 +51,7 @@ try {
   await page.goto(config.Origin);
   await page.locator('#code').fill(config.Code);
   await page.getByRole('button', { name: 'Open session' }).click();
-  await page.locator('#status').filter({ hasText: 'Connected' }).waitFor();
+  await page.locator('#status').filter({ hasText: /^Connected$/ }).waitFor();
   await visible(config.Mode === 'linux' ? 'keybash-lab>' : '');
   assert.equal(await page.locator('#code').inputValue(), '');
   const cookies = await context.cookies();

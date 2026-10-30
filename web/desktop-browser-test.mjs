@@ -20,7 +20,7 @@ try {
   await page.goto(config.Origin);
   await page.locator('#code').fill(config.Code);
   await page.getByRole('button',{name:'Open session',exact:true}).click();
-  await page.locator('#status').filter({hasText:'Connected'}).waitFor({timeout:10000});
+  await page.locator('#status').filter({hasText:/^Connected$/}).waitFor({timeout:10000});
   assert.equal(await page.locator('#code').inputValue(),'');
   await page.waitForFunction(()=>{
     const canvases=[...document.querySelectorAll('#display canvas')];

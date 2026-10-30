@@ -124,7 +124,7 @@ try {
     stage = 'SSH simulation';
     const terminal = await context.newPage();
     await terminal.goto(config.Origin + '/remote/ssh/' + connections.ssh);
-    await terminal.locator('#status').filter({hasText: 'Connected'}).waitFor();
+    await terminal.locator('#status').filter({hasText: /^Connected$/}).waitFor();
     await terminal.locator('.xterm-helper-textarea').focus();
     await terminal.keyboard.type('echo Salam dostum'); await terminal.keyboard.press('Enter');
     await terminal.waitForFunction(() => (document.querySelector('.xterm-rows')?.textContent.match(/Salam dostum/g) ?? []).length >= 2);
@@ -132,7 +132,7 @@ try {
     stage = 'desktop simulation';
     const desktop = await context.newPage();
     await desktop.goto(config.Origin + '/remote/rdp/' + connections.rdp);
-    await desktop.locator('#status').filter({hasText: 'Connected'}).waitFor();
+    await desktop.locator('#status').filter({hasText: /^Connected$/}).waitFor();
     await desktop.waitForFunction(() => [...document.querySelectorAll('#display canvas')].some(c => c.width >= 1024 && c.height >= 768 && c.getContext('2d').getImageData(0, 0, 1, 1).data[0] > 200));
     const pixels = () => desktop.evaluate(() => {
       const canvas = [...document.querySelectorAll('#display canvas')].find(c => c.width >= 1024 && c.height >= 768);
