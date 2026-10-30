@@ -226,8 +226,9 @@ button.secondary {
   box-shadow: var(--shadow);
 }
 button.secondary:hover:not(:disabled) { background: var(--paper-sunk); border-color: var(--ink-faint); }
-/* A state is said in colour that stays legible, never faded out. */
-button:disabled, button.secondary:disabled {
+/* A state is said in colour that stays legible, never faded out. While a
+   page waits on a request its buttons keep their faces, so it does not flash. */
+:where(body:not([data-busy])) button:disabled, :where(body:not([data-busy])) button.secondary:disabled {
   cursor: default;
   color: var(--paper);
   background: var(--ink-soft);
@@ -497,6 +498,28 @@ a.connect {
 }
 button:not(.secondary):not(.ghost):not(:disabled):hover,
 a.connect:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
+/* Sign-in: the same light behind the card, and what Keybash keeps under it. */
+body.signin-page {
+  background:
+    radial-gradient(48rem 26rem at 50% -8rem, color-mix(in srgb, var(--tool) 12%, transparent), transparent 70%),
+    var(--paper);
+}
+.signin-mark { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.signin .panel { padding: 1.8rem 1.8rem 1.5rem; box-shadow: var(--shadow-lg); }
+.signin .panel h1 { margin-bottom: 0.3rem; }
+.signin-facts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem 1.1rem;
+  margin: 1.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.signin-facts li { display: inline-flex; align-items: center; gap: 0.4rem; }
+.signin-facts li::before { content: ""; width: 0.38rem; height: 0.38rem; background: var(--tool); border-radius: 50%; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
@@ -509,3 +532,6 @@ a.connect:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, t
       var(--paper);
   }
 }
+
+/* Waiting on a request: the pointer says so; the buttons keep their faces. */
+body[data-busy] button:disabled { cursor: progress; }

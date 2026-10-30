@@ -22,8 +22,8 @@ const page=await context.newPage(),errors=[],outbound=[];
 page.on('pageerror',e=>errors.push(e.name+': '+e.message));
 page.on('request',r=>{if(!r.url().startsWith(config.Origin+'/'))outbound.push('external request');});
 try{
-  await page.goto(config.Origin);await page.locator('#code').fill(config.Code);await page.getByRole('button',{name:'Sessiyanı aç',exact:true}).click();
-  await page.locator('#status').filter({hasText:'Sessiya açıldı'}).waitFor();
+  await page.goto(config.Origin);await page.locator('#code').fill(config.Code);await page.getByRole('button',{name:'Open session',exact:true}).click();
+  await page.locator('#status').filter({hasText:'Connected'}).waitFor();
   const remote=config.Native?'Remote Azərbaycan 🔑':'Remote Azərbaycan 🔑 <img src=x onerror=alert(1)>';
   await page.waitForFunction(expected=>document.getElementById('remote-text').value===expected,remote,{timeout:10000});
   assert.equal(await page.locator('#copy-remote').isEnabled(),true);
@@ -43,13 +43,13 @@ try{
   await page.waitForFunction(()=>[...document.querySelectorAll('#display canvas')].some(c=>c.width>=1280&&c.height>=720));
   await page.evaluate(()=>{clipState.mode='deny';});
   await page.locator('#copy-remote').click();
-  await page.locator('#notice').filter({hasText:'Clipboard icazəsi yoxdur'}).waitFor();
+  await page.locator('#notice').filter({hasText:'No clipboard permission'}).waitFor();
   assert.equal(await page.locator('#remote-text').inputValue(),remote);
   await page.locator('#paste-local').click();
   assert.equal(await page.locator('#paste-text').evaluate(e=>e===document.activeElement),true);
   await page.locator('#paste-text').fill('🔑'.repeat(10000));
   await page.locator('#paste-send').click();
-  await page.locator('#notice').filter({hasText:'Mətn ötürülmədi'}).waitFor();
+  await page.locator('#notice').filter({hasText:'The text was not sent'}).waitFor();
   await page.evaluate(()=>{clipState.mode='pending';});
   await page.locator('#paste-local').click();
   await page.waitForFunction(()=>typeof clipState.resolve==='function');

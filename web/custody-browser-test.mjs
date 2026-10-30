@@ -58,38 +58,39 @@ try {
   assert(await page.locator('#records-panel').isVisible()); assert(!(await page.locator('#account-panel').isVisible()));
   assert.equal(await page.locator('.rail-item[aria-current=page]').getAttribute('data-page'), 'keys');
   assert(!(await page.locator('.rail-item[data-page=connections]').isVisible()));
-  assert(await page.locator('#credential-fold').evaluate(el => el.open), 'empty keys page did not open the add form');
+  assert(await page.locator('#records .empty-state').isVisible(), 'empty keys page did not say what to do'); assert(await page.locator('#add-record').isVisible()); assert(!(await page.locator('#new-connection').isVisible()));
   await page.locator('.rail-item[data-page=account]').click(); await page.waitForURL(config.Origin + '/account'); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
-  assert(!(await page.locator('#records-panel').isVisible())); assert.equal(await page.locator('h1').textContent(), 'Hesab'); assert.equal(await page.title(), 'Keybash · Hesab');
+  assert(!(await page.locator('#records-panel').isVisible())); assert.equal(await page.locator('h1').textContent(), 'Account'); assert.equal(await page.title(), 'Keybash · Account'); assert(!(await page.locator('#add-record').isVisible()));
   await page.locator('.rail-item[data-page=keys]').click(); await page.waitForURL(config.Origin + '/keys'); await page.locator('#records-panel').waitFor({ state: 'visible' }); await settled();
   // Completing sign-in counts as fresh proof for ten minutes; let it lapse.
   // Adding a record needs the ready session only.
   await lapse();
-  await page.locator('#credential').evaluate(el => { el.parentElement.open = true; });
-  await page.locator('#credential-name').fill('<img src=x onerror=alert(1)>'); await page.locator('#credential-user').fill('fixture'); await page.locator('#credential-password').fill(vaultSecret); await page.locator('#credential button').click(); await page.locator('#notice').filter({ hasText: 'saxlanıldı' }).waitFor(); await settled();
+  await page.getByRole('button', { name: 'Add your first key or password', exact: true }).click(); await page.locator('#record-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#record-dialog .segment[aria-pressed=true]').getAttribute('data-kind'), 'password'); assert(!(await page.locator('#key-fields').isVisible()));
+  await page.locator('#credential-name').fill('<img src=x onerror=alert(1)>'); await page.locator('#credential-user').fill('fixture'); await page.locator('#credential-password').fill(vaultSecret); await page.locator('#credential button[type=submit]').click(); await page.locator('#notice').filter({ hasText: 'Encrypted and saved.' }).waitFor(); await settled(); assert.equal(await page.locator('#record-dialog').evaluate(el => el.open), false);
   assert.equal(await page.locator('img').count(), 0, 'credential label became markup');
   const metadata = await (await page.request.get(config.Origin + '/api/credentials')).json(); assert.equal(metadata.length, 1); assert(!JSON.stringify(metadata).includes(vaultSecret));
   // Revealing needs a factor from the last ten minutes: the page asks for the
   // phone's code alone, keeps asking after a wrong one, then shows the record.
   assert.equal((await api('/api/credentials/' + metadata[0].id + '/reveal', {})).status(), 428, 'fresh factor bypass');
-  await page.getByRole('button', { name: 'Göstər', exact: true }).click();
-  await stepUp(otp(Math.floor(seconds / 30) + 7)); await page.locator('#stepup-error').filter({ hasText: 'qəbul edilmədi' }).waitFor();
+  await page.getByRole('button', { name: 'Show', exact: true }).click();
+  await stepUp(otp(Math.floor(seconds / 30) + 7)); await page.locator('#stepup-error').filter({ hasText: 'not accepted' }).waitFor();
   assert.equal(await page.locator('#stepup-dialog input').count(), 1, 'step-up asked for more than the code'); assert.equal(await page.locator('#secret-dialog').evaluate(el => el.open), false);
   await stepUp(otp()); await page.locator('#secret-dialog').waitFor({ state: 'visible' }); assert.equal(await page.locator('#revealed-secret').inputValue(), vaultSecret); await settled();
   assert.equal(await page.locator('#stepup-dialog').evaluate(el => el.open), false); assert.equal(await page.locator('#stepup-code').inputValue(), '');
   await page.locator('#hide-secret').click(); assert.equal(await page.locator('#revealed-secret').inputValue(), '');
   // Inside the window it does not ask again.
-  await page.getByRole('button', { name: 'Göstər', exact: true }).click(); await page.locator('#secret-dialog').waitFor({ state: 'visible' }); await settled();
+  await page.getByRole('button', { name: 'Show', exact: true }).click(); await page.locator('#secret-dialog').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#stepup-dialog').evaluate(el => el.open), false); await page.locator('#hide-secret').click();
   if (config.Screenshot) await page.screenshot({ path: config.Screenshot });
   // A failed request cannot claim that the record was deleted.
   await page.route(config.Origin + '/api/credentials/' + metadata[0].id, route => route.fulfill({ status: 503, body: 'synthetic failure' }));
-  await page.getByRole('button', { name: 'Sil', exact: true }).click(); await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: 'təsdiqlənmədi' }).waitFor(); await settled();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click(); await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: 'did not go through' }).waitFor(); await settled();
   assert.equal((await (await page.request.get(config.Origin + '/api/credentials')).json()).length, 1);
   await page.unroute(config.Origin + '/api/credentials/' + metadata[0].id);
   // Cancelling the code prompt changes nothing and says so.
-  await lapse(); await page.getByRole('button', { name: 'Sil', exact: true }).click(); await page.locator('#confirm-delete').click();
-  await page.locator('#stepup-dialog').waitFor({ state: 'visible' }); await page.locator('#stepup-cancel').click(); await page.locator('#notice').filter({ hasText: 'ləğv edildi' }).waitFor(); await settled();
+  await lapse(); await page.getByRole('button', { name: 'Delete', exact: true }).click(); await page.locator('#confirm-delete').click();
+  await page.locator('#stepup-dialog').waitFor({ state: 'visible' }); await page.locator('#stepup-cancel').click(); await page.locator('#notice').filter({ hasText: 'Confirmation cancelled' }).waitFor(); await settled();
   assert.equal((await (await page.request.get(config.Origin + '/api/credentials')).json()).length, 1);
   const cookie = (await context.cookies()).find(c => c.name === '__Host-keybash-session'); assert(cookie?.secure && cookie.httpOnly && cookie.sameSite === 'Strict');
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0); assert.equal(await page.evaluate(() => document.cookie), '');
@@ -97,23 +98,23 @@ try {
   assert.equal((await page.request.get(config.Origin + '/api/credentials')).status(), 403);
   await fixture('tick'); await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   await fixture('restart'); assert.equal((await page.request.get(config.Origin + '/api/session')).status(), 401, 'restart retained session');
-  await page.goto(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'qəbul edilmədi' }).waitFor(); await settled();
+  await page.goto(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor(); await settled();
   await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert.equal((await (await page.request.get(config.Origin + '/api/credentials')).json()).length, 1, 'restart lost vault');
-  await page.getByRole('button', { name: 'Sil', exact: true }).click(); await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: 'silindi' }).waitFor(); await settled();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click(); await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: 'Deleted.' }).waitFor(); await settled();
   assert.equal((await (await page.request.get(config.Origin + '/api/credentials')).json()).length, 0);
   // A key made here: only its public line comes back, as the one command to
-  // install it, and its row has no Göstər.
-  await page.locator('#generate-fold').evaluate(el => { el.open = true; });
-  await page.locator('#generate-name').fill('Made here'); await page.locator('#generate-user').fill('deploy'); await page.locator('#generate button').click();
+  // install it, and its row has no Show.
+  await page.locator('#add-record').click(); await page.locator('#record-dialog').waitFor({ state: 'visible' }); await page.locator('#record-dialog .segment[data-kind=generate]').click(); assert(!(await page.locator('#credential').isVisible()));
+  await page.locator('#generate-name').fill('Made here'); await page.locator('#generate-user').fill('deploy'); await page.locator('#generate button[type=submit]').click();
   await page.locator('#install-dialog').waitFor({ state: 'visible' }); await settled();
   assert.match(await page.locator('#install-command').textContent(), /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'ssh-ed25519 [A-Za-z0-9+/]+=*' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/);
   await page.locator('#close-install').click();
   const made = page.locator('.record', { hasText: 'Made here' });
-  assert.equal(await made.getByRole('button', { name: 'Göstər', exact: true }).count(), 0, 'a key made here offered Göstər');
-  assert.equal(await made.getByRole('button', { name: 'Serverə əlavə et', exact: true }).count(), 1);
+  assert.equal(await made.getByRole('button', { name: 'Show', exact: true }).count(), 0, 'a key made here offered Show');
+  assert.equal(await made.getByRole('button', { name: 'Add to server', exact: true }).count(), 1);
   assert(!(await page.content()).includes('b3BlbnNzaC1rZXktdjE'), 'the page holds a private key'); // every OpenSSH private key body starts so
-  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'qəbul edilmədi' }).waitFor();
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
   console.log('Browser custody: bootstrap, mandatory MFA, code-only step-up, encrypted record UX, restart, replay refusal and failure handling passed');
 } catch (error) { console.log(error.code === 'ERR_ASSERTION' ? error.message : error.name); throw new Error('browser custody checks failed'); }

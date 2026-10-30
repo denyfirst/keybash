@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="az">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,28 +16,28 @@
 <body class="workspace session-page">
   <aside class="rail" id="rail">
     <p class="rail-identity"><a class="wordmark" href="/" aria-label="Keybash">keybash<span class="wordmark-stop">.</span></a> <span class="tag">SSH</span></p>
-    <p class="rail-caption" id="rail-workspace">İş yeri</p>
+    <p class="rail-caption" id="rail-workspace">Workspace</p>
     <nav class="rail-nav" aria-labelledby="rail-workspace">
-      <a class="rail-item" href="/"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.5 6l-6 6 6 6"/></svg>Bağlantılar</a>
+      <a class="rail-item" href="/"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.5 6l-6 6 6 6"/></svg>Connections</a>
       <span class="rail-item" aria-current="page"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.6"/><path d="M7 9l2.5 2L7 13M11.5 13H15"/></svg>Terminal</span>
     </nav>
   </aside>
   <div class="workspace-main">
-    <header class="topbar"><div class="topbar-start"><button id="rail-toggle" class="rail-toggle" type="button" aria-expanded="true" aria-controls="rail"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.6"/><path d="M9.5 4.5v15M6 8.5h1.5M6 11h1.5"/></svg><span>Menyunu gizlət</span></button><p class="topbar-path"><span>İş yeri</span><span class="topbar-slash" aria-hidden="true">/</span><strong id="topbar-name">Terminal</strong></p></div><span id="status" role="status">Bağlı deyil</span></header>
+    <header class="topbar"><div class="topbar-start"><button id="rail-toggle" class="rail-toggle" type="button" aria-expanded="true" aria-controls="rail"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.6"/><path d="M9.5 4.5v15M6 8.5h1.5M6 11h1.5"/></svg><span>Hide menu</span></button><p class="topbar-path"><span>Workspace</span><span class="topbar-slash" aria-hidden="true">/</span><strong id="topbar-name">Terminal</strong></p></div><span id="status" role="status">Not connected</span></header>
     <main>
       <section id="login-panel" class="panel login-panel">
-        <form id="login"><label for="code">Birdəfəlik lab giriş kodu</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Sessiyanı aç</button></div></form>
+        <form id="login"><label for="code">One-time lab sign-in code</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Open session</button></div></form>
       </section>
       <section class="session" aria-label="Terminal workspace">
-        <div class="toolbar"><div class="tab"><span class="tab-dot"></span><span id="tab-name">ssh</span> <span class="tab-type">SSH</span></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="fullscreen" disabled>Tam ekran</button><button id="disconnect" disabled>Bağla</button></div></div>
+        <div class="toolbar"><div class="tab"><span class="tab-dot"></span><span id="tab-name">ssh</span> <span class="tab-type">SSH</span></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="fullscreen" disabled>Full screen</button><button id="disconnect" disabled>Disconnect</button></div></div>
         <div id="terminal" aria-label="SSH terminal"></div>
         <footer class="session-foot"><span>Ctrl+C: interrupt <i>·</i> Ctrl+Shift+C: copy</span><span id="size">100 × 30</span></footer>
       </section>
-      <p class="help">Çoxsətirli və idarəedici simvolları olan paste göndərilmədən əvvəl göstərilir. Paste əlavə Enter göndərmir.</p>
+      <p class="help">A paste with several lines or control characters is shown to you before it is sent. A paste never adds an Enter.</p>
       <p id="notice" role="status" class="notice"></p>
     </main>
   </div>
-  <dialog id="paste-review"><form method="dialog"><p class="eyebrow">Paste baxışı</p><h2>Göndəriləcək mətni yoxla.</h2><p class="hint">Bu mətn əmrlər və idarəedici simvollar ehtiva edə bilər.</p><textarea id="paste-preview" readonly aria-label="Paste preview"></textarea><div class="dialog-actions"><button value="cancel" id="cancel-paste" class="secondary">Ləğv et</button><button type="button" id="confirm-paste" class="primary">Terminala göndər</button></div></form></dialog>
-  <dialog id="clipboard-panel"><form method="dialog"><h2>Clipboard paneli</h2><p id="clipboard-help" class="hint"></p><textarea id="clipboard-text" aria-label="Clipboard text" maxlength="32768"></textarea><div class="dialog-actions"><button value="close" class="secondary">Bağla</button><button type="button" id="panel-paste">Paste-i yoxla</button></div></form></dialog>
+  <dialog id="paste-review"><form method="dialog"><p class="eyebrow">Paste review</p><h2>Check the text before it is sent.</h2><p class="hint">It may contain commands and control characters.</p><textarea id="paste-preview" readonly aria-label="Paste preview"></textarea><div class="dialog-actions"><button value="cancel" id="cancel-paste" class="secondary">Cancel</button><button type="button" id="confirm-paste" class="primary">Send to terminal</button></div></form></dialog>
+  <dialog id="clipboard-panel"><form method="dialog"><h2>Clipboard</h2><p id="clipboard-help" class="hint"></p><textarea id="clipboard-text" aria-label="Clipboard text" maxlength="32768"></textarea><div class="dialog-actions"><button value="close" class="secondary">Close</button><button type="button" id="panel-paste">Review paste</button></div></form></dialog>
 </body>
 </html>

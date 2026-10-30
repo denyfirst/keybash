@@ -9,12 +9,12 @@ async function json(path, method='GET', body, csrf='') {
   const bytes=new Uint8Array(length);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}
   return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
 }
-export function remoteErrorMessage(error){if(error?.code==='capacity')return 'Hazırda bağlantı tutumu doludur. Açıq sessiyanı bağla və ya bir qədər sonra yenidən cəhd et.';if(error?.code==='rate')return 'Qoşulma cəhdləri çoxdur. Bir qədər gözlə və yenidən cəhd et.';return 'Qoşulma rədd edildi. Sessiya bitibsə yenidən daxil ol.';}
+export function remoteErrorMessage(error){if(error?.code==='capacity')return 'The server is at its session limit. Close an open session, or try again in a moment.';if(error?.code==='rate')return 'Too many connection attempts. Wait a moment and try again.';return 'The connection was refused. If your session ended, sign in again.';}
 // The menu folds away so a session gets the whole width. The choice is not
 // remembered: Keybash pages store nothing in the browser.
 export function railToggle(){
  const button=document.getElementById('rail-toggle');if(!button)return;
- button.addEventListener('click',()=>{const hidden=document.body.classList.toggle('rail-hidden');button.setAttribute('aria-expanded',String(!hidden));button.querySelector('span').textContent=hidden?'Menyunu göstər':'Menyunu gizlət';});
+ button.addEventListener('click',()=>{const hidden=document.body.classList.toggle('rail-hidden');button.setAttribute('aria-expanded',String(!hidden));button.querySelector('span').textContent=hidden?'Show menu':'Hide menu';});
 }
 // Full screen also asks the browser for the keyboard where it can (Chrome,
 // Edge), so Esc, the Windows key and Alt+Tab reach the remote; the browser
@@ -24,7 +24,7 @@ export async function enterFullscreen(element){
  try{await navigator.keyboard?.lock?.();}catch{}
 }
 export function watchFullscreen(button,changed=()=>{}){
- document.addEventListener('fullscreenchange',()=>{const on=Boolean(document.fullscreenElement);if(!on)navigator.keyboard?.unlock?.();button.textContent=on?'Tam ekrandan çıx':'Tam ekran';changed(on);});
+ document.addEventListener('fullscreenchange',()=>{const on=Boolean(document.fullscreenElement);if(!on)navigator.keyboard?.unlock?.();button.textContent=on?'Exit full screen':'Full screen';changed(on);});
 }
 // The connection's own name, for the tab title, so several open sessions are
 // told apart. A missing or oversized list keeps the generic title.

@@ -9,7 +9,7 @@ const term = new globalThis.Terminal({ cols: 100, rows: 30, scrollback: 1500, fo
 term.open($('terminal'));
 term.parser.registerOscHandler(52, () => true); // Remote output never writes the local clipboard.
 term.parser.registerOscHandler(8, () => true);  // No remotely supplied clickable hyperlinks.
-term.write('\x1b[2mKeybash terminal lab\r\nSessiyanı açmaq üçün birdəfəlik giriş kodunu daxil et.\x1b[0m\r\n');
+term.write(ownedRemote ? '\x1b[2mConnecting…\x1b[0m\r\n' : '\x1b[2mKeybash terminal lab\r\nEnter the one-time sign-in code to open a session.\x1b[0m\r\n');
 let socket = null, expected = 1, pendingPaste = '', connected = false;
 let retired = false;
 function retireTerminal() {
@@ -20,7 +20,7 @@ function notice(text) { $('notice').textContent = text; }
 function clearPaste() { pendingPaste = ''; $('paste-preview').value = ''; }
 function updateState(active) {
   connected = active;
-  $('status').textContent = active ? 'Qoşulub' : 'Bağlı deyil';
+  $('status').textContent = active ? 'Connected' : 'Not connected';
   $('status').classList.toggle('connected', active);
   for (const id of ['copy', 'paste', 'fullscreen', 'disconnect']) $(id).disabled = !active;
   if (!active && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
@@ -28,14 +28,14 @@ function updateState(active) {
 function sendInput(data) {
   if (!connected || socket?.readyState !== WebSocket.OPEN) return;
   const bytes = encoder.encode(data);
-  if (bytes.byteLength > MAX_INPUT || socket.bufferedAmount > 65536) { notice('Giriş limiti aşıldı.'); return; }
+  if (bytes.byteLength > MAX_INPUT || socket.bufferedAmount > 65536) { notice('Input limit exceeded.'); return; }
   socket.send(bytes);
 }
 term.onData(sendInput);
 function requestPaste(text) {
   if (!connected) return;
   const inspection = inspectPaste(text);
-  if (!inspection.allowed) { notice('Paste ən çox 32 KiB ola bilər.'); return; }
+  if (!inspection.allowed) { notice('A paste can be at most 32 KiB.'); return; }
   notice('');
   if (inspection.review) {
     pendingPaste = text;
@@ -63,7 +63,7 @@ function panel(text, copy) {
   $('clipboard-text').value = text;
   $('clipboard-text').readOnly = copy;
   $('panel-paste').hidden = copy;
-  $('clipboard-help').textContent = copy ? 'Mətni seçib brauzerin copy funksiyasından istifadə et.' : 'Mətni buraya paste et; yoxlamadan sonra terminala göndər.';
+  $('clipboard-help').textContent = copy ? 'Select the text and copy it with your browser.' : 'Paste the text here; after the review it goes to the terminal.';
   $('clipboard-panel').showModal(); $('clipboard-text').focus();
   if (copy) $('clipboard-text').select();
 }
@@ -71,8 +71,8 @@ async function copySelection() {
   if (!connected) return;
   const selection = term.getSelection();
   if (!connected || !selection) return;
-  if (!inspectPaste(selection).allowed) { notice('Copy limiti aşıldı.'); return; }
-  try { await navigator.clipboard.writeText(selection); notice('Mətn kopyalandı.'); }
+  if (!inspectPaste(selection).allowed) { notice('The selection is too large to copy.'); return; }
+  try { await navigator.clipboard.writeText(selection); notice('Text copied.'); }
   catch { panel(selection, true); }
 }
 $('copy').addEventListener('click', copySelection);
@@ -127,9 +127,9 @@ function connect(proof=null) {
     updateState(false); clearPaste();
     retireTerminal();
     for (const id of ['paste-review', 'clipboard-panel']) if ($(id).open) $(id).close();
-    $('clipboard-text').value = ''; notice('Sessiya bağlandı.');
+    $('clipboard-text').value = ''; notice('Session closed.');
   };
-  socket.onerror = () => notice('Bağlantı açıla bilmədi.');
+  socket.onerror = () => notice('The connection could not be opened.');
 }
 $('login').addEventListener('submit', async event => {
   event.preventDefault();
@@ -139,7 +139,7 @@ $('login').addEventListener('submit', async event => {
     const response = await fetch('/lab/grant', { method: 'POST', headers: { 'Content-Type': 'text/plain', 'X-Keybash-Lab': '1' }, body: code, credentials: 'same-origin' });
     if (!response.ok) throw new Error('refused');
     $('login-panel').hidden = true; connect();
-  } catch { notice('Giriş kodu qəbul edilmədi.'); }
+  } catch { notice('The sign-in code was not accepted.'); }
 });
 $('disconnect').addEventListener('click', async () => {
   updateState(false); clearPaste(); retireTerminal();
@@ -150,7 +150,7 @@ railToggle();
 watchFullscreen($('fullscreen'), () => { if (!retired) term.focus(); });
 $('fullscreen').addEventListener('click', () => {
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-  else if (connected) void enterFullscreen(document.querySelector('.session')).catch(() => notice('Brauzer tam ekrana icazə vermədi.'));
+  else if (connected) void enterFullscreen(document.querySelector('.session')).catch(() => notice('The browser did not allow full screen.'));
 });
 window.addEventListener('pagehide',()=>{socket?.close();retireTerminal();clearPaste();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});

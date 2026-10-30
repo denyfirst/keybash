@@ -19,8 +19,8 @@ await context.addInitScript(()=>{
 try {
   await page.goto(config.Origin);
   await page.locator('#code').fill(config.Code);
-  await page.getByRole('button',{name:'Sessiyanı aç',exact:true}).click();
-  await page.locator('#status').filter({hasText:'Sessiya açıldı'}).waitFor({timeout:10000});
+  await page.getByRole('button',{name:'Open session',exact:true}).click();
+  await page.locator('#status').filter({hasText:'Connected'}).waitFor({timeout:10000});
   assert.equal(await page.locator('#code').inputValue(),'');
   await page.waitForFunction(()=>{
     const canvases=[...document.querySelectorAll('#display canvas')];
@@ -48,7 +48,7 @@ try {
   assert(cookies.some(c=>c.name==='__Host-keybash-lab'&&c.secure&&c.httpOnly&&c.sameSite==='Strict'));
   assert.equal(await page.evaluate(()=>localStorage.length+sessionStorage.length+clipboardCalls),0);
   if(config.Screenshot) await page.screenshot({path:config.Screenshot});
-  await page.getByRole('button',{name:'Bağla',exact:true}).click();
+  await page.getByRole('button',{name:'Disconnect',exact:true}).click();
   await page.waitForFunction(()=>document.getElementById('display').childElementCount===0);
   await page.keyboard.press('b');
   assert.equal(await page.locator('#special').isDisabled(),true);

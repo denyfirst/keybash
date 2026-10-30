@@ -52,24 +52,24 @@ async function account() {
     const data=response.data;
     csrf = data.csrf; $('account').textContent = data.username;
     if (!document.hidden) lock(false);
-  } catch { $('notice').textContent = 'Sessiya yoxlana bilmədi. Səhifəni yenilə.'; }
+  } catch { $('notice').textContent = 'The session could not be checked. Reload the page.'; }
 }
 if (document.body.dataset.screen === 'account') void account();
 form.addEventListener('submit', async event => {
   event.preventDefault();
   if (busy || document.hidden) return;
   const login = form.id === 'login';
-  if (!login && $('replacement').value !== $('confirm').value) { $('notice').textContent='Yeni şifrələr eyni deyil.'; return; }
+  if (!login && $('replacement').value !== $('confirm').value) { $('notice').textContent='The new passwords don’t match.'; return; }
   const body = login ? {username:$('username').value,password:$('password').value} : {password:$('current').value,next:$('replacement').value};
   clear(); lock(true); $('notice').textContent = '';
   try {
     const response = await request(login ? '/api/session' : '/api/password','POST',body);
     if (document.hidden) throw new Error('unconfirmed');
     if (response.status === 204) { location.assign(login ? '/' : '/login'); return; }
-    $('notice').textContent = response.status === 429 ? 'Çox cəhd edildi. Bir dəqiqə sonra yenidən yoxla.' :
-      response.status === 401 ? 'İstifadəçi adı və ya şifrə qəbul edilmədi.' :
-      response.status === 400 ? 'Məlumatları yoxla. Yeni şifrə ən azı 15 simvol olmalıdır.' : 'Sorğu tamamlanmadı. Səhifəni yenilə.';
-  } catch { $('notice').textContent = 'Əməliyyat təsdiqlənmədi. Yenidən cəhd etməzdən əvvəl səhifəni yenilə.'; }
+    $('notice').textContent = response.status === 429 ? 'Too many attempts. Try again in a minute.' :
+      response.status === 401 ? 'The username or password was not accepted.' :
+      response.status === 400 ? 'Check the details. The new password needs at least 15 characters.' : 'The request did not complete. Reload the page.';
+  } catch { $('notice').textContent = 'Not confirmed. Reload the page before trying again.'; }
   finally { delete body.password; delete body.next; clear(); lock(false); }
 });
 $('logout')?.addEventListener('click', async () => {
@@ -79,6 +79,6 @@ $('logout')?.addEventListener('click', async () => {
     const response = await request('/api/session','DELETE');
     if (response.status !== 204 || document.hidden) throw new Error('unconfirmed');
     csrf = ''; location.replace('/login');
-  } catch { $('notice').textContent='Çıxış təsdiqlənmədi. Bu cihazdan ayrılmadan yenidən yoxla.'; }
+  } catch { $('notice').textContent='Sign-out was not confirmed. Try again before leaving this device.'; }
   finally { clear(); lock(false); }
 });

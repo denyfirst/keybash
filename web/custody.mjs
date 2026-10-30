@@ -2,7 +2,13 @@ import { systems } from '/systems.mjs';
 const $ = id => document.getElementById(id);
 let csrf = '', busy = false, secretTimer, pendingDelete = '', remoteEnabled = false, setupRequired = false;
 let catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0, owned = new Map();
-const notice = text => { $('notice').textContent = text; };
+// The page's answer goes where the person is looking: into the open sheet
+// that asked, or under the page.
+const notice = text => {
+  const sheet = [...document.querySelectorAll('dialog[open] .dialog-notice')].at(-1);
+  if (sheet) { sheet.textContent = text; $('notice').textContent = ''; } else $('notice').textContent = text;
+};
+const dialogNotice = text => document.querySelectorAll('.dialog-notice').forEach(el => { el.textContent = text; });
 const sections = ['enroll', 'challenge', 'recovery', 'vault'];
 const idOK = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 function hideSecret() {
@@ -13,7 +19,14 @@ function hideSecret() {
 function clearInputs() {
   document.querySelectorAll('input[type=password], input[autocomplete=one-time-code]').forEach(el => { el.value = ''; });
   for (const id of ['credential-key', 'key-file']) if ($(id)) $(id).value = '';
+  document.querySelectorAll('.code-boxes').forEach(box => { box.dataset.filled = '0'; });
 }
+// The six boxes follow the one field: digits only, the next box lit.
+$('enrollment-code')?.addEventListener('input', event => {
+  const field = event.target, digits = field.value.replace(/[^0-9]/g, '').slice(0, 6);
+  if (field.value !== digits) field.value = digits;
+  field.parentElement.dataset.filled = String(digits.length);
+});
 // The MFA seed, as a QR code and as text, is on screen only while it is
 // needed and the page is in view.
 const qrOK = rows => Array.isArray(rows) && rows.length >= 21 && rows.length <= 57 && (rows.length - 17) % 4 === 0 && rows.every(row => typeof row === 'string' && row.length === rows.length && /^[01]+$/.test(row));
@@ -33,7 +46,8 @@ function showSeed(secret, rows) {
 }
 function clearAll() {
   hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration;
-  for (const id of ['account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
+  for (const id of ['account', 'account-name', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
+  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
   delete document.body.dataset.stage;
@@ -116,8 +130,9 @@ async function run(action) {
   busy = true; notice('');
   // The step-up dialog stays usable while the action that opened it waits.
   const buttons = [...document.querySelectorAll('button')].filter(el => !el.closest('#stepup-dialog')); buttons.forEach(el => { el.disabled = true; });
+  document.body.dataset.busy = '';
   try { await action(); } catch (error) { notice(errorMessage(error)); }
-  finally { busy = false; buttons.forEach(el => { el.disabled = false; }); updateTrustButtons(); }
+  finally { busy = false; delete document.body.dataset.busy; buttons.forEach(el => { el.disabled = false; }); updateTrustButtons(); }
 }
 function bind(id, action) {
   $(id)?.addEventListener('submit', event => { event.preventDefault(); void run(action); });
@@ -133,29 +148,43 @@ function showCodes(data) {
   if (!Array.isArray(data?.codes) || data.codes.length !== 10 || !data.codes.every(code => typeof code === 'string' && /^[A-Za-z0-9_-]{22}$/.test(code))) throw new Error('invalid codes');
   clearInputs(); hideSecret(); hideSeed();
   sections.forEach(id => { $(id).hidden = id !== 'recovery'; });
-  $('heading').textContent = 'Your recovery codes are ready.';
+  $('heading').textContent = 'Your recovery codes are ready';
   $('recovery-codes').value = data.codes.join('\n');
 }
+// A key or password as a row: what it is, who it signs in as, and what can be
+// done with it. The secret itself is never part of the row.
+function recordRow(record) {
+  const row = document.createElement('article'); row.className = 'record'; row.dataset.kind = record.generated ? 'generated' : record.kind;
+  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.append(glyph(record.generated ? 'made' : record.kind, 'server-glyph'));
+  const titles = document.createElement('div'); titles.className = 'record-titles';
+  const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = record.name;
+  const meta = document.createElement('p'); meta.className = 'record-meta';
+  meta.textContent = `${record.kind === 'ssh-key' ? 'SSH key' : 'Password'} · ${record.username ? `user ${record.username}` : 'no user'}`;
+  titles.append(name, meta);
+  if (record.generated) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'Made in Keybash'; titles.append(badge); }
+  row.append(tile, titles);
+  const print = document.createElement('code'); print.className = 'fingerprint'; print.textContent = record.fingerprint; print.title = 'Key fingerprint';
+  if (record.fingerprint) row.append(print);
+  const actions = document.createElement('div'); actions.className = 'record-actions'; row.append(actions);
+  return { row, actions };
+}
+function askDelete(record) { pendingDelete = record.id; $('delete-name').textContent = record.name; $('delete-dialog').showModal(); }
 async function loadRecords() {
   const records = await request('/api/credentials');
   if (!Array.isArray(records) || records.length > 256) throw new Error('invalid records');
   $('records').replaceChildren();
   for (const record of records) {
     if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
-    const row = document.createElement('div'); row.className = 'record';
-    const label = document.createElement('span'); label.textContent = record.name;
-    const meta = document.createElement('span'); meta.textContent = `${record.kind === 'ssh-key' ? 'SSH key' : 'Password'}${record.generated ? ' · made in Keybash' : ''} · user ${record.username}`;
-    row.append(label, meta);
-    if (record.fingerprint) { const print = document.createElement('span'); print.className = 'fingerprint'; print.textContent = record.fingerprint; row.append(print); }
+    const { row, actions } = recordRow(record);
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost'; remove.textContent = 'Delete';
+    remove.addEventListener('click', () => askDelete(record));
     // A key made here is never shown; its row offers the install command instead.
     if (record.generated) {
-      const install = document.createElement('button'); install.type = 'button'; install.textContent = 'Add to server';
+      const install = document.createElement('button'); install.type = 'button'; install.className = 'secondary'; install.textContent = 'Add to server';
       install.addEventListener('click', () => showInstall(record.public));
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'secondary'; remove.textContent = 'Delete';
-      remove.addEventListener('click', () => { pendingDelete = record.id; $('delete-name').textContent = record.name; $('delete-dialog').showModal(); });
-      row.append(install, remove); $('records').append(row); continue;
+      actions.append(install, remove); $('records').append(row); continue;
     }
-    const reveal = document.createElement('button'); reveal.type = 'button'; reveal.textContent = 'Show';
+    const reveal = document.createElement('button'); reveal.type = 'button'; reveal.className = 'secondary'; reveal.textContent = 'Show';
     reveal.addEventListener('click', () => { void run(async () => {
       hideSecret();
       const item = await request(`/api/credentials/${record.id}/reveal`, 'POST', {});
@@ -165,13 +194,11 @@ async function loadRecords() {
       $('copy-passphrase').hidden = !item.passphrase; $('revealed-passphrase').hidden = !item.passphrase;
       $('secret-dialog').showModal(); secretTimer = setTimeout(hideSecret, 60000);
     }); });
-    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'secondary'; remove.textContent = 'Delete';
-    remove.addEventListener('click', () => { pendingDelete = record.id; $('delete-name').textContent = record.name; $('delete-dialog').showModal(); });
-    row.append(reveal, remove); $('records').append(row);
+    actions.append(reveal, remove); $('records').append(row);
   }
   if (!records.length) {
-    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No keys or passwords yet. Add one below, or let Keybash make an SSH key.';
-    $('records').append(empty); $('credential-fold').open = true;
+    const start = document.createElement('button'); start.type = 'button'; start.textContent = 'Add your first key or password'; start.addEventListener('click', () => openRecordDialog('password'));
+    $('records').append(emptyState('No keys or passwords yet', 'Save a server user’s password or SSH key, or let Keybash make a new SSH key for you.', 'key', start));
   }
   owned = new Map(records.map(record => [record.id, record]));
   if(remoteEnabled){$('connection-credential').replaceChildren();for(const record of records){const option=document.createElement('option');option.value=record.id;option.textContent=`${record.name} · ${record.kind === 'ssh-key' ? 'SSH key' : 'Password'}`;$('connection-credential').append(option);}await loadConnections();}
@@ -219,6 +246,10 @@ const icons = {
   ssh: ['M4 5.5h16v13H4z', 'M7.5 10l2.5 2-2.5 2', 'M12 14h4'],
   rdp: ['M3.5 5h17v11h-17z', 'M9 19.5h6', 'M12 16v3.5'],
   play: ['M8.5 6.5v11l9-5.5z'],
+  password: ['M5.5 7.5h13a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2z', 'M8 12h.01', 'M12 12h.01', 'M16 12h.01'],
+  'ssh-key': ['M4.5 12a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0', 'M11.5 12h9', 'M17 12v3', 'M20 12v2'],
+  made: ['M3.5 14a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0', 'M10.5 14h8', 'M15.5 14v2.5', 'M18.5 14v2', 'M17.5 3.5v4', 'M15.5 5.5h4'],
+  key: ['M4.5 12a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0', 'M11.5 12h9', 'M17 12v3', 'M20 12v2'],
 };
 function glyph(name, className) {
   const svg = document.createElementNS(svgNS, 'svg');
@@ -242,7 +273,7 @@ function paintTile(tile, name) {
   tile.style.setProperty('--mark', color);
   const channel = i => { const c = parseInt(color.slice(i, i + 2), 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
   const tone = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  if (tone < 0.05) tile.dataset.tone = 'dark'; else if (tone > 0.45) tile.dataset.tone = 'light';
+  if (tone < 0.05) tile.dataset.tone = 'dark'; else if (tone < 0.12) tile.dataset.tone = 'dim'; else if (tone > 0.45) tile.dataset.tone = 'light';
 }
 let pickedSystem = '';
 function systemGrid(container, chosen, choose) {
@@ -264,14 +295,18 @@ function openSystemPicker(record) {
   }); });
   $('system-dialog').showModal();
 }
-function emptyState(title, text) {
+// An empty page shows what will live there: a small waiting terminal, or a key.
+function emptyState(title, text, picture = 'terminal', action) {
   const box = document.createElement('div'); box.className = 'empty-state';
-  const art = document.createElement('span'); art.className = 'empty-art'; art.setAttribute('aria-hidden', 'true');
-  const cursor = document.createElement('span'); cursor.className = 'empty-cursor'; cursor.textContent = '▍';
-  art.append('$ ', cursor); box.append(art);
+  const art = document.createElement('span'); art.setAttribute('aria-hidden', 'true');
+  if (picture === 'terminal') {
+    const cursor = document.createElement('span'); cursor.className = 'empty-cursor'; cursor.textContent = '▍';
+    art.className = 'empty-art'; art.append('$ ', cursor);
+  } else { art.className = 'empty-key'; art.append(glyph('key', 'server-glyph')); }
+  box.append(art);
   const heading = document.createElement('p'); heading.className = 'empty-title'; heading.textContent = title;
   const body = document.createElement('p'); body.className = 'hint'; body.textContent = text;
-  box.append(heading, body); return box;
+  box.append(heading, body); if (action) box.append(action); return box;
 }
 const trustWords = { verified: 'Ready', changed: 'Identity changed', unverified: 'Needs approval', unavailable: 'Unavailable' };
 const trustHelp = { changed: 'The administrator changed this server’s identity. Review it before connecting.', unverified: 'Review and accept this server’s identity before connecting.', unavailable: 'This server is not in the administrator’s list right now.' };
@@ -324,7 +359,11 @@ async function loadConnections() {
   // With no connection yet, the first steps say what to do, and which is done.
   const hasRecords = $('connection-credential').options.length > 0;
   $('first-steps').hidden = connections.length > 0; $('first-step-key').dataset.done = String(hasRecords);
-  if (!connections.length) $('connections').append(emptyState('No connections yet', hasRecords ? 'Create one to open a terminal on your server.' : 'Add a key or password first, then create a connection.'));
+  if (!connections.length) {
+    let start;
+    if (hasRecords) { start = document.createElement('button'); start.type = 'button'; start.textContent = 'Create your first connection'; start.addEventListener('click', () => $('new-connection').click()); }
+    $('connections').append(emptyState('No connections yet', hasRecords ? 'Create one to open a terminal on your server.' : 'Add a key or password first, then create a connection.', 'terminal', start));
+  }
   await chooseTarget();
 }
 // One document, three pages: the path picks what a ready session sees. Without
@@ -342,7 +381,7 @@ function showPage(ready) {
     if (item.dataset.page === name) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
     item.hidden = item.dataset.page === 'connections' && !remoteEnabled;
   });
-  $('new-connection').hidden = !ready || name !== 'connections';
+  $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys';
   $('topbar-page').textContent = ready ? pages[name].title : 'Sign-in';
   $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
   if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
@@ -350,11 +389,11 @@ function showPage(ready) {
 async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
-  csrf = data.csrf; $('account').textContent = data.username; document.body.dataset.stage = data.stage;
+  csrf = data.csrf; $('account').textContent = data.username; $('account-name').textContent = data.username; document.body.dataset.stage = data.stage;
   remoteEnabled = data.remote === true;
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
-  $('heading').textContent = data.stage === 'enroll' ? 'Set up your phone.' : 'Confirm it’s you.';
+  $('heading').textContent = data.stage === 'enroll' ? 'Set up your phone' : 'Confirm it’s you';
   showPage(data.stage === 'ready');
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false;
   if (data.stage === 'ready') await loadRecords();
@@ -392,22 +431,43 @@ bind('generate', async () => {
   const name = $('generate-name').value, username = $('generate-user').value;
   const made = await request('/api/credentials/generate', 'POST', { name, username });
   if (!idOK(made?.id) || !publicOK(made.public)) throw new Error('invalid key');
-  $('generate').reset(); $('generate-fold').open = false; await loadRecords(); notice('Key made. Now add it to your server.'); showInstall(made.public);
+  $('generate').reset(); $('record-dialog').close(); await loadRecords(); notice('Key made. Now add it to your server.'); showInstall(made.public);
 });
+// One dialog adds all three kinds: a password, an SSH key, or a key made here.
+let recordKind = 'password';
+function chooseKind(kind) {
+  clearInputs(); recordKind = kind;
+  document.querySelectorAll('#record-dialog .segment').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.kind === kind)));
+  $('credential').hidden = kind === 'generate'; $('generate').hidden = kind !== 'generate';
+  $('key-fields').hidden = kind !== 'ssh-key'; $('password-fields').hidden = kind !== 'password';
+}
+function openRecordDialog(kind) {
+  if (busy) return;
+  $('credential').reset(); $('generate').reset(); chooseKind(kind); dialogNotice('');
+  $('record-dialog').showModal(); $(kind === 'generate' ? 'generate-name' : 'credential-name').focus();
+}
+document.querySelectorAll('#record-dialog .segment').forEach(button => button.addEventListener('click', () => { if (!busy) chooseKind(button.dataset.kind); }));
+document.querySelectorAll('.record-cancel').forEach(button => button.addEventListener('click', () => $('record-dialog').close()));
+$('add-record')?.addEventListener('click', () => openRecordDialog('password'));
+$('record-dialog')?.addEventListener('close', () => { clearInputs(); dialogNotice(''); });
+$('change-password')?.addEventListener('click', () => { if (busy) return; clearInputs(); dialogNotice(''); $('password-dialog').showModal(); $('current-password').focus(); });
+$('password-cancel')?.addEventListener('click', () => $('password-dialog').close());
+$('password-dialog')?.addEventListener('close', clearInputs);
 click('copy-install', () => copy('install-command'));
 $('new-connection')?.addEventListener('click', () => {
   if (busy) return;
   pickedSystem = ''; const choose = name => { pickedSystem = name; systemGrid($('connection-system'), pickedSystem, choose); };
-  systemGrid($('connection-system'), pickedSystem, choose);
+  systemGrid($('connection-system'), pickedSystem, choose); dialogNotice('');
   $('connection-dialog').showModal(); $('connection-name').focus();
 });
 $('system-cancel')?.addEventListener('click', () => $('system-dialog').close());
 $('connection-cancel')?.addEventListener('click', () => $('connection-dialog').close());
 $('close-install')?.addEventListener('click', () => $('install-dialog').close());
 bind('credential', async () => {
-  const kind = $('credential-kind').value;
+  const kind = recordKind;
+  if (!['password', 'ssh-key'].includes(kind)) return;
   const value = { name: $('credential-name').value, kind, username: $('credential-user').value, secret: $(kind === 'password' ? 'credential-password' : 'credential-key').value, passphrase: kind === 'ssh-key' ? $('credential-passphrase').value : '' };
-  clearInputs(); await request('/api/credentials', 'POST', value); $('credential').reset(); await loadRecords(); notice('Encrypted and saved.');
+  clearInputs(); await request('/api/credentials', 'POST', value); $('credential').reset(); $('record-dialog').close(); await loadRecords(); notice('Encrypted and saved.');
 });
 bind('connection', async () => {
   // The approval binds this choice to the identity shown; if the catalog
@@ -427,9 +487,6 @@ bind('trust-confirm', async () => {
 $('connection-target')?.addEventListener('change', () => { void chooseTarget().catch(error => notice(errorMessage(error))); });
 $('cancel-trust')?.addEventListener('click', closeReview);
 $('trust-dialog')?.addEventListener('close', closeReview);
-$('credential-kind')?.addEventListener('change', () => {
-  clearInputs(); const key = $('credential-kind').value === 'ssh-key'; $('key-fields').hidden = !key; $('password-fields').hidden = key;
-});
 $('key-file')?.addEventListener('change', () => { void run(async () => {
   const file = $('key-file').files[0]; $('credential-key').value = ''; if (!file) return;
   if (file.size > 65536) throw Object.assign(new Error('file too large'), { status: 400 });
@@ -458,6 +515,7 @@ void run(async () => {
   if (document.body.dataset.screen === 'login') {
     const data = await request('/api/setup'); if (typeof data?.initialized !== 'boolean') throw new Error('invalid setup');
     $(data.initialized ? 'signin' : 'bootstrap').hidden = false;
+    if (!data.initialized) { $('signin-title').textContent = 'Set up Keybash'; document.title = 'Keybash · Set up'; }
   } else await loadAccount();
 });
 setInterval(() => {

@@ -8,7 +8,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   const usable = () => enabled && live();
   const valid = text => typeof text === 'string' && text.isWellFormed() && !text.includes('\0') && inspectPaste(text).allowed;
   function prepare(text) {
-    if (!valid(text)) { $('notice').textContent = 'Mətn 32 KiB həddinə və Unicode qaydasına uyğun deyil.'; return false; }
+    if (!valid(text)) { $('notice').textContent = 'The text must be at most 32 KiB of valid Unicode.'; return false; }
     $('paste-text').value = text;
     $('paste-preview').textContent = inspectPaste(text).preview;
     return true;
@@ -16,7 +16,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   function paste() {
     if (!usable()) return;
     const text = $('paste-text').value;
-    if (!valid(text)) { $('notice').textContent = 'Mətn ötürülmədi: ölçü və ya Unicode uyğun deyil.'; return; }
+    if (!valid(text)) { $('notice').textContent = 'The text was not sent: too large or not valid Unicode.'; return; }
     resetKeyboard();
     send('clipboard', '0', 'text/plain');
     const bytes = encoder.encode(text);
@@ -35,11 +35,11 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     const epoch = generation, text = remoteText;
     try {
       await navigator.clipboard.writeText(text);
-      if (usable() && epoch === generation) $('notice').textContent = 'Remote mətn kopyalandı.';
+      if (usable() && epoch === generation) $('notice').textContent = 'Text from the remote copied.';
     } catch {
       if (usable() && epoch === generation) {
         $('remote-text').value = text; $('remote-text').focus(); $('remote-text').select();
-        $('notice').textContent = 'Clipboard icazəsi yoxdur. Seçilmiş mətni Ctrl+C ilə kopyala.';
+        $('notice').textContent = 'No clipboard permission. Select the text and press Ctrl+C.';
       }
     }
   }
@@ -57,7 +57,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   function resize() { clearTimeout(resizeTimer); if (usable()) resizeTimer = setTimeout(requestSize, 350); }
   $('paste-text').addEventListener('input', () => {
     const check = inspectPaste($('paste-text').value);
-    $('paste-preview').textContent = check.allowed ? check.preview : 'Mətn 32 KiB həddini keçir.';
+    $('paste-preview').textContent = check.allowed ? check.preview : 'The text is over 32 KiB.';
   });
   $('paste-send').addEventListener('click', paste);
   $('copy-remote').addEventListener('click', () => void copy());
@@ -70,7 +70,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
       if (usable() && epoch === generation && prepare(text)) $('paste-send').focus();
     } catch {
       if (usable() && epoch === generation) {
-        $('paste-text').focus(); $('notice').textContent = 'Clipboard icazəsi yoxdur. Mətni panelə Ctrl+V ilə yapışdır.';
+        $('paste-text').focus(); $('notice').textContent = 'No clipboard permission. Paste the text into the panel with Ctrl+V.';
       }
     }
   });
@@ -80,7 +80,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     const text = event.clipboardData?.getData('text/plain');
     if (!prepare(text)) return;
     if (!inspectPaste(text).review) paste();
-    else { $('paste-send').focus(); $('notice').textContent = 'Mətni nəzərdən keçir, sonra göndər. Enter əlavə edilmir.'; }
+    else { $('paste-send').focus(); $('notice').textContent = 'Review the text, then send it. No Enter is added.'; }
   });
   return {
     get enabled() { return enabled; },

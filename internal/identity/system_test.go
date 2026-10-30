@@ -75,6 +75,16 @@ func TestConnectionSystemIsALabelOnly(t *testing.T) {
 	if read().System != "ubuntu" {
 		t.Fatal("a refused request changed the system")
 	}
+	// A request without this session's CSRF token, or without a session, is
+	// refused before it is read.
+	token := c.csrf
+	c.csrf = strings.Repeat("A", 43)
+	c.expect("POST", path, inputJSON(map[string]string{"system": "debian"}), 403)
+	c.csrf = token
+	(&custodyClient{t: t, l: c.l}).expect("POST", path, inputJSON(map[string]string{"system": "debian"}), 401)
+	if read().System != "ubuntu" {
+		t.Fatal("a request without the session's token changed the system")
+	}
 	// Another account cannot label someone else's connection.
 	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
 		t.Fatal("second account failed")

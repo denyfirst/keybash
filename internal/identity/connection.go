@@ -135,6 +135,7 @@ func (s *Store) trustConnection(owner, id, expected, approval, fingerprint strin
 		return tx.Bucket(connectionBucket).Put(credentialKey(owner, id), sealed)
 	})
 }
+
 // setConnectionSystem changes only the label a card shows. Target, credential
 // and trust stay as they are; the record is resealed at the next revision.
 func (s *Store) setConnectionSystem(owner, id, system string) error {

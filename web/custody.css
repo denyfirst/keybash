@@ -9,45 +9,65 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 #vault > .panel + .panel { margin-top: 0; }
 #vault > .panel { scroll-margin-top: 1.2rem; }
 
-#records, #connections { display: grid; gap: 0.6rem; margin: 0.4rem 0 0.8rem; }
+#connections { margin: 0.4rem 0 0.8rem; }
 
-/* A record or connection: its name and facts on the first lines, its actions
-   after them. Names and fingerprints break anywhere rather than overflow. */
+/* ── Keys and passwords: one row each ─────────────────────────────────── */
+.record-list { display: grid; gap: 0.6rem; }
 .record {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.9rem 1rem;
-  background: var(--paper);
+  gap: 0.6rem 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
   border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.record > span {
-  flex: 1 1 100%;
-  overflow-wrap: anywhere;
-  font-size: 0.92rem;
-  color: var(--ink-soft);
+.record:hover { border-color: color-mix(in srgb, var(--tool) 30%, var(--rule)); box-shadow: var(--shadow-lg); }
+.record-icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--tool);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 20%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card)));
+  border-radius: 10px;
 }
-.record > span:first-child { color: var(--ink); font-weight: 600; }
-.record button, .record a { margin: 0; }
-.record button { padding: 0.45rem 0.9rem; font-size: 0.86rem; }
-/* Connect is the record's main action: a link drawn as the accent button. */
-.record a {
-  display: inline-block;
-  padding: 0.45rem 0.9rem;
-  font-size: 0.86rem;
+.record-titles { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; min-width: 0; }
+.record-name { flex: 1 1 100%; margin: 0; overflow: hidden; font-size: 1rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.record-meta { margin: 0; font-size: 0.84rem; color: var(--ink-soft); }
+.record-badge {
+  padding: 0.05rem 0.5rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: #ffffff;
-  text-decoration: none;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
+  color: var(--tool);
+  background: color-mix(in srgb, var(--tool) 10%, var(--card));
+  border-radius: 999px;
 }
-.record a:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-
-.record > span.fingerprint { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
-#records > .empty, #connections > .empty { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
+/* A fingerprint is long and compared rarely: shown short, whole on hover. */
+.record .fingerprint {
+  max-width: 15rem;
+  overflow: hidden;
+  padding: 0.25rem 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.record-actions { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 0.4rem; min-width: 12.75rem; grid-column: -2; }
+.record-actions button { margin: 0; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
+@media (max-width: 760px) {
+  .record { grid-template-columns: auto minmax(0, 1fr); }
+  .record .fingerprint { grid-column: 1 / -1; max-width: 100%; }
+  .record-actions { grid-column: 1 / -1; justify-content: flex-start; min-width: 0; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
+  .record-actions button.ghost { margin-left: auto; }
+}
 
 /* ── Connections: one card per server ─────────────────────────────────── */
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); gap: 1rem; }
@@ -178,27 +198,49 @@ dialog.sheet .hint { margin-bottom: 0; }
 .rail-user strong { color: var(--ink); font-weight: 650; }
 .avatar { flex: none; width: 2rem; height: 2rem; background: linear-gradient(135deg, color-mix(in srgb, var(--tool) 70%, var(--card)), color-mix(in srgb, var(--brand) 55%, var(--card))); border-radius: 50%; }
 
-/* The account page: one row per thing that protects the account. */
-.settings { display: grid; }
+/* The account page: who is signed in, then one card per thing that
+   protects the account. */
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+  padding: 1.2rem 1.4rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.account-card > div { flex: 1; min-width: 0; }
+.account-card .hint { margin: 0; }
+.account-name { margin: 0; overflow: hidden; font-size: 1.15rem; font-weight: 650; text-overflow: ellipsis; }
+.avatar-large { width: 3rem; height: 3rem; }
+.pill-good { color: var(--strong); }
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1rem; }
 .setting {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 0.4rem 1.5rem;
-  padding: 1.2rem 0;
-  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.3rem 1.3rem 1.2rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
 }
-.setting:first-child { padding-top: 0; border-top: 0; }
-.setting:last-child { padding-bottom: 0; }
-.setting h2 { margin: 0 0 0.2rem; font-size: 1rem; }
+.setting h2 { margin: 0 0 0.25rem; font-size: 1.02rem; }
 .setting .hint { margin: 0; }
-.setting > button { margin-top: 0; white-space: nowrap; }
-.setting > details { grid-column: 1 / -1; margin-top: 0; border-top: 0; }
-.setting > details > summary { padding-top: 0.2rem; font-size: 0.92rem; color: var(--link); width: fit-content; }
-.setting > details form { max-width: 26rem; }
-@media (max-width: 640px) {
-  .setting { grid-template-columns: minmax(0, 1fr); }
+.setting-text { flex: 1; }
+.setting > button { align-self: flex-start; margin: 0; }
+.setting-icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--tool);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 20%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card)));
+  border-radius: 10px;
 }
+.setting-icon svg { width: 1.3rem; height: 1.3rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* A server identity's state, in words and in its colour. */
 .trust-state { font-weight: 600; }
@@ -293,14 +335,60 @@ dialog.sheet .hint { margin-bottom: 0; }
 #seed { display: flex; flex-wrap: wrap; gap: 0.15rem 0.7rem; font-size: 1.05rem; letter-spacing: 0.08em; }
 .qr-care { margin-top: 0.9rem; }
 #enrollment label { margin-top: 0.9rem; }
-#enrollment-code {
-  max-width: 12rem;
-  font-family: var(--mono);
-  font-size: 1.35rem;
-  letter-spacing: 0.4em;
-  text-indent: 0.4em; /* balances the spacing after the last digit */
-  text-align: center;
+/* Six boxes, one input: the digits are spaced to sit in the boxes drawn
+   behind them, so typing, pasting and autofill all work as in one field. */
+.code-boxes {
+  --cell: 2.9rem;
+  --gap: 0.55rem;
+  --room: 4px; /* for the focus ring, inside the clip */
+  position: relative;
+  display: flex;
+  gap: var(--gap);
+  width: calc(6 * var(--cell) + 5 * var(--gap) + 2 * var(--room));
+  max-width: 100%;
+  padding: var(--room);
+  overflow: hidden;
 }
+.code-boxes > span {
+  flex: none;
+  width: var(--cell);
+  height: 3.4rem;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 35%, var(--rule));
+  border-radius: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+/* Wider than the boxes, so the spacing after the last digit never scrolls
+   the field; the clip hides the rest. */
+.code-boxes > input {
+  position: absolute;
+  top: var(--room);
+  left: var(--room);
+  z-index: 1;
+  width: calc(6 * var(--cell) + 6 * var(--gap) + var(--cell));
+  height: 3.4rem;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 1.55rem;
+  font-weight: 600;
+  letter-spacing: calc(var(--cell) + var(--gap) - 1ch);
+  text-indent: calc((var(--cell) - 1ch) / 2);
+  caret-color: var(--tool);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.code-boxes > input:focus { box-shadow: none; }
+.code-boxes:focus-within > span:nth-of-type(1),
+.code-boxes:focus-within[data-filled="1"] > span:nth-of-type(2),
+.code-boxes:focus-within[data-filled="2"] > span:nth-of-type(3),
+.code-boxes:focus-within[data-filled="3"] > span:nth-of-type(4),
+.code-boxes:focus-within[data-filled="4"] > span:nth-of-type(5),
+.code-boxes:focus-within[data-filled="5"] > span:nth-of-type(6),
+.code-boxes:focus-within[data-filled="6"] > span:nth-of-type(6) { border-color: var(--tool); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool) 22%, transparent); }
+.code-boxes:focus-within:not([data-filled="0"]) > span:nth-of-type(1) { border-color: color-mix(in srgb, var(--ink-faint) 35%, var(--rule)); box-shadow: none; }
 /* A key made here leaves only as this one command, read before it is sent. */
 dialog.install { width: min(44rem, 92vw); }
 .install-steps { margin: 0.7rem 0 0.2rem; padding-left: 1.3rem; font-size: 0.9rem; color: var(--ink-soft); }
@@ -409,9 +497,12 @@ button.server-icon:hover:not(:disabled) { box-shadow: 0 0 0 3px color-mix(in srg
 /* Marks are drawn with fill, not text colour: --mark is a picture's colour. */
 .system-mark { width: 1.45rem; height: 1.45rem; fill: var(--mark, var(--tool)); }
 .system-own { fill: none; stroke: var(--tool); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.server-icon[data-tone=light] .system-mark { fill: var(--ink); }
+/* A mark too pale or too deep for the scheme keeps its hue, moved toward
+   the ink; a black mark on a dark page is drawn in ink. */
+.server-icon[data-tone=light] .system-mark { fill: color-mix(in srgb, var(--mark) 50%, #000000); }
 @media screen and (prefers-color-scheme: dark) {
   .server-icon[data-tone=light] .system-mark { fill: var(--mark); }
+  .server-icon[data-tone=dim] .system-mark { fill: color-mix(in srgb, var(--mark) 55%, #ffffff); }
   .server-icon[data-tone=dark] .system-mark { fill: var(--ink); }
 }
 .field-label { margin: 1.1rem 0 0.4rem; font-size: 0.86rem; font-weight: 600; color: var(--ink-soft); }
@@ -440,3 +531,71 @@ button.server-icon:hover:not(:disabled) { box-shadow: 0 0 0 3px color-mix(in srg
 .compact .system-option .server-icon { width: 2rem; height: 2rem; }
 .compact .system-mark { width: 1.15rem; height: 1.15rem; }
 dialog.systems { width: min(40rem, 94vw); }
+
+/* ── Adding a key or password: one sheet, three kinds ────────────────────── */
+#record-dialog .segmented {
+  display: flex;
+  gap: 0.25rem;
+  margin: 1.1rem 0 0.2rem;
+  padding: 0.25rem;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) + 2px);
+}
+#record-dialog .segment {
+  flex: 1;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  background: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+#record-dialog .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
+#record-dialog .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
+.generate-lead { margin-top: 1rem; }
+/* What a sheet says back stays in the sheet. */
+.dialog-notice { min-height: 0; margin: 0.8rem 0 0; font-size: 0.88rem; font-weight: 500; color: var(--ink); text-align: right; }
+.dialog-notice:empty { display: none; }
+/* Deleting is the one action drawn in red; the same red in both schemes
+   keeps white text readable on it. */
+button.danger { background: #b3202e; border-color: #b3202e; }
+button.danger:hover:not(:disabled) { background: #931a25; border-color: #931a25; }
+.delete-name { margin: 0.6rem 0; font-weight: 650; overflow-wrap: anywhere; }
+/* An empty keys page shows a key, waiting. */
+.empty-key {
+  display: grid;
+  place-items: center;
+  width: 4.2rem;
+  height: 4.2rem;
+  margin: 0 auto 1.1rem;
+  color: var(--tool);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 22%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card)));
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+}
+.empty-key .server-glyph { width: 2rem; height: 2rem; }
+.empty-state > button { margin-top: 1.2rem; }
+
+/* ── Second factor: set up, asked for, and recovered from ─────────────────── */
+.enroll-head { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1.8rem; }
+.enroll-head .enroll-lead { margin: 0.2rem 0 0; }
+.steps > li::before { background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 20%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card))); }
+/* Sign-in's second step: one small card, the code field large. */
+.factor-card { max-width: 27rem; padding: 1.8rem 1.8rem 1.4rem; }
+.factor-card .setting-icon { margin-bottom: 1rem; }
+.factor-card h2 { margin-bottom: 0.3rem; }
+.factor-card button { width: 100%; }
+#factor-code { font-family: var(--mono); font-size: 1.3rem; letter-spacing: 0.3em; text-indent: 0.3em; text-align: center; }
+.factor-foot { margin: 1.1rem 0 0; padding-top: 0.9rem; border-top: 1px solid var(--rule); }
+.recovery-card { max-width: 36rem; }
+#recovery-codes { min-height: 20.5rem; font-size: 1rem; letter-spacing: 0.04em; text-align: center; background: var(--paper-sunk); }
+@media (max-width: 520px) {
+  #enroll { padding: 1.3rem 1.1rem 1.5rem; }
+  .steps > li { padding-left: 2.6rem; }
+  .code-boxes { --cell: 2.25rem; --gap: 0.3rem; }
+  .code-boxes > input { font-size: 1.3rem; }
+}
+#credential-key { min-height: 6.5rem; }

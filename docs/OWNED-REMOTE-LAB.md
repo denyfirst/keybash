@@ -124,11 +124,11 @@ SSH paste preview and focused RDP input remain enforced. RDP clipboard/remote
 resize are still disabled. Explicit SSH clipboard permission applies only to
 the terminal document. No external service, CDN or runtime dependency is added.
 
-"Qoşul" opens each session in its own tab (`target=_blank`, `rel=noopener`;
+"Connect" opens each session in its own tab (`target=_blank`, `rel=noopener`;
 both pages are same-origin with COOP `same-origin`), and the tab is titled
 with the connection's name, read from `/api/connections` and set as text.
 A session page can fold its menu away for the full width; this is not
-remembered, since the pages store nothing in the browser. "Tam ekran"
+remembered, since the pages store nothing in the browser. "Full screen"
 (terminal: the whole session panel; desktop: the canvas) asks the browser for
 full screen and, where it allows (Chromium), Keyboard Lock, so Esc, the
 Windows key and Alt+Tab reach the remote and holding Esc leaves. Both need a

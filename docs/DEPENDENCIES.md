@@ -331,7 +331,7 @@ Linux, AlmaLinux, CentOS, Arch Linux, Alpine Linux, openSUSE, Linux Mint, Kali
 Linux, Gentoo, NixOS, Raspberry Pi, FreeBSD, macOS (Apple) and Linux (Tux)
 come from Simple Icons `simple-icons@16.35.0` (npm, released 2026-10-11),
 licensed CC0-1.0. The licence is in `docs/third-party/simple-icons-LICENSE.md`
-(SHA-256 `9046848b63a5c92bff14e4accca80bd987e0623b74adf9226ce5198d312b79d5`). Windows and the generic server are our own line drawings.
+(SHA-256 `9046848b63a5c92bff14e4accca80bd987e0623b74adf9226ce5198d312b79d5`). The Windows mark (four squares in Windows blue) and the generic server line drawing are our own; no Microsoft file is copied.
 
 This follows the same rule as the bundled typeface. The data was copied once
 from `cdn.jsdelivr.net/npm/simple-icons@16.35.0/icons/<slug>.svg`, fetched

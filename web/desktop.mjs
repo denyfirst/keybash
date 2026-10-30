@@ -20,7 +20,7 @@ function end() {
   $('display').replaceChildren();
   for (const id of ['disconnect','special','fullscreen']) $(id).disabled = true;
   if (document.fullscreenElement) void document.exitFullscreen().catch(()=>{});
-  $('status').textContent = 'Sessiya bitdi';
+  $('status').textContent = 'Session ended';
 }
 function fit() {
   if (!client || stopped) return;
@@ -105,7 +105,7 @@ function begin(proof=null) {
   client.onerror = end;
   client.onstatechange = state => {
     if (state === Guacamole.Client.State.CONNECTED && !stopped) {
-      $('status').textContent = 'Sessiya açıldı'; fit(); $('desktop').focus();
+      $('status').textContent = 'Connected'; fit(); $('desktop').focus();
       for (const id of ['disconnect','special','fullscreen']) $(id).disabled = false;
     }
   };
@@ -117,9 +117,9 @@ $('login').addEventListener('submit', async event => {
   if (!stopped || code.length !== 43) return;
   try {
     const result = await fetch('/lab/grant',{method:'POST',headers:{'Content-Type':'text/plain','X-Keybash-Lab':'1'},body:code});
-    if (!result.ok) { $('notice').textContent='Giriş rədd edildi.'; return; }
+    if (!result.ok) { $('notice').textContent='Sign-in refused.'; return; }
     $('login-panel').hidden=true; stopped=false; begin();
-  } catch { $('notice').textContent='Sessiya açıla bilmədi.'; end(); }
+  } catch { $('notice').textContent='The session could not be opened.'; end(); }
 });
 $('disconnect').addEventListener('click', () => {
   end();
