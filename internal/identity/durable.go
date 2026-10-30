@@ -5,9 +5,17 @@ import (
 	"time"
 )
 
-// Revealing, deleting or importing secrets, changing trust decisions, the
-// password or MFA require both factors proved within this window.
-const freshProof = 2 * time.Minute
+// Revealing or deleting secrets and connections, and changing the password,
+// MFA or recovery codes, need a factor proved within this window: sign-in
+// counts until its password check is this old, and a step-up code renews it.
+// Adding a record or a connection, trusting a catalog identity and connecting
+// need a ready session only.
+const freshProof = 10 * time.Minute
+
+// stepUpFailures wrong step-up codes end the session. A stolen session then
+// gets this many guesses at a six-digit code, not one every few seconds for
+// the session's life; the person signs in again with password and factor.
+const stepUpFailures = 5
 
 // NewPersistent keeps the existing HTTPS/Origin/session controls, backed by
 // encrypted transactional custody. Password-only sessions are setup/challenge
@@ -117,29 +125,30 @@ func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recover
 	l.sessions[newID].reauthUntil = proofUntil
 	return raw, codes, nil
 }
-func (l *Lab) reauthenticate(ctx context.Context, id [32]byte, password, code string) error {
-	l.mu.Lock()
-	s := l.readyLocked(id, false)
-	if s == nil || !l.attemptLocked("reauth:"+s.username, reauthAttempts) {
-		l.mu.Unlock()
-		return errRefused
-	}
-	a := l.accounts[s.username]
-	hash, revision := a.password, a.revision
-	l.mu.Unlock()
-	if !l.slot(ctx) {
-		return errLimited
-	}
-	defer func() { <-l.derive }()
-	valid := hash.verify(password)
+
+// stepUp renews a ready session's fresh window with the second factor alone:
+// a current authenticator code or an unused recovery code. The session already
+// proved the password at sign-in; what a stolen or unattended session lacks is
+// the phone. Wrong codes spend the durable factor budget and, at
+// stepUpFailures, end this session.
+func (l *Lab) stepUp(ctx context.Context, id [32]byte, code string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !valid || l.readyLocked(id, false) != s || a.revision != revision || ctx.Err() != nil {
+	s := l.readyLocked(id, false)
+	if s == nil || ctx.Err() != nil {
 		return errRefused
 	}
-	if l.store.consumeFactor(s.owner, revision, code, l.now()) != nil {
+	if !l.attemptLocked("reauth:"+s.username, reauthAttempts) {
+		return errLimited
+	}
+	if l.store.consumeFactor(s.owner, s.revision, code, l.now()) != nil {
+		if s.stepFailures++; s.stepFailures >= stepUpFailures {
+			l.forgetLocked(id)
+		}
 		return errRefused
 	}
+	s.stepFailures = 0
+	s.last = l.now() // the person is present
 	s.reauthUntil = l.now().Add(freshProof)
 	return nil
 }

@@ -43,7 +43,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	command := args[0]
 	switch command {
-	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab", "backup", "restore", "key-export", "key-import", "check-tls":
+	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab", "backup", "restore", "key-export", "key-import", "check-tls", "server-add":
 	default:
 		return refused
 	}
@@ -63,9 +63,30 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	out := flags.String("out", "", "new backup file, never beside the instance key")
 	in := flags.String("in", "", "backup file to restore")
 	sshOnlyCatalog := flags.Bool("ssh-only", false, "check-targets: also refuse any target that is not SSH")
+	serverLabel := flags.String("name", "", "server-add: the name people will see")
+	serverHost := flags.String("host", "", "server-add: the server's IP address")
+	serverPort := flags.Int("port", 22, "server-add: the server's SSH port")
+	serverPrint := flags.String("fingerprint", "", "server-add: the SHA256 host key fingerprint you compared, instead of answering yes")
 	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" || (*out != "") != (command == "backup") || (*in != "") != (command == "restore") ||
-		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") && command != "check-tls" || *sshOnlyCatalog && command != "check-targets" {
+		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") && command != "check-tls" || *sshOnlyCatalog && command != "check-targets" ||
+		(*serverLabel != "" || *serverHost != "" || *serverPrint != "" || *serverPort != 22) && command != "server-add" {
 		return refused
+	}
+	if command == "server-add" {
+		validFlags := true
+		flags.Visit(func(f *flag.Flag) {
+			validFlags = validFlags && (f.Name == "config" || f.Name == "name" || f.Name == "host" || f.Name == "port" || f.Name == "fingerprint")
+		})
+		if !validFlags || *catalog == "" || *serverLabel == "" || *serverHost == "" || runtime.GOOS != "linux" || os.Geteuid() != 0 {
+			return refused
+		}
+		load := func(path string) ([]byte, error) {
+			if _, e := operatorconfig.LoadCatalog(path); e != nil {
+				return nil, e
+			}
+			return os.ReadFile(path) // #nosec G304 -- the root-owned catalog LoadCatalog just admitted; ReplaceCatalog rechecks its bytes.
+		}
+		return serverAdd(context.Background(), *catalog, *serverLabel, *serverHost, *serverPort, *serverPrint, input, output, load, probeHostKey, operatorconfig.ReplaceCatalog)
 	}
 	var targets []identity.RemoteTarget
 	limits := sessionlimits.Default()

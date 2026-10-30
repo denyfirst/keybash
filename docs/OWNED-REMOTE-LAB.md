@@ -37,10 +37,11 @@ per owner and 2048 overall, within the existing 256 MiB DB cap. The optional
 namespace's deletion is an availability loss, not a new authority. Old backup/
 whole-record rollback limits from `CUSTODY-LAB.md` still apply.
 
-Connections can be created/listed/deleted after MFA. Creation, deletion and
-trust changes require fresh password-plus-factor proof; launching an approved
-connection needs a ready MFA session, because sign-in already proved both
-factors and launch changes no stored decision. The API accepts only exact
+Connections can be created/listed/deleted after MFA. Creation, trust changes
+and launching need a ready MFA session: sign-in already proved both factors,
+and creation and trust bind only an owned credential to the operator-approved
+identity that launch would use anyway. Deletion asks for a factor proved
+within ten minutes (see `CUSTODY-LAB.md`). The API accepts only exact
 named scalar fields; an `owner`, replacement target/identity or extra field
 is refused. SSH needs the owner's nonempty username and a key or password; RDP
 needs a username and password. Only the stored credential is tried: no
@@ -122,6 +123,16 @@ frame; background/BFCache handling cannot revive an abandoned async launch.
 SSH paste preview and focused RDP input remain enforced. RDP clipboard/remote
 resize are still disabled. Explicit SSH clipboard permission applies only to
 the terminal document. No external service, CDN or runtime dependency is added.
+
+"Qoşul" opens each session in its own tab (`target=_blank`, `rel=noopener`;
+both pages are same-origin with COOP `same-origin`), and the tab is titled
+with the connection's name, read from `/api/connections` and set as text.
+A session page can fold its menu away for the full width; this is not
+remembered, since the pages store nothing in the browser. "Tam ekran"
+(terminal: the whole session panel; desktop: the canvas) asks the browser for
+full screen and, where it allows (Chromium), Keyboard Lock, so Esc, the
+Windows key and Alt+Tab reach the remote and holding Esc leaves. Both need a
+click on the page, and closing the session leaves full screen.
 
 `cmd/keybash serve-lab` deliberately remains custody-only: operator catalog
 configuration, an installed isolated launcher, target trust/approval UI and

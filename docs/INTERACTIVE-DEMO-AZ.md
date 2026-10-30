@@ -41,13 +41,13 @@ serverlər üçün etmə. Demo Ctrl+C ilə və ya bir saatdan sonra dayanır.
 Demo bir bələdçi və iş yeri səhifəsi açır. Bələdçidə **İş yerini aç** düyməsi,
 demo istifadəçisi/şifrəsi, hazırkı MFA kodu və qalan birdəfəlik bərpa kodları var.
 Hər açılışda yeni müvəqqəti instance və test açarları yaradılır. Giriş və MFA
-ilk dəfə adi UI ilə avtomatik tamamlanır; həssas əməliyyatlar üçün iki dəqiqəlik
-icazə adi server yoxlamalarından alınır. MFA/CSRF/ownership bypass yoxdur.
+ilk dəfə adi UI ilə avtomatik tamamlanır. MFA/CSRF/ownership bypass yoxdur.
 
 MFA kodunu təkrar işlətmək olmaz. Açılışda işlənən kod bitənədək növbəti kodu
 gözlə və ya bələdçidəki istifadə olunmamış bərpa kodlarından birini işlət.
-Sonrakı əlavə/silmə və yeni bağlantı açılışı üçün lazım gəlsə hesab səhifəsində
-demo giriş şifrəsi və yeni MFA/bərpa kodu ilə təkrar doğrula. Şifrəni/MFA-nı
+Açar və bağlantı əlavə etmək və qoşulmaq üçün kod soruşulmur. Göstərmək və
+silmək üçün girişdən 10 dəqiqə keçibsə, kiçik pəncərə yalnız telefondakı kodu
+(və ya bərpa kodunu) soruşur və əməliyyatı davam etdirir. Şifrəni/MFA-nı
 dəyişsən, bələdçidəki ilkin məlumatlar artıq uyğun olmaya bilər; demo yenidən
 başladılaraq təmiz vəziyyətə qayıdır.
 

@@ -108,13 +108,13 @@ func remoteFixtureWithLimits(t *testing.T, origin string, limits sessionlimits.L
 	c.session("challenge")
 	c.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
 	c.session("ready")
-	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": codes[1]}), 204)
+	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
 	a, _ := store.lookup("alice")
 	credential, e := store.putCredential(a.ID, Credential{Name: "Synthetic remote", Kind: "password", Username: "synthetic-user", Secret: worker.expected})
 	if e != nil {
 		t.Fatal("fixture credential failed")
 	}
-	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic connection", "target": target.ID, "credential": credential, "fingerprint": identityFingerprint(target), "approval": approvalFingerprint(target)}), 200)
+	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic connection", "target": target.ID, "credential": credential, "approval": approvalFingerprint(target)}), 200)
 	var record struct{ ID string }
 	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
 		t.Fatal("connection creation failed")
@@ -286,7 +286,7 @@ func TestOwnedRemotePageCarriesItsConnection(t *testing.T) {
 		t.Fatal("owned page has no body tag")
 	}
 	tag := page[start : start+end]
-	if !strings.Contains(tag, `data-owned-remote="rdp"`) || !strings.Contains(tag, `data-connection="`+record+`"`) || !strings.Contains(tag, `class="workspace"`) || strings.Count(page, "data-owned-remote") != 1 {
+	if !strings.Contains(tag, `data-owned-remote="rdp"`) || !strings.Contains(tag, `data-connection="`+record+`"`) || !strings.Contains(tag, `class="workspace session-page"`) || strings.Count(page, "data-owned-remote") != 1 {
 		t.Fatalf("owned page body tag is not marked for its connection: %s", tag)
 	}
 	c.expect("GET", "/remote/ssh/"+record, "", 404)
@@ -332,10 +332,13 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	staleKey, _ := tokenID(staleRaw)
 	delete(l.remote.leases, staleKey)
 	l.mu.Unlock()
-	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"fingerprint": row.Fingerprint, "approval": row.Approval, "revision": "1"}), 403)
-	c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "again", "target": row.Target, "credential": row.Credential, "fingerprint": row.Fingerprint, "approval": row.Approval}), 403)
-	c.expect("DELETE", "/api/connections/"+record, "{}", 403)
-	c.expect("DELETE", "/api/credentials/"+row.Credential, "{}", 403)
+	// Trusting and creating need the ready session only, so these reach their
+	// own checks (a stale revision, a wrong fingerprint) without changing
+	// anything; deleting asks for fresh proof.
+	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"approval": row.Approval, "revision": "999"}), 409)
+	c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "again", "target": row.Target, "credential": row.Credential, "approval": strings.Repeat("0", 64)}), 409)
+	c.expect("DELETE", "/api/connections/"+record, "{}", 428)
+	c.expect("DELETE", "/api/credentials/"+row.Credential, "{}", 428)
 	l.mu.Lock()
 	l.sessions[id].reauthUntil = saved
 	l.mu.Unlock()
@@ -359,8 +362,8 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	bob.session("challenge")
 	bob.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
 	bob.session("ready")
-	bob.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": codes[1]}), 204)
-	bob.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "other", "target": row.Target, "credential": row.Credential, "fingerprint": row.Fingerprint, "approval": row.Approval}), 403)
+	bob.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
+	bob.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "other", "target": row.Target, "credential": row.Credential, "approval": row.Approval}), 403)
 	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
 	bob.expect("DELETE", "/api/connections/"+record, "{}", 404)
 	// An issued but unconsumed grant cannot retain a deleted credential.

@@ -159,8 +159,8 @@ func compatible(t RemoteTarget, c Credential) bool {
 // Opening an approved, owned connection needs a ready MFA session, not a
 // fresh password and new code each time: sign-in already proved both factors,
 // and the one-use 30-second lease stays bound to this session and owner.
-// Changing what may be opened (trust, creation, deletion) and revealing or
-// changing secrets still require fresh proof.
+// Creating and trusting connections need the same; deleting them, and
+// revealing or deleting secrets, need fresh proof (see freshProof).
 func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	s := l.readyLocked(id, false)
 	if s == nil || l.remote == nil {
@@ -468,13 +468,16 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		}{raw}
 		return
 	}
-	if l.readyLocked(id, true) != s {
-		status = 403
+	// Creating a connection or trusting a target binds only an owned
+	// credential to an operator-approved identity, which acceptTargetProof
+	// checks; it is no more than opening needs. Deleting asks for fresh proof.
+	if r.Method == "DELETE" && l.readyLocked(id, true) != s {
+		status = http.StatusPreconditionRequired
 		return
 	}
 	switch {
 	case r.Method == "POST" && r.URL.Path == "/api/connections":
-		fields, ok := readFields(w, r, 2048, "name", "target", "credential", "fingerprint", "approval")
+		fields, ok := readFields(w, r, 2048, "name", "target", "credential", "approval")
 		if !ok {
 			status = 400
 			return
@@ -485,7 +488,9 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 403
 			return
 		}
-		if !acceptTargetProof(target, fields["fingerprint"], fields["approval"], l.now()) {
+		// The identity is the operator catalog's pin; the person confirms the
+		// snapshot they were shown (approval), not a fingerprint they retype.
+		if !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
 			status = 409
 			return
 		}
@@ -502,7 +507,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 429
 			return
 		}
-		record, e := l.store.putConnection(s.owner, connection{Name: fields["name"], Target: fields["target"], Credential: fields["credential"], Approval: approvalFingerprint(target), Fingerprint: fields["fingerprint"]})
+		record, e := l.store.putConnection(s.owner, connection{Name: fields["name"], Target: fields["target"], Credential: fields["credential"], Approval: approvalFingerprint(target), Fingerprint: identityFingerprint(target)})
 		if e != nil {
 			status = 400
 			return
@@ -512,7 +517,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		}{record}
 	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/connections/") && strings.HasSuffix(r.URL.Path, "/trust"):
 		record := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/connections/"), "/trust")
-		fields, ok := readFields(w, r, 2048, "fingerprint", "approval", "revision")
+		fields, ok := readFields(w, r, 2048, "approval", "revision")
 		if !ok || !validID(record) {
 			status = 400
 			return
@@ -524,7 +529,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			return
 		}
 		target, ok := l.remote.targets[row.Target]
-		if !ok || !acceptTargetProof(target, fields["fingerprint"], fields["approval"], l.now()) {
+		if !ok || !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
 			status = 409
 			return
 		}
@@ -545,7 +550,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 429
 			return
 		}
-		if l.store.trustConnection(s.owner, record, fields["revision"], fields["approval"], fields["fingerprint"]) != nil {
+		if l.store.trustConnection(s.owner, record, fields["revision"], fields["approval"], identityFingerprint(target)) != nil {
 			status = 409
 			return
 		}

@@ -188,12 +188,15 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
+	// The workspace is one document with a page per path; the script shows
+	// the part the path names. Loading a page counts as activity.
+	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account")
 	id, valid := tokenID(requestToken(r))
 	l.mu.Lock()
-	s := l.liveLocked(id, r.URL.Path == "/" && r.Method == "GET")
+	s := l.liveLocked(id, page)
 	if !valid || s == nil {
 		l.mu.Unlock()
-		if r.URL.Path == "/" && r.Method == "GET" {
+		if page {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 		} else {
 			refuse(w, 401)
@@ -212,7 +215,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	if r.URL.Path == "/" && r.Method == "GET" {
+	if page {
 		l.mu.Unlock()
 		serveAsset(w, "custody-workspace.html")
 		return
@@ -345,12 +348,12 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/reauth" && r.Method == "POST" {
 		l.mu.Unlock()
-		fields, ok := readFields(w, r, 4096, "password", "code")
-		if !ok || !passwordInput(fields["password"]) {
+		fields, ok := readFields(w, r, 1024, "code")
+		if !ok {
 			refuse(w, 400)
 			return
 		}
-		e := l.reauthenticate(r.Context(), id, fields["password"], fields["code"])
+		e := l.stepUp(r.Context(), id, fields["code"])
 		clear(fields)
 		if e != nil {
 			identityError(w, e)
@@ -369,9 +372,13 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, items)
 		return
 	}
-	if l.readyLocked(id, true) != s {
+	// Adding a record only needs the ready session. Everything else here
+	// reveals, removes or changes account security and asks for a factor
+	// proved within freshProof; 428 tells the page to ask for a code.
+	adding := (r.URL.Path == "/api/credentials" || r.URL.Path == "/api/credentials/generate") && r.Method == "POST"
+	if !adding && l.readyLocked(id, true) != s {
 		l.mu.Unlock()
-		refuse(w, 403)
+		refuse(w, http.StatusPreconditionRequired)
 		return
 	}
 	s.last = l.now()
@@ -432,6 +439,40 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, struct {
 			Codes recoveryCodes `json:"codes"`
 		}{codes})
+	case r.URL.Path == "/api/credentials/generate" && r.Method == "POST":
+		if !l.attemptLocked("import:"+s.username, importAttempts) {
+			l.mu.Unlock()
+			identityError(w, errLimited)
+			return
+		}
+		l.mu.Unlock()
+		fields, ok := readFields(w, r, 1024, "name", "username")
+		if !ok {
+			refuse(w, 400)
+			return
+		}
+		c, e := newGeneratedKey(fields["name"], fields["username"])
+		if e != nil {
+			refuse(w, 400)
+			return
+		}
+		l.mu.Lock()
+		if l.readyLocked(id, false) != s || r.Context().Err() != nil {
+			l.mu.Unlock()
+			refuse(w, 401)
+			return
+		}
+		record, e := l.store.putCredential(s.owner, c)
+		l.mu.Unlock()
+		if e != nil {
+			refuse(w, 503)
+			return
+		}
+		// Only the public line leaves; the private key stays sealed here.
+		jsonReply(w, struct {
+			ID     string `json:"id"`
+			Public string `json:"public"`
+		}{record, c.Public})
 	case r.URL.Path == "/api/credentials" && r.Method == "POST":
 		if !l.attemptLocked("import:"+s.username, importAttempts) {
 			l.mu.Unlock()
@@ -457,7 +498,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		l.mu.Lock()
-		if l.readyLocked(id, true) != s || r.Context().Err() != nil {
+		if l.readyLocked(id, false) != s || r.Context().Err() != nil {
 			l.mu.Unlock()
 			refuse(w, 401)
 			return
@@ -508,6 +549,10 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			l.mu.Unlock()
 			if e != nil {
 				refuse(w, 404)
+				return
+			}
+			if c.Generated {
+				refuse(w, 403) // made here, never exported
 				return
 			}
 			deadlineDone := make(chan struct{})

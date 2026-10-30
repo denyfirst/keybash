@@ -2,6 +2,8 @@ package identity
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -23,6 +25,11 @@ type Credential struct {
 	Secret      string `json:"secret"`
 	Passphrase  string `json:"passphrase"`
 	Fingerprint string `json:"fingerprint"`
+	// Public is an SSH key's authorized_keys line, kept so it can be shown
+	// without opening the private key. A Generated key was made here: its
+	// private half is never revealed or exported and leaves only as signatures.
+	Public    string `json:"public,omitempty"`
+	Generated bool   `json:"generated,omitempty"`
 }
 
 func (Credential) Format(w fmt.State, _ rune) { _, _ = io.WriteString(w, "[credential redacted]") }
@@ -33,10 +40,12 @@ type credentialSummary struct {
 	Kind        string `json:"kind"`
 	Username    string `json:"username"`
 	Fingerprint string `json:"fingerprint"`
+	Public      string `json:"public,omitempty"`
+	Generated   bool   `json:"generated,omitempty"`
 }
 
 func (c Credential) summary() credentialSummary {
-	return credentialSummary{c.ID, c.Name, c.Kind, c.Username, c.Fingerprint}
+	return credentialSummary{c.ID, c.Name, c.Kind, c.Username, c.Fingerprint, c.Public, c.Generated}
 }
 func label(value string, maxBytes int, empty bool) bool {
 	if !utf8.ValidString(value) || len(value) > maxBytes || !empty && len(value) == 0 {
@@ -57,7 +66,7 @@ func validateCredential(c *Credential) error {
 		if len(c.Secret) > 4096 || len(c.Passphrase) != 0 || strings.ContainsRune(c.Secret, 0) {
 			return errRefused
 		}
-		c.Fingerprint = ""
+		c.Fingerprint, c.Public = "", ""
 		return nil
 	}
 	if c.Kind != "ssh-key" {
@@ -68,8 +77,33 @@ func validateCredential(c *Credential) error {
 		return errRefused
 	}
 	c.Fingerprint = ssh.FingerprintSHA256(key.PublicKey())
+	c.Public = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key.PublicKey())))
 	key.Close()
 	return nil
+}
+
+// newGeneratedKey makes an Ed25519 key here, for a person who has none. It is
+// sealed like any record but never revealed or exported; the person puts its
+// public line on their server.
+func newGeneratedKey(name, username string) (Credential, error) {
+	if username == "" {
+		return Credential{}, errRefused // a key nobody can log in with is no use
+	}
+	_, private, e := ed25519.GenerateKey(rand.Reader)
+	if e != nil {
+		return Credential{}, errRefused
+	}
+	block, e := ssh.MarshalPrivateKey(private, "keybash")
+	clear(private)
+	if e != nil {
+		return Credential{}, errRefused
+	}
+	c := Credential{Name: name, Kind: "ssh-key", Username: username, Secret: string(pem.EncodeToMemory(block)), Generated: true}
+	clear(block.Bytes)
+	if validateCredential(&c) != nil {
+		return Credential{}, errRefused
+	}
+	return c, nil
 }
 
 // openSSHKey bounds an OpenSSH private key's cost before parsing it and
@@ -152,7 +186,7 @@ func (s *Store) credential(tx *bolt.Tx, owner, id string) (Credential, error) {
 		return c, e
 	}
 	defer clear(plain)
-	if decodeRecord(plain, &c, 96*1024) != nil || c.ID != id || !label(c.Name, 160, false) || (c.Kind != "password" && c.Kind != "ssh-key") || len(c.Secret) > 64*1024 || len(c.Passphrase) > 1024 {
+	if decodeRecord(plain, &c, 96*1024) != nil || c.ID != id || !label(c.Name, 160, false) || (c.Kind != "password" && c.Kind != "ssh-key") || c.Generated && c.Kind != "ssh-key" || len(c.Secret) > 64*1024 || len(c.Passphrase) > 1024 {
 		return Credential{}, errRefused
 	}
 	return c, nil

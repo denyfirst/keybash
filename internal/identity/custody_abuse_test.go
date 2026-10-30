@@ -173,7 +173,7 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 	owner.session("challenge")
 	owner.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": bobCodes[0]}), 204)
 	owner.session("ready")
-	owner.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": bobCodes[1]}), 204)
+	owner.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": bobCodes[1]}), 204)
 	owner.expect("POST", "/api/credentials/"+record+"/reveal", "{}", 404)
 	owner.expect("DELETE", "/api/credentials/"+record, "{}", 404)
 	if _, e = s.readCredential(alice.ID, record); e != nil {
@@ -187,7 +187,7 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 	owner.session("challenge")
 	owner.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": aliceCodes[0]}), 204)
 	owner.session("ready")
-	owner.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": aliceCodes[1]}), 204)
+	owner.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": aliceCodes[1]}), 204)
 	// Replacement/regen rotate the cookie and revoke every old account session.
 	stale := owner.cookie
 	w := owner.expect("POST", "/api/mfa/recovery", "{}", 200)

@@ -13,8 +13,8 @@
   <script src="/vendor/xterm.js" defer></script>
   <script type="module" src="/app.mjs"></script>
 </head>
-<body class="workspace">
-  <aside class="rail">
+<body class="workspace session-page">
+  <aside class="rail" id="rail">
     <p class="rail-identity"><a class="wordmark" href="/" aria-label="Keybash">keybash<span class="wordmark-stop">.</span></a> <span class="tag">SSH</span></p>
     <p class="rail-caption" id="rail-workspace">İş yeri</p>
     <nav class="rail-nav" aria-labelledby="rail-workspace">
@@ -23,13 +23,13 @@
     </nav>
   </aside>
   <div class="workspace-main">
-    <header class="topbar"><p class="topbar-path"><span>İş yeri</span><span class="topbar-slash" aria-hidden="true">/</span><strong>Terminal</strong></p><span id="status" role="status">Bağlı deyil</span></header>
+    <header class="topbar"><div class="topbar-start"><button id="rail-toggle" class="rail-toggle" type="button" aria-expanded="true" aria-controls="rail"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.6"/><path d="M9.5 4.5v15M6 8.5h1.5M6 11h1.5"/></svg><span>Menyunu gizlət</span></button><p class="topbar-path"><span>İş yeri</span><span class="topbar-slash" aria-hidden="true">/</span><strong id="topbar-name">Terminal</strong></p></div><span id="status" role="status">Bağlı deyil</span></header>
     <main>
       <section id="login-panel" class="panel login-panel">
         <form id="login"><label for="code">Birdəfəlik lab giriş kodu</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Sessiyanı aç</button></div></form>
       </section>
       <section class="session" aria-label="Terminal workspace">
-        <div class="toolbar"><div class="tab"><span class="tab-dot"></span>ssh <span class="tab-type">SSH</span></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="disconnect" disabled>Bağla</button></div></div>
+        <div class="toolbar"><div class="tab"><span class="tab-dot"></span><span id="tab-name">ssh</span> <span class="tab-type">SSH</span></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="fullscreen" disabled>Tam ekran</button><button id="disconnect" disabled>Bağla</button></div></div>
         <div id="terminal" aria-label="SSH terminal"></div>
         <footer class="session-foot"><span>Ctrl+C: interrupt <i>·</i> Ctrl+Shift+C: copy</span><span id="size">100 × 30</span></footer>
       </section>

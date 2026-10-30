@@ -68,6 +68,28 @@ is never written, so it cannot sign anything else. Trusting `ca.pem` on a test
 PC, after comparing its printed SHA-256 fingerprint, vouches for this gateway
 only. Production uses the organization's own CA or a public one.
 
+## Adding a server later
+
+`keybash server-add --config=/etc/keybash/targets.json --name=… --host=IP
+[--port=22] [--fingerprint=SHA256:…]`, as root, adds one SSH server by IP
+without hand-written JSON:
+
+- It first checks the name and address against the catalog with a stand-in key.
+  Protected networks, loopback, link-local and an address and port already
+  listed are refused without any connection.
+- It then reads the server's Ed25519 host key over an SSH handshake that
+  stops at the key. It offers no other key type and never authenticates.
+- It prints the fingerprint and the command to compare it on the server's
+  console. It changes nothing until the operator types `yes`, or passes the
+  `--fingerprint` they compared.
+- The catalog is replaced through `operatorconfig.ReplaceCatalog`:
+  - as root;
+  - only if its bytes are still those it read;
+  - only with a catalog that loads;
+  - by writing a root-owned 0644 file beside it and renaming it over.
+- The services read the catalog at start, so the command ends by naming the
+  restart, which closes open sessions.
+
 ## Uninstall
 
 `uninstall.sh` stops and disables the units, removes unit files, the sysusers

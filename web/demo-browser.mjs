@@ -48,17 +48,11 @@ try {
   await account.locator('#recovery').waitFor({state: 'visible'}); await settle();
   const recovery = (await account.locator('#recovery-codes').inputValue()).split('\n');
   await account.locator('#saved-recovery').click(); await account.locator('#vault').waitFor({state: 'visible'}); await settle();
-  await account.locator('#reauth-password').fill(config.Password);
-  // Consume an ordinary one-use recovery code for initial reauthentication;
-  // this avoids reusing the enrollment TOTP or a wall-clock boundary race.
-  await account.locator('#reauth-code').fill(recovery[0]);
-  await account.locator('#reauth button').click();
-  await account.locator('#notice').filter({hasText: 'Doğrulandı'}).waitFor(); await settle();
+  // Records and connections need a ready session only; no step-up here.
   stage = 'sample connections';
   const state = await (await account.request.get(config.Origin + '/api/session')).json();
   const headers = {Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf};
   const connections = {};
-  const fingerprints = {ssh: config.SSHFingerprint, rdp: config.RDPFingerprint};
   for (const [mode, name, secret, target] of [
     ['ssh', 'Linux SSH · UI simulyasiyası', config.SSHSecret, config.SSH],
     ['rdp', 'Desktop · UI simulyasiyası (Windows deyil)', config.RDPSecret, config.RDP]
@@ -66,7 +60,7 @@ try {
     const saved = await account.request.post(config.Origin + '/api/credentials', {headers, data: {name, kind: mode === 'ssh' ? 'ssh-key' : 'password', username: 'synthetic-user', secret, passphrase: ''}});
     assert.equal(saved.status(), 200);
     const credential = await saved.json();
-    const linked = await account.request.post(config.Origin + '/api/connections', {headers, data: {name, target, credential: credential.id, fingerprint: fingerprints[mode], approval: (await (await account.request.get(config.Origin + '/api/targets/' + target)).json()).approval}});
+    const linked = await account.request.post(config.Origin + '/api/connections', {headers, data: {name, target, credential: credential.id, approval: (await (await account.request.get(config.Origin + '/api/targets/' + target)).json()).approval}});
     assert.equal(linked.status(), 200);
     connections[mode] = (await linked.json()).id;
   }
@@ -84,16 +78,16 @@ try {
       <h1>keybash<span style="color:#e34254">.</span> Demo</h1>
       <p><strong>Bu, lokal UI simulyasiyasıdır.</strong> Real Linux shell və Windows yoxdur. Öz server açarlarını və şifrələrini daxil etmə.</p>
       <button id="workspace">İş yerini aç</button>
-      <ol><li>İş yerində iki nümunə bağlantı var. <b>Qoşul</b> seç.</li><li>Terminalda <code>help</code>, <code>whoami</code>, <code>echo Salam dostum</code>, Ctrl+C və paste preview-ni sına.</li><li>Desktop-da kliklə, yaz, Backspace/Enter və tam ekranı sına. RDP clipboard/remote resize hələ bağlıdır.</li><li>Bağlantını yenidən açmaq üçün təkrar doğrulama lazım deyil; əlavə etmə, silmə və göstərmə üçün lazımdır. Logout bütün açıq bağlantıları bağlayır.</li></ol>
+      <ol><li>İş yerində iki nümunə bağlantı var. <b>Qoşul</b> seç.</li><li>Terminalda <code>help</code>, <code>whoami</code>, <code>echo Salam dostum</code>, Ctrl+C və paste preview-ni sına.</li><li>Desktop-da kliklə, yaz, Backspace/Enter və tam ekranı sına. RDP clipboard/remote resize hələ bağlıdır.</li><li>Qoşulmaq, açar və bağlantı əlavə etmək üçün kod soruşulmur; göstərmə və silmə üçün telefondakı kod soruşulur (girişdən sonrakı 10 dəqiqədə soruşulmur). Logout bütün açıq bağlantıları bağlayır.</li></ol>
       <p>Demo istifadəçisi: <code>demo</code><br>Demo giriş şifrəsi: <code id="password"></code></p>
       <p>Hazırkı MFA kodu: <output id="otp"></output><br><small id="remaining"></small><br><small>Eyni kod bir dəfə işləyir. Açılışda işlənmiş kod üçün növbəti 30 saniyəlik kodu gözlə.</small></p>
       <details><summary>Demo MFA seed və birdəfəlik bərpa kodları</summary><p>Autentifikatora əl ilə əlavə etmək üçün: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Hər bərpa kodunu yalnız bir dəfə işlət. Bunlar yalnız bu müvəqqəti demo üçündür.</p></details>
-      <details><summary>Demo server kimlikləri</summary><p>Yeni demo bağlantısını təsdiqləmək üçün ayrıca fixture məlumatı:</p><p>SSH: <code id="ssh-fingerprint"></code></p><p>RDP: <code id="rdp-fingerprint"></code></p></details><p><small>Bütün demo pəncərələrini bağlayanda və ya bir saatdan sonra sessiya bitir. Hər işə salma yeni, müvəqqəti məlumatlarla başlayır.</small></p></html>`);
+      <details><summary>Demo server kimlikləri</summary><p>Bağlantı yaradanda kimlik yazılmır; Keybash onu serverlər siyahısından götürür. Bunlar yalnız məlumat üçündür:</p><p>SSH: <code id="ssh-fingerprint"></code></p><p>RDP: <code id="rdp-fingerprint"></code></p></details><p><small>Bütün demo pəncərələrini bağlayanda və ya bir saatdan sonra sessiya bitir. Hər işə salma yeni, müvəqqəti məlumatlarla başlayır.</small></p></html>`);
     await guide.locator('#ssh-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.SSHFingerprint);
     await guide.locator('#rdp-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.RDPFingerprint);
     await guide.locator('#password').evaluate((el, value) => { el.textContent = value; }, config.Password);
     await guide.locator('#seed').evaluate((el, value) => { el.textContent = value; }, seed);
-    await guide.locator('#recovery').evaluate((el, value) => { el.value = value; }, recovery.slice(1).join('\n'));
+    await guide.locator('#recovery').evaluate((el, value) => { el.value = value; }, recovery.join('\n'));
     await guide.exposeFunction('openWorkspace', async () => {
       if (!account.isClosed()) await account.bringToFront();
       else await (await context.newPage()).goto(config.Origin + '/');
@@ -120,7 +114,7 @@ try {
       });
     } else {
       assert.match(await guide.locator('#otp').textContent(), /^[0-9]{6}$/);
-      assert.equal((await guide.locator('#recovery').inputValue()).split('\n').length, 9);
+      assert.equal((await guide.locator('#recovery').inputValue()).split('\n').length, 10); // no step-up spends one any more
       await guide.locator('#workspace').click();
       await account.waitForFunction(() => document.visibilityState === 'visible');
       await guide.close();
