@@ -9,98 +9,238 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 #vault > .panel + .panel { margin-top: 0; }
 #vault > .panel { scroll-margin-top: 1.2rem; }
 
-#records, #connections { display: grid; gap: 0.6rem; margin: 0.4rem 0 0.8rem; }
+#connections { margin: 0.4rem 0 0.8rem; }
 
-/* A record or connection: its name and facts on the first lines, its actions
-   after them. Names and fingerprints break anywhere rather than overflow. */
+/* ── Keys and passwords: one row each ─────────────────────────────────── */
+.record-list { display: grid; gap: 0.6rem; }
 .record {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.9rem 1rem;
-  background: var(--paper);
+  gap: 0.6rem 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
   border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.record > span {
-  flex: 1 1 100%;
-  overflow-wrap: anywhere;
-  font-size: 0.92rem;
-  color: var(--ink-soft);
+.record:hover { border-color: color-mix(in srgb, var(--tool) 30%, var(--rule)); box-shadow: var(--shadow-lg); }
+.record-icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--tool);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 20%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card)));
+  border-radius: 10px;
 }
-.record > span:first-child { color: var(--ink); font-weight: 600; }
-.record button, .record a { margin: 0; }
-.record button { padding: 0.45rem 0.9rem; font-size: 0.86rem; }
-/* Connect is the record's main action: a link drawn as the accent button. */
-.record a {
-  display: inline-block;
-  padding: 0.45rem 0.9rem;
-  font-size: 0.86rem;
+.record-titles { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; min-width: 0; }
+.record-name { flex: 1 1 100%; margin: 0; overflow: hidden; font-size: 1rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.record-meta { margin: 0; font-size: 0.84rem; color: var(--ink-soft); }
+.record-badge {
+  padding: 0.05rem 0.5rem;
+  font-size: 0.72rem;
   font-weight: 600;
+  color: var(--tool);
+  background: color-mix(in srgb, var(--tool) 10%, var(--card));
+  border-radius: 999px;
+}
+/* A fingerprint is long and compared rarely: shown short, whole on hover. */
+.record .fingerprint {
+  max-width: 15rem;
+  overflow: hidden;
+  padding: 0.25rem 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.record-actions { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 0.4rem; min-width: 12.75rem; grid-column: -2; }
+.record-actions button { margin: 0; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
+@media (max-width: 760px) {
+  .record { grid-template-columns: auto minmax(0, 1fr); }
+  .record .fingerprint { grid-column: 1 / -1; max-width: 100%; }
+  .record-actions { grid-column: 1 / -1; justify-content: flex-start; min-width: 0; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
+  .record-actions button.ghost { margin-left: auto; }
+}
+
+/* ── Connections: one card per server ─────────────────────────────────── */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); gap: 1rem; }
+.server-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1.15rem 1.2rem 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.server-card:hover { border-color: color-mix(in srgb, var(--tool) 30%, var(--rule)); box-shadow: var(--shadow-lg); }
+.server-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.85rem; }
+.server-card-head .pill { margin-top: 0.15rem; }
+.server-icon {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  color: var(--tool);
+  background: color-mix(in srgb, var(--tool) 12%, var(--card));
+  border-radius: 10px;
+}
+.server-card[data-trust=changed] .server-icon,
+.server-card[data-trust=unavailable] .server-icon { color: var(--insecure); background: color-mix(in srgb, var(--insecure) 12%, var(--card)); }
+.server-card[data-trust=unverified] .server-icon { color: var(--weak); background: color-mix(in srgb, var(--weak) 14%, var(--card)); }
+.server-glyph { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.server-titles { min-width: 0; }
+.server-name { margin: 0; overflow: hidden; font-size: 1.02rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.server-meta { margin: 0.1rem 0 0; overflow: hidden; font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint); text-overflow: ellipsis; white-space: nowrap; }
+.server-help { margin: 0; font-size: 0.86rem; color: var(--ink-soft); }
+.server-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.5rem; margin-top: auto; padding-top: 0.85rem; border-top: 1px solid var(--rule); }
+.server-actions button { margin: 0; padding: 0.45rem 0.8rem; font-size: 0.85rem; }
+.server-actions button.ghost { margin-left: auto; }
+/* Connect is the card's main action: a link drawn as the accent button. */
+a.connect {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 650;
   color: #ffffff;
   text-decoration: none;
   background: var(--accent);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(15, 18, 24, 0.14);
 }
-.record a:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+a.connect:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+a.connect .button-glyph { width: 0.85rem; height: 0.85rem; fill: currentColor; stroke: none; }
 
-.record > span.fingerprint { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); }
-#records > .empty, #connections > .empty { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
+/* A state in a word and a colour, never in colour alone. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.22rem 0.62rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+}
+.pill::before { content: ""; width: 0.45rem; height: 0.45rem; background: currentColor; border-radius: 50%; }
 
-/* Before the first connection: three steps, the done ones ticked. */
+.empty-state {
+  grid-column: 1 / -1;
+  padding: 2.4rem 1.5rem;
+  text-align: center;
+  background: var(--card);
+  border: 1px dashed color-mix(in srgb, var(--ink-faint) 40%, var(--rule));
+  border-radius: var(--radius-lg);
+}
+.empty-state .empty-title { margin: 0 0 0.3rem; font-size: 1.05rem; font-weight: 650; color: var(--ink); }
+.empty-state .hint { max-width: 26rem; margin: 0 auto; }
+.page-foot { margin-top: 1.4rem; }
+
+/* Before the first connection: three steps side by side, the done ones ticked. */
 .first-steps {
   display: grid;
-  gap: 0.7rem;
-  margin: 0 0 1.6rem;
-  padding: 1.1rem 1.2rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 0.8rem;
+  margin: 0 0 1.4rem;
+  padding: 0;
   list-style: none;
   counter-reset: step;
-  background: color-mix(in srgb, var(--tool) 6%, var(--card));
-  border: 1px solid color-mix(in srgb, var(--tool) 25%, var(--rule));
-  border-radius: calc(var(--radius) + 2px);
 }
-.first-steps > li { position: relative; padding-left: 2.2rem; font-size: 0.92rem; color: var(--ink-soft); counter-increment: step; }
-.first-steps > li strong { color: var(--ink); font-weight: 600; }
+.first-steps > li {
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem 1rem 1rem 3.2rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  counter-increment: step;
+}
 .first-steps > li::before {
   content: counter(step);
   position: absolute;
-  top: 0.05rem;
-  left: 0;
+  top: 1rem;
+  left: 1rem;
   display: grid;
   place-items: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  font-size: 0.78rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--tool);
-  border: 1px solid color-mix(in srgb, var(--tool) 40%, var(--rule));
+  background: color-mix(in srgb, var(--tool) 12%, var(--card));
   border-radius: 50%;
 }
-.first-steps > li[data-done="true"]::before { content: "✓"; color: var(--strong); border-color: color-mix(in srgb, var(--strong) 45%, var(--rule)); }
+.first-steps > li[data-done="true"]::before { content: "✓"; color: var(--strong); background: color-mix(in srgb, var(--strong) 14%, var(--card)); }
+.first-steps .step-title { font-weight: 650; color: var(--ink); }
+.first-steps .step-text { font-size: 0.86rem; color: var(--ink-soft); }
 
-/* The account page: one row per thing that protects the account. */
-.settings { display: grid; }
+/* A form that asks a few things at once: a sheet over the page. */
+dialog.sheet { width: min(32rem, 92vw); padding: 1.6rem 1.7rem 1.4rem; }
+dialog.sheet h2 { margin-bottom: 0.2rem; }
+dialog.sheet .hint { margin-bottom: 0; }
+
+/* The signed-in person, at the foot of the menu. */
+.rail-user { display: flex; align-items: center; gap: 0.6rem; line-height: 1.35; }
+.rail-user strong { color: var(--ink); font-weight: 650; }
+.avatar { flex: none; width: 2rem; height: 2rem; background: linear-gradient(135deg, color-mix(in srgb, var(--tool) 70%, var(--card)), color-mix(in srgb, var(--brand) 55%, var(--card))); border-radius: 50%; }
+
+/* The account page: who is signed in, then one card per thing that
+   protects the account. */
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+  padding: 1.2rem 1.4rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.account-card > div { flex: 1; min-width: 0; }
+.account-card .hint { margin: 0; }
+.account-name { margin: 0; overflow: hidden; font-size: 1.15rem; font-weight: 650; text-overflow: ellipsis; }
+.avatar-large { width: 3rem; height: 3rem; }
+.pill-good { color: var(--strong); }
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1rem; }
 .setting {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 0.4rem 1.5rem;
-  padding: 1.2rem 0;
-  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.3rem 1.3rem 1.2rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
 }
-.setting:first-child { padding-top: 0; border-top: 0; }
-.setting:last-child { padding-bottom: 0; }
-.setting h2 { margin: 0 0 0.2rem; font-size: 1rem; }
+.setting h2 { margin: 0 0 0.25rem; font-size: 1.02rem; }
 .setting .hint { margin: 0; }
-.setting > button { margin-top: 0; white-space: nowrap; }
-.setting > details { grid-column: 1 / -1; margin-top: 0; border-top: 0; }
-.setting > details > summary { padding-top: 0.2rem; font-size: 0.92rem; color: var(--link); width: fit-content; }
-.setting > details form { max-width: 26rem; }
-@media (max-width: 640px) {
-  .setting { grid-template-columns: minmax(0, 1fr); }
+.setting-text { flex: 1; }
+.setting > button { align-self: flex-start; margin: 0; }
+.setting-icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--tool);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 20%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card)));
+  border-radius: 10px;
 }
+.setting-icon svg { width: 1.3rem; height: 1.3rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* A server identity's state, in words and in its colour. */
 .trust-state { font-weight: 600; }
@@ -195,14 +335,60 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 #seed { display: flex; flex-wrap: wrap; gap: 0.15rem 0.7rem; font-size: 1.05rem; letter-spacing: 0.08em; }
 .qr-care { margin-top: 0.9rem; }
 #enrollment label { margin-top: 0.9rem; }
-#enrollment-code {
-  max-width: 12rem;
-  font-family: var(--mono);
-  font-size: 1.35rem;
-  letter-spacing: 0.4em;
-  text-indent: 0.4em; /* balances the spacing after the last digit */
-  text-align: center;
+/* Six boxes, one input: the digits are spaced to sit in the boxes drawn
+   behind them, so typing, pasting and autofill all work as in one field. */
+.code-boxes {
+  --cell: 2.9rem;
+  --gap: 0.55rem;
+  --room: 4px; /* for the focus ring, inside the clip */
+  position: relative;
+  display: flex;
+  gap: var(--gap);
+  width: calc(6 * var(--cell) + 5 * var(--gap) + 2 * var(--room));
+  max-width: 100%;
+  padding: var(--room);
+  overflow: hidden;
 }
+.code-boxes > span {
+  flex: none;
+  width: var(--cell);
+  height: 3.4rem;
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 35%, var(--rule));
+  border-radius: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+/* Wider than the boxes, so the spacing after the last digit never scrolls
+   the field; the clip hides the rest. */
+.code-boxes > input {
+  position: absolute;
+  top: var(--room);
+  left: var(--room);
+  z-index: 1;
+  width: calc(6 * var(--cell) + 6 * var(--gap) + var(--cell));
+  height: 3.4rem;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 1.55rem;
+  font-weight: 600;
+  letter-spacing: calc(var(--cell) + var(--gap) - 1ch);
+  text-indent: calc((var(--cell) - 1ch) / 2);
+  caret-color: var(--tool);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.code-boxes > input:focus { box-shadow: none; }
+.code-boxes:focus-within > span:nth-of-type(1),
+.code-boxes:focus-within[data-filled="1"] > span:nth-of-type(2),
+.code-boxes:focus-within[data-filled="2"] > span:nth-of-type(3),
+.code-boxes:focus-within[data-filled="3"] > span:nth-of-type(4),
+.code-boxes:focus-within[data-filled="4"] > span:nth-of-type(5),
+.code-boxes:focus-within[data-filled="5"] > span:nth-of-type(6),
+.code-boxes:focus-within[data-filled="6"] > span:nth-of-type(6) { border-color: var(--tool); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool) 22%, transparent); }
+.code-boxes:focus-within:not([data-filled="0"]) > span:nth-of-type(1) { border-color: color-mix(in srgb, var(--ink-faint) 35%, var(--rule)); box-shadow: none; }
 /* A key made here leaves only as this one command, read before it is sent. */
 dialog.install { width: min(44rem, 92vw); }
 .install-steps { margin: 0.7rem 0 0.2rem; padding-left: 1.3rem; font-size: 0.9rem; color: var(--ink-soft); }
@@ -242,3 +428,174 @@ dialog.stepup input {
 #connection-server, #trust-server { font-size: 0.82rem; }
 #trust-previous { overflow-wrap: anywhere; }
 dialog input { margin-top: 0.8rem; }
+
+/* A card lifts a little and shows a line of the colour when pointed at. */
+.server-card { position: relative; overflow: hidden; }
+.server-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, var(--tool), transparent 80%);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.25s ease;
+}
+.server-card:hover { transform: translateY(-1px); }
+.server-card:hover::before { transform: scaleX(1); }
+.server-card { transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
+.server-icon { background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 20%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card))); }
+/* Ready breathes, gently; the other states hold still and say why. */
+.pill[data-trust=verified]::before { animation: breathe 2.6s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+  50% { box-shadow: 0 0 0 0.3rem color-mix(in srgb, currentColor 0%, transparent); }
+}
+/* An empty page shows a small terminal, waiting. */
+.empty-art {
+  position: relative;
+  display: block;
+  width: 8rem;
+  height: 5rem;
+  margin: 0 auto 1.2rem;
+  padding: 1.9rem 0 0 0.9rem;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  color: var(--term-live);
+  background: var(--term-bg);
+  border: 1px solid var(--term-rule);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+}
+.empty-art::before {
+  content: "";
+  position: absolute;
+  top: 0.6rem;
+  left: 0.7rem;
+  width: 0.42rem;
+  height: 0.42rem;
+  background: #ff5f57;
+  border-radius: 50%;
+  box-shadow: 0.62rem 0 #febc2e, 1.24rem 0 #28c840;
+}
+.empty-cursor { animation: cursor 1.1s steps(1) infinite; }
+@keyframes cursor { 50% { visibility: hidden; } }
+
+/* ── Systems: a server's mark, in its own colour ─────────────────────────── */
+/* The card's tile is also the button that changes it. */
+button.server-icon {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+  background-image: none;
+}
+button.server-icon:hover:not(:disabled) { box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark, var(--tool)) 25%, transparent); }
+.server-icon[data-system] { background: color-mix(in srgb, var(--mark, var(--tool)) 14%, var(--card)); }
+/* Marks are drawn with fill, not text colour: --mark is a picture's colour. */
+.system-mark { width: 1.45rem; height: 1.45rem; fill: var(--mark, var(--tool)); }
+.system-own { fill: none; stroke: var(--tool); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* A mark too pale or too deep for the scheme keeps its hue, moved toward
+   the ink; a black mark on a dark page is drawn in ink. */
+.server-icon[data-tone=light] .system-mark { fill: color-mix(in srgb, var(--mark) 50%, #000000); }
+@media screen and (prefers-color-scheme: dark) {
+  .server-icon[data-tone=light] .system-mark { fill: var(--mark); }
+  .server-icon[data-tone=dim] .system-mark { fill: color-mix(in srgb, var(--mark) 55%, #ffffff); }
+  .server-icon[data-tone=dark] .system-mark { fill: var(--ink); }
+}
+.field-label { margin: 1.1rem 0 0.4rem; font-size: 0.86rem; font-weight: 600; color: var(--ink-soft); }
+.field-label .optional { font-weight: 400; color: var(--ink-faint); }
+.system-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr)); gap: 0.5rem; margin-top: 1rem; }
+.system-grid.compact { grid-template-columns: repeat(auto-fill, minmax(2.9rem, 1fr)); gap: 0.4rem; margin-top: 0; }
+.system-option {
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.6rem 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--card);
+  border: 1px solid var(--rule);
+  box-shadow: none;
+  background-image: none;
+}
+.system-option:hover:not(:disabled) { color: var(--ink); background: var(--paper-sunk); border-color: color-mix(in srgb, var(--ink-faint) 40%, var(--rule)); box-shadow: none; }
+.system-option[aria-pressed=true] { color: var(--ink); border-color: var(--tool); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool) 22%, transparent); }
+.system-option .server-icon { width: 2.3rem; height: 2.3rem; }
+.compact .system-option { padding: 0.35rem; }
+.compact .system-option .system-label { display: none; }
+.compact .system-option .server-icon { width: 2rem; height: 2rem; }
+.compact .system-mark { width: 1.15rem; height: 1.15rem; }
+dialog.systems { width: min(40rem, 94vw); }
+
+/* ── Adding a key or password: one sheet, three kinds ────────────────────── */
+#record-dialog .segmented {
+  display: flex;
+  gap: 0.25rem;
+  margin: 1.1rem 0 0.2rem;
+  padding: 0.25rem;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: calc(var(--radius) + 2px);
+}
+#record-dialog .segment {
+  flex: 1;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  background: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+#record-dialog .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
+#record-dialog .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
+.generate-lead { margin-top: 1rem; }
+/* What a sheet says back stays in the sheet. */
+.dialog-notice { min-height: 0; margin: 0.8rem 0 0; font-size: 0.88rem; font-weight: 500; color: var(--ink); text-align: right; }
+.dialog-notice:empty { display: none; }
+/* Deleting is the one action drawn in red; the same red in both schemes
+   keeps white text readable on it. */
+button.danger { background: #b3202e; border-color: #b3202e; }
+button.danger:hover:not(:disabled) { background: #931a25; border-color: #931a25; }
+.delete-name { margin: 0.6rem 0; font-weight: 650; overflow-wrap: anywhere; }
+/* An empty keys page shows a key, waiting. */
+.empty-key {
+  display: grid;
+  place-items: center;
+  width: 4.2rem;
+  height: 4.2rem;
+  margin: 0 auto 1.1rem;
+  color: var(--tool);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 22%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card)));
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+}
+.empty-key .server-glyph { width: 2rem; height: 2rem; }
+.empty-state > button { margin-top: 1.2rem; }
+
+/* ── Second factor: set up, asked for, and recovered from ─────────────────── */
+.enroll-head { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1.8rem; }
+.enroll-head .enroll-lead { margin: 0.2rem 0 0; }
+.steps > li::before { background: linear-gradient(140deg, color-mix(in srgb, var(--tool) 20%, var(--card)), color-mix(in srgb, var(--tool) 6%, var(--card))); }
+/* Sign-in's second step: one small card, the code field large. */
+.factor-card { max-width: 27rem; padding: 1.8rem 1.8rem 1.4rem; }
+.factor-card .setting-icon { margin-bottom: 1rem; }
+.factor-card h2 { margin-bottom: 0.3rem; }
+.factor-card button { width: 100%; }
+#factor-code { font-family: var(--mono); font-size: 1.3rem; letter-spacing: 0.3em; text-indent: 0.3em; text-align: center; }
+.factor-foot { margin: 1.1rem 0 0; padding-top: 0.9rem; border-top: 1px solid var(--rule); }
+.recovery-card { max-width: 36rem; }
+#recovery-codes { min-height: 20.5rem; font-size: 1rem; letter-spacing: 0.04em; text-align: center; background: var(--paper-sunk); }
+@media (max-width: 520px) {
+  #enroll { padding: 1.3rem 1.1rem 1.5rem; }
+  .steps > li { padding-left: 2.6rem; }
+  .code-boxes { --cell: 2.25rem; --gap: 0.3rem; }
+  .code-boxes > input { font-size: 1.3rem; }
+}
+#credential-key { min-height: 6.5rem; }

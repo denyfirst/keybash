@@ -144,6 +144,9 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		case "/custody.mjs":
 			serveAsset(w, "custody.mjs")
 			return
+		case "/systems.mjs":
+			serveAsset(w, "systems.mjs")
+			return
 		case "/auth.css":
 			serveAsset(w, "auth.css")
 			return

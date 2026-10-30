@@ -38,7 +38,7 @@ Edge-də **Ətraflı → 127.0.0.1 ünvanına davam et** seçərək xəbərdarl�
 ünvan üçün qəbul et. Əməliyyat sisteminin TLS etibarı dəyişdirilmir. Bunu real
 serverlər üçün etmə. Demo Ctrl+C ilə və ya bir saatdan sonra dayanır.
 
-Demo bir bələdçi və iş yeri səhifəsi açır. Bələdçidə **İş yerini aç** düyməsi,
+Demo bir bələdçi və iş yeri səhifəsi açır. Bələdçidə **Open the workspace** düyməsi,
 demo istifadəçisi/şifrəsi, hazırkı MFA kodu və qalan birdəfəlik bərpa kodları var.
 Hər açılışda yeni müvəqqəti instance və test açarları yaradılır. Giriş və MFA
 ilk dəfə adi UI ilə avtomatik tamamlanır. MFA/CSRF/ownership bypass yoxdur.
@@ -55,14 +55,14 @@ başladılaraq təmiz vəziyyətə qayıdır.
 
 - **Hesab:** login, MFA, logout, təkrar doğrulama, şifrəli qeyd siyahısı və
   synthetic qeydlər əlavə etmək/göstərmək/silmək.
-- **Bağlantılar:** iki hazır nümunədən **Qoşul**, yeni connection yaratmaq,
+- **Bağlantılar:** iki hazır nümunədən **Connect**, yeni connection yaratmaq,
   seçicilər, adlandırma, pəncərələr arasında gəzmək.
 - **Terminal:** `help`, `whoami`, `hostname`, `pwd`, `ls`, `uname`, `date`,
   `echo Salam dostum`, `clear`, `exit`; Unicode yazı, seçim/copy, paste preview,
   Ctrl+C, Ctrl+L və ölçü dəyişəndə terminal görünüşü.
 - **Desktop:** öz üzərində SIMULATION yazılmış test görüntüsü; klik və yazı
-  görüntünü dəyişir. Backspace, Enter, lokal fullscreen və Bağla düyməsi.
-- **Ləğv:** iki bağlantını açıb ayrıca hesab səhifəsində **Hesabdan çıx** seç;
+  görüntünü dəyişir. Backspace, Enter, lokal fullscreen və **Disconnect** düyməsi.
+- **Ləğv:** iki bağlantını açıb menyuda **Sign out** seç;
   hər iki görünüş bağlanmalı və görüntü təmizlənməlidir.
 
 Terminal sintetik əmr siyahısıdır, Linux shell deyil. `vim`, `tmux`, real fayl

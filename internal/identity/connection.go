@@ -21,8 +21,16 @@ type connection struct {
 	Credential  string `json:"credential"`
 	Approval    string `json:"approval"`
 	Fingerprint string `json:"fingerprint,omitempty"`
-	Revision    uint64 `json:"-"`
+	// System names the mark a card shows for the server's operating system;
+	// it is a label the owner picks and authorizes nothing.
+	System   string `json:"system,omitempty"`
+	Revision uint64 `json:"-"`
 }
+
+// systemNames are the marks web/systems.mjs draws (TestSystemNamesMatchTheMarks).
+var systemNames = map[string]bool{"ubuntu": true, "debian": true, "fedora": true, "redhat": true, "rockylinux": true, "almalinux": true,
+	"centos": true, "archlinux": true, "alpinelinux": true, "opensuse": true, "linuxmint": true, "kalilinux": true, "gentoo": true,
+	"nixos": true, "raspberrypi": true, "freebsd": true, "apple": true, "linux": true, "windows": true, "server": true}
 
 func validApproval(raw string) bool {
 	data, e := hex.DecodeString(raw)
@@ -43,7 +51,7 @@ func (s *Store) connection(tx *bolt.Tx, owner, id string) (connection, error) {
 		return c, e
 	}
 	defer clear(plain)
-	if decodeRecord(plain, &c, 2048) != nil || c.ID != id || !validID(c.Target) || !validID(c.Credential) || !validApproval(c.Approval) || !label(c.Name, 160, false) || c.Fingerprint != "" && !validFingerprint(c.Fingerprint) {
+	if decodeRecord(plain, &c, 2048) != nil || c.ID != id || !validID(c.Target) || !validID(c.Credential) || !validApproval(c.Approval) || !label(c.Name, 160, false) || c.Fingerprint != "" && !validFingerprint(c.Fingerprint) || c.System != "" && !systemNames[c.System] {
 		return connection{}, errRefused
 	}
 	c.Revision = revision
@@ -121,6 +129,31 @@ func (s *Store) trustConnection(owner, id, expected, approval, fingerprint strin
 		}
 		defer clear(plain)
 		sealed, e := s.seal(tx, "connection", owner, id, revision+1, plain)
+		if e != nil {
+			return errRefused
+		}
+		return tx.Bucket(connectionBucket).Put(credentialKey(owner, id), sealed)
+	})
+}
+
+// setConnectionSystem changes only the label a card shows. Target, credential
+// and trust stay as they are; the record is resealed at the next revision.
+func (s *Store) setConnectionSystem(owner, id, system string) error {
+	if !systemNames[system] {
+		return errRefused
+	}
+	return s.update(func(tx *bolt.Tx) error {
+		c, e := s.connection(tx, owner, id)
+		if e != nil {
+			return errRefused
+		}
+		c.System = system
+		plain, e := json.Marshal(c)
+		if e != nil {
+			return errRefused
+		}
+		defer clear(plain)
+		sealed, e := s.seal(tx, "connection", owner, id, c.Revision+1, plain)
 		if e != nil {
 			return errRefused
 		}

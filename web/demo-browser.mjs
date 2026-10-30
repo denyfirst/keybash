@@ -54,8 +54,8 @@ try {
   const headers = {Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf};
   const connections = {};
   for (const [mode, name, secret, target] of [
-    ['ssh', 'Linux SSH · UI simulyasiyası', config.SSHSecret, config.SSH],
-    ['rdp', 'Desktop · UI simulyasiyası (Windows deyil)', config.RDPSecret, config.RDP]
+    ['ssh', 'Linux SSH · UI simulation', config.SSHSecret, config.SSH],
+    ['rdp', 'Desktop · UI simulation (not Windows)', config.RDPSecret, config.RDP]
   ]) {
     const saved = await account.request.post(config.Origin + '/api/credentials', {headers, data: {name, kind: mode === 'ssh' ? 'ssh-key' : 'password', username: 'synthetic-user', secret, passphrase: ''}});
     assert.equal(saved.status(), 200);
@@ -73,16 +73,16 @@ try {
     const guide = await context.newPage();
     // about:blank is a separate disposable guide, never a product route or
     // script injected into the application. Only synthetic demo factors here.
-    await guide.setContent(`<!doctype html><html lang="az"><meta charset="utf-8"><title>Keybash · Demo bələdçisi</title><style>
-      body{background:#111216;color:#e8eaf0;font:17px system-ui;max-width:820px;margin:52px auto;padding:0 24px;line-height:1.6}h1{font-size:38px}strong{color:#ff6977}code,output{background:#20232b;padding:8px 12px;border-radius:6px;display:inline-block}output{font-size:28px;letter-spacing:5px}button{background:#d62f43;color:white;border:0;border-radius:6px;padding:12px 20px;font:inherit;cursor:pointer}textarea{width:100%;height:90px;background:#20232b;color:#eee;border:1px solid #444}small{color:#b3bac8}li{margin:10px 0}</style>
-      <h1>keybash<span style="color:#e34254">.</span> Demo</h1>
-      <p><strong>Bu, lokal UI simulyasiyasıdır.</strong> Real Linux shell və Windows yoxdur. Öz server açarlarını və şifrələrini daxil etmə.</p>
-      <button id="workspace">İş yerini aç</button>
-      <ol><li>İş yerində iki nümunə bağlantı var. <b>Qoşul</b> seç.</li><li>Terminalda <code>help</code>, <code>whoami</code>, <code>echo Salam dostum</code>, Ctrl+C və paste preview-ni sına.</li><li>Desktop-da kliklə, yaz, Backspace/Enter və tam ekranı sına. RDP clipboard/remote resize hələ bağlıdır.</li><li>Qoşulmaq, açar və bağlantı əlavə etmək üçün kod soruşulmur; göstərmə və silmə üçün telefondakı kod soruşulur (girişdən sonrakı 10 dəqiqədə soruşulmur). Logout bütün açıq bağlantıları bağlayır.</li></ol>
-      <p>Demo istifadəçisi: <code>demo</code><br>Demo giriş şifrəsi: <code id="password"></code></p>
-      <p>Hazırkı MFA kodu: <output id="otp"></output><br><small id="remaining"></small><br><small>Eyni kod bir dəfə işləyir. Açılışda işlənmiş kod üçün növbəti 30 saniyəlik kodu gözlə.</small></p>
-      <details><summary>Demo MFA seed və birdəfəlik bərpa kodları</summary><p>Autentifikatora əl ilə əlavə etmək üçün: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Hər bərpa kodunu yalnız bir dəfə işlət. Bunlar yalnız bu müvəqqəti demo üçündür.</p></details>
-      <details><summary>Demo server kimlikləri</summary><p>Bağlantı yaradanda kimlik yazılmır; Keybash onu serverlər siyahısından götürür. Bunlar yalnız məlumat üçündür:</p><p>SSH: <code id="ssh-fingerprint"></code></p><p>RDP: <code id="rdp-fingerprint"></code></p></details><p><small>Bütün demo pəncərələrini bağlayanda və ya bir saatdan sonra sessiya bitir. Hər işə salma yeni, müvəqqəti məlumatlarla başlayır.</small></p></html>`);
+    await guide.setContent(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Keybash · Demo guide</title><style>
+      body{background:#111216;color:#e8eaf0;font:17px system-ui;max-width:820px;margin:52px auto;padding:0 24px;line-height:1.6}h1{font-size:38px}strong{color:#22d3ee}code,output{background:#20232b;padding:8px 12px;border-radius:6px;display:inline-block}output{font-size:28px;letter-spacing:5px}button{background:#0e7490;color:white;border:0;border-radius:6px;padding:12px 20px;font:inherit;cursor:pointer}textarea{width:100%;height:90px;background:#20232b;color:#eee;border:1px solid #444}small{color:#b3bac8}li{margin:10px 0}</style>
+      <h1>keybash<span style="color:#22d3ee">.</span> Demo</h1>
+      <p><strong>This is a local UI simulation.</strong> There is no real Linux shell or Windows. Do not enter your own server keys or passwords.</p>
+      <button id="workspace">Open the workspace</button>
+      <ol><li>The workspace has two sample connections. Choose <b>Connect</b>.</li><li>In the terminal try <code>help</code>, <code>whoami</code>, <code>echo hello friend</code>, Ctrl+C and the paste preview.</li><li>On the desktop, click, type, try Backspace/Enter and full screen. RDP clipboard and remote resize are still off.</li><li>Connecting and adding keys or connections need no code; showing and deleting secrets ask for the code on your phone (not within 10 minutes of signing in). Signing out closes every open connection.</li></ol>
+      <p>Demo user: <code>demo</code><br>Demo password: <code id="password"></code></p>
+      <p>Current MFA code: <output id="otp"></output><br><small id="remaining"></small><br><small>Each code works once. If the code was used at start-up, wait for the next 30-second code.</small></p>
+      <details><summary>Demo MFA seed and one-time recovery codes</summary><p>To add it to an authenticator by hand: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Each recovery code works once. They exist only for this temporary demo.</p></details>
+      <details><summary>Demo server identities</summary><p>Nobody types an identity when creating a connection; Keybash takes it from the server list. These are for information only:</p><p>SSH: <code id="ssh-fingerprint"></code></p><p>RDP: <code id="rdp-fingerprint"></code></p></details><p><small>The session ends when you close every demo window, or after an hour. Each start begins with new, temporary data.</small></p></html>`);
     await guide.locator('#ssh-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.SSHFingerprint);
     await guide.locator('#rdp-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.RDPFingerprint);
     await guide.locator('#password').evaluate((el, value) => { el.textContent = value; }, config.Password);
@@ -98,14 +98,14 @@ try {
       const now = Math.floor(Date.now() / 1000);
       await guide.evaluate(({code, seconds}) => {
         document.getElementById('otp').textContent = code;
-        document.getElementById('remaining').textContent = `Növbəti kod ${seconds} saniyə sonra.`;
+        document.getElementById('remaining').textContent = `Next code in ${seconds} seconds.`;
       }, {code: otp(seed, Math.floor(now / 30)), seconds: 30 - now % 30});
     };
     await update();
     timer = setInterval(() => { void update().catch(() => {}); }, 1000);
     await guide.bringToFront();
     if (config.Interactive) {
-      console.log('Keybash demo hazırdır. Ayrı brauzer pəncərəsində bələdçi və iş yeri açıldı. Demo maksimum bir saat işləyir.');
+      console.log('The Keybash demo is ready. A guide and the workspace opened in a separate browser window. The demo runs for at most one hour.');
       await new Promise(resolve => {
         browser.on('disconnected', resolve);
         const check = () => { if (context.pages().length === 0) resolve(); };
@@ -124,7 +124,7 @@ try {
     stage = 'SSH simulation';
     const terminal = await context.newPage();
     await terminal.goto(config.Origin + '/remote/ssh/' + connections.ssh);
-    await terminal.locator('#status').filter({hasText: 'Qoşulub'}).waitFor();
+    await terminal.locator('#status').filter({hasText: /^Connected$/}).waitFor();
     await terminal.locator('.xterm-helper-textarea').focus();
     await terminal.keyboard.type('echo Salam dostum'); await terminal.keyboard.press('Enter');
     await terminal.waitForFunction(() => (document.querySelector('.xterm-rows')?.textContent.match(/Salam dostum/g) ?? []).length >= 2);
@@ -132,7 +132,7 @@ try {
     stage = 'desktop simulation';
     const desktop = await context.newPage();
     await desktop.goto(config.Origin + '/remote/rdp/' + connections.rdp);
-    await desktop.locator('#status').filter({hasText: 'Sessiya açıldı'}).waitFor();
+    await desktop.locator('#status').filter({hasText: /^Connected$/}).waitFor();
     await desktop.waitForFunction(() => [...document.querySelectorAll('#display canvas')].some(c => c.width >= 1024 && c.height >= 768 && c.getContext('2d').getImageData(0, 0, 1, 1).data[0] > 200));
     const pixels = () => desktop.evaluate(() => {
       const canvas = [...document.querySelectorAll('#display canvas')].find(c => c.width >= 1024 && c.height >= 768);

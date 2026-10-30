@@ -129,8 +129,8 @@ func TestInteractiveDemoServe(t *testing.T) {
 		target RemoteTarget
 		record Credential
 	}{
-		{terminal, Credential{Name: "Linux SSH · UI simulyasiyası", Kind: "ssh-key", Username: "synthetic-user", Secret: string(pem.EncodeToMemory(block))}},
-		{desktop, Credential{Name: "Desktop · UI simulyasiyası (Windows deyil)", Kind: "password", Username: "synthetic-user", Secret: demoRemotePassword}},
+		{terminal, Credential{Name: "Linux SSH · UI simulation", Kind: "ssh-key", Username: "synthetic-user", Secret: string(pem.EncodeToMemory(block))}},
+		{desktop, Credential{Name: "Desktop · UI simulation (not Windows)", Kind: "password", Username: "synthetic-user", Secret: demoRemotePassword}},
 	} {
 		if validateCredential(&sample.record) != nil {
 			t.Fatal("demo credential refused")
@@ -150,11 +150,11 @@ func TestInteractiveDemoServe(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 	// Synthetic, single-run demo factors only; they die with this process.
-	fmt.Printf("\nKeybash demo hazırdır: %s/login\n", origin)
-	fmt.Printf("İstifadəçi: demo\nŞifrə: %s\n", demoServePassword)
-	fmt.Printf("MFA seed (autentifikatora əl ilə əlavə et): %s\n", seed)
-	fmt.Printf("Birdəfəlik bərpa kodları (MFA kodu yerinə, hər biri bir dəfə):\n  %s\n", strings.Join(recovery, "\n  "))
-	fmt.Printf("Sertifikat bu işə salma üçün yaradılıb; brauzer xəbərdarlığını yalnız bu ünvan üçün qəbul et.\n")
-	fmt.Printf("Simulyasiyadır: real Linux shell və Windows yoxdur. Ctrl+C və ya bir saat sonra dayanır.\n\n")
+	fmt.Printf("\nThe Keybash demo is ready: %s/login\n", origin)
+	fmt.Printf("User: demo\nPassword: %s\n", demoServePassword)
+	fmt.Printf("MFA seed (add it to an authenticator by hand): %s\n", seed)
+	fmt.Printf("One-time recovery codes (instead of an MFA code, each once):\n  %s\n", strings.Join(recovery, "\n  "))
+	fmt.Printf("The certificate was made for this run; accept the browser warning for this address only.\n")
+	fmt.Printf("This is a simulation: there is no real Linux shell or Windows. It stops with Ctrl+C or after an hour.\n\n")
 	<-ctx.Done()
 }

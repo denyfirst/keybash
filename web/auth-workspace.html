@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="az">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta name="referrer" content="no-referrer">
-  <title>Keybash · Hesab</title>
+  <title>Keybash · Account</title>
   <link rel="preload" href="/schibsted-grotesk.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/keybash.css">
   <link rel="stylesheet" href="/auth.css">
@@ -15,23 +15,23 @@
   <main class="signin">
     <p class="signin-mark"><a class="wordmark" href="/" aria-label="Keybash">keybash<span class="wordmark-stop">.</span></a></p>
     <section class="panel" aria-labelledby="heading">
-      <div class="panel-head"><h1 id="heading">Giriş təsdiqləndi.</h1><span class="tag">Self-host</span></div>
+      <div class="panel-head"><h1 id="heading">Signed in.</h1><span class="tag">Self-host</span></div>
       <p id="account" class="hint"></p>
-      <p class="hint">Bu, giriş sınağıdır. Server bağlantıları hələ bu ekrandan açılmır.</p>
+      <p class="hint">This is a sign-in test. Server connections do not open from this screen.</p>
       <form id="change" method="post" action="/api/password">
-        <label for="current">Hazırkı şifrə</label>
+        <label for="current">Current password</label>
         <input id="current" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
-        <label for="replacement">Yeni şifrə</label>
+        <label for="replacement">New password</label>
         <input id="replacement" name="next" type="password" autocomplete="new-password" maxlength="1024" required aria-describedby="password-help">
-        <p id="password-help" class="hint">Ən azı 15 simvol. Uzun, unikal şifrə seç.</p>
-        <label for="confirm">Yeni şifrəni təkrar et</label>
+        <p id="password-help" class="hint">At least 15 characters; choose a long, unique one.</p>
+        <label for="confirm">Repeat the new password</label>
         <input id="confirm" type="password" autocomplete="new-password" maxlength="1024" required>
-        <button type="submit">Şifrəni dəyiş</button>
+        <button type="submit">Change password</button>
       </form>
-      <button id="logout" type="button" class="secondary">Hesabdan çıx</button>
+      <button id="logout" type="button" class="secondary">Sign out</button>
       <p id="notice" role="status" aria-live="polite"></p>
     </section>
   </main>
-  <footer class="colophon"><p>Şifrə dəyişəndə bu hesabın bütün giriş sessiyaları bağlanır.</p></footer>
+  <footer class="colophon"><p>Changing the password closes all of this account’s sessions.</p></footer>
 </body>
 </html>

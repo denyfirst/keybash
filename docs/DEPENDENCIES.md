@@ -322,3 +322,44 @@ The manager workspace's native/browser text and display-update evidence is
 tracked in `RDP-WORKSPACE-INTEGRATION.md`. Keyboard layouts/reconnect, real
 Windows, production packaging and independent audit remain gates. Limits and API/source
 references are in [the browser RDP lab](BROWSER-RDP-LAB.md).
+
+## Operating-system marks (2026-10-30)
+
+Connection cards can show the mark of the server's operating system, picked by
+the connection's owner. The marks for Ubuntu, Debian, Fedora, Red Hat, Rocky
+Linux, AlmaLinux, CentOS, Arch Linux, Alpine Linux, openSUSE, Linux Mint, Kali
+Linux, Gentoo, NixOS, Raspberry Pi, FreeBSD, macOS (Apple) and Linux (Tux)
+come from Simple Icons `simple-icons@16.35.0` (npm, released 2026-10-11),
+licensed CC0-1.0. The licence is in `docs/third-party/simple-icons-LICENSE.md`
+(SHA-256 `9046848b63a5c92bff14e4accca80bd987e0623b74adf9226ce5198d312b79d5`). The Windows mark (four squares in Windows blue) and the generic server line drawing are our own; no Microsoft file is copied.
+
+This follows the same rule as the bundled typeface. The data was copied once
+from `cdn.jsdelivr.net/npm/simple-icons@16.35.0/icons/<slug>.svg`, fetched
+twice by different clients with identical digests. Only each file's single
+`path` data is kept, checked against `[MmLlHhVvCcSsQqTtAaZz0-9., -]`, in
+`web/systems.mjs`, and drawn by DOM calls. No SVG file, script or URL is
+shipped, nothing is fetched at runtime, and the CSP is unchanged. The server
+accepts only these names (`TestSystemNamesMatchTheMarks`). Each mark is its
+owner's trademark, shown only to say which system a server runs. Updating
+means repeating this with a new pinned version and new digests.
+
+| Mark | SHA-256 of the source SVG |
+|---|---|
+| almalinux | `d31e95e025c2299efb0fcbf64965081c5815ae32a54ad39db20b0c16327a6ef6` |
+| alpinelinux | `d37d0a7873c65174308d63929f09ab93c3aaa7f5c5df79cdec4be532e015fc98` |
+| apple | `2a1509dccd25e6d2bc7a11a8e52941077e1a48555e192ce638699b9f083c2a7c` |
+| archlinux | `2b1d26b4a1194c40dc068b2aba4b3a5f9ea83b6a8f1da04c229d03fe80308bfa` |
+| centos | `94a3ca4414ed77c8bdf1ff0bd6d40d64ac4e27bd863889af50044ab6167ce1fa` |
+| debian | `8835536d63c80990f9c90c935982ba329d163e707c894278ca6bd73258d1962b` |
+| fedora | `c234757373cab5ed80d7b2df8ff26ea039bcec16a9e9a47adbd29f5d0e94489a` |
+| freebsd | `57c61b8658266e79ae3d753d367ebb56d5157e929fc72b2bc6ba7fe7a1059584` |
+| gentoo | `894c74754481396130effc60dc3f3a4022bfa863c1ec78344f3c77bb9b73851f` |
+| kalilinux | `0ceffe5e8ce02aae42f7f5f6cada390f79e5ab6450a4e460b03127a370c33a1a` |
+| linux | `7e55f2779ae11a83c9dad2d0414a65d8ca7867d0716ce58bfe41ed299ae1447f` |
+| linuxmint | `ab7e227a8e7b7d167d8bc4617c6323c205b4565ce1c206e6d1fd677669cd27d4` |
+| nixos | `08e3442ba2b81fd8bb50c745ab354b96128a80e8884969f7dace33fe7d15a921` |
+| opensuse | `22f842b1d6b2cf32b7b1a569708c2ca73bd5cae627def4e45e15d07915f0d6bf` |
+| raspberrypi | `ab35cdb6cfd69779dfa54c8f15f0ed3c514ff6c07f1c941dd47a61115a208c59` |
+| redhat | `3d0e1854a9dad1a8ad11132843f522f948197ec0e0ee49b7a51d5fdf44230568` |
+| rockylinux | `a65476b168c4ef14c6b743e7eb3875e56c9d60ca15bbaef57a72a6cdeab242d0` |
+| ubuntu | `b0aca674c881a07bb60b26afbcee07093ae419e29ee38e376f938817fa66ae03` |

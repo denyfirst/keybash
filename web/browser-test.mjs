@@ -50,8 +50,8 @@ async function selectAndCopy(text) {
 try {
   await page.goto(config.Origin);
   await page.locator('#code').fill(config.Code);
-  await page.getByRole('button', { name: 'Sessiyanı aç' }).click();
-  await page.locator('#status').filter({ hasText: 'Qoşulub' }).waitFor();
+  await page.getByRole('button', { name: 'Open session' }).click();
+  await page.locator('#status').filter({ hasText: /^Connected$/ }).waitFor();
   await visible(config.Mode === 'linux' ? 'keybash-lab>' : '');
   assert.equal(await page.locator('#code').inputValue(), '');
   const cookies = await context.cookies();
@@ -96,7 +96,7 @@ try {
   await page.locator('#paste-review').waitFor({ state: 'visible' });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert((await page.locator('#paste-preview').inputValue()).includes('\\u202e'));
-  await page.getByRole('button', { name: 'Ləğv et' }).click();
+  await page.getByRole('button', { name: 'Cancel' }).click();
   await paste('a'.repeat(32769));
   await page.locator('#notice').filter({ hasText: '32 KiB' }).waitFor();
 
@@ -109,7 +109,7 @@ try {
     await page.locator('.xterm-helper-textarea').focus(); await page.keyboard.press('Enter');
     await visible('KB_PASTE');
     await paste("printf 'KB_%s\\n' 'MULTILINE'\nprintf 'KB_%s\\n' 'END'");
-    await page.getByRole('button', { name: 'Terminala göndər' }).click();
+    await page.getByRole('button', { name: 'Send to terminal' }).click();
     // Bash bracketed paste does not execute until explicit Enter.
     assert(!(await page.locator('.xterm-rows').innerText()).includes('KB_MULTILINE'));
     await page.locator('.xterm-helper-textarea').focus(); await page.keyboard.press('Enter');
@@ -125,16 +125,16 @@ try {
     await command("printf 'KB_%s\\n' 'AFTER_INTERRUPT'"); await visible('KB_AFTER_INTERRUPT');
   } else {
     await paste('APPROVED_ONE\nAPPROVED_TWO');
-    await page.getByRole('button', { name: 'Terminala göndər' }).click();
+    await page.getByRole('button', { name: 'Send to terminal' }).click();
     await visible('APPROVED_ONE'); await visible('APPROVED_TWO');
     await page.evaluate(() => { labClipboard.denied = true; });
     await page.getByRole('button', { name: 'Paste', exact: true }).click();
     await page.locator('#clipboard-panel').waitFor({ state: 'visible' });
     await page.locator('#clipboard-text').fill('FALLBACK_PANEL');
-    await page.getByRole('button', { name: 'Paste-i yoxla' }).click(); await visible('FALLBACK_PANEL');
+    await page.getByRole('button', { name: 'Review paste' }).click(); await visible('FALLBACK_PANEL');
   }
-  await page.getByRole('button', { name: 'Bağla', exact: true }).click();
-  await page.locator('#status').filter({ hasText: 'Bağlı deyil' }).waitFor();
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  await page.locator('#status').filter({ hasText: 'Not connected' }).waitFor();
   await page.waitForTimeout(100);
   assert(!(await context.cookies()).some(cookie => cookie.name === '__Host-keybash-lab'));
   assert.equal(await page.locator('#terminal').innerText(),'');
