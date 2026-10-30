@@ -555,6 +555,19 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			return
 		}
 		l.revokeRemotesLocked(s.owner, record, "")
+	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/connections/") && strings.HasSuffix(r.URL.Path, "/system"):
+		// A label only: which mark the card shows. It changes no target,
+		// credential or trust decision, so a ready session is enough.
+		record := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/connections/"), "/system")
+		fields, ok := readFields(w, r, 256, "system")
+		if !ok || !validID(record) || !systemNames[fields["system"]] {
+			status = 400
+			return
+		}
+		if l.store.setConnectionSystem(s.owner, record, fields["system"]) != nil {
+			status = 404
+			return
+		}
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/connections/"):
 		record := strings.TrimPrefix(r.URL.Path, "/api/connections/")
 		if _, ok := readFields(w, r, 1024); !ok || !validID(record) {

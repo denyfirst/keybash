@@ -29,23 +29,25 @@
 }
 
 :root {
-  --paper:       #f7f7f8;
-  --paper-sunk:  #ececf0;
+  --paper:       #f4f6f9;
+  --paper-sunk:  #edf0f4;
   --card:        #ffffff;
-  --ink:         #16171b;
-  --ink-soft:    #464953;
-  --ink-faint:   #5c606a;
-  --rule:        #d9d9df;
+  --ink:         #0f1218;
+  --ink-soft:    #444b59;
+  --ink-faint:   #5a6172;
+  --rule:        #e1e5eb;
 
   /* The organisation's red: the wordmark's stop and nothing else. */
   --brand:       #c42b3a;
 
-  /* Keybash's colour: the current place, a chosen item, a link. */
-  --tool:         #1f5fbf;
-  --link:         #1d58b3;
+  /* Keybash's colour, signal cyan: the wordmark's stop, the current place,
+     a chosen item, a link. Porch is violet and Denyfirst red; cyan is also
+     apart from the verdict colours (green, amber, red). */
+  --tool:         #0e7490;
+  --link:         #0c6a84;
   /* A button's face. Its label is white in both schemes. */
-  --accent:       #1f5fbf;
-  --accent-hover: #194d9c;
+  --accent:       #0e7490;
+  --accent-hover: #155e75;
 
   /* A server identity's state, said in words and in these colours. */
   --strong:      #1f6a44;
@@ -65,8 +67,11 @@
           -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
 
-  --edge: rgba(22, 23, 27, 0.20);
-  --radius: 6px;
+  --edge: rgba(15, 18, 24, 0.14);
+  --shadow: 0 1px 2px rgba(15, 18, 24, 0.05), 0 2px 8px rgba(15, 18, 24, 0.05);
+  --shadow-lg: 0 18px 48px rgba(15, 18, 24, 0.16);
+  --radius: 8px;
+  --radius-lg: 14px;
   --measure: 38rem;
 
   color-scheme: light;
@@ -74,22 +79,24 @@
 
 @media screen and (prefers-color-scheme: dark) {
   :root {
-    --paper:        #101114;
-    --paper-sunk:   #18191d;
-    --card:         #17181d;
-    --ink:          #f0f0f2;
-    --ink-soft:     #b4b5be;
-    --ink-faint:    #999ba6;
-    --rule:         #2c2d33;
+    --paper:        #0b0d11;
+    --paper-sunk:   #141821;
+    --card:         #11141b;
+    --ink:          #eef1f6;
+    --ink-soft:     #b3bac7;
+    --ink-faint:    #949cad;
+    --rule:         #242a35;
     --brand:        #ed4552;
-    --tool:         #8fb4ff;
-    --link:         #8fb4ff;
-    --accent:       #2f6fdb;
-    --accent-hover: #275fc0;
+    --tool:         #22d3ee;
+    --link:         #22d3ee;
+    --accent:       #0e7490;
+    --accent-hover: #0b6680;
     --strong:       #6fbf92;
     --weak:         #d9a23c;
     --insecure:     #ff7c86;
-    --edge:         rgba(240, 240, 242, 0.18);
+    --edge:         rgba(0, 0, 0, 0.45);
+    --shadow:       0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.3);
+    --shadow-lg:    0 24px 60px rgba(0, 0, 0, 0.55);
     color-scheme: dark;
   }
 }
@@ -119,8 +126,8 @@ a:hover { text-decoration-thickness: 2px; }
 :focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
 
 h1 {
-  margin: 0 0 0.6rem;
-  font-size: 1.75rem;
+  margin: 0 0 0.4rem;
+  font-size: 1.9rem;
   line-height: 1.15;
   letter-spacing: -0.02em;
   font-weight: 600;
@@ -156,16 +163,16 @@ p { margin: 0 0 0.9rem; }
   text-decoration: none;
 }
 .wordmark-stop { color: var(--brand); }
+/* Keybash's own mark ends in its colour; the denyfirst credit keeps the red. */
+.wordmark .wordmark-stop { color: var(--tool); }
 
 /* ── Fields and buttons ────────────────────────────────────────────────── */
 label {
   display: block;
-  margin: 1.1rem 0 0.45rem;
-  font-size: 0.74rem;
+  margin: 1.1rem 0 0.4rem;
+  font-size: 0.86rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
 }
 input, select, textarea {
   display: block;
@@ -173,11 +180,12 @@ input, select, textarea {
   min-width: 0;
   font-family: var(--sans);
   font-size: 1rem;
-  padding: 0.7rem 0.85rem;
+  padding: 0.68rem 0.85rem;
   color: var(--ink);
-  background: var(--paper-sunk);
-  border: 1px solid var(--rule);
+  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 30%, var(--rule));
   border-radius: var(--radius);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 input[type="file"] { padding: 0.55rem; font-size: 0.9rem; }
 textarea {
@@ -187,28 +195,35 @@ textarea {
   font-size: 0.86rem;
   line-height: 1.6;
 }
-input:focus, select:focus, textarea:focus { border-color: var(--ink-faint); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--tool); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool) 22%, transparent); }
 input::placeholder, textarea::placeholder { color: var(--ink-faint); }
 
 /* The one action a form asks for, in the accent. */
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   font-family: var(--sans);
   font-size: 0.92rem;
   font-weight: 600;
   margin-top: 1.2rem;
-  padding: 0.65rem 1.2rem;
+  padding: 0.62rem 1.1rem;
   color: #ffffff;
   background: var(--accent);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(15, 18, 24, 0.14);
   cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
 }
 button:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 /* Everything else a form offers: drawn in ink, outlined. */
 button.secondary {
   color: var(--ink);
-  background: transparent;
-  border-color: var(--rule);
+  background: var(--card);
+  border-color: color-mix(in srgb, var(--ink-faint) 25%, var(--rule));
+  box-shadow: var(--shadow);
 }
 button.secondary:hover:not(:disabled) { background: var(--paper-sunk); border-color: var(--ink-faint); }
 /* A state is said in colour that stays legible, never faded out. */
@@ -294,10 +309,11 @@ dialog::backdrop { background: rgba(10, 11, 13, 0.55); }
 
 /* ── A card on the page ────────────────────────────────────────────────── */
 .panel {
-  padding: 1.4rem 1.5rem;
+  padding: 1.5rem 1.6rem;
   background: var(--card);
   border: 1px solid var(--rule);
-  border-radius: calc(var(--radius) + 2px);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
 }
 .panel + .panel { margin-top: 1.2rem; }
 .panel-head {
@@ -415,8 +431,14 @@ body.workspace main {
   max-width: 72rem;
   padding: 2rem 2rem 3rem;
 }
-.work-heading { margin-bottom: 1.6rem; }
+.work-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.8rem; }
 .work-heading p { margin: 0; color: var(--ink-soft); }
+.page-actions { display: flex; gap: 0.6rem; }
+.page-actions button { margin: 0; }
+.button-glyph { flex: none; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* A quiet action: text in ink, no box until hovered. */
+button.ghost { color: var(--ink-soft); background: transparent; border-color: transparent; box-shadow: none; }
+button.ghost:hover:not(:disabled) { color: var(--ink); background: var(--paper-sunk); border-color: var(--rule); }
 
 .colophon {
   padding: 1rem 2rem;
@@ -447,4 +469,43 @@ body.workspace main {
   .rail-foot { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0 auto; padding: 0; border: 0; }
   .rail-foot button { width: auto; margin: 0; }
   .topbar, body.workspace main, .colophon { padding-left: 1rem; padding-right: 1rem; }
+}
+
+/* ── Signal: the few places Keybash's colour shows itself ──────────────── */
+/* A soft light of the product colour behind the top of every workspace page. */
+.workspace-main {
+  background:
+    radial-gradient(56rem 22rem at 78% -6rem, color-mix(in srgb, var(--tool) 9%, transparent), transparent 70%),
+    var(--paper);
+}
+/* The current page in the menu: tinted, with a bar of the colour beside it. */
+.rail-item { position: relative; }
+.rail-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  left: -0.5rem;
+  width: 3px;
+  background: var(--tool);
+  border-radius: 0 3px 3px 0;
+}
+/* The one action a page asks for carries a little depth. */
+button:not(.secondary):not(.ghost):not(:disabled),
+a.connect {
+  background-image: linear-gradient(180deg, color-mix(in srgb, #ffffff 10%, transparent), transparent);
+}
+button:not(.secondary):not(.ghost):not(:disabled):hover,
+a.connect:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media screen and (prefers-color-scheme: dark) {
+  /* On dark surfaces the sheen greys the colour out; the plain face is brighter. */
+  button:not(.secondary):not(.ghost):not(:disabled), a.connect { background-image: none; }
+  .workspace-main {
+    background:
+      radial-gradient(56rem 24rem at 78% -6rem, color-mix(in srgb, var(--tool) 13%, transparent), transparent 70%),
+      var(--paper);
+  }
 }

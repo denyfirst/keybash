@@ -104,6 +104,7 @@ type connectionView struct {
 	Fingerprint string `json:"fingerprint"`
 	Revision    string `json:"revision"`
 	Trust       string `json:"trust"`
+	System      string `json:"system,omitempty"`
 }
 
 func describeConnection(c connection, t RemoteTarget, now time.Time) connectionView {
@@ -115,5 +116,5 @@ func describeConnection(c connection, t RemoteTarget, now time.Time) connectionV
 	} else if connectionTrusted(c, t, now) {
 		state = "verified"
 	}
-	return connectionView{c.ID, c.Name, c.Target, c.Credential, c.Fingerprint, strconv.FormatUint(c.Revision, 10), state}
+	return connectionView{c.ID, c.Name, c.Target, c.Credential, c.Fingerprint, strconv.FormatUint(c.Revision, 10), state, c.System}
 }
