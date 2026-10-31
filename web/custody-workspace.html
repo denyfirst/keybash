@@ -8,6 +8,7 @@
 <a class="rail-item" href="/" data-page="connections"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="12" rx="1.6"/><path d="M7 9l2.5 2L7 13M11.5 13H15M9 19.5h6"/></svg>Connections</a>
 <a class="rail-item" href="/keys" data-page="keys"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12h9M17 12v3M20 12v2"/></svg>Keys &amp; passwords</a>
 <a class="rail-item" href="/account" data-page="account"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1.2-3.3 3.8-5 7-5s5.8 1.7 7 5"/></svg>Account</a>
+<a class="rail-item" href="/installation" data-page="installation"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4.5" width="16" height="6" rx="1.4"/><rect x="4" y="13.5" width="16" height="6" rx="1.4"/><path d="M7.5 7.5h.01M7.5 16.5h.01M11 7.5h5.5M11 16.5h5.5"/></svg>Installation</a>
 </nav>
 <div class="rail-foot"><p class="rail-user"><span class="avatar" aria-hidden="true"></span><span>Signed in as<br><strong id="account"></strong></span></p><button id="logout" type="button" class="secondary">Sign out</button></div>
 </aside>
@@ -49,6 +50,31 @@
 <article class="setting"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="6.5" y="2.5" width="11" height="19" rx="2.2"/><path d="M10.5 18.5h3M9.5 9.5l1.8 1.8 3.4-3.6"/></svg></span><div class="setting-text"><h2>Authenticator</h2><p class="hint">The 6-digit code on your phone. Replace it when you change phones: the old one keeps working until the new one is confirmed.</p></div><button id="reset-mfa" type="button" class="secondary">Replace authenticator</button></article>
 <article class="setting"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M6 6l3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5"/></svg></span><div class="setting-text"><h2>Recovery codes</h2><p class="hint">One-time codes for signing in when your phone is lost. Making new ones stops the old ones at once.</p></div><button id="regenerate-recovery" type="button" class="secondary">Make new codes</button></article>
 </div></section>
+<section id="installation-panel" hidden>
+<article class="install-card"><div class="install-card-head"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="4" y="4.5" width="16" height="6" rx="1.4"/><rect x="4" y="13.5" width="16" height="6" rx="1.4"/><path d="M7.5 7.5h.01M7.5 16.5h.01M11 7.5h5.5M11 16.5h5.5"/></svg></span><h2>This installation</h2></div>
+<dl class="facts">
+<dt>Version</dt><dd id="install-version">Checking…</dd>
+<dt>Serves</dt><dd id="install-serves">Checking…</dd>
+<dt>Your secrets</dt><dd>Encrypted on this server under its own key. A secret opens only after your phone confirms it.</dd>
+<dt>Sent to us</dt><dd>Nothing. This copy reports to no one and never checks for updates by itself.</dd>
+</dl></article>
+<article class="install-card" id="install-add"><div class="install-card-head"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3.5" y="4.5" width="17" height="11" rx="1.6"/><path d="M9 19.5h6M12 15.5v4M12 7.5v5M9.5 10h5"/></svg></span><h2>Add a server</h2></div>
+<p class="hint">On the Keybash server, as root. The command reads the server’s identity, prints its fingerprint to compare on that server’s own console, and adds it only once you confirm. It adds SSH servers; RDP servers go into <code>/etc/keybash/targets.json</code> by hand.</p>
+<ol class="command-steps">
+<li><p>Add the server by its address and give it a name:</p><output id="command-add">sudo /usr/local/libexec/keybash/keybash server-add \
+  --config=/etc/keybash/targets.json --name="Web server" --host=192.0.2.10</output><button id="copy-add" type="button" class="secondary">Copy</button></li>
+<li><p>Restart Keybash so it reads the new list. Open sessions close.</p><output id="command-restart">sudo systemctl restart keybash-ssh-manager keybash-gateway</output><button id="copy-restart" type="button" class="secondary">Copy</button></li>
+</ol></article>
+<article class="install-card" id="install-update"><div class="install-card-head"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/></svg></span><h2>Update</h2></div>
+<p class="hint">Updating stops Keybash for a moment, so open sessions close. Your settings, keys, passwords and accounts stay. The previous version is copied to <code>/var/backups/keybash</code> first and put back by itself if the new one does not start.</p>
+<ol class="command-steps">
+<li><p>In your Keybash checkout on the server (here <code>~/keybash</code>), as your usual user, get the latest version and build it:</p><output id="command-build">cd ~/keybash &amp;&amp; git pull --ff-only &amp;&amp;
+  sh scripts/build-stage.sh ~/keybash-stage-$(git rev-parse --short HEAD)</output><button id="copy-build" type="button" class="secondary">Copy</button></li>
+<li><p>Install it, as root. It checks everything before it changes anything:</p><output id="command-upgrade">cd ~/keybash &amp;&amp;
+  sudo sh scripts/upgrade.sh --stage=$HOME/keybash-stage-$(git rev-parse --short HEAD)</output><button id="copy-upgrade" type="button" class="secondary">Copy</button></li>
+</ol>
+<p class="hint">Until Keybash publishes signed releases, an update trusts the code GitHub serves over HTTPS. <a href="https://github.com/denyfirst/keybash/blob/main/docs/INSTALL.md#upgrading" target="_blank" rel="noopener noreferrer">The same, step by step</a></p></article>
+</section>
 </section>
 <p id="notice" role="status" aria-live="polite"></p>
 <p class="focus-foot">Signed in as <strong id="focus-account"></strong><span aria-hidden="true"> · </span><button id="focus-logout" type="button" class="link-button">Sign out</button></p>

@@ -193,7 +193,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	// The workspace is one document with a page per path; the script shows
 	// the part the path names. Loading a page counts as activity.
-	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account")
+	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account" || r.URL.Path == "/installation")
 	id, valid := tokenID(requestToken(r))
 	l.mu.Lock()
 	s := l.liveLocked(id, page)
@@ -344,6 +344,12 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 401)
 			return
 		}
+	}
+	if r.URL.Path == "/api/installation" && r.Method == "GET" {
+		data := l.installationLocked()
+		l.mu.Unlock()
+		jsonReply(w, data)
+		return
 	}
 	if r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/capacity" {
 		l.remoteHTTP(w, r, id, s)

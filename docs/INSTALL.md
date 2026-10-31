@@ -90,6 +90,44 @@ without hand-written JSON:
 - The services read the catalog at start, so the command ends by naming the
   restart, which closes open sessions.
 
+## Upgrading
+
+In the checkout on the server, as the usual user, then as root:
+
+```sh
+git pull --ff-only
+sh scripts/build-stage.sh ~/keybash-stage-$(git rev-parse --short HEAD)    # add --with-rdp for an RDP install
+sudo sh scripts/upgrade.sh --stage=$HOME/keybash-stage-$(git rev-parse --short HEAD)
+```
+
+`upgrade.sh` replaces the programs (and the RDP runtime) and keeps everything
+else: accounts, IDs, listener, networks, server name, limits, catalog, TLS
+pair, keys and data. The Installation page in the workspace shows the same
+commands with the running version.
+
+- Each build changes every program's digest, since Go stamps the commit into
+  it. The units pin the workers' digests, so the upgrade writes a new service
+  plan rather than replacing files under the old one.
+- The settings are read back from the installed gateway unit. They are used
+  only if the installed `keybash-service-plan`, given them and the old
+  digests, writes every installed unit and the sysusers file again byte for
+  byte. A unit edited by hand is refused.
+- Before the first change:
+  - the new programs must accept the installed catalog and TLS pair;
+  - the new plan must keep the same accounts and pass `systemd-analyze verify`;
+  - the stage must keep the mode: an SSH-only install upgrades to SSH only,
+    and an RDP install to RDP.
+- It copies the old programs, units, runtime and database to
+  `/var/backups/keybash/<UTC time>` (root, 0700), stops the services, swaps the
+  files and starts them. If they do not come up, it puts the copies back and
+  starts the old version.
+- Upgrading closes open sessions. One upgrade runs at a time.
+- The backup holds the sealed database, not the instance key. Remove it once
+  the new version works.
+
+Until Keybash publishes signed releases, an update trusts the code GitHub
+serves over HTTPS; signed commits are checked in CI, not on the server.
+
 ## Uninstall
 
 `uninstall.sh` stops and disables the units, removes unit files, the sysusers
@@ -108,6 +146,25 @@ refusals that leave the host untouched, a non-root refusal, and a full install:
 - the printed bootstrap code creating the first account;
 - the printed recovery code's format;
 - ownership and modes of every installed path.
+
+It then upgrades that install:
+- **Refusals that change nothing:** these leave every program, unit, runtime file
+  and the database as they were, and the gateway running:
+  - not root, an unknown option, a relative stage, a stage missing a program;
+  - a stage of the other mode, a second upgrade at once;
+  - a gateway unit edited by hand.
+- **A real upgrade:** to a stage whose SSH worker differs only in its build ID. The
+  new digest must be pinned in both units and match the installed worker. The
+  account made at install still signs in, and the backup is root-only and holds
+  the old worker.
+- **A failed upgrade:** a stage whose gateway passes every check but never
+  serves. Programs, units, runtime and database must be byte-identical
+  afterwards, and the old version must serve and sign in.
+- **Mutations of a copy of the upgrader:** each must fail its intended check:
+  - skipping the unit check (an edited unit is upgraded over);
+  - skipping the restore (a failed upgrade leaves the host down);
+  - pinning the installed worker's digest (a valid upgrade no longer pins
+    what it installs).
 
 It then checks that a second install refuses before changing anything, and
 that uninstall stops everything while keeping the database and key. Mutations
