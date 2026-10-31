@@ -113,6 +113,24 @@ ikinci dəfə əlavə olunmur. Belə ünvanlara qoşulmağa heç cəhd edilmir. 
 yalnız oxunduğu andan bəri dəyişməyibsə və yeni siyahı Keybash-in özü kimi
 yüklənə bilirsə əvəz olunur.
 
+## Yeniləmək
+
+Serverdəki Keybash qovluğunda əvvəl adi istifadəçi ilə yeni versiyanı yığ,
+sonra root ilə qur:
+
+```sh
+git pull --ff-only
+sh scripts/build-stage.sh ~/keybash-stage-$(git rev-parse --short HEAD)    # RDP varsa: --with-rdp
+sudo sh scripts/upgrade.sh --stage=$HOME/keybash-stage-$(git rev-parse --short HEAD)
+```
+
+`upgrade.sh` yalnız proqramları dəyişir. Hesablar, ayarlar, serverlərin
+siyahısı, sertifikat, açarlar və məlumatlar yerində qalır. Heç nəyi dəyişməzdən
+əvvəl hər şeyi yoxlayır. Köhnə versiyanın surətini `/var/backups/keybash`
+qovluğuna qoyur. Yeni versiya başlamasa, köhnəsini özü geri qaytarıb başladır.
+Yeniləmə zamanı açıq sessiyalar bağlanır. Workspace-dəki **Installation**
+səhifəsi eyni əmrləri və işləyən versiyanı göstərir.
+
 ## Silmək
 
 ```sh

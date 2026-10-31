@@ -637,3 +637,32 @@ button.link-button {
 button.link-button:hover:not(:disabled) { color: var(--link); background: none; text-decoration-thickness: 2px; }
 /* A command is copied whole, so it never breaks at one of its hyphens. */
 #connection-dialog .hint code { white-space: nowrap; }
+
+/* Installation: what this copy is, then the two jobs done on its server. */
+/* One column that never grows to fit a command: a long one scrolls in its box. */
+#installation-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; max-width: 54rem; }
+.install-card {
+  min-width: 0;
+  padding: 1.3rem 1.4rem 1.2rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.install-card-head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.9rem; }
+.install-card-head h2 { margin: 0; font-size: 1.02rem; }
+.install-card > .hint { margin: 0 0 0.6rem; max-width: var(--measure); }
+.facts { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: 0.65rem 1.2rem; margin: 0; }
+.facts dt { font-size: 0.86rem; font-weight: 600; color: var(--ink-soft); }
+.facts dd { margin: 0; font-size: 0.92rem; }
+.facts code { font-size: 0.86rem; }
+.command-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.9rem; margin: 0.4rem 0 0.6rem; padding-left: 1.3rem; }
+.command-steps p { margin: 0; font-size: 0.9rem; color: var(--ink-soft); }
+/* A command keeps its lines, so it never breaks at one of its hyphens; a
+   long line scrolls inside its box. */
+.command-steps output { margin: 0.45rem 0; overflow-x: auto; overflow-wrap: normal; white-space: pre; font-size: 0.8rem; }
+.command-steps button { margin: 0; padding: 0.3rem 0.8rem; font-size: 0.82rem; }
+@media (max-width: 520px) {
+  .facts { grid-template-columns: 1fr; gap: 0.2rem; }
+  .facts dd { margin-bottom: 0.6rem; }
+}

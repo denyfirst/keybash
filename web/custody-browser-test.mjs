@@ -65,6 +65,12 @@ try {
   assert(await page.locator('#records .empty-state').isVisible(), 'empty keys page did not say what to do'); assert(await page.locator('#add-record').isVisible()); assert(!(await page.locator('#new-connection').isVisible()));
   await page.locator('.rail-item[data-page=account]').click(); await page.waitForURL(config.Origin + '/account'); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
   assert(!(await page.locator('#records-panel').isVisible())); assert.equal(await page.locator('h1').textContent(), 'Account'); assert.equal(await page.title(), 'Keybash · Account'); assert(!(await page.locator('#add-record').isVisible()));
+  // Installation says what this copy is, and how to add a server and update it.
+  await page.locator('.rail-item[data-page=installation]').click(); await page.waitForURL(config.Origin + '/installation'); await page.locator('#installation-panel').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#install-serves').filter({ hasText: /^Keys and passwords only/ }).waitFor();
+  assert.equal(await page.locator('h1').textContent(), 'Installation'); assert(!(await page.locator('#account-panel').isVisible()));
+  assert.match(await page.locator('#install-version').textContent(), /^(Not recorded in this build\.|[0-9a-f]{7}( · .+)?)$/);
+  assert.match(await page.locator('#command-upgrade').textContent(), /sudo sh scripts\/upgrade\.sh --stage=/); assert(!(await page.locator('#command-build').textContent()).endsWith('--with-rdp'));
   await page.locator('.rail-item[data-page=keys]').click(); await page.waitForURL(config.Origin + '/keys'); await page.locator('#records-panel').waitFor({ state: 'visible' }); await settled();
   // Completing sign-in counts as fresh proof for ten minutes; let it lapse.
   // Adding a record needs the ready session only.
