@@ -1,6 +1,6 @@
 import { systems } from '/systems.mjs';
 const $ = id => document.getElementById(id);
-let csrf = '', busy = false, secretTimer, pendingDelete = '', remoteEnabled = false, setupRequired = false;
+let csrf = '', busy = false, secretTimer, pendingDelete = null, remoteEnabled = false, setupRequired = false;
 let catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0, owned = new Map();
 // The page's answer goes where the person is looking: into the open sheet
 // that asked, or under the page.
@@ -46,7 +46,7 @@ function showSeed(secret, rows) {
 }
 function clearAll() {
   hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration;
-  for (const id of ['account', 'account-name', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
+  for (const id of ['account', 'account-name', 'focus-account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
@@ -168,7 +168,16 @@ function recordRow(record) {
   const actions = document.createElement('div'); actions.className = 'record-actions'; row.append(actions);
   return { row, actions };
 }
-function askDelete(record) { pendingDelete = record.id; $('delete-name').textContent = record.name; $('delete-dialog').showModal(); }
+// One sheet asks before anything is deleted: a key or password, or a connection.
+const deleteKinds = {
+  credential: { title: 'Delete this key or password?', hint: 'Connections that sign in with it stop working. This cannot be undone.', path: id => `/api/credentials/${id}` },
+  connection: { title: 'Delete this connection?', hint: 'The key or password it signs in with stays under Keys & passwords. This cannot be undone.', path: id => `/api/connections/${id}` },
+};
+function askDelete(kind, record) {
+  pendingDelete = { kind, id: record.id };
+  $('delete-title').textContent = deleteKinds[kind].title; $('delete-hint').textContent = deleteKinds[kind].hint; $('delete-name').textContent = record.name;
+  $('delete-dialog').showModal();
+}
 async function loadRecords() {
   const records = await request('/api/credentials');
   if (!Array.isArray(records) || records.length > 256) throw new Error('invalid records');
@@ -177,7 +186,7 @@ async function loadRecords() {
     if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
     const { row, actions } = recordRow(record);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost'; remove.textContent = 'Delete';
-    remove.addEventListener('click', () => askDelete(record));
+    remove.addEventListener('click', () => askDelete('credential', record));
     // A key made here is never shown; its row offers the install command instead.
     if (record.generated) {
       const install = document.createElement('button'); install.type = 'button'; install.className = 'secondary'; install.textContent = 'Add to server';
@@ -337,7 +346,7 @@ function serverCard(record, target) {
     link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
   }
   if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
-  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => { void run(async () => { await request(`/api/connections/${record.id}`, 'DELETE', {}); await loadConnections(); }); });
+  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => askDelete('connection', record));
   actions.append(remove); card.append(actions);
   return card;
 }
@@ -389,7 +398,7 @@ function showPage(ready) {
 async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
-  csrf = data.csrf; $('account').textContent = data.username; $('account-name').textContent = data.username; document.body.dataset.stage = data.stage;
+  csrf = data.csrf; for (const id of ['account', 'account-name', 'focus-account']) $(id).textContent = data.username; document.body.dataset.stage = data.stage;
   remoteEnabled = data.remote === true;
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
@@ -501,13 +510,21 @@ bind('password-change', async () => {
 click('reset-mfa', async () => { await request('/api/mfa/reset', 'POST', {}); hideSecret(); await loadAccount(); });
 click('regenerate-recovery', async () => { showCodes(await request('/api/mfa/recovery', 'POST', {})); });
 click('saved-recovery', async () => { $('recovery-codes').value = ''; await loadAccount(); });
-click('logout', async () => { hideSecret(); clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); });
+const signOut = async () => { hideSecret(); clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); };
+click('logout', signOut); click('focus-logout', signOut);
 click('copy-seed', () => copy('seed')); click('copy-recovery', () => copy('recovery-codes'));
 click('copy-secret', () => copy('revealed-secret')); click('copy-passphrase', () => copy('revealed-passphrase'));
 $('hide-secret')?.addEventListener('click', hideSecret);
 $('secret-dialog')?.addEventListener('close', hideSecret);
-click('confirm-delete', async () => { const id = pendingDelete; pendingDelete = ''; $('delete-dialog').close(); if (!idOK(id)) return; await request(`/api/credentials/${id}`, 'DELETE', {}); hideSecret(); await loadRecords(); notice('Deleted.'); });
-$('cancel-delete')?.addEventListener('click', () => { pendingDelete = ''; $('delete-dialog').close(); });
+click('confirm-delete', async () => {
+  const { kind, id } = pendingDelete ?? {}; pendingDelete = null; $('delete-dialog').close();
+  if (!Object.hasOwn(deleteKinds, kind) || !idOK(id)) return;
+  await request(deleteKinds[kind].path(id), 'DELETE', {});
+  if (kind === 'credential') { hideSecret(); await loadRecords(); } else await loadConnections();
+  notice('Deleted.');
+});
+$('cancel-delete')?.addEventListener('click', () => $('delete-dialog').close());
+$('delete-dialog')?.addEventListener('close', () => { pendingDelete = null; });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { hideSecret(); clearInputs(); closeReview(); hideSeed(); } });
 window.addEventListener('pagehide', clearAll);
 window.addEventListener('pageshow', event => { if (event.persisted) { clearAll(); location.reload(); } });

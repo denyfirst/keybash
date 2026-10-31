@@ -10,11 +10,13 @@ async function json(path, method='GET', body, csrf='') {
   return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
 }
 export function remoteErrorMessage(error){if(error?.code==='capacity')return 'The server is at its session limit. Close an open session, or try again in a moment.';if(error?.code==='rate')return 'Too many connection attempts. Wait a moment and try again.';return 'The connection was refused. If your session ended, sign in again.';}
-// The menu folds away so a session gets the whole width. The choice is not
-// remembered: Keybash pages store nothing in the browser.
-export function railToggle(){
- const button=document.getElementById('rail-toggle');if(!button)return;
- button.addEventListener('click',()=>{const hidden=document.body.classList.toggle('rail-hidden');button.setAttribute('aria-expanded',String(!hidden));button.querySelector('span').textContent=hidden?'Show menu':'Hide menu';});
+// Another session to the same server opens in its own tab, as Connect does,
+// so each tab stays one session that closing it ends. SSH only: a second RDP
+// sign-in as the same user takes over the first desktop instead.
+export function offerNewSession(){
+ const record=document.body.dataset.connection,link=document.getElementById('new-session');
+ if(!link||document.body.dataset.ownedRemote!=='ssh'||!/^[a-f0-9]{32}$/.test(record??''))return;
+ link.href=`/remote/ssh/${record}`;link.hidden=false;
 }
 // Full screen also asks the browser for the keyboard where it can (Chrome,
 // Edge), so Esc, the Windows key and Alt+Tab reach the remote; the browser
@@ -32,7 +34,7 @@ export async function nameSession(kind){
  const record=document.body.dataset.connection;
  try{const rows=await json('/api/connections');const row=Array.isArray(rows)?rows.find(item=>item?.id===record):null;
   if(typeof row?.name!=='string'||!row.name||row.name.length>160)return;
-  document.title=`${row.name} · ${kind}`;document.getElementById('tab-name').textContent=row.name;document.getElementById('topbar-name').textContent=row.name;
+  document.title=`${row.name} · ${kind}`;document.getElementById('tab-name').textContent=row.name;
  }catch{}
 }
 export async function remoteProof(){

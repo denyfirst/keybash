@@ -34,6 +34,9 @@ try {
   await page.locator('#bootstrap').waitFor({ state: 'visible' });
   await page.locator('#setup-code').fill(config.Code); await page.locator('#setup-user').fill(config.Username); await page.locator('#setup-password').fill(config.Password); await page.locator('#bootstrap button').click();
   await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
+  // Until the second factor is done the page is its card alone: no menu, and Sign out under the card.
+  const alone = async () => { assert(!(await page.locator('.rail').isVisible()) && !(await page.locator('.topbar').isVisible()), 'the menu shows before the second factor'); assert(await page.locator('#focus-logout').isVisible(), 'no Sign out under the card'); assert.equal(await page.locator('#focus-account').textContent(), await page.locator('#account').textContent()); };
+  await alone();
   assert.equal((await page.request.get(config.Origin + '/api/credentials')).status(), 403, 'password-only vault access');
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); seed = await page.locator('#seed').textContent(); assert.match(seed, /^[A-Z2-7]{32}$/); await settled();
   // The QR code is the server's drawing of this seed, module for module, with a
@@ -50,7 +53,8 @@ try {
   assert.equal(await page.locator('#seed-qr path').count(), 0); assert.equal(await page.locator('#seed').textContent(), ''); assert(await page.locator('#qr-start').isVisible());
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); assert.equal(await page.locator('#seed').textContent(), seed); await settled();
   await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30) - 1)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
-  await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  await alone(); await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  assert(await page.locator('.rail').isVisible() && !(await page.locator('#focus-logout').isVisible()), 'the ready workspace has no menu');
   assert.equal(await page.locator('#recovery-codes').inputValue(), '');
   assert.equal(await page.locator('#reauth, #reauth-password').count(), 0, 'standing re-verification form');
   // A page per path. Without an operator catalog "/" shows the keys, the menu
@@ -94,7 +98,8 @@ try {
   assert.equal((await (await page.request.get(config.Origin + '/api/credentials')).json()).length, 1);
   const cookie = (await context.cookies()).find(c => c.name === '__Host-keybash-session'); assert(cookie?.secure && cookie.httpOnly && cookie.sameSite === 'Strict');
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0); assert.equal(await page.evaluate(() => document.cookie), '');
-  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#challenge').waitFor({ state: 'visible' });
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#challenge').waitFor({ state: 'visible' }); await settled();
+  await alone(); await page.locator('#focus-logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#challenge').waitFor({ state: 'visible' });
   assert.equal((await page.request.get(config.Origin + '/api/credentials')).status(), 403);
   await fixture('tick'); await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   await fixture('restart'); assert.equal((await page.request.get(config.Origin + '/api/session')).status(), 401, 'restart retained session');
