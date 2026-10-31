@@ -286,7 +286,7 @@ func TestOwnedRemotePageCarriesItsConnection(t *testing.T) {
 		t.Fatal("owned page has no body tag")
 	}
 	tag := page[start : start+end]
-	if !strings.Contains(tag, `data-owned-remote="rdp"`) || !strings.Contains(tag, `data-connection="`+record+`"`) || !strings.Contains(tag, `class="workspace session-page"`) || strings.Count(page, "data-owned-remote") != 1 {
+	if !strings.Contains(tag, `data-owned-remote="rdp"`) || !strings.Contains(tag, `data-connection="`+record+`"`) || !strings.Contains(tag, `class="session-page"`) || strings.Count(page, "data-owned-remote") != 1 {
 		t.Fatalf("owned page body tag is not marked for its connection: %s", tag)
 	}
 	c.expect("GET", "/remote/ssh/"+record, "", 404)

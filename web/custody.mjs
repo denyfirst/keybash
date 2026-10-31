@@ -1,6 +1,6 @@
 import { systems } from '/systems.mjs';
 const $ = id => document.getElementById(id);
-let csrf = '', busy = false, secretTimer, pendingDelete = '', remoteEnabled = false, setupRequired = false;
+let csrf = '', busy = false, secretTimer, pendingDelete = null, remoteEnabled = false, setupRequired = false;
 let catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0, owned = new Map();
 // The page's answer goes where the person is looking: into the open sheet
 // that asked, or under the page.
@@ -46,7 +46,7 @@ function showSeed(secret, rows) {
 }
 function clearAll() {
   hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration;
-  for (const id of ['account', 'account-name', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
+  for (const id of ['account', 'account-name', 'focus-account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
@@ -168,7 +168,16 @@ function recordRow(record) {
   const actions = document.createElement('div'); actions.className = 'record-actions'; row.append(actions);
   return { row, actions };
 }
-function askDelete(record) { pendingDelete = record.id; $('delete-name').textContent = record.name; $('delete-dialog').showModal(); }
+// One sheet asks before anything is deleted: a key or password, or a connection.
+const deleteKinds = {
+  credential: { title: 'Delete this key or password?', hint: 'Connections that sign in with it stop working. This cannot be undone.', path: id => `/api/credentials/${id}` },
+  connection: { title: 'Delete this connection?', hint: 'The key or password it signs in with stays under Keys & passwords. This cannot be undone.', path: id => `/api/connections/${id}` },
+};
+function askDelete(kind, record) {
+  pendingDelete = { kind, id: record.id };
+  $('delete-title').textContent = deleteKinds[kind].title; $('delete-hint').textContent = deleteKinds[kind].hint; $('delete-name').textContent = record.name;
+  $('delete-dialog').showModal();
+}
 async function loadRecords() {
   const records = await request('/api/credentials');
   if (!Array.isArray(records) || records.length > 256) throw new Error('invalid records');
@@ -177,7 +186,7 @@ async function loadRecords() {
     if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
     const { row, actions } = recordRow(record);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost'; remove.textContent = 'Delete';
-    remove.addEventListener('click', () => askDelete(record));
+    remove.addEventListener('click', () => askDelete('credential', record));
     // A key made here is never shown; its row offers the install command instead.
     if (record.generated) {
       const install = document.createElement('button'); install.type = 'button'; install.className = 'secondary'; install.textContent = 'Add to server';
@@ -337,7 +346,7 @@ function serverCard(record, target) {
     link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
   }
   if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
-  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => { void run(async () => { await request(`/api/connections/${record.id}`, 'DELETE', {}); await loadConnections(); }); });
+  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => askDelete('connection', record));
   actions.append(remove); card.append(actions);
   return card;
 }
@@ -366,13 +375,33 @@ async function loadConnections() {
   }
   await chooseTarget();
 }
-// One document, three pages: the path picks what a ready session sees. Without
+// One document, four pages: the path picks what a ready session sees. Without
 // an operator catalog there is nothing to connect to, so "/" shows the keys.
 const pages = {
   connections: { path: '/', panel: 'connections-panel', title: 'Connections', lead: 'Your servers, one click from a terminal.' },
   keys: { path: '/keys', panel: 'records-panel', title: 'Keys & passwords', lead: 'What you sign in to servers with, encrypted on this server.' },
   account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, your phone authenticator and your recovery codes.' },
+  installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, how to add a server, and how to update it.' },
 };
+// What this copy runs and serves comes from the server; the commands on the
+// page are fixed text, the same for every installation.
+async function loadInstallation() {
+  const data = await request('/api/installation');
+  if (typeof data?.revision !== 'string' || !/^(?:[0-9a-f]{40})?$/.test(data.revision) || typeof data.built !== 'string' || data.built !== '' && Number.isNaN(Date.parse(data.built)) ||
+    typeof data.modified !== 'boolean' || typeof data.ssh !== 'boolean' || typeof data.rdp !== 'boolean' || !Number.isInteger(data.servers) || data.servers < 0 || data.servers > 256) throw new Error('invalid installation');
+  if (data.revision) {
+    const link = document.createElement('a'); link.href = `https://github.com/denyfirst/keybash/commit/${data.revision}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    const code = document.createElement('code'); code.textContent = data.revision.slice(0, 7); link.append(code);
+    const notes = [];
+    if (data.built) notes.push(`built ${new Date(data.built).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`);
+    if (data.modified) notes.push('with local changes');
+    $('install-version').replaceChildren(link, notes.length ? ` · ${notes.join(' · ')}` : '');
+  } else $('install-version').textContent = 'Not recorded in this build.';
+  const kinds = data.ssh && data.rdp ? 'SSH and RDP' : data.ssh ? 'SSH' : data.rdp ? 'RDP' : '';
+  $('install-serves').textContent = kinds ? `${kinds}, to ${data.servers} ${data.servers === 1 ? 'server' : 'servers'} on your administrator’s list.` : 'Keys and passwords only: no server list is set up.';
+  // An installation with RDP is rebuilt with its runtime.
+  if (data.rdp && !$('command-build').textContent.endsWith(' --with-rdp')) $('command-build').textContent += ' --with-rdp';
+}
 function showPage(ready) {
   let name = Object.keys(pages).find(key => pages[key].path === location.pathname) ?? 'connections';
   if (name === 'connections' && !remoteEnabled) name = 'keys';
@@ -385,18 +414,20 @@ function showPage(ready) {
   $('topbar-page').textContent = ready ? pages[name].title : 'Sign-in';
   $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
   if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
+  return name;
 }
 async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
-  csrf = data.csrf; $('account').textContent = data.username; $('account-name').textContent = data.username; document.body.dataset.stage = data.stage;
+  csrf = data.csrf; for (const id of ['account', 'account-name', 'focus-account']) $(id).textContent = data.username; document.body.dataset.stage = data.stage;
   remoteEnabled = data.remote === true;
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
   $('heading').textContent = data.stage === 'enroll' ? 'Set up your phone' : 'Confirm it’s you';
-  showPage(data.stage === 'ready');
+  const page = showPage(data.stage === 'ready');
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false;
   if (data.stage === 'ready') await loadRecords();
+  if (data.stage === 'ready' && page === 'installation') await loadInstallation();
 }
 bind('signin', async () => {
   const username = $('username').value, password = $('password').value; clearInputs();
@@ -501,13 +532,22 @@ bind('password-change', async () => {
 click('reset-mfa', async () => { await request('/api/mfa/reset', 'POST', {}); hideSecret(); await loadAccount(); });
 click('regenerate-recovery', async () => { showCodes(await request('/api/mfa/recovery', 'POST', {})); });
 click('saved-recovery', async () => { $('recovery-codes').value = ''; await loadAccount(); });
-click('logout', async () => { hideSecret(); clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); });
+const signOut = async () => { hideSecret(); clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); };
+click('logout', signOut); click('focus-logout', signOut);
 click('copy-seed', () => copy('seed')); click('copy-recovery', () => copy('recovery-codes'));
+for (const name of ['add', 'restart', 'build', 'upgrade']) click(`copy-${name}`, () => copy(`command-${name}`));
 click('copy-secret', () => copy('revealed-secret')); click('copy-passphrase', () => copy('revealed-passphrase'));
 $('hide-secret')?.addEventListener('click', hideSecret);
 $('secret-dialog')?.addEventListener('close', hideSecret);
-click('confirm-delete', async () => { const id = pendingDelete; pendingDelete = ''; $('delete-dialog').close(); if (!idOK(id)) return; await request(`/api/credentials/${id}`, 'DELETE', {}); hideSecret(); await loadRecords(); notice('Deleted.'); });
-$('cancel-delete')?.addEventListener('click', () => { pendingDelete = ''; $('delete-dialog').close(); });
+click('confirm-delete', async () => {
+  const { kind, id } = pendingDelete ?? {}; pendingDelete = null; $('delete-dialog').close();
+  if (!Object.hasOwn(deleteKinds, kind) || !idOK(id)) return;
+  await request(deleteKinds[kind].path(id), 'DELETE', {});
+  if (kind === 'credential') { hideSecret(); await loadRecords(); } else await loadConnections();
+  notice('Deleted.');
+});
+$('cancel-delete')?.addEventListener('click', () => $('delete-dialog').close());
+$('delete-dialog')?.addEventListener('close', () => { pendingDelete = null; });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { hideSecret(); clearInputs(); closeReview(); hideSeed(); } });
 window.addEventListener('pagehide', clearAll);
 window.addEventListener('pageshow', event => { if (event.persisted) { clearAll(); location.reload(); } });
