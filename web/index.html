@@ -13,30 +13,18 @@
   <script src="/vendor/xterm.js" defer></script>
   <script type="module" src="/app.mjs"></script>
 </head>
-<body class="workspace session-page">
-  <aside class="rail" id="rail">
-    <p class="rail-identity"><a class="wordmark" href="/" aria-label="Keybash">keybash<span class="wordmark-stop">.</span></a> <span class="tag">SSH</span></p>
-    <p class="rail-caption" id="rail-workspace">Workspace</p>
-    <nav class="rail-nav" aria-labelledby="rail-workspace">
-      <a class="rail-item" href="/"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.5 6l-6 6 6 6"/></svg>Connections</a>
-      <span class="rail-item" aria-current="page"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.6"/><path d="M7 9l2.5 2L7 13M11.5 13H15"/></svg>Terminal</span>
-    </nav>
-  </aside>
-  <div class="workspace-main">
-    <header class="topbar"><div class="topbar-start"><button id="rail-toggle" class="rail-toggle" type="button" aria-expanded="true" aria-controls="rail"><svg class="rail-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.6"/><path d="M9.5 4.5v15M6 8.5h1.5M6 11h1.5"/></svg><span>Hide menu</span></button><p class="topbar-path"><span>Workspace</span><span class="topbar-slash" aria-hidden="true">/</span><strong id="topbar-name">Terminal</strong></p></div><span id="status" role="status">Not connected</span></header>
-    <main>
-      <section id="login-panel" class="panel login-panel">
-        <form id="login"><label for="code">One-time lab sign-in code</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Open session</button></div></form>
-      </section>
-      <section class="session" aria-label="Terminal workspace">
-        <div class="toolbar"><div class="tab"><span class="tab-dot"></span><span id="tab-name">ssh</span> <span class="tab-type">SSH</span></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="fullscreen" disabled>Full screen</button><button id="disconnect" disabled>Disconnect</button></div></div>
-        <div id="terminal" aria-label="SSH terminal"></div>
-        <footer class="session-foot"><span>Ctrl+C: interrupt <i>·</i> Ctrl+Shift+C: copy</span><span id="size">100 × 30</span></footer>
-      </section>
-      <p class="help">A paste with several lines or control characters is shown to you before it is sent. A paste never adds an Enter.</p>
-      <p id="notice" role="status" class="notice"></p>
-    </main>
-  </div>
+<body class="session-page">
+  <main>
+    <section id="login-panel" class="panel login-panel">
+      <form id="login"><label for="code">One-time lab sign-in code</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Open session</button></div></form>
+    </section>
+    <section class="session" aria-label="Terminal workspace">
+      <div class="toolbar"><div class="toolbar-start"><span class="wordmark session-mark">keybash<span class="wordmark-stop">.</span></span><div class="tab"><span class="tab-dot"></span><span id="tab-name">ssh</span> <span class="tab-type">SSH</span></div><a id="new-session" class="new-session" target="_blank" rel="noopener" title="New session to this server" aria-label="New session to this server" hidden><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg></a></div><div class="tools"><button id="copy" disabled>Copy</button><button id="paste" disabled>Paste</button><button id="fullscreen" disabled>Full screen</button><button id="disconnect" disabled>Disconnect</button></div></div>
+      <div id="terminal" aria-label="SSH terminal"></div>
+      <footer class="session-foot"><span id="status" role="status">Not connected</span><span class="session-keys">Ctrl+C: interrupt <i>·</i> Ctrl+Shift+C: copy</span><span class="session-end"><span id="size">100 × 30</span><i>·</i><span>by <span class="org"><span class="org-deny">deny</span>first<span class="wordmark-stop">.</span></span></span></span></footer>
+    </section>
+    <p id="notice" role="status" class="notice"></p>
+  </main>
   <dialog id="paste-review"><form method="dialog"><p class="eyebrow">Paste review</p><h2>Check the text before it is sent.</h2><p class="hint">It may contain commands and control characters.</p><textarea id="paste-preview" readonly aria-label="Paste preview"></textarea><div class="dialog-actions"><button value="cancel" id="cancel-paste" class="secondary">Cancel</button><button type="button" id="confirm-paste" class="primary">Send to terminal</button></div></form></dialog>
   <dialog id="clipboard-panel"><form method="dialog"><h2>Clipboard</h2><p id="clipboard-help" class="hint"></p><textarea id="clipboard-text" aria-label="Clipboard text" maxlength="32768"></textarea><div class="dialog-actions"><button value="close" class="secondary">Close</button><button type="button" id="panel-paste">Review paste</button></div></form></dialog>
 </body>

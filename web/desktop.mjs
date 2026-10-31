@@ -1,6 +1,6 @@
 import { Guacamole } from './vendor/guacamole.mjs';
 import { workspaceControls } from './desktop-workspace.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, railToggle, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
@@ -20,7 +20,7 @@ function end() {
   $('display').replaceChildren();
   for (const id of ['disconnect','special','fullscreen']) $(id).disabled = true;
   if (document.fullscreenElement) void document.exitFullscreen().catch(()=>{});
-  $('status').textContent = 'Session ended';
+  $('status').textContent = 'Session ended'; $('status').classList.remove('connected');
 }
 function fit() {
   if (!client || stopped) return;
@@ -105,7 +105,7 @@ function begin(proof=null) {
   client.onerror = end;
   client.onstatechange = state => {
     if (state === Guacamole.Client.State.CONNECTED && !stopped) {
-      $('status').textContent = 'Connected'; fit(); $('desktop').focus();
+      $('status').textContent = 'Connected'; $('status').classList.add('connected'); fit(); $('desktop').focus();
       for (const id of ['disconnect','special','fullscreen']) $(id).disabled = false;
     }
   };
@@ -135,7 +135,6 @@ $('fullscreen').addEventListener('click', () => {
   if (document.fullscreenElement) void document.exitFullscreen().catch(()=>{});
   else if (!stopped) void enterFullscreen($('desktop')).then(() => $('desktop').focus()).catch(()=>{});
 });
-railToggle();
 watchFullscreen($('fullscreen'), fit);
 window.addEventListener('resize', fit);
 window.addEventListener('pagehide', ()=>{retired=true;end();});

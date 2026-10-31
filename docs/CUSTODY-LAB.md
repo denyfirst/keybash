@@ -143,7 +143,10 @@ any record, so a restore keeps it working.
 The workspace has a page per path, one document behind the session:
 `/` connections (or the keys when there is no operator catalog), `/keys`
 and `/account`. The script shows the part the path names, and the menu marks
-it. Before the first connection a short guide lists the three steps.
+it. Before the first connection a short guide lists the three steps. Until
+the second factor is done (phone setup, the code, the first recovery codes)
+the page is its card alone in the middle, with no menu, and Sign out under
+it. Deleting a key, a password or a connection first asks in a sheet.
 
 All assets are local; no CDN, external authentication, telemetry, QR image URL,
 browser persistent storage or automatic clipboard read/write. The enrollment

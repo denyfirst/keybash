@@ -62,6 +62,8 @@
   --term-ink:    #e8e9ec;
   --term-faint:  #959aa5;
   --term-live:   #6fbf92;
+  --term-tool:   #22d3ee;
+  --term-brand:  #ff5c6a;
 
   --sans: "Schibsted Grotesk", "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui,
           -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -295,8 +297,11 @@ summary {
 .panel > details:first-child { margin-top: 0; border-top: 0; }
 .panel > details:first-child > summary { padding-top: 0; }
 
+/* Text in a sheet wraps, so it never scrolls sideways; without this a fraction
+   of a pixel at some zoom levels drew both scroll bars on a short sheet. */
 dialog {
   width: min(40rem, 92vw);
+  overflow-x: hidden;
   padding: 1.6rem;
   color: var(--ink);
   background: var(--card);
@@ -492,11 +497,11 @@ button.ghost:hover:not(:disabled) { color: var(--ink); background: var(--paper-s
   border-radius: 0 3px 3px 0;
 }
 /* The one action a page asks for carries a little depth. */
-button:not(.secondary):not(.ghost):not(:disabled),
+button:not(.secondary):not(.ghost):not(.link-button):not(:disabled),
 a.connect {
   background-image: linear-gradient(180deg, color-mix(in srgb, #ffffff 10%, transparent), transparent);
 }
-button:not(.secondary):not(.ghost):not(:disabled):hover,
+button:not(.secondary):not(.ghost):not(.link-button):not(:disabled):hover,
 a.connect:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
 /* Sign-in: the same light behind the card, and what Keybash keeps under it. */
 body.signin-page {
