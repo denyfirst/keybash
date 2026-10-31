@@ -599,3 +599,41 @@ button.danger:hover:not(:disabled) { background: #931a25; border-color: #931a25;
   .code-boxes > input { font-size: 1.3rem; }
 }
 #credential-key { min-height: 6.5rem; }
+
+/* Until the account is ready (the phone set up, the code, the recovery codes)
+   the page is its card alone, in the middle, as at sign-in: no menu beside it
+   to wander into before the second factor is done. */
+.focus-mark, .focus-foot { display: none; }
+body.workspace:not([data-stage="ready"]) {
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(48rem 26rem at 50% -8rem, color-mix(in srgb, var(--tool) 12%, transparent), transparent 70%),
+    var(--paper);
+}
+body.workspace:not([data-stage="ready"]) :is(.rail, .topbar) { display: none; }
+body.workspace:not([data-stage="ready"]) .workspace-main { flex: 1 0 auto; background: none; }
+body.workspace:not([data-stage="ready"]) main { max-width: 49rem; margin: 0 auto; padding: 3.2rem 1.2rem 2rem; }
+body.workspace:not([data-stage="ready"]) .focus-mark { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin: 0 0 1.8rem; }
+body.workspace:not([data-stage="ready"]) .work-heading { justify-content: center; text-align: center; }
+body.workspace:not([data-stage="ready"]) :is(#enroll, #challenge, #recovery) { margin-inline: auto; box-shadow: var(--shadow-lg); }
+body.workspace:not([data-stage="ready"]) .focus-foot { display: block; margin: 1.4rem 0 0; font-size: 0.85rem; text-align: center; color: var(--ink-soft); }
+body.workspace:not([data-stage="ready"]) .colophon { text-align: center; }
+/* An action that reads as a link, such as Sign out under the card. */
+button.link-button {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--link);
+  background: none;
+  border: 0;
+  box-shadow: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+button.link-button:hover:not(:disabled) { color: var(--link); background: none; text-decoration-thickness: 2px; }
+/* A command is copied whole, so it never breaks at one of its hyphens. */
+#connection-dialog .hint code { white-space: nowrap; }

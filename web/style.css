@@ -1,37 +1,16 @@
 /* A remote session page: the terminal or the desktop, drawn on a panel that is
-   dark in both schemes (a terminal's colours are the remote's, not ours). */
+   dark in both schemes (a terminal's colours are the remote's, not ours).
+   The panel is the page. Connect opens each session in a tab of its own, and
+   closing that tab ends it, so nothing here leads away from the session. */
 
-#status {
-  padding: 0.3rem 0.7rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--ink-soft);
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  white-space: nowrap;
+body.session-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background:
+    radial-gradient(56rem 22rem at 78% -6rem, color-mix(in srgb, var(--tool) 9%, transparent), transparent 70%),
+    var(--paper);
 }
-#status.connected { color: var(--strong); border-color: color-mix(in srgb, var(--strong) 45%, var(--rule)); }
-
-/* A session takes the page's full width, and all of it once the menu is
-   folded away; the terminal grows with the window's height. */
-body.session-page main { max-width: none; }
-body.workspace.rail-hidden { grid-template-columns: minmax(0, 1fr); }
-body.rail-hidden .rail { display: none; }
-.topbar-start { display: flex; align-items: center; gap: 0.9rem; min-width: 0; }
-.rail-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--ink-soft);
-  background: transparent;
-  border: 1px solid var(--rule);
-}
-.rail-toggle:hover:not(:disabled) { color: var(--ink); background: var(--paper-sunk); border-color: var(--ink-faint); }
-.rail-toggle .rail-glyph { width: 1rem; height: 1rem; color: currentColor; }
+body.session-page main { padding: 1rem 1.2rem 0.4rem; }
 
 .login-panel { margin-bottom: 1.2rem; }
 .login-row { display: flex; gap: 0.6rem; }
@@ -46,6 +25,7 @@ body.rail-hidden .rail { display: none; }
 }
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
@@ -54,21 +34,46 @@ body.rail-hidden .rail { display: none; }
   background: var(--term-bar);
   border-bottom: 1px solid var(--term-rule);
 }
+.toolbar-start { display: flex; align-self: stretch; align-items: center; gap: 0.8rem; min-width: 0; }
+/* Our mark on the session, where the menu used to be. */
+.session-mark {
+  padding-right: 1rem;
+  font-size: 1.12rem;
+  line-height: 1.5rem;
+  color: var(--term-ink);
+  border-right: 1px solid var(--term-rule);
+}
+.session-mark .wordmark-stop { color: var(--term-tool); }
 .tab {
   display: flex;
   align-self: stretch;
   align-items: center;
   gap: 0.6rem;
+  min-width: 0;
   padding: 0 0.6rem;
   font-size: 0.86rem;
   font-weight: 600;
   color: var(--term-ink);
-  border-bottom: 2px solid var(--tool);
+  border-bottom: 2px solid var(--term-tool);
 }
-.tab-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--term-faint); }
+#tab-name { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--term-faint); }
 body:has(#status.connected) .tab-dot { background: var(--term-live); }
-.tab-type { margin-left: 0.8rem; font-size: 0.7rem; letter-spacing: 0.1em; color: var(--term-faint); }
-.tools { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.tab-type { margin-left: 0.4rem; font-size: 0.7rem; letter-spacing: 0.1em; color: var(--term-faint); }
+/* Another session to the same server, in a tab of its own. */
+.new-session {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  color: var(--term-faint);
+  border: 1px solid var(--term-rule);
+  border-radius: var(--radius);
+}
+.new-session:hover { color: var(--term-ink); background: var(--term-rule); border-color: var(--term-faint); }
+.new-session[hidden] { display: none; }
+.tools { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.45rem 0; }
 /* Tool buttons sit on the dark bar in both schemes. */
 .tools button {
   margin: 0;
@@ -81,25 +86,54 @@ body:has(#status.connected) .tab-dot { background: var(--term-live); }
 .tools button:hover:not(:disabled) { background: var(--term-rule); border-color: var(--term-faint); }
 .tools button:disabled { color: var(--term-faint); background: transparent; border-color: var(--term-rule); }
 
-#terminal { height: max(22rem, calc(100dvh - 13rem)); padding: 1.2rem; background: var(--term-bg); }
-/* In full screen the session is the whole screen: bar, terminal, footer. */
+/* The terminal takes the window's height less the bar, the status line and
+   the notice under the panel, so the page itself does not scroll. */
+#terminal { height: max(22rem, calc(100dvh - 10.4rem)); overflow: hidden; padding: 1.2rem 1.4rem; background: var(--term-bg); }
+/* In full screen the session is the whole screen: bar, terminal, status line. */
 .session:fullscreen { display: flex; flex-direction: column; width: 100vw; height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
 .session:fullscreen #terminal { flex: 1; height: auto; min-height: 0; }
+
+/* The status line under the session: its state, its keys, its size, and who
+   made it. */
 .session-foot {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.7rem 1.2rem;
+  gap: 0.5rem 1.2rem;
+  padding: 0.6rem 1.2rem;
   font-size: 0.78rem;
   color: var(--term-faint);
   background: var(--term-bar);
   border-top: 1px solid var(--term-rule);
 }
 .session-foot i { margin: 0 0.5rem; font-style: normal; }
+.session-keys { flex: 1; text-align: center; }
+.session-end { display: inline-flex; align-items: center; white-space: nowrap; }
+.session-foot .org { font-weight: 700; color: var(--term-ink); }
+.session-foot .org-deny,
+.session-foot .org .wordmark-stop { color: var(--term-brand); }
+/* The connection's state as a terminal would print it: a dot and a word. */
+#status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  white-space: nowrap;
+  color: var(--term-faint);
+}
+#status::before { content: ""; width: 0.45rem; height: 0.45rem; background: currentColor; border-radius: 50%; }
+#status.connected { color: var(--term-live); }
+#status.connected::before { box-shadow: 0 0 0 3px color-mix(in srgb, var(--term-live) 22%, transparent); }
 
 .help { margin-top: 1rem; }
 
 @media (max-width: 760px) {
+  body.session-page main { padding: 0.6rem 0.6rem 0.4rem; }
+  .session-mark { display: none; }
+  .session-keys { display: none; }
   #terminal { height: 26rem; padding: 0.8rem; }
-  .session-foot span:first-child { max-width: 14rem; }
 }
