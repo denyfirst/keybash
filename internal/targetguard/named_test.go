@@ -131,8 +131,8 @@ func TestNamedTargetRejectsWholeAnswerBeforeAnyTCP(t *testing.T) {
 	for _, bad := range []string{
 		"10.20.30.41", // Approved globally, but belongs to another target.
 		"10.99.0.1", "127.0.0.1", "::1", "169.254.169.254",
-		"100.100.100.200", "168.63.129.16", "fd00:ec2::254",
-		"::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1",
+		"100.100.100.200", "168.63.129.16", "fd00:ec2::254", "fd20:ce::254",
+		"fd00:c1::a9fe:a9fe", "fd00:a9fe:a9fe::1", "::ffff:169.254.169.254", "64:ff9b::a9fe:a9fe", "2002:a9fe:a9fe::1",
 		"fd42::5%eth0", "0.0.0.0", "ff02::1", "240.0.0.1",
 	} {
 		t.Run(bad, func(t *testing.T) {

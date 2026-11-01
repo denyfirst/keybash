@@ -232,4 +232,10 @@ must be denied in deployment policy; translator-aware support is deferred.
 
 Platform address references: [AWS IMDS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html),
 [Alibaba ENS metadata](https://www.alibabacloud.com/help/en/ens/instance-metadata),
-and [Azure platform IP](https://learn.microsoft.com/en-us/azure/virtual-network/what-is-ip-address-168-63-129-16).
+[Azure platform IP](https://learn.microsoft.com/en-us/azure/virtual-network/what-is-ip-address-168-63-129-16),
+[Google Compute Engine metadata](https://cloud.google.com/compute/docs/metadata/querying-metadata),
+[Akamai (Linode) metadata](https://techdocs.akamai.com/cloud-computing/docs/metadata-service-api),
+and Oracle Cloud's IPv6 metadata address as cloud-init's
+[Oracle datasource](https://github.com/canonical/cloud-init/blob/main/cloudinit/sources/DataSourceOracle.py)
+uses it. The IPv6 ones are unique-local addresses, which a private-network
+approval would otherwise accept, so each is named.
