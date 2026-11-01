@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -112,6 +113,55 @@ func TestExposedLabAdmitsOnlyListedNetworks(t *testing.T) {
 	}
 }
 
+// One source spending a name's budget does not keep its holder from signing in
+// from another source, and the name's ceiling across sources still holds, for
+// registered and unknown names alike.
+func TestExposedLoginBudgetIsPerNameAndSource(t *testing.T) {
+	lan := []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")}
+	l, e := NewLab("https://keybash.lan:8443", accounts(t), FromSources(lan))
+	if e != nil {
+		t.Fatal("valid exposed lab refused")
+	}
+	defer l.Close()
+	login := func(addr, username, password string) int {
+		r := request(l, "POST", "/api/session", fmt.Sprintf(`{"username":%q,"password":%q}`, username, password), "")
+		r.RemoteAddr = addr
+		return respond(l, r).Code
+	}
+	for _, name := range []string{"alice", "nobody"} {
+		for i := range loginAttempts {
+			if code := login("192.168.1.7:50000", name, bobPassword); code != http.StatusUnauthorized {
+				t.Fatalf("%s attempt %d from one source answered %d", name, i, code)
+			}
+		}
+		if login("192.168.1.7:50001", name, bobPassword) != http.StatusTooManyRequests {
+			t.Fatalf("one source passed five attempts at %s", name)
+		}
+	}
+	if login("192.168.1.8:50000", "alice", alicePassword) != http.StatusNoContent {
+		t.Fatal("one source's failures kept alice from signing in from another")
+	}
+	// Six attempts used on each name so far (alice's sixth succeeded); the
+	// ceiling across sources allows 30, then refuses every source.
+	for _, name := range []string{"alice", "nobody"} {
+		used := loginAttempts + 1
+		if name == "nobody" {
+			used = loginAttempts
+		}
+		for source := 20; used < loginNameAttempts; source++ {
+			for i := 0; i < loginAttempts && used < loginNameAttempts; i++ {
+				if code := login(fmt.Sprintf("192.168.1.%d:50000", source), name, bobPassword); code != http.StatusUnauthorized {
+					t.Fatalf("%s attempt %d answered %d", name, used, code)
+				}
+				used++
+			}
+		}
+		if login("192.168.1.200:50000", name, alicePassword) != http.StatusTooManyRequests {
+			t.Fatalf("%s passed its ceiling across sources", name)
+		}
+	}
+}
+
 func TestExposedLoginCountsPerSource(t *testing.T) {
 	lan := []netip.Prefix{netip.MustParsePrefix("192.168.1.0/24")}
 	l, e := NewLab("https://keybash.lan:8443", accounts(t), FromSources(lan))
@@ -134,7 +184,10 @@ func TestExposedLoginCountsPerSource(t *testing.T) {
 		t.Fatal("a source beyond its budget could still try passwords")
 	}
 	l.mu.Lock()
-	_, counted := l.attempts["login:probe-new"]
+	counted := false
+	for key := range l.attempts {
+		counted = counted || strings.HasPrefix(key, "login:probe-new")
+	}
 	l.mu.Unlock()
 	if counted {
 		t.Fatal("a refused source still created a per-name counter")
