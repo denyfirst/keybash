@@ -248,21 +248,31 @@ func (s *Store) anAdminRemains(tx *bolt.Tx) error {
 // adoptSoleAdmin names the only account administrator when there is no
 // administrator at all: a copy set up before roles existed, whose one account
 // is the person who set it up. A copy with several accounts and no
-// administrator names one with `keybash account-recover --admin`.
+// administrator names one with `keybash account-recover --admin`. A start
+// with nothing to adopt rolls back and writes nothing: a failed upgrade checks
+// that the database it put back is the same, byte for byte.
 func (s *Store) adoptSoleAdmin() error {
-	return s.update(func(tx *bolt.Tx) error {
+	nothing := errors.New("nothing to adopt")
+	e := s.updateWhy(func(tx *bolt.Tx) error {
 		if _, e := s.meta(tx); e != nil {
 			return e
 		}
 		all, e := s.accounts(tx)
-		if e != nil || len(all) != 1 || all[0].Role == roleAdmin {
+		if e != nil {
 			return e
+		}
+		if len(all) != 1 || all[0].Role == roleAdmin {
+			return nothing
 		}
 		a := all[0]
 		a.Role = roleAdmin
 		a.Revision++
 		return s.saveAccount(tx, a)
 	})
+	if e == nothing {
+		return nil
+	}
+	return e
 }
 
 // resetAccess sends an account back to its invite: a new random password

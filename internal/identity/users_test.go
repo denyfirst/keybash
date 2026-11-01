@@ -422,9 +422,23 @@ func TestCopiesFromBeforeRolesGetAnAdministrator(t *testing.T) {
 	if mustLookup(t, store, "alice").Role != roleAdmin {
 		t.Fatal("the bootstrap account is not an administrator")
 	}
-	setRole(t, store, "alice", roleUser)
+	// A failed upgrade compares the database it put back byte for byte, so a
+	// start with nothing to adopt must not commit at all.
+	commits := func() (id int) {
+		_ = store.view(func(tx *bolt.Tx) error { id = tx.ID(); return nil })
+		return id
+	}
+	before := commits()
 	l, e := NewPersistent("https://127.0.0.1:8443", store)
 	if e != nil {
+		t.Fatal("persistent lab refused")
+	}
+	_ = l.Close()
+	if commits() != before {
+		t.Fatal("a start with an administrator wrote to the database")
+	}
+	setRole(t, store, "alice", roleUser)
+	if l, e = NewPersistent("https://127.0.0.1:8443", store); e != nil {
 		t.Fatal("persistent lab refused")
 	}
 	_ = l.Close()
