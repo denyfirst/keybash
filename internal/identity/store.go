@@ -79,6 +79,13 @@ type durableAccount struct {
 	// which an older binary (strict about unknown fields) can still read.
 	Enrollment    []byte `json:",omitempty"`
 	EnrollmentEnd int64  `json:",omitempty"`
+	// Role is roleUser (empty), roleAdmin or roleAuditor. Disabled refuses
+	// sign-in. Invited marks an account whose holder has not chosen a password
+	// yet: its password is random and unknown, and its setup code is the invite.
+	// All omitted when empty, like Enrollment, so earlier records keep their schema.
+	Role     string `json:",omitempty"`
+	Disabled bool   `json:",omitempty"`
+	Invited  bool   `json:",omitempty"`
 }
 
 // A password alone must not let whoever learns it first enroll their own
@@ -456,6 +463,9 @@ func (s *Store) readAccount(tx *bolt.Tx, id string) (durableAccount, error) {
 	if a.Seed != "" && !validSeed(a.Seed) || a.EnrollmentEnd < 0 || len(a.Enrollment) != 0 && len(a.Enrollment) != 32 || (len(a.Enrollment) == 0) != (a.EnrollmentEnd == 0) || a.Seed != "" && len(a.Enrollment) != 0 {
 		return durableAccount{}, errRefused
 	}
+	if !validRole(a.Role) || a.Invited && (a.Seed != "" || len(a.Enrollment) == 0) {
+		return durableAccount{}, errRefused
+	}
 	return a, nil
 }
 func (s *Store) saveAccount(tx *bolt.Tx, a durableAccount) error {
@@ -512,11 +522,17 @@ func (s *Store) bootstrapValid(code string, now time.Time) bool {
 	}) == nil
 }
 
-// setup is the one-time enrollment code to issue, or "" when the caller has
-// already proved operator authority (the bootstrap code).
-func (s *Store) createAccount(tx *bolt.Tx, name string, hash PasswordHash, now time.Time, withSetup bool) (durableAccount, string, error) {
+// newAccount says what createAccount makes: the role, whether a one-time setup
+// code is issued (not when the caller already proved operator authority with
+// the bootstrap code), and whether the holder still chooses the password.
+type newAccount struct {
+	role           string
+	setup, invited bool
+}
+
+func (s *Store) createAccount(tx *bolt.Tx, name string, hash PasswordHash, now time.Time, kind newAccount) (durableAccount, string, error) {
 	a := durableAccount{}
-	if !usernameInput(name) || !hash.valid() || tx.Bucket(nameBucket).Get(s.nameIndex(name)) != nil || tx.Bucket(accountBucket).Stats().KeyN >= 256 {
+	if !usernameInput(name) || !hash.valid() || !validRole(kind.role) || kind.invited && !kind.setup || tx.Bucket(nameBucket).Get(s.nameIndex(name)) != nil || tx.Bucket(accountBucket).Stats().KeyN >= 256 {
 		return a, "", errRefused
 	}
 	id, e := randomID()
@@ -526,9 +542,9 @@ func (s *Store) createAccount(tx *bolt.Tx, name string, hash PasswordHash, now t
 	if tx.Bucket(accountBucket).Get([]byte(id)) != nil {
 		return a, "", errRefused
 	}
-	a = durableAccount{ID: id, Username: name, Hash: storedPassword(hash), Revision: 1, LastCounter: -1}
+	a = durableAccount{ID: id, Username: name, Hash: storedPassword(hash), Revision: 1, LastCounter: -1, Role: kind.role, Invited: kind.invited}
 	setup := ""
-	if withSetup {
+	if kind.setup {
 		if setup, e = issueEnrollment(&a, now); e != nil {
 			return durableAccount{}, "", e
 		}
@@ -564,7 +580,9 @@ func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time) e
 		if e != nil || m.Initialized || now.Unix() >= m.BootstrapEnd || subtle.ConstantTimeCompare(digest[:], m.Bootstrap[:]) != 1 || tx.Bucket(accountBucket).Stats().KeyN != 0 {
 			return errRefused
 		}
-		if _, _, e = s.createAccount(tx, name, hash, now, false); e != nil {
+		// Whoever holds the bootstrap code set this copy up: the first account
+		// administers it.
+		if _, _, e = s.createAccount(tx, name, hash, now, newAccount{role: roleAdmin}); e != nil {
 			return e
 		}
 		m, e = s.meta(tx)
@@ -593,7 +611,7 @@ func (s *Store) CreateAccount(name, password string) (string, error) {
 		if e != nil || !m.Initialized {
 			return errRefused
 		}
-		_, setup, e = s.createAccount(tx, name, h, time.Now(), true)
+		_, setup, e = s.createAccount(tx, name, h, time.Now(), newAccount{setup: true})
 		return e
 	})
 	if e != nil {
@@ -628,8 +646,11 @@ func (s *Store) RenewBootstrap() (string, error) {
 // trusted operator operation is deliberately absent from the HTTP router.
 // Password replacement and optional lost-factor reset commit atomically. An
 // account left without a factor gets a fresh one-time setup code, returned
-// here; one that keeps its factor returns "".
-func (s *Store) RecoverAccount(name, password string, lostFactor bool) (string, error) {
+// here; one that keeps its factor returns "". With admin, the account also
+// becomes an unblocked administrator: the way back in when no administrator
+// can sign in, and the way to name one on a copy that has several accounts
+// but none yet.
+func (s *Store) RecoverAccount(name, password string, lostFactor, admin bool) (string, error) {
 	next, e := HashPassword(password)
 	if e != nil {
 		return "", e
@@ -646,6 +667,10 @@ func (s *Store) RecoverAccount(name, password string, lostFactor bool) (string, 
 		}
 		a.Hash = storedPassword(next)
 		a.Revision++
+		a.Invited = false // the operator chose the password
+		if admin {
+			a.Role, a.Disabled = roleAdmin, false
+		}
 		if lostFactor {
 			a.Seed = ""
 			a.Recovery = nil

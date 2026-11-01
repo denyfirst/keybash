@@ -7,16 +7,16 @@ assert.equal(new URL(config.Origin).hostname, '127.0.0.1');
 const browser = await chromium.launch({ headless: true, ...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
 const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 1100 } });
 const page = await context.newPage(); const errors = [], external = [], secretURLs = [];
-const vaultSecret = 'Synthetic browser custody canary 73'; let seed = '', codes = [], seconds = config.Unix;
+const vaultSecret = 'Synthetic browser custody canary 73', inviteePassword = 'Synthetic invitee password 2026!'; let seed = '', codes = [], seconds = config.Unix, invite = '', inviteSeed = '';
 page.on('pageerror', error => errors.push(error.name));
 page.on('request', request => {
   if (!request.url().startsWith(config.Origin + '/')) external.push('external request');
-  if ([config.Password, config.Code, vaultSecret, seed, ...codes].filter(Boolean).some(secret => request.url().includes(secret) || request.url().includes(encodeURIComponent(secret)))) secretURLs.push('secret URL');
+  if ([config.Password, config.Code, vaultSecret, seed, invite, inviteSeed, inviteePassword, ...codes].filter(Boolean).some(secret => request.url().includes(secret) || request.url().includes(encodeURIComponent(secret)))) secretURLs.push('secret URL');
 });
-function otp(counter = Math.floor(seconds / 30)) {
+function otp(counter = Math.floor(seconds / 30), key32 = seed) {
   // Independent RFC 4226/6238 test oracle, never shipped by the application.
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = '';
-  for (const c of seed) bits += alphabet.indexOf(c).toString(2).padStart(5, '0');
+  for (const c of key32) bits += alphabet.indexOf(c).toString(2).padStart(5, '0');
   const key = Buffer.from(bits.match(/.{8}/g).map(b => parseInt(b, 2)));
   const input = Buffer.alloc(8); input.writeBigUInt64BE(BigInt(counter));
   const digest = createHmac('sha1', key).update(input).digest(); const offset = digest[19] & 15;
@@ -125,8 +125,31 @@ try {
   assert.equal(await made.getByRole('button', { name: 'Show', exact: true }).count(), 0, 'a key made here offered Show');
   assert.equal(await made.getByRole('button', { name: 'Add to server', exact: true }).count(), 1);
   assert(!(await page.content()).includes('b3BlbnNzaC1rZXktdjE'), 'the page holds a private key'); // every OpenSSH private key body starts so
+  // The administrator invites someone, who chooses their own password with the
+  // one-time code and lands where their role allows: an auditor sees Account alone.
+  await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users'); await page.locator('#users-panel').waitFor({ state: 'visible' }); await settled();
+  const me = page.locator('.person', { hasText: config.Username });
+  assert.equal(await me.locator('.record-badge').textContent(), 'You'); assert.equal(await me.getByRole('button').count(), 0, 'an administrator could change their own account');
+  await lapse(); await page.locator('#invite-person').click(); await page.locator('#invite-dialog').waitFor({ state: 'visible' });
+  await page.locator('#invite-name').fill('invitee'); await page.locator('#invite-dialog input[value=auditor]').check(); await page.locator('#invite-form button[type=submit]').click();
+  await stepUp(otp()); await page.locator('#code-dialog').waitFor({ state: 'visible' }); await settled();
+  invite = await page.locator('#person-code').textContent(); assert.match(invite, /^[A-Za-z0-9_-]{43}$/);
+  await page.locator('#close-code').click(); await page.waitForFunction(() => document.getElementById('person-code').textContent === '');
+  const invited = page.locator('.person', { hasText: 'invitee' });
+  assert.equal(await invited.locator('.person-state').textContent(), 'Invited'); assert.equal(await invited.locator('.record-meta').textContent(), 'Auditor');
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
+  await page.locator('#show-claim').click(); await page.locator('#claim').waitFor({ state: 'visible' }); assert(!(await page.locator('#signin').isVisible()));
+  await page.locator('#claim-user').fill('invitee'); await page.locator('#claim-code').fill(invite); await page.locator('#claim-password').fill(inviteePassword); await page.locator('#claim-confirm').fill(inviteePassword); await page.locator('#claim button').click();
+  await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
+  assert(!(await page.locator('#setup-proof').isVisible()), 'the invite was asked for again');
+  await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); inviteSeed = await page.locator('#seed').textContent(); assert.match(inviteSeed, /^[A-Z2-7]{32}$/); await settled();
+  await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30), inviteSeed)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('h1').textContent(), 'Account'); assert.deepEqual(await page.locator('.rail-item:visible').evaluateAll(items => items.map(item => item.dataset.page)), ['account']);
+  assert.equal((await page.request.get(config.Origin + '/api/credentials')).status(), 403, 'an auditor reached keys and passwords');
+  assert.equal((await page.request.get(config.Origin + '/api/users')).status(), 403, 'an auditor listed accounts');
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
-  console.log('Browser custody: bootstrap, mandatory MFA, code-only step-up, encrypted record UX, restart, replay refusal and failure handling passed');
+  console.log('Browser custody: bootstrap, mandatory MFA, code-only step-up, encrypted record UX, invites and roles, restart, replay refusal and failure handling passed');
 } catch (error) { console.log(error.code === 'ERR_ASSERTION' ? error.message : error.name); throw new Error('browser custody checks failed'); }
 finally { await context.close(); await browser.close(); }

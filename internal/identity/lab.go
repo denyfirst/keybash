@@ -33,6 +33,8 @@ type account struct {
 	disabled bool
 	id       string
 	mfa      bool
+	role     string
+	invited  bool // no password chosen yet: only the invite opens it
 }
 type window struct {
 	start time.Time
@@ -278,8 +280,9 @@ const (
 	// Per client source (an IPv4 address or IPv6 /64) on an exposed lab, across
 	// every name it tries; loopback labs have one shared source and skip it.
 	sourceAttempts = 30
-	// Only login creates attacker-chosen keys, and only after taking a derive
-	// slot, so creation is bounded by KDF throughput far below this ceiling.
+	// Only login and invite claims create attacker-chosen keys, and only after
+	// taking a derive slot, so creation is bounded by KDF throughput far below
+	// this ceiling.
 	maxAttemptKeys = 8192
 )
 
@@ -356,7 +359,7 @@ func (l *Lab) loginFrom(ctx context.Context, source, username, password, previou
 	if l.store != nil {
 		l.refreshLocked(username)
 	}
-	if !valid || a == nil || a.disabled || a.revision != revision || l.closed || ctx.Err() != nil ||
+	if !valid || a == nil || a.disabled || a.invited || a.revision != revision || l.closed || ctx.Err() != nil ||
 		oldValid && oldSession != nil && l.sessions[oldID] != oldSession {
 		return "", errRefused
 	}

@@ -89,6 +89,23 @@ sudo setpriv --reuid=keybash-gateway --regid=keybash-gateway --clear-groups --re
 sudo systemctl start keybash-gateway
 ```
 
+## İnsan əlavə etmək
+
+Bootstrap kodu ilə yaradılan hesab administratordur. Terminal lazım deyil:
+**Users** səhifəsində **Invite someone** düyməsini bas, istifadəçi adını və rolu
+seç (User, Auditor və ya Administrator). Keybash bir dəfəlik kodu yalnız bir
+dəfə göstərir. Kodu həmin şəxsə istifadəçi adından ayrı ver. O, giriş səhifəsində
+**I have an invite** seçir, parolunu özü seçir və telefonunu qurur. Kod bir dəfə
+işləyir və 72 saatdan sonra keçərsiz olur.
+
+Eyni səhifədə rolu dəyişmək, bloklamaq, girişi sıfırlamaq (yalnız şəxsin öz
+parolu ilə işləyən yeni telefon kodu; parolu, açar və parolları qalır) və
+silmək olar. Hər dəyişiklik telefon kodu istəyir və həmin
+şəxsin açıq sessiyalarını dərhal bağlayır.
+
+Heç bir administrator daxil ola bilmirsə: gateway-i dayandır və
+`keybash account-recover --admin` əmrini işlət (ingiliscə INSTALL.md-də tam əmr var).
+
 ## Sonradan server əlavə etmək
 
 Siyahıya JSON yazmadan və açarı əl ilə köçürmədən server əlavə etmək üçün:

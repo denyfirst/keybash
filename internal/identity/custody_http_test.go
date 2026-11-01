@@ -216,14 +216,14 @@ func TestCustodyOfflineRecoveryBootstrapRenewalAndSealLimit(t *testing.T) {
 		t.Fatal("initialized registration reopened")
 	}
 	a, _, _ := enrollFixture(t, s, "alice", time.Now())
-	if _, e := s.RecoverAccount("alice", nextPassword, false); e != nil {
+	if _, e := s.RecoverAccount("alice", nextPassword, false, false); e != nil {
 		t.Fatal("operator recovery refused")
 	}
 	b, e := s.lookup("alice")
 	if e != nil || b.ID != a.ID || b.Revision != a.Revision+1 || b.Seed != a.Seed || !b.password().verify(nextPassword) {
 		t.Fatal("operator recovery lost account or factor")
 	}
-	if _, e := s.RecoverAccount("alice", alicePassword, true); e != nil {
+	if _, e := s.RecoverAccount("alice", alicePassword, true, false); e != nil {
 		t.Fatal("lost-factor recovery refused")
 	}
 	b, _ = s.lookup("alice")
@@ -537,7 +537,7 @@ func TestRecoverySetupCodes(t *testing.T) {
 		t.Fatal("operator account fixture refused")
 	}
 	bob, _ := s.lookup("bob")
-	second, e := s.RecoverAccount("bob", nextPassword, false)
+	second, e := s.RecoverAccount("bob", nextPassword, false, false)
 	if e != nil || len(second) != 43 || second == first {
 		t.Fatal("recovery of an unenrolled account did not reissue its setup code")
 	}
@@ -545,14 +545,14 @@ func TestRecoverySetupCodes(t *testing.T) {
 		t.Fatal("a superseded setup code stayed valid")
 	}
 	enrollFixture(t, s, "alice", time.Now())
-	if code, e := s.RecoverAccount("alice", nextPassword, false); e != nil || code != "" {
+	if code, e := s.RecoverAccount("alice", nextPassword, false, false); e != nil || code != "" {
 		t.Fatal("recovery that keeps a factor issued a setup code")
 	}
 	alice, _ := s.lookup("alice")
 	if s.enrollmentValid(alice.ID, second, time.Now()) {
 		t.Fatal("a setup code worked for another account")
 	}
-	if code, e := s.RecoverAccount("alice", alicePassword, true); e != nil || !s.enrollmentValid(alice.ID, code, time.Now()) {
+	if code, e := s.RecoverAccount("alice", alicePassword, true, false); e != nil || !s.enrollmentValid(alice.ID, code, time.Now()) {
 		t.Fatal("lost-factor recovery did not issue a working setup code")
 	}
 }
