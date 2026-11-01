@@ -278,10 +278,9 @@ const (
 	// is otherwise counted per source, so one source cannot keep its holder
 	// from signing in elsewhere; this ceiling keeps many sources slow too.
 	loginNameAttempts = 30
-	// Only login creates attacker-chosen keys (at most three per attempt), and
-	// only after taking a derive slot, so creation is bounded by KDF throughput
-	// below this ceiling.
-	maxAttemptKeys = 16384
+	// Only login creates attacker-chosen keys, and only after taking a derive
+	// slot, so creation is bounded by KDF throughput far below this ceiling.
+	maxAttemptKeys = 8192
 )
 
 func (l *Lab) attemptLocked(key string, limit int) bool {

@@ -44,7 +44,7 @@ The appearance follows the existing Denyfirst dark palette and restrained red.
   same policy and KDF cost. There is no window shared across names or purposes:
   MFA, reauthentication, password change, import, trust and connection opens
   each have their own per-account window, so failed logins cannot lock other
-  accounts or a signed-in owner out. At most 16384 counters exist; a full table
+  accounts or a signed-in owner out. At most 8192 counters exist; a full table
   refuses new names rather than evicting another account's counter, and expired
   windows are reclaimed every second. Success does not reset budgets. On a
   loopback lab, repeated failures against one name deny that name for a minute. An exposed
