@@ -13,6 +13,24 @@ import (
 	"github.com/denyfirst/keybash/web"
 )
 
+// workspaceBody is the workspace document's body tag, which names the
+// session's stage when the page is served.
+const workspaceBody = `<body class="workspace" data-screen="account">`
+
+// serveWorkspace sends the workspace already in the layout of the session's
+// stage, so moving between pages never shows the second-factor layout for a
+// moment. The stage only picks a layout: every API call checks it again.
+func serveWorkspace(w http.ResponseWriter, stage string) {
+	data, err := web.Assets.ReadFile("custody-workspace.html")
+	if err != nil || bytes.Count(data, []byte(workspaceBody)) != 1 || stage != "enroll" && stage != "challenge" && stage != "ready" {
+		refuse(w, http.StatusInternalServerError)
+		return
+	}
+	tag := strings.TrimSuffix(workspaceBody, ">") + ` data-stage="` + stage + `">`
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(bytes.Replace(data, []byte(workspaceBody), []byte(tag), 1))
+}
+
 func readFields(w http.ResponseWriter, r *http.Request, limit int, names ...string) (map[string]string, bool) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		return nil, false
@@ -219,8 +237,9 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page {
+		stage := s.stage
 		l.mu.Unlock()
-		serveAsset(w, "custody-workspace.html")
+		serveWorkspace(w, stage)
 		return
 	}
 	if r.URL.Path == "/api/session" && r.Method == "GET" {
