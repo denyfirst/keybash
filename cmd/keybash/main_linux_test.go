@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -97,6 +98,45 @@ func TestOperatorLinuxInitBootstrapAndOfflineRecovery(t *testing.T) {
 	if recovered := setupCode("lost-factor recovery"); recovered == added {
 		t.Fatal("setup codes were reused")
 	}
+	// --admin belongs to recovery alone, where it names an administrator: the
+	// way back in when none can sign in.
+	if call("account-add", "carol\n"+password+"\n", "--admin") == nil || output.Len() != 0 {
+		t.Fatal("account-add accepted --admin")
+	}
+	if call("account-recover", "bob\n"+password+"\n", "--admin") != nil {
+		t.Fatal("administrator recovery refused")
+	}
+	setupCode("administrator recovery")
+	if store, e = identity.OpenFiles(data, key); e != nil {
+		t.Fatal("store refused after recovery")
+	}
+	if lab, e = identity.NewPersistent("https://127.0.0.1:8443", store); e != nil {
+		t.Fatal("persistent lab refused after recovery")
+	}
+	ask := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "https://127.0.0.1:8443"+path, strings.NewReader(body))
+		r.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
+		r.RemoteAddr = "127.0.0.1:7890"
+		r.Header.Set("Origin", "https://127.0.0.1:8443")
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Keybash-Request", "1")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		lab.ServeHTTP(w, r)
+		return w
+	}
+	signin, _ := json.Marshal(map[string]string{"username": "bob", "password": password})
+	w = ask("POST", "/api/session", string(signin), nil)
+	if w.Code != 204 || len(w.Result().Cookies()) != 1 {
+		t.Fatal("recovered administrator could not sign in")
+	}
+	if w = ask("GET", "/api/session", "", w.Result().Cookies()[0]); w.Code != 200 || !strings.Contains(w.Body.String(), `"role":"admin"`) {
+		t.Fatal("recovery with --admin did not name an administrator")
+	}
+	_ = lab.Close()
+	_ = store.Close()
 	if call("serve-lab", "", "--listen", "0.0.0.0:8443") == nil {
 		t.Fatal("public listener accepted")
 	}

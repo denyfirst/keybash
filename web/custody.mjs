@@ -1,6 +1,6 @@
 import { systems } from '/systems.mjs';
 const $ = id => document.getElementById(id);
-let csrf = '', busy = false, secretTimer, pendingDelete = null, remoteEnabled = false, setupRequired = false;
+let csrf = '', busy = false, secretTimer, pendingDelete = null, remoteEnabled = false, setupRequired = false, role = 'user', pendingPerson = null;
 let catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0, owned = new Map();
 // The page's answer goes where the person is looking: into the open sheet
 // that asked, or under the page.
@@ -45,8 +45,8 @@ function showSeed(secret, rows) {
   $('qr-start').hidden = true; $('seed-panel').hidden = false;
 }
 function clearAll() {
-  hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration;
-  for (const id of ['account', 'account-name', 'focus-account', 'records', 'connections', 'connection-server']) if ($(id)) $(id).textContent = '';
+  hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration; pendingPerson = null;
+  for (const id of ['account', 'account-name', 'focus-account', 'records', 'connections', 'connection-server', 'people', 'person-code']) if ($(id)) $(id).textContent = '';
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
@@ -117,6 +117,9 @@ function errorMessage(error) {
   if (error.status === 'cancelled') return 'Confirmation cancelled. Nothing changed.';
   if (error.status === 'ended') return 'Too many wrong codes: this session was closed. Sign in again.';
   if (error.status === 'setup') return 'The setup code was not accepted. Check the one-time code from your administrator, or ask for a new one if it expired.';
+  if (error.status === 'invite') return 'The username or code was not accepted. Check both: a code works once and expires after 72 hours. Ask your administrator for a new one if needed.';
+  if (error.status === 'taken') return 'That username is already taken. Choose another.';
+  if (error.status === 'last-admin') return 'At least one administrator must remain.';
   if (error.status === 403) return 'That is not allowed. Reload the page and try again.';
   if (error.status === 428) return 'This needs confirmation with your phone. Try again.';
   if (error.status === 409) return 'The server details changed meanwhile. Reload the page and check again.';
@@ -168,14 +171,19 @@ function recordRow(record) {
   const actions = document.createElement('div'); actions.className = 'record-actions'; row.append(actions);
   return { row, actions };
 }
-// One sheet asks before anything is deleted: a key or password, or a connection.
-const deleteKinds = {
+// One sheet asks before anything is deleted or taken away: a key or password,
+// a connection, or a person's account or access.
+const confirmKinds = {
   credential: { title: 'Delete this key or password?', hint: 'Connections that sign in with it stop working. This cannot be undone.', path: id => `/api/credentials/${id}` },
   connection: { title: 'Delete this connection?', hint: 'The key or password it signs in with stays under Keys & passwords. This cannot be undone.', path: id => `/api/connections/${id}` },
+  person: { title: 'Delete this person?', hint: 'Their account goes, with their keys, passwords and connections, and they are signed out at once. This cannot be undone.', path: id => `/api/users/${id}` },
+  block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their keys and passwords stay.', path: id => `/api/users/${id}/block`, method: 'POST', word: 'Block' },
+  reset: { title: 'Reset this person’s access?', hint: 'Their password and phone stop working and they are signed out. You get a new code; with it they choose a new password and set up their phone again. Their keys and passwords stay.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Reset access' },
 };
-function askDelete(kind, record) {
-  pendingDelete = { kind, id: record.id };
-  $('delete-title').textContent = deleteKinds[kind].title; $('delete-hint').textContent = deleteKinds[kind].hint; $('delete-name').textContent = record.name;
+function askConfirm(kind, record) {
+  pendingDelete = { kind, id: record.id, name: record.name };
+  $('delete-title').textContent = confirmKinds[kind].title; $('delete-hint').textContent = confirmKinds[kind].hint; $('delete-name').textContent = record.name;
+  $('confirm-delete').textContent = confirmKinds[kind].word ?? 'Delete';
   $('delete-dialog').showModal();
 }
 async function loadRecords() {
@@ -186,7 +194,7 @@ async function loadRecords() {
     if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
     const { row, actions } = recordRow(record);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost'; remove.textContent = 'Delete';
-    remove.addEventListener('click', () => askDelete('credential', record));
+    remove.addEventListener('click', () => askConfirm('credential', record));
     // A key made here is never shown; its row offers the install command instead.
     if (record.generated) {
       const install = document.createElement('button'); install.type = 'button'; install.className = 'secondary'; install.textContent = 'Add to server';
@@ -346,7 +354,7 @@ function serverCard(record, target) {
     link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
   }
   if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
-  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => askDelete('connection', record));
+  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => askConfirm('connection', record));
   actions.append(remove); card.append(actions);
   return card;
 }
@@ -382,7 +390,60 @@ const pages = {
   keys: { path: '/keys', panel: 'records-panel', title: 'Keys & passwords', lead: 'What you sign in to servers with, encrypted on this server.' },
   account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, your phone authenticator and your recovery codes.' },
   installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, how to add a server, and how to update it.' },
+  users: { path: '/users', panel: 'users-panel', title: 'Users', lead: 'Who signs in here, and what each person may do.' },
 };
+// Which pages each role sees, in rail order; the first is where a role lands.
+// The server refuses the rest whatever the page shows.
+const access = { user: ['connections', 'keys', 'account'], admin: ['connections', 'keys', 'users', 'installation', 'account'], auditor: ['account'] };
+const roleWords = { user: 'User', admin: 'Administrator', auditor: 'Auditor' };
+const stateWords = { active: 'Active', setup: 'Setting up phone', invited: 'Invited', expired: 'Code expired', blocked: 'Blocked' };
+const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+// The one-time code for an invite or a reset, shown once to give to the person.
+function showCode(code, name, kind) {
+  if (!codeOK(code)) throw new Error('invalid code');
+  $('code-title').textContent = kind === 'invite' ? `Invite for ${name}` : `New code for ${name}`;
+  $('code-lead').textContent = `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`;
+  $('person-code').textContent = code; $('code-dialog').showModal();
+}
+function openRole(person) {
+  if (busy) return;
+  pendingPerson = person; $('role-title').textContent = `Change role for ${person.username}`; dialogNotice('');
+  document.querySelectorAll('input[name=person-role]').forEach(input => { input.checked = input.value === person.role; });
+  $('role-dialog').showModal();
+}
+// A person as a row: who, which role, in what state, and what can be done.
+// Nothing about their password, phone or keys is ever part of it.
+function personRow(person, self) {
+  const row = document.createElement('article'); row.className = 'record person'; row.dataset.person = person.id;
+  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.setAttribute('aria-hidden', 'true'); tile.textContent = person.username[0];
+  const titles = document.createElement('div'); titles.className = 'record-titles';
+  const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = person.username;
+  const meta = document.createElement('p'); meta.className = 'record-meta'; meta.textContent = roleWords[person.role];
+  titles.append(name, meta);
+  if (self) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'You'; titles.append(badge); }
+  const state = document.createElement('span'); state.className = 'pill person-state'; state.dataset.state = person.state; state.textContent = stateWords[person.state];
+  const actions = document.createElement('div'); actions.className = 'record-actions';
+  row.append(tile, titles, state, actions);
+  if (self) return row; // your own password and phone are on Account
+  const button = (text, style, act) => { const b = document.createElement('button'); b.type = 'button'; b.className = style; b.textContent = text; b.addEventListener('click', act); actions.append(b); };
+  const record = { id: person.id, name: person.username };
+  button('Change role', 'secondary', () => openRole(person));
+  if (person.state === 'blocked') button('Unblock', 'ghost', () => { void run(async () => { await request(`/api/users/${person.id}/unblock`, 'POST', {}); await loadUsers(); notice(`${person.username} can sign in again.`); }); });
+  else button('Block', 'ghost', () => askConfirm('block', record));
+  button(['invited', 'expired'].includes(person.state) ? 'New code' : 'Reset access', 'ghost', () => askConfirm('reset', record));
+  button('Delete', 'ghost', () => askConfirm('person', record));
+  return row;
+}
+async function loadUsers() {
+  const data = await request('/api/users');
+  if (!idOK(data?.self) || !Array.isArray(data.accounts) || data.accounts.length > 256) throw new Error('invalid users');
+  const rows = document.createDocumentFragment();
+  for (const person of data.accounts) {
+    if (!idOK(person.id) || typeof person.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(person.username) || !Object.hasOwn(roleWords, person.role) || !Object.hasOwn(stateWords, person.state)) throw new Error('invalid person');
+    rows.append(personRow(person, person.id === data.self));
+  }
+  $('people').replaceChildren(rows);
+}
 // What this copy runs and serves comes from the server; the commands on the
 // page are fixed text, the same for every installation.
 async function loadInstallation() {
@@ -403,14 +464,16 @@ async function loadInstallation() {
   if (data.rdp && !$('command-build').textContent.endsWith(' --with-rdp')) $('command-build').textContent += ' --with-rdp';
 }
 function showPage(ready) {
+  // Without an operator catalog there is nothing to connect to.
+  const allowed = access[role].filter(key => key !== 'connections' || remoteEnabled);
   let name = Object.keys(pages).find(key => pages[key].path === location.pathname) ?? 'connections';
-  if (name === 'connections' && !remoteEnabled) name = 'keys';
+  if (!allowed.includes(name)) name = allowed[0];
   for (const [key, page] of Object.entries(pages)) $(page.panel).hidden = !ready || key !== name;
   document.querySelectorAll('.rail-item').forEach(item => {
     if (item.dataset.page === name) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
-    item.hidden = item.dataset.page === 'connections' && !remoteEnabled;
+    item.hidden = !allowed.includes(item.dataset.page);
   });
-  $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys';
+  $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys'; $('invite-person').hidden = !ready || name !== 'users';
   $('topbar-page').textContent = ready ? pages[name].title : 'Sign-in';
   $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
   if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
@@ -418,16 +481,18 @@ function showPage(ready) {
 }
 async function loadAccount() {
   const data = await request('/api/session');
-  if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage)) throw new Error('invalid session');
-  csrf = data.csrf; for (const id of ['account', 'account-name', 'focus-account']) $(id).textContent = data.username; document.body.dataset.stage = data.stage;
+  if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage) || !Object.hasOwn(access, data.role)) throw new Error('invalid session');
+  csrf = data.csrf; role = data.role; for (const id of ['account', 'account-name', 'focus-account']) $(id).textContent = data.username; document.body.dataset.stage = data.stage;
   remoteEnabled = data.remote === true;
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
   $('heading').textContent = data.stage === 'enroll' ? 'Set up your phone' : 'Confirm it’s you';
   const page = showPage(data.stage === 'ready');
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false; document.body.dataset.loaded = '';
-  if (data.stage === 'ready') await loadRecords();
+  // An auditor holds no key or password, so there is none to load.
+  if (data.stage === 'ready' && role !== 'auditor') await loadRecords();
   if (data.stage === 'ready' && page === 'installation') await loadInstallation();
+  if (data.stage === 'ready' && page === 'users') await loadUsers();
 }
 bind('signin', async () => {
   const username = $('username').value, password = $('password').value; clearInputs();
@@ -437,6 +502,51 @@ bind('bootstrap', async () => {
   const code = $('setup-code').value, username = $('setup-user').value, password = $('setup-password').value; clearInputs();
   await request('/api/bootstrap', 'POST', { code, username, password }); location.replace('/');
 });
+// An invited person chooses their password with the code, then sets up their phone.
+bind('claim', async () => {
+  const username = $('claim-user').value, code = $('claim-code').value, password = $('claim-password').value, confirm = $('claim-confirm').value; clearInputs();
+  if (password !== confirm) { notice('The passwords don’t match.'); return; }
+  try { await request('/api/invite', 'POST', { username, code, password }); }
+  catch (error) { throw error.status === 401 ? Object.assign(new Error('invite'), { status: 'invite' }) : error; }
+  location.replace('/');
+});
+function showClaim(on) {
+  clearInputs(); notice('');
+  $('signin').hidden = on; $('claim').hidden = !on; $('show-claim').hidden = on; $('show-signin').hidden = !on;
+  $('signin-title').textContent = on ? 'Accept your invite' : 'Sign in'; document.title = on ? 'Keybash · Accept invite' : 'Keybash · Sign in';
+  $(on ? 'claim-user' : 'username').focus();
+}
+$('show-claim')?.addEventListener('click', () => showClaim(true));
+$('show-signin')?.addEventListener('click', () => showClaim(false));
+$('invite-person')?.addEventListener('click', () => {
+  if (busy) return;
+  $('invite-form').reset(); dialogNotice(''); $('invite-dialog').showModal(); $('invite-name').focus();
+});
+$('invite-cancel')?.addEventListener('click', () => $('invite-dialog').close());
+bind('invite-form', async () => {
+  const username = $('invite-name').value, chosen = document.querySelector('input[name=invite-role]:checked')?.value;
+  if (!Object.hasOwn(roleWords, chosen)) return;
+  let made;
+  try { made = await request('/api/users', 'POST', { username, role: chosen }); }
+  catch (error) { throw error.status === 409 ? Object.assign(new Error('taken'), { status: 'taken' }) : error; }
+  if (!idOK(made?.id)) throw new Error('invalid invite');
+  $('invite-dialog').close(); await loadUsers(); showCode(made.code, username, 'invite');
+});
+$('role-cancel')?.addEventListener('click', () => $('role-dialog').close());
+$('role-dialog')?.addEventListener('close', () => { pendingPerson = null; });
+bind('role-form', async () => {
+  const person = pendingPerson, chosen = document.querySelector('input[name=person-role]:checked')?.value;
+  if (!person || !Object.hasOwn(roleWords, chosen)) return;
+  if (chosen !== person.role) {
+    try { await request(`/api/users/${person.id}/role`, 'POST', { role: chosen }); }
+    catch (error) { throw error.status === 409 ? Object.assign(new Error('last-admin'), { status: 'last-admin' }) : error; }
+  }
+  $('role-dialog').close(); await loadUsers();
+  if (chosen !== person.role) notice(`${person.username} is now ${chosen === 'admin' ? 'an administrator' : chosen === 'auditor' ? 'an auditor' : 'a user'}, from their next sign-in.`);
+});
+click('copy-code', () => copy('person-code'));
+$('close-code')?.addEventListener('click', () => $('code-dialog').close());
+$('code-dialog')?.addEventListener('close', () => { $('person-code').textContent = ''; });
 click('begin-enroll', async () => {
   // An operator-created account proves its one-time setup code before a seed
   // is shown; a bootstrap or replacement session needs none.
@@ -540,11 +650,16 @@ click('copy-secret', () => copy('revealed-secret')); click('copy-passphrase', ()
 $('hide-secret')?.addEventListener('click', hideSecret);
 $('secret-dialog')?.addEventListener('close', hideSecret);
 click('confirm-delete', async () => {
-  const { kind, id } = pendingDelete ?? {}; pendingDelete = null; $('delete-dialog').close();
-  if (!Object.hasOwn(deleteKinds, kind) || !idOK(id)) return;
-  await request(deleteKinds[kind].path(id), 'DELETE', {});
-  if (kind === 'credential') { hideSecret(); await loadRecords(); } else await loadConnections();
-  notice('Deleted.');
+  const { kind, id, name } = pendingDelete ?? {}; pendingDelete = null; $('delete-dialog').close();
+  if (!Object.hasOwn(confirmKinds, kind) || !idOK(id)) return;
+  const reply = await request(confirmKinds[kind].path(id), confirmKinds[kind].method ?? 'DELETE', {});
+  if (kind === 'credential') { hideSecret(); await loadRecords(); notice('Deleted.'); }
+  else if (kind === 'connection') { await loadConnections(); notice('Deleted.'); }
+  else {
+    await loadUsers();
+    if (kind === 'reset') showCode(reply?.code, name, 'reset');
+    notice(kind === 'person' ? 'Deleted.' : kind === 'block' ? `${name} is blocked and signed out.` : `${name}’s access was reset.`);
+  }
 });
 $('cancel-delete')?.addEventListener('click', () => $('delete-dialog').close());
 $('delete-dialog')?.addEventListener('close', () => { pendingDelete = null; });
@@ -554,7 +669,7 @@ window.addEventListener('pageshow', event => { if (event.persisted) { clearAll()
 void run(async () => {
   if (document.body.dataset.screen === 'login') {
     const data = await request('/api/setup'); if (typeof data?.initialized !== 'boolean') throw new Error('invalid setup');
-    $(data.initialized ? 'signin' : 'bootstrap').hidden = false;
+    $(data.initialized ? 'signin' : 'bootstrap').hidden = false; $('signin-switch').hidden = !data.initialized;
     if (!data.initialized) { $('signin-title').textContent = 'Set up Keybash'; document.title = 'Keybash · Set up'; }
   } else await loadAccount();
 });

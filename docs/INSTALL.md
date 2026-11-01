@@ -68,6 +68,40 @@ is never written, so it cannot sign anything else. Trusting `ca.pem` on a test
 PC, after comparing its printed SHA-256 fingerprint, vouches for this gateway
 only. Production uses the organization's own CA or a public one.
 
+## Adding people
+
+The account made with the bootstrap code administers Keybash. Its Users page
+invites people, without the terminal:
+
+1. **Invite someone:** choose a username and a role.
+   - **User:** connects to servers with their own keys and passwords.
+   - **Auditor:** reads the activity log; reaches no server and holds no key.
+   - **Administrator:** a user who also manages people.
+2. Keybash shows a one-time code once. Give it to the person apart from their
+   username.
+3. On the sign-in page they choose **I have an invite**, enter both and choose
+   their own password. Then they set up their phone. The code works once and
+   expires after 72 hours.
+
+The same page changes a role, blocks and unblocks, resets access (a new code;
+their keys and passwords stay) and deletes an account with everything it owns.
+Each change asks for the phone and signs that person out at once. An
+administrator cannot change their own account there, so one always remains.
+
+If no administrator can sign in, recover one on the server. The database is
+locked while the gateway runs, so stop it first:
+
+```sh
+sudo systemctl stop keybash-gateway
+sudo setpriv --reuid=keybash-gateway --regid=keybash-gateway --clear-groups --reset-env -- \
+  /usr/local/libexec/keybash/keybash account-recover --admin [--lost-mfa] \
+  --data=/var/lib/keybash --key-file=/etc/keybash/keys/instance.key
+sudo systemctl start keybash-gateway
+```
+
+It reads the username and a new password on two lines of standard input, and
+prints a setup code when the account has no factor.
+
 ## Adding a server later
 
 `keybash server-add --config=/etc/keybash/targets.json --name=… --host=IP

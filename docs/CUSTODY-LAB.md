@@ -106,6 +106,47 @@ MFA attempt budget, enrollment spends the code, and the next recovery replaces
 it. The bootstrap account needs none: its bootstrap code already proved the
 operator. Hand the code to the person separately from the password.
 
+## Roles and invites
+
+Every account has one role, kept inside its encrypted record:
+
+| Role | What it may do |
+| --- | --- |
+| user (stored empty) | its own keys, passwords and connections, and its own account |
+| `admin` | the same, plus the Users page and the Installation page |
+| `auditor` | its own account only: no key, password, connection, server route or terminal |
+
+The bootstrap account is an administrator. A store from before roles that has
+exactly one account names it administrator when the gateway starts; a store
+with several and none waits for the operator's `account-recover --admin`. That
+offline command also makes an account an unblocked administrator when none can
+sign in. Unknown role words and malformed role records are refused.
+
+The Users page is for a ready administrator. Listing needs the ready session.
+Every change needs a factor proved within the fresh window, like revealing a
+secret, and counts against a per-administrator budget:
+
+- **Invite:** creates an account with a random 256-bit password nobody keeps
+  and a 72-hour setup code, shown once to the administrator. Its holder posts
+  username, code and a password they choose to `/api/invite`. That sets the
+  password once, and continues at phone setup with the code already proved;
+  it is the setup code until enrollment spends it. Every claim costs an
+  Argon2id derivation before the code is checked, so a wrong name, a wrong
+  code, a spent code and an expired code look alike. Claims count per name
+  and per source. An invited account cannot sign in with any password.
+- **Change role, block, unblock, reset access, delete:** each bumps the
+  account's revision, which ends its sessions and terminals at once.
+  - Reset sends it back to an invite: a new random password, no factor, a new
+    code. Its keys and passwords stay.
+  - Delete removes its keys, passwords and connections in the same
+    transaction.
+
+An administrator cannot change their own account on this page (their own
+password and factor are on Account), and every change is refused unless an
+active administrator remains. Nobody, administrators included, can read
+another account's secrets: the API has no owner selector, and the list holds
+only id, name, role and state.
+
 ## Vault and browser boundary
 
 Up to 256 accounts, 256 credentials/owner, 4096 overall, 64 MiB live credential
@@ -182,7 +223,8 @@ Visit `https://127.0.0.1:8443/login`, enter the one-time code, create a unique
 password, enroll MFA, and save recovery codes separately. There is no TLS trust
 bypass or public-listener flag. This is not yet a supported installation guide.
 `bootstrap-renew` reissues setup before initialization only. Stop the lab before
-`account-add` or `account-recover` (optional `--lost-mfa`). These read exactly two
+`account-add` or `account-recover` (optional `--lost-mfa`, and `--admin` to make
+the account an unblocked administrator). These read exactly two
 LF-delimited stdin lines: username, password, with an optional final LF, total
 2048 bytes. They emit neither password nor account; when the account has no
 factor afterwards they print its one-time setup code (above). Supply stdin through an

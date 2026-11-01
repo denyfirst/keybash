@@ -57,6 +57,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	cert := flags.String("tls-cert", "", "operator TLS certificate path")
 	tlsKey := flags.String("tls-key", "", "operator TLS private key path")
 	lost := flags.Bool("lost-mfa", false, "offline recovery also clears a lost factor")
+	admin := flags.Bool("admin", false, "account-recover: also make the account an unblocked administrator")
 	catalog := flags.String("config", "", "root-owned operator target catalog")
 	rdpManager := flags.String("rdp-manager", "", "fixed root RDP manager socket")
 	manager := flags.String("ssh-manager", "", "fixed root SSH manager socket")
@@ -67,7 +68,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	serverHost := flags.String("host", "", "server-add: the server's IP address")
 	serverPort := flags.Int("port", 22, "server-add: the server's SSH port")
 	serverPrint := flags.String("fingerprint", "", "server-add: the SHA256 host key fingerprint you compared, instead of answering yes")
-	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || *lost && command != "account-recover" || (*out != "") != (command == "backup") || (*in != "") != (command == "restore") ||
+	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || (*lost || *admin) && command != "account-recover" || (*out != "") != (command == "backup") || (*in != "") != (command == "restore") ||
 		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") && command != "check-tls" || *sshOnlyCatalog && command != "check-targets" ||
 		(*serverLabel != "" || *serverHost != "" || *serverPrint != "" || *serverPort != 22) && command != "server-add" {
 		return refused
@@ -223,7 +224,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		if command == "account-add" {
 			setup, e = store.CreateAccount(parts[0], parts[1])
 		} else {
-			setup, e = store.RecoverAccount(parts[0], parts[1], *lost)
+			setup, e = store.RecoverAccount(parts[0], parts[1], *lost, *admin)
 		}
 		if e != nil {
 			return refused

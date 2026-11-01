@@ -621,23 +621,7 @@ body.workspace:not([data-stage="ready"]) .focus-foot { display: block; margin: 1
 body.workspace:not([data-stage="ready"]) .colophon { text-align: center; }
 /* The server names the stage in the page it sends, so the layout is right from
    the first paint; the words that need the account wait until it has loaded. */
-body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, .rail-user, .focus-foot) { visibility: hidden; }
-/* An action that reads as a link, such as Sign out under the card. */
-button.link-button {
-  display: inline;
-  margin: 0;
-  padding: 0;
-  font: inherit;
-  font-weight: 600;
-  color: var(--link);
-  background: none;
-  border: 0;
-  box-shadow: none;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.2em;
-}
-button.link-button:hover:not(:disabled) { color: var(--link); background: none; text-decoration-thickness: 2px; }
+body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, .rail-nav, .rail-user, .focus-foot) { visibility: hidden; }
 /* A command is copied whole, so it never breaks at one of its hyphens. */
 #connection-dialog .hint code { white-space: nowrap; }
 
@@ -669,3 +653,35 @@ button.link-button:hover:not(:disabled) { color: var(--link); background: none; 
   .facts { grid-template-columns: 1fr; gap: 0.2rem; }
   .facts dd { margin-bottom: 0.6rem; }
 }
+
+/* Users: one row per person, the role in words and the state in a pill. */
+.person .record-icon { font-weight: 700; text-transform: uppercase; }
+.person-state[data-state=active] { color: var(--strong); }
+.person-state:is([data-state=setup], [data-state=invited]) { color: var(--weak); }
+.person-state:is([data-state=expired], [data-state=blocked]) { color: var(--insecure); }
+.person .record-actions { flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .person .person-state { grid-column: 1 / -1; justify-self: start; }
+}
+/* A role is chosen from three described choices, never a bare word. */
+.role-choice { display: grid; gap: 0.5rem; min-width: 0; margin: 1.1rem 0 0; padding: 0; border: 0; }
+.role-choice legend { margin: 0 0 0.4rem; padding: 0; font-size: 0.86rem; font-weight: 600; color: var(--ink-soft); }
+.role-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  font-weight: 400;
+  color: var(--ink);
+  cursor: pointer;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.role-option:has(input:checked) { background: color-mix(in srgb, var(--tool) 7%, var(--card)); border-color: var(--tool); }
+dialog .role-option input { width: auto; margin: 0.2rem 0 0; accent-color: var(--tool); }
+.role-text { display: grid; gap: 0.15rem; }
+.role-text span { font-size: 0.85rem; color: var(--ink-soft); }
+/* The one-time code is shown once, whole, ready to copy. */
+.person-code { margin: 1rem 0 0.4rem; font-size: 1rem; letter-spacing: 0.02em; user-select: all; }
