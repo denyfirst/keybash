@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/boombuler/barcode/qr"
+	"github.com/denyfirst/keybash/internal/qrcode"
 )
 
 // formatInfo reads a QR code's 15-bit format information from one of its two
@@ -68,10 +68,11 @@ func TestSeedQRCarriesExactlyTheSeed(t *testing.T) {
 	if e != nil {
 		t.Fatal("seed QR refused a valid account and seed")
 	}
-	// Exactly the QR code of that URI, at error correction level M.
-	want, e := qr.Encode("otpauth://totp/Keybash:"+user+"?secret="+seed+"&issuer=Keybash", qr.M, qr.Auto)
+	// Exactly the QR code of that URI, at error correction level M, row by
+	// row from the top (internal/qrcode pins the codes themselves).
+	want, e := qrcode.Encode([]byte("otpauth://totp/Keybash:" + user + "?secret=" + seed + "&issuer=Keybash"))
 	n := len(rows)
-	if e != nil || n != want.Bounds().Dx() || n < 21 || n > 57 || (n-17)%4 != 0 {
+	if e != nil || n != len(want) || n < 21 || n > 57 || (n-17)%4 != 0 {
 		t.Fatal("seed QR has the wrong size")
 	}
 	for y, row := range rows {
@@ -79,8 +80,7 @@ func TestSeedQRCarriesExactlyTheSeed(t *testing.T) {
 			t.Fatal("seed QR row is malformed")
 		}
 		for x := range n {
-			gray, _, _, _ := want.At(x, y).RGBA()
-			if (row[x] == '1') != (gray == 0) {
+			if (row[x] == '1') != want[y][x] {
 				t.Fatal("seed QR does not draw the seed's key URI")
 			}
 		}

@@ -3,19 +3,18 @@ package identity
 import (
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1" // #nosec G505 -- RFC 4226 and 6238 fix HMAC-SHA1 for authenticator apps; HMAC does not rely on SHA-1's collision resistance.
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
-	"image"
 	"io"
 	"net/url"
 	"time"
 
-	"github.com/boombuler/barcode/qr"
-	"github.com/pquerna/otp"
-	"github.com/pquerna/otp/hotp"
+	"github.com/denyfirst/keybash/internal/qrcode"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -46,20 +45,20 @@ func seedQR(username, seed string) ([]string, error) {
 	if !usernameInput(username) || !validSeed(seed) {
 		return nil, errRefused
 	}
-	code, e := qr.Encode(seedURI(username, seed), qr.M, qr.Auto)
-	if e != nil {
-		return nil, errRefused
-	}
-	n := code.Bounds().Dx()
-	if n < 21 || n > 57 || (n-17)%4 != 0 || code.Bounds() != image.Rect(0, 0, n, n) {
+	code, e := qrcode.Encode([]byte(seedURI(username, seed)))
+	n := len(code)
+	if e != nil || n < 21 || n > 57 || (n-17)%4 != 0 {
 		return nil, errRefused
 	}
 	rows := make([]string, n)
 	row := make([]byte, n)
-	for y := range n {
-		for x := range n {
+	for y, modules := range code {
+		if len(modules) != n {
+			return nil, errRefused
+		}
+		for x, dark := range modules {
 			row[x] = '0'
-			if gray, _, _, _ := code.At(x, y).RGBA(); gray == 0 {
+			if dark {
 				row[x] = '1'
 			}
 		}
@@ -98,8 +97,24 @@ func (s *Store) newRecovery(owner string) (recoveryCodes, [][32]byte, error) {
 	return codes, hashes, nil
 }
 
-// The library implements RFC 4226 HMAC OTP; this adapter supplies the three
-// bounded RFC 6238 time counters and persists the greatest consumed counter.
+// hotp is RFC 4226's HMAC-based one-time password with six digits: HMAC-SHA1
+// of the big-endian counter, dynamic truncation to 31 bits, the low six
+// decimal digits. It is what every authenticator app computes; the standard
+// library is enough, so no OTP dependency is needed.
+func hotp(key []byte, counter uint64) string {
+	var message [8]byte
+	binary.BigEndian.PutUint64(message[:], counter)
+	mac := hmac.New(sha1.New, key) // #nosec G401 -- RFC 4226 HMAC-SHA1, as authenticator apps compute it.
+	_, _ = mac.Write(message[:])
+	sum := mac.Sum(nil)
+	at := sum[len(sum)-1] & 0x0f
+	return fmt.Sprintf("%06d", (binary.BigEndian.Uint32(sum[at:at+4])&0x7fffffff)%1000000)
+}
+
+// factorCounter supplies the three bounded RFC 6238 time counters (30-second
+// steps, one either side) to hotp, compares in constant time, and returns the
+// greatest matching counter above the last consumed one, which the store
+// persists so no code is accepted twice.
 func factorCounter(seed, code string, now time.Time, last int64) (int64, bool) {
 	if !validSeed(seed) || len(code) != 6 || now.Unix() < 30 {
 		return 0, false
@@ -109,14 +124,18 @@ func factorCounter(seed, code string, now time.Time, last int64) (int64, bool) {
 			return 0, false
 		}
 	}
+	key, e := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(seed)
+	if e != nil || len(key) != 20 {
+		return 0, false
+	}
+	defer clear(key)
 	current := now.Unix() / 30
 	matched := int64(-1)
 	for _, counter := range []int64{current - 1, current, current + 1} {
 		if counter < 0 {
 			continue
 		}
-		valid, e := hotp.ValidateCustom(code, uint64(counter), seed, hotp.ValidateOpts{Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1})
-		if e == nil && valid && counter > last {
+		if subtle.ConstantTimeCompare([]byte(hotp(key, uint64(counter))), []byte(code)) == 1 && counter > last {
 			matched = max(matched, counter)
 		}
 	}

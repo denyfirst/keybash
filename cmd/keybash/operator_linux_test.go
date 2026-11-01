@@ -6,11 +6,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1" // #nosec G505 -- RFC 6238 HMAC-SHA1 test fixture.
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base32"
+	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -24,7 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -179,7 +183,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	if json.Unmarshal(call("POST", "/api/mfa/enrollment", map[string]string{}, 200), &seed) != nil {
 		t.Fatal("fixture factor failed")
 	}
-	otp, err := totp.GenerateCode(seed.Secret, time.Now())
+	otp, err := currentCode(seed.Secret, time.Now())
 	if err != nil {
 		t.Fatal("fixture factor generation failed")
 	}
@@ -214,4 +218,20 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	case <-time.After(8 * time.Second):
 		t.Fatal("configured CLI SIGTERM did not exit")
 	}
+}
+
+// currentCode is the six-digit RFC 6238 code an authenticator app shows now
+// for a base32 seed (HMAC-SHA1, 30-second steps), as the gateway checks it.
+func currentCode(seed string, now time.Time) (string, error) {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(seed)
+	if err != nil {
+		return "", err
+	}
+	var message [8]byte
+	binary.BigEndian.PutUint64(message[:], uint64(now.Unix()/30)) // #nosec G115 -- a positive Unix time.
+	mac := hmac.New(sha1.New, key)                                // #nosec G401 -- RFC 6238 HMAC-SHA1 test fixture.
+	_, _ = mac.Write(message[:])
+	sum := mac.Sum(nil)
+	at := sum[len(sum)-1] & 0x0f
+	return fmt.Sprintf("%06d", (binary.BigEndian.Uint32(sum[at:at+4])&0x7fffffff)%1000000), nil
 }

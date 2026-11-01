@@ -1,5 +1,26 @@
 # Protocol dependency review
 
+## OTP and QR in the standard library (2026-11-01)
+
+`github.com/pquerna/otp` and `github.com/boombuler/barcode` (a 2019
+pseudo-version) are removed; nothing replaces them. The one-time password is
+RFC 4226's HMAC-SHA1 with dynamic truncation, about ten lines in
+`identity.hotp`, pinned by the RFC 4226 appendix D and RFC 6238 appendix B
+vectors (`TestHOTPIsTheRFCAlgorithm`). `factorCounter` keeps the same window
+(one 30-second step either side), constant-time comparison, replay refusal
+and durable budget.
+
+The enrollment QR code comes from `internal/qrcode`: byte mode, level M,
+versions 1 to 10 only, about 300 lines with no imports beyond `errors`.
+`TestEncodeDrawsWhatKeybashDrewBefore` pins a digest of 228 codes covering
+every version and all eight masks, taken from the removed encoder: the codes
+are identical module for module. The same codes were decoded independently
+(jsQR 1.4.0, outside the repository) back to their inputs, the published
+"HELLO WORLD" 1-M error correction is a test vector, and every code is read
+back in-test through its syndromes and byte segment. The licences of the
+removed modules are no longer shipped. The two sections below are kept as
+the record of the earlier adoption.
+
 ## Interface typeface (2026-10-26)
 
 The pages adopt the Denyfirst design Porch established, including its typeface:
@@ -71,7 +92,7 @@ the existing Go 1.26.9 pin is unchanged. It uses the already pinned x/sys;
 its dependency build/benchmark/test graph is not the runtime inventory.
 No bbolt CLI, network service, dynamic module/plugin or migration auto-run.
 
-Pinned `github.com/pquerna/otp v1.5.0` (Apache-2.0, tag
+Pinned until 2026-11-01 (removed; see above) `github.com/pquerna/otp v1.5.0` (Apache-2.0, tag
 `5971b1ef1d6652fec2caed37f11e5cacd9249f78`, released 2025-05-16), sum
 `h1:NMMR+WrmaqXU4EzdGJEE1aUUI0AMRzsp96fFFWNPwxs=`. Reviewed HOTP/TOTP
 validation, digit/algorithm selection, seed decoding and skew adapter. Keybash
@@ -84,7 +105,7 @@ adoption; monitor the OTP/module advisories, and review removal/update before
 release. Do not silently update either dependency or widen the parser/import
 surface.
 
-## QR enrollment (2026-10-29)
+## QR enrollment (2026-10-29, superseded 2026-11-01)
 
 The same pinned barcode module now becomes a direct dependency for one call:
 `qr.Encode(uri, qr.M, qr.Auto)` in `identity.seedQR`, the encoder pquerna/otp's

@@ -60,7 +60,8 @@ offline list is not a complete breach corpus or a NIST compliance claim.
 
 Password authentication issues only a five-minute `enroll` or `challenge`
 session. No credential operation is allowed until MFA succeeds and rotates
-the cookie. TOTP uses the pinned OTP library, a random 160-bit seed, SHA1,
+the cookie. TOTP is RFC 6238 over an in-tree RFC 4226 HOTP (standard library
+only), with a random 160-bit seed, SHA1,
 six digits, 30 seconds, +/- one time step. The greatest consumed counter and
 five factor attempts per account/minute (including failures) commit durably.
 Ten random 128-bit recovery codes are shown once and only their owner-bound
