@@ -6,10 +6,9 @@ toxunmur. Yalnız Keybash repository-sindəki development alətlərindən istifa
 
 ## Açmaq
 
-Windows PowerShell-də:
+Windows PowerShell-də, Keybash repository-sinin kök qovluğunda:
 
 ```powershell
-Set-Location C:\Users\Rash\projects\keybash
 ./scripts/demo.ps1
 ```
 
@@ -24,7 +23,6 @@ asılılıqlarını və Playwright Chromium-u mühəndislik qaydasına uyğun qu
 ### Node olmadan (yalnız Go)
 
 ```powershell
-Set-Location C:\Users\Rash\projects\keybash
 ./scripts/demo.ps1 -Serve
 ```
 
