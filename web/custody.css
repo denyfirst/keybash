@@ -619,6 +619,9 @@ body.workspace:not([data-stage="ready"]) .work-heading { justify-content: center
 body.workspace:not([data-stage="ready"]) :is(#enroll, #challenge, #recovery) { margin-inline: auto; box-shadow: var(--shadow-lg); }
 body.workspace:not([data-stage="ready"]) .focus-foot { display: block; margin: 1.4rem 0 0; font-size: 0.85rem; text-align: center; color: var(--ink-soft); }
 body.workspace:not([data-stage="ready"]) .colophon { text-align: center; }
+/* The server names the stage in the page it sends, so the layout is right from
+   the first paint; the words that need the account wait until it has loaded. */
+body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, .rail-user, .focus-foot) { visibility: hidden; }
 /* An action that reads as a link, such as Sign out under the card. */
 button.link-button {
   display: inline;

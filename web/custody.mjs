@@ -50,7 +50,7 @@ function clearAll() {
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
-  delete document.body.dataset.stage;
+  delete document.body.dataset.stage; delete document.body.dataset.loaded;
 }
 async function request(path, method = 'GET', value, retried = false) {
   const controller = new AbortController();
@@ -425,7 +425,7 @@ async function loadAccount() {
   sections.forEach(id => { $(id).hidden = true; });
   $('heading').textContent = data.stage === 'enroll' ? 'Set up your phone' : 'Confirm it’s you';
   const page = showPage(data.stage === 'ready');
-  $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false;
+  $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false; document.body.dataset.loaded = '';
   if (data.stage === 'ready') await loadRecords();
   if (data.stage === 'ready' && page === 'installation') await loadInstallation();
 }
