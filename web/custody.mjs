@@ -178,7 +178,7 @@ const confirmKinds = {
   connection: { title: 'Delete this connection?', hint: 'The key or password it signs in with stays under Keys & passwords. This cannot be undone.', path: id => `/api/connections/${id}` },
   person: { title: 'Delete this person?', hint: 'Their account goes, with their keys, passwords and connections, and they are signed out at once. This cannot be undone.', path: id => `/api/users/${id}` },
   block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their keys and passwords stay.', path: id => `/api/users/${id}/block`, method: 'POST', word: 'Block' },
-  reset: { title: 'Reset this person’s access?', hint: 'Their password and phone stop working and they are signed out. You get a new code; with it they choose a new password and set up their phone again. Their keys and passwords stay.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Reset access' },
+  reset: { title: 'Reset this person’s access?', hint: 'Their phone stops working and they are signed out. You get a new code. They sign in with their own password and enter it to set up a phone again. Their password, keys and passwords stay, and the code alone opens nothing.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Reset access' },
 };
 function askConfirm(kind, record) {
   pendingDelete = { kind, id: record.id, name: record.name };
@@ -402,7 +402,9 @@ const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(
 function showCode(code, name, kind) {
   if (!codeOK(code)) throw new Error('invalid code');
   $('code-title').textContent = kind === 'invite' ? `Invite for ${name}` : `New code for ${name}`;
-  $('code-lead').textContent = `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`;
+  $('code-lead').textContent = kind === 'invite'
+    ? `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`
+    : `This code is shown only now. ${name} needs it with their own password to set up a phone; a person still to accept an invite chooses their password with it.`;
   $('person-code').textContent = code; $('code-dialog').showModal();
 }
 function openRole(person) {

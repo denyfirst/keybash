@@ -275,14 +275,19 @@ func (s *Store) adoptSoleAdmin() error {
 	return e
 }
 
-// resetAccess sends an account back to its invite: a new random password
-// nobody keeps, no factor or recovery codes, and a new code. Its keys,
-// passwords and connections stay. hash is of that random secret.
-func resetAccess(hash PasswordHash, now time.Time) (func(*durableAccount) error, *string) {
+// resetAccess clears an account's phone and recovery codes and issues a new
+// setup code. The password stays, and the account is not made an invite:
+// only its holder, with their own password and that code, can enroll again.
+// The administrator who receives the code therefore cannot become the
+// account and reach its keys, passwords and connections, which stay. A
+// holder who also lost their password needs the operator's offline
+// account-recover, or deletion and a new invite. An account still waiting
+// for its invite stays one, so the new code is its new invite.
+func resetAccess(now time.Time) (func(*durableAccount) error, *string) {
 	code := new(string)
 	return func(a *durableAccount) error {
 		var e error
-		a.Hash, a.Invited, a.Seed, a.Recovery, a.LastCounter = storedPassword(hash), true, "", nil, -1
+		a.Seed, a.Recovery, a.LastCounter = "", nil, -1
 		*code, e = issueEnrollment(a, now)
 		return e
 	}, code

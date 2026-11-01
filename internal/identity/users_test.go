@@ -276,15 +276,29 @@ func TestAdministratorChangesTakeEffectAtOnce(t *testing.T) {
 	}
 	f.alice.expect("POST", path+"/unblock", "{}", 204)
 	(&custodyClient{t: t, l: f.l}).expect("POST", "/api/session", inputJSON(map[string]string{"username": "bob", "password": bobPassword}), 204)
-	// A reset sends the account back to an invite: the old password stops
-	// working, and the new code lets its holder choose another.
+	// A reset clears the phone and gives a new setup code; the password stays.
+	// The code alone opens nothing: it is no invite. The holder signs in with
+	// their own password and needs the code to set up a phone again.
 	w := f.alice.expect("POST", path+"/reset", "{}", 200)
 	var reset struct{ Code string }
 	if json.Unmarshal(w.Body.Bytes(), &reset) != nil || len(reset.Code) != 43 {
 		t.Fatal("reset gave no code")
 	}
-	(&custodyClient{t: t, l: f.l}).expect("POST", "/api/session", inputJSON(map[string]string{"username": "bob", "password": bobPassword}), 401)
-	(&custodyClient{t: t, l: f.l}).expect("POST", "/api/invite", inputJSON(map[string]string{"username": "bob", "code": reset.Code, "password": nextPassword}), 204)
+	(&custodyClient{t: t, l: f.l}).expect("POST", "/api/invite", inputJSON(map[string]string{"username": "bob", "code": reset.Code, "password": nextPassword}), 401)
+	if _, users := listUsers(t, f.alice); users["bob"].State != "setup" {
+		t.Fatal("a reset account is not listed as setting up its phone")
+	}
+	holder := &custodyClient{t: t, l: f.l}
+	holder.expect("POST", "/api/session", inputJSON(map[string]string{"username": "bob", "password": bobPassword}), 204)
+	holder.session("enroll")
+	holder.expect("POST", "/api/mfa/enrollment", "{}", 403)
+	w = holder.expect("POST", "/api/mfa/enrollment", inputJSON(map[string]string{"setup": reset.Code}), 200)
+	var seed struct{ Secret string }
+	if json.Unmarshal(w.Body.Bytes(), &seed) != nil || !validSeed(seed.Secret) {
+		t.Fatal("no seed after the setup code")
+	}
+	holder.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, f.now.Unix()/30)}), 200)
+	holder.session("ready")
 	// Deleting takes the account's keys, passwords and connections with it.
 	if _, e := f.store.putCredential(b.ID, Credential{Name: "Bob's", Kind: "password", Username: "u", Secret: "s"}); e != nil {
 		t.Fatal("fixture credential failed")

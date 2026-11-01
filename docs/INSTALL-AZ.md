@@ -98,8 +98,9 @@ dəfə göstərir. Kodu həmin şəxsə istifadəçi adından ayrı ver. O, giri
 **I have an invite** seçir, parolunu özü seçir və telefonunu qurur. Kod bir dəfə
 işləyir və 72 saatdan sonra keçərsiz olur.
 
-Eyni səhifədə rolu dəyişmək, bloklamaq, girişi sıfırlamaq (yeni kod; açar və
-parolları qalır) və silmək olar. Hər dəyişiklik telefon kodu istəyir və həmin
+Eyni səhifədə rolu dəyişmək, bloklamaq, girişi sıfırlamaq (yalnız şəxsin öz
+parolu ilə işləyən yeni telefon kodu; parolu, açar və parolları qalır) və
+silmək olar. Hər dəyişiklik telefon kodu istəyir və həmin
 şəxsin açıq sessiyalarını dərhal bağlayır.
 
 Heç bir administrator daxil ola bilmirsə: gateway-i dayandır və

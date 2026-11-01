@@ -83,8 +83,9 @@ invites people, without the terminal:
    their own password. Then they set up their phone. The code works once and
    expires after 72 hours.
 
-The same page changes a role, blocks and unblocks, resets access (a new code;
-their keys and passwords stay) and deletes an account with everything it owns.
+The same page changes a role, blocks and unblocks, resets access (a new phone
+code that works only with the person's own password; their password, keys and
+passwords stay) and deletes an account with everything it owns.
 Each change asks for the phone and signs that person out at once. An
 administrator cannot change their own account there, so one always remains.
 

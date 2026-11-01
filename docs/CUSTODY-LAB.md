@@ -136,8 +136,12 @@ secret, and counts against a per-administrator budget:
   and per source. An invited account cannot sign in with any password.
 - **Change role, block, unblock, reset access, delete:** each bumps the
   account's revision, which ends its sessions and terminals at once.
-  - Reset sends it back to an invite: a new random password, no factor, a new
-    code. Its keys and passwords stay.
+  - Reset clears the phone and recovery codes and gives a new setup code. The
+    password stays and the account is not made an invite, so only its holder,
+    with their own password and that code, can enroll again; the
+    administrator who holds the code cannot sign in as them. Its keys and
+    passwords stay. A holder who also lost their password needs the
+    operator's offline `account-recover`, or deletion and a new invite.
   - Delete removes its keys, passwords and connections in the same
     transaction.
 

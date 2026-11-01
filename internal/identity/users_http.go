@@ -125,17 +125,7 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 			refuse(w, 400)
 			return
 		}
-		if !l.slot(r.Context()) {
-			identityError(w, errLimited)
-			return
-		}
-		hash, he := randomPassword()
-		<-l.derive
-		if he != nil {
-			refuse(w, 503)
-			return
-		}
-		change, code := resetAccess(hash, now)
+		change, code := resetAccess(now)
 		if e = l.store.changeAccount(actor, target, change); e == nil {
 			reply = struct {
 				Code string `json:"code"`
