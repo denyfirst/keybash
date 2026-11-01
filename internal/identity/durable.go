@@ -24,7 +24,7 @@ func NewPersistent(origin string, store *Store, options ...Option) (*Lab, error)
 	if store == nil {
 		return nil, errRefused
 	}
-	if _, e := store.initialized(); e != nil {
+	if _, e := store.initialized(); e != nil || store.adoptSoleAdmin() != nil {
 		return nil, errRefused
 	}
 	dummy, e := token()
@@ -69,8 +69,21 @@ func (l *Lab) refreshLocked(name string) bool {
 		l.accounts[name] = a
 	}
 	a.id, a.password, a.revision, a.mfa = d.ID, d.password(), d.Revision, d.Seed != ""
+	a.role, a.disabled, a.invited = d.Role, d.Disabled, d.Invited
 	return true
 }
+
+// roleLocked is the session account's role as the store holds it now; every
+// request refreshes the account first, and a role change ends its sessions.
+func (l *Lab) roleLocked(s *session) string {
+	if a := l.accounts[s.username]; a != nil {
+		return a.role
+	}
+	return roleAuditor // no account: reach nothing
+}
+
+// serversLocked: an auditor reaches no server and holds no key or password.
+func (l *Lab) serversLocked(s *session) bool { return l.roleLocked(s) != roleAuditor }
 func (l *Lab) readyLocked(id [32]byte, fresh bool) *session {
 	s := l.liveLocked(id, false)
 	if s == nil || l.store == nil || s.stage != "ready" || s.owner != l.accounts[s.username].id || s.revision != l.accounts[s.username].revision || fresh && !l.now().Before(s.reauthUntil) {

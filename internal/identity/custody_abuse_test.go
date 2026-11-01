@@ -123,7 +123,7 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 	now := time.Now()
 	alice, _, aliceCodes := enrollFixture(t, s, "alice", now)
 	if s.update(func(tx *bolt.Tx) error {
-		_, _, e := s.createAccount(tx, "bob", accounts(t)[0].Password, time.Now(), true)
+		_, _, e := s.createAccount(tx, "bob", accounts(t)[0].Password, time.Now(), newAccount{setup: true})
 		return e
 	}) != nil {
 		t.Fatal("fixture second account failed")

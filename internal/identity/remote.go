@@ -163,7 +163,7 @@ func compatible(t RemoteTarget, c Credential) bool {
 // revealing or deleting secrets, need fresh proof (see freshProof).
 func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	s := l.readyLocked(id, false)
-	if s == nil || l.remote == nil {
+	if s == nil || l.remote == nil || !l.serversLocked(s) {
 		return "", errRefused
 	}
 	if !l.attemptLocked("remote:"+s.username, remoteAttempts) {
@@ -209,7 +209,7 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteTarget, Credential, context.Context, error) {
 	key, ok := tokenID(raw)
 	s := l.readyLocked(id, false)
-	if !ok || s == nil || l.remote == nil {
+	if !ok || s == nil || l.remote == nil || !l.serversLocked(s) {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
 	lease := l.remote.leases[key]
@@ -265,7 +265,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	id, ok := tokenID(requestToken(r))
 	l.mu.Lock()
 	s := l.readyLocked(id, false)
-	allowed := ok && s != nil && l.remote != nil
+	allowed := ok && s != nil && l.remote != nil && l.serversLocked(s)
 	capacityFull := allowed && !l.reserveRemoteSocketLocked(s.owner)
 	l.mu.Unlock()
 	if capacityFull {

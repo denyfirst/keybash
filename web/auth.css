@@ -14,3 +14,5 @@
 
 /* The memory-only identity lab's account card. */
 .account-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+/* Sign in, or accept an invite: one link switches the form. */
+.signin-switch { margin: 1rem 0 0; font-size: 0.9rem; text-align: center; }

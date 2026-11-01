@@ -193,6 +193,10 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		l.bootstrapHTTP(w, r)
 		return
 	}
+	if r.URL.Path == "/api/invite" && r.Method == "POST" {
+		l.inviteHTTP(w, r)
+		return
+	}
 	if r.URL.Path == "/api/session" && r.Method == "POST" {
 		fields, ok := readInput(w, r, "username", "password")
 		if !ok || !usernameInput(fields["username"]) || !passwordInput(fields["password"]) {
@@ -211,7 +215,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	// The workspace is one document with a page per path; the script shows
 	// the part the path names. Loading a page counts as activity.
-	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account" || r.URL.Path == "/installation")
+	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account" || r.URL.Path == "/installation" || r.URL.Path == "/users")
 	id, valid := tokenID(requestToken(r))
 	l.mu.Lock()
 	s := l.liveLocked(id, page)
@@ -249,7 +253,8 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			Stage    string `json:"stage"`
 			Remote   bool   `json:"remote"`
 			Setup    bool   `json:"setup"` // first enrollment still needs the operator's setup code
-		}{s.username, l.csrf(id), s.stage, l.remote != nil, s.stage == "enroll" && !s.replacing && !s.setupProved}
+			Role     string `json:"role"`  // which pages to show; the server checks every request
+		}{s.username, l.csrf(id), s.stage, l.remote != nil, s.stage == "enroll" && !s.replacing && !s.setupProved, roleWord(l.roleLocked(s))}
 		l.mu.Unlock()
 		jsonReply(w, data)
 		return
@@ -363,6 +368,18 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 401)
 			return
 		}
+	}
+	if r.URL.Path == "/api/users" || strings.HasPrefix(r.URL.Path, "/api/users/") {
+		l.usersHTTP(w, r, id, s)
+		return
+	}
+	// An auditor holds no key or password and reaches no server; only an
+	// administrator sees how this copy is installed.
+	servers := strings.HasPrefix(r.URL.Path, "/api/credentials") || r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || strings.HasPrefix(r.URL.Path, "/api/remote/")
+	if servers && !l.serversLocked(s) || r.URL.Path == "/api/installation" && l.roleLocked(s) != roleAdmin {
+		l.mu.Unlock()
+		refuse(w, 403)
+		return
 	}
 	if r.URL.Path == "/api/installation" && r.Method == "GET" {
 		data := l.installationLocked()
