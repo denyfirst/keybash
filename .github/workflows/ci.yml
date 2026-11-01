@@ -55,8 +55,10 @@ jobs:
           export PATH="${node_bin}:${PATH}"
           test "$(node --version)" = v24.19.0
           # pnpm is pinned by hash like Node, not by the registry's word: the
-          # tarball's SHA-256 matches its published sha512 integrity.
-          curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
+          # tarball's SHA-256 matches its published sha512 integrity. The
+          # registry negotiates TLS 1.2 at most; the fixed hash, not the
+          # transport, is what pins the file.
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             https://registry.npmjs.org/pnpm/-/pnpm-11.25.0.tgz \
             --output "${RUNNER_TEMP}/keybash-pnpm.tgz"
           printf '%s  %s\n' 33dd0748f27e7916c4f1c8b6943461983e3453b06bbda6312a6280130b4881e5 \
