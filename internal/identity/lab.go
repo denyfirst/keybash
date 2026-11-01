@@ -265,7 +265,7 @@ func (l *Lab) csrf(id [32]byte) string {
 // exhausting a key cannot lock every user out of login, MFA or their own open
 // sessions. Argon2id CPU stays bounded separately by the two derive slots.
 const (
-	loginAttempts    = 5  // per submitted username, registered or not
+	loginAttempts    = 5  // per submitted username, registered or not (on an exposed lab, per source)
 	factorAttempts   = 5  // per account; the store keeps its own durable budget
 	reauthAttempts   = 5  // per account, separate from unauthenticated login
 	passwordAttempts = 5  // per account
@@ -273,6 +273,10 @@ const (
 	trustAttempts    = 5  // per account
 	remoteAttempts   = 20 // connection opens per account
 	setupAttempts    = 5  // the single pre-initialization bootstrap
+	// Per submitted username on an exposed lab, across all sources. The name
+	// is otherwise counted per source, so one source cannot keep its holder
+	// from signing in elsewhere; this ceiling keeps many sources slow too.
+	loginNameAttempts = 30
 	// Per client source (an IPv4 address or IPv6 /64) on an exposed lab, across
 	// every name it tries; loopback labs have one shared source and skip it.
 	sourceAttempts = 30
@@ -323,7 +327,18 @@ func (l *Lab) loginFrom(ctx context.Context, source, username, password, previou
 	l.mu.Lock()
 	// Unknown and registered names share the same policy. Separate unknown-user
 	// buckets would expose account existence through different 429 responses.
-	if l.closed || source != "" && !l.attemptLocked("source:"+source, sourceAttempts) || !l.attemptLocked("login:"+username, loginAttempts) {
+	// On an exposed lab the source is checked first, so a refused source
+	// creates no per-name counter; then the name from this source; then the
+	// name across all sources.
+	allowed := !l.closed
+	if allowed && source != "" {
+		allowed = l.attemptLocked("source:"+source, sourceAttempts) &&
+			l.attemptLocked("login:"+username+"@"+source, loginAttempts) &&
+			l.attemptLocked("login:"+username, loginNameAttempts)
+	} else if allowed {
+		allowed = l.attemptLocked("login:"+username, loginAttempts)
+	}
+	if !allowed {
 		l.mu.Unlock()
 		return "", errLimited
 	}

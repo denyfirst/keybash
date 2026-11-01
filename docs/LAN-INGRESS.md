@@ -40,11 +40,14 @@ keybash serve-remote-lab ... \
   CSRF, `__Host-` cookie and Fetch-metadata checks are unchanged. Every
   response carries `Strict-Transport-Security: max-age=31536000` (browsers
   ignore it for an address origin).
-- **Password guessing.** Besides the five attempts per name per minute,
-  sign-in attempts from one source are limited to 30 per minute across all the
-  names it tries. The source is checked first, so a refused source creates no
-  per-name counter. A loopback lab has one shared source and keeps only the
-  per-name limit.
+- **Password guessing.** Sign-in attempts from one source are limited to 30
+  per minute across all the names it tries, and to five per minute for any
+  one name. A name is also limited to 30 per minute across all sources. One
+  source therefore cannot keep a person from signing in from another, and
+  many sources together still guess slowly; behind the password, every
+  session also needs the second factor. The source is checked first, so a
+  refused source creates no per-name counter. A loopback lab has one shared
+  source and keeps five attempts per name per minute.
 
 ## Limits
 

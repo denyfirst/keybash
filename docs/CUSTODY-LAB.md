@@ -36,7 +36,15 @@ sizes and access patterns are visible metadata; its state is HMAC protected.
 
 Wrong keys and changed tags/owner bindings fail closed. Whole-file rollback,
 record replay within an old authenticated database snapshot, arbitrary corrupt
-bbolt files and offline deletion are not solved by AEAD. An old backup could
+bbolt files and offline deletion are not solved by AEAD. The same holds for
+one record: someone who can write the database file, even without the
+instance key, can put back an older copy of a single account or credential
+(its own revision is what the associated data binds), restoring for example
+an earlier password hash or recovery codes already spent. It helps only
+someone who also knows the old secret. In the standard install the database
+and the instance key share the gateway's owner, so this needs that owner's
+access or a copy of the file taken outside it; detecting it would need a
+monotonic counter kept beyond that owner's reach. An old backup could
 resurrect a consumed code, so restore (`BACKUP-RESTORE.md`) resets every
 account's factor and recovery codes in the same transaction that writes the
 records. Filesystem quotas, crash/power-loss fault injection, key rotation and
@@ -60,7 +68,8 @@ offline list is not a complete breach corpus or a NIST compliance claim.
 
 Password authentication issues only a five-minute `enroll` or `challenge`
 session. No credential operation is allowed until MFA succeeds and rotates
-the cookie. TOTP uses the pinned OTP library, a random 160-bit seed, SHA1,
+the cookie. TOTP is RFC 6238 over an in-tree RFC 4226 HOTP (standard library
+only), with a random 160-bit seed, SHA1,
 six digits, 30 seconds, +/- one time step. The greatest consumed counter and
 five factor attempts per account/minute (including failures) commit durably.
 Ten random 128-bit recovery codes are shown once and only their owner-bound

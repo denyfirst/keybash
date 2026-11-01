@@ -19,11 +19,16 @@ var (
 
 // These platform endpoints are denied even if an operator approves them.
 // Loopback, link-local, multicast, unspecified, and non-unicast addresses are
-// rejected separately. Private unicast targets may be explicitly approved.
+// rejected separately. Private unicast targets may be explicitly approved, so
+// a cloud's metadata service on a unique-local IPv6 address must be named
+// here: the link-local rule never sees it.
 var platformEndpoints = [...]netip.Addr{
-	netip.MustParseAddr("100.100.100.200"),
-	netip.MustParseAddr("168.63.129.16"),
-	netip.MustParseAddr("fd00:ec2::254"),
+	netip.MustParseAddr("100.100.100.200"),    // Alibaba Cloud metadata
+	netip.MustParseAddr("168.63.129.16"),      // Azure platform (WireServer)
+	netip.MustParseAddr("fd00:ec2::254"),      // AWS instance metadata, IPv6
+	netip.MustParseAddr("fd20:ce::254"),       // Google Compute Engine metadata, IPv6-only VMs
+	netip.MustParseAddr("fd00:c1::a9fe:a9fe"), // Oracle Cloud instance metadata, IPv6
+	netip.MustParseAddr("fd00:a9fe:a9fe::1"),  // Akamai (Linode) metadata, IPv6
 }
 
 // Address translation can hide a forbidden IPv4 destination inside IPv6.

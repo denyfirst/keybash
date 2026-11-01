@@ -120,9 +120,18 @@ func TestOperatorCatalogLinuxUnprivilegedReader(t *testing.T) {
 	if err != nil {
 		t.Fatal("fixture executable missing")
 	}
+	// go test builds the binary in root's private build directory, which UID
+	// 65533 cannot enter. Run a copy from the fixture's readable directory, as
+	// scripts/operator-config-lab.sh does with its own build.
+	program, err := os.ReadFile(binary) // #nosec G304 -- the current test executable.
+	reader := filepath.Join(filepath.Dir(path), "reader.test")
+	if err != nil || os.WriteFile(reader, program, 0555) != nil { // #nosec G306 -- a synthetic test binary the separate reader UID must execute.
+		t.Fatal("fixture executable copy failed")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	child := exec.CommandContext(ctx, binary, "-test.run=^TestOperatorCatalogLinuxReaderChild$", "-test.v") // #nosec G204 -- current test executable, fixed child selector.
+	child := exec.CommandContext(ctx, reader, "-test.run=^TestOperatorCatalogLinuxReaderChild$", "-test.v") // #nosec G204 -- a copy of the current test executable, fixed child selector.
+	child.Dir = filepath.Dir(path)
 	child.Env = []string{"KEYBASH_CATALOG_READER_CHILD=1"}
 	child.Stdin = strings.NewReader(path)
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65533, Gid: 65533}}

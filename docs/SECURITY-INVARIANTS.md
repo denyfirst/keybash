@@ -147,6 +147,7 @@ no external server dials and load no real credentials.
 | Missing/duplicate identities or non-loopback origins cannot initialize login, unless exposed to listed networks | copied account configuration and exact origin checks: numeric loopback, or a canonical global-unicast address or DNS name only with networks | `TestIdentityConfigurationRefusesMissingDuplicateOrUntrusted`, `TestOriginsAreExactForLoopbackAndExposedLabs` |
 | An exposed gateway admits only the listed networks, before TLS and on every request, at its exact origin | specific global-unicast listener, required canonical network list without loopback or the whole space, listener closes others and caps connections per source and in total, request peer and Host checks, HSTS, certificate must cover the origin | `TestParseSourcesIsExactAndBounded`, `TestAllowedAndSourceUnits`, `TestListenerAdmitsOnlyListedSourcesWithinLimits`, `TestWrapRefusesBadLimits`, `TestExposedLabAdmitsOnlyListedNetworks`, `TestExposureNeedsNetworksAndASpecificAddress`, `TestExposedCertificateMustCoverTheOrigin`, `TestExposedListenerAdmitsOnlyItsNetworks` |
 | On an exposed gateway one source cannot guess passwords across many names | 30 sign-in attempts per source (IPv4 address or IPv6 /64) per minute, checked before the per-name window | `TestExposedLoginCountsPerSource` |
+| On an exposed gateway one source cannot keep a person from signing in, and many sources together still guess slowly | five attempts per name per source and 30 per name across sources, per minute | `TestExposedLoginBudgetIsPerNameAndSource` |
 | Browser login/change/logout preserve password clearing, protected navigation and truthful failure state | local fixed assets, bounded response/deadline, no storage or secret URLs | `TestBrowserPasswordLogin` |
 
 Browser evidence is additionally enforced by `web/paste.test.mjs` and the
@@ -162,8 +163,9 @@ The separate identity lab implements password-only, memory-resident accounts
 and owner sessions. It has no persistent IDs/hash storage, operator bootstrap,
 blocklist, MFA/recovery, vault or remote-resource authorization. Its cookie is
 not accepted by the protocol labs and opens no worker. See `IDENTITY-LAB.md`.
-Failures against one name still deny that name for a minute. Only an exposed
-gateway (`LAN-INGRESS.md`) also counts sign-ins per source; KDF concurrency is
+On a loopback lab, failures against one name still deny that name for a
+minute. An exposed gateway (`LAN-INGRESS.md`) counts each name per source,
+under a ceiling across sources, and each source across names; KDF concurrency is
 not a process-memory or DDoS guarantee. Production durability/ownership and independent
 candidate review remain gates before real credentials or remote access.
 
@@ -237,4 +239,10 @@ must be denied in deployment policy; translator-aware support is deferred.
 
 Platform address references: [AWS IMDS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html),
 [Alibaba ENS metadata](https://www.alibabacloud.com/help/en/ens/instance-metadata),
-and [Azure platform IP](https://learn.microsoft.com/en-us/azure/virtual-network/what-is-ip-address-168-63-129-16).
+[Azure platform IP](https://learn.microsoft.com/en-us/azure/virtual-network/what-is-ip-address-168-63-129-16),
+[Google Compute Engine metadata](https://cloud.google.com/compute/docs/metadata/querying-metadata),
+[Akamai (Linode) metadata](https://techdocs.akamai.com/cloud-computing/docs/metadata-service-api),
+and Oracle Cloud's IPv6 metadata address as cloud-init's
+[Oracle datasource](https://github.com/canonical/cloud-init/blob/main/cloudinit/sources/DataSourceOracle.py)
+uses it. The IPv6 ones are unique-local addresses, which a private-network
+approval would otherwise accept, so each is named.

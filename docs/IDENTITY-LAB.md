@@ -46,9 +46,10 @@ The appearance follows the existing Denyfirst dark palette and restrained red.
   each have their own per-account window, so failed logins cannot lock other
   accounts or a signed-in owner out. At most 8192 counters exist; a full table
   refuses new names rather than evicting another account's counter, and expired
-  windows are reclaimed every second. Success does not reset budgets. Repeated
-  failures against one name still deny that name for a minute. An exposed
-  gateway (`LAN-INGRESS.md`) also allows 30 sign-ins per source per minute.
+  windows are reclaimed every second. Success does not reset budgets. On a
+  loopback lab, repeated failures against one name deny that name for a minute. An exposed
+  gateway (`LAN-INGRESS.md`) also allows 30 sign-ins per source per minute,
+  five per name from one source, and 30 per name across sources.
 - Fresh 256-bit opaque session tokens; only SHA-256 token digests are stored.
   `__Host-` Secure/HttpOnly/SameSite=Strict cookie, Path=/, no Domain. Duplicate,
   malformed, forged and revoked cookies cannot select a session. Successful

@@ -22,3 +22,11 @@ database-only theft case, with explicit metadata/rollback limits. Rotation,
 backup/restore, migration, filesystem fault injection and independent candidate
 audit must precede production release. `CUSTODY-LAB.md` describes boundaries,
 operator behavior, measured evidence and remaining product integration.
+
+## Update (2026-11-01)
+
+The OTP library is replaced by an in-tree RFC 4226 HOTP on the standard
+library, and its QR dependency by `internal/qrcode`. HMAC-SHA1 truncation is
+a fixed public algorithm, small enough to pin with the RFCs' own vectors, and
+removing the two modules (one a 2019 pseudo-version) shrinks the supply chain
+of the factor every account depends on. See `docs/DEPENDENCIES.md`.

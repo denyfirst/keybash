@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -24,7 +25,6 @@ import (
 	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
-	"github.com/pquerna/otp/hotp"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/ssh"
 )
@@ -60,11 +60,11 @@ func bootstrapped(t *testing.T) (*Store, []byte, string) {
 }
 func otpCode(t *testing.T, seed string, counter int64) string {
 	t.Helper()
-	code, e := hotp.GenerateCode(seed, uint64(counter))
-	if e != nil {
+	key, e := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(seed)
+	if e != nil || counter < 0 {
 		t.Fatal("fixture OTP failed")
 	}
-	return code
+	return hotp(key, uint64(counter))
 }
 func enrollFixture(t *testing.T, s *Store, name string, now time.Time) (durableAccount, string, recoveryCodes) {
 	t.Helper()
