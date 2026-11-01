@@ -165,9 +165,12 @@ function recordRow(record) {
   meta.textContent = `${record.kind === 'ssh-key' ? 'SSH key' : 'Password'} · ${record.username ? `user ${record.username}` : 'no user'}`;
   titles.append(name, meta);
   if (record.generated) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'Made in Keybash'; titles.append(badge); }
+  if (record.fingerprint) {
+    const line = document.createElement('p'); line.className = 'record-print';
+    const print = document.createElement('code'); print.className = 'fingerprint'; print.textContent = record.fingerprint; print.title = 'Key fingerprint';
+    line.append(print); titles.append(line);
+  }
   row.append(tile, titles);
-  const print = document.createElement('code'); print.className = 'fingerprint'; print.textContent = record.fingerprint; print.title = 'Key fingerprint';
-  if (record.fingerprint) row.append(print);
   const actions = document.createElement('div'); actions.className = 'record-actions'; row.append(actions);
   return { row, actions };
 }
@@ -193,7 +196,7 @@ async function loadRecords() {
   for (const record of records) {
     if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
     const { row, actions } = recordRow(record);
-    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost'; remove.textContent = 'Delete';
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost destructive'; remove.textContent = 'Delete';
     remove.addEventListener('click', () => askConfirm('credential', record));
     // A key made here is never shown; its row offers the install command instead.
     if (record.generated) {
@@ -354,7 +357,7 @@ function serverCard(record, target) {
     link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
   }
   if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
-  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => askConfirm('connection', record));
+  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost destructive'; remove.addEventListener('click', () => askConfirm('connection', record));
   actions.append(remove); card.append(actions);
   return card;
 }
@@ -433,7 +436,7 @@ function personRow(person, self) {
   if (person.state === 'blocked') button('Unblock', 'ghost', () => { void run(async () => { await request(`/api/users/${person.id}/unblock`, 'POST', {}); await loadUsers(); notice(`${person.username} can sign in again.`); }); });
   else button('Block', 'ghost', () => askConfirm('block', record));
   button(['invited', 'expired'].includes(person.state) ? 'New code' : 'Reset access', 'ghost', () => askConfirm('reset', record));
-  button('Delete', 'ghost', () => askConfirm('person', record));
+  button('Delete', 'ghost destructive', () => askConfirm('person', record));
   return row;
 }
 async function loadUsers() {
@@ -476,7 +479,7 @@ function showPage(ready) {
     item.hidden = !allowed.includes(item.dataset.page);
   });
   $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys'; $('invite-person').hidden = !ready || name !== 'users';
-  $('topbar-page').textContent = ready ? pages[name].title : 'Sign-in';
+  $('topbar-page').textContent = $('rail-page').textContent = ready ? pages[name].title : 'Sign-in';
   $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
   if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
   return name;
@@ -518,6 +521,19 @@ function showClaim(on) {
   $('signin-title').textContent = on ? 'Accept your invite' : 'Sign in'; document.title = on ? 'Keybash · Accept invite' : 'Keybash · Sign in';
   $(on ? 'claim-user' : 'username').focus();
 }
+// On a phone the menu folds behind one button: it opens when asked, and
+// Escape or a tap elsewhere folds it again.
+function setMenu(open) {
+  const toggle = $('menu-toggle'), rail = toggle?.closest('.rail');
+  if (!rail) return;
+  toggle.setAttribute('aria-expanded', String(open));
+  if (open) rail.dataset.open = ''; else delete rail.dataset.open;
+}
+$('menu-toggle')?.addEventListener('click', () => setMenu($('menu-toggle').getAttribute('aria-expanded') !== 'true'));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && $('menu-toggle')?.getAttribute('aria-expanded') === 'true') { setMenu(false); $('menu-toggle').focus(); }
+});
+document.addEventListener('click', event => { if (!event.target.closest?.('.rail')) setMenu(false); });
 $('show-claim')?.addEventListener('click', () => showClaim(true));
 $('show-signin')?.addEventListener('click', () => showClaim(false));
 $('invite-person')?.addEventListener('click', () => {

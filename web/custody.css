@@ -15,7 +15,7 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 .record-list { display: grid; gap: 0.6rem; }
 .record {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.6rem 1rem;
   padding: 0.85rem 1rem;
@@ -36,7 +36,7 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
   border-radius: 10px;
 }
 .record-titles { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; min-width: 0; }
-.record-name { flex: 1 1 100%; margin: 0; overflow: hidden; font-size: 1rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.record-name { flex: 1 1 100%; margin: 0; font-size: 1rem; font-weight: 650; overflow-wrap: anywhere; }
 .record-meta { margin: 0; font-size: 0.84rem; color: var(--ink-soft); }
 .record-badge {
   padding: 0.05rem 0.5rem;
@@ -46,16 +46,17 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
   background: color-mix(in srgb, var(--tool) 10%, var(--card));
   border-radius: 999px;
 }
-/* A fingerprint is long and compared rarely: shown short, whole on hover. */
+/* A fingerprint is compared character by character, so it is shown whole, on
+   its own line under the name, and wraps rather than being cut. */
+.record-print { flex-basis: 100%; margin: 0.3rem 0 0; }
 .record .fingerprint {
-  max-width: 15rem;
-  overflow: hidden;
-  padding: 0.25rem 0.55rem;
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.2rem 0.5rem;
   font-family: var(--mono);
   font-size: 0.74rem;
   color: var(--ink-faint);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   background: var(--paper-sunk);
   border: 1px solid var(--rule);
   border-radius: 6px;
@@ -64,9 +65,9 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 .record-actions button { margin: 0; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
 @media (max-width: 760px) {
   .record { grid-template-columns: auto minmax(0, 1fr); }
-  .record .fingerprint { grid-column: 1 / -1; max-width: 100%; }
   .record-actions { grid-column: 1 / -1; justify-content: flex-start; min-width: 0; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
-  .record-actions button.ghost { margin-left: auto; }
+  .record-actions { flex-wrap: wrap; }
+  .record-actions button.destructive { margin-left: auto; }
 }
 
 /* ── Connections: one card per server ─────────────────────────────────── */
@@ -99,12 +100,21 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
 .server-card[data-trust=unverified] .server-icon { color: var(--weak); background: color-mix(in srgb, var(--weak) 14%, var(--card)); }
 .server-glyph { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .server-titles { min-width: 0; }
-.server-name { margin: 0; overflow: hidden; font-size: 1.02rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.server-meta { margin: 0.1rem 0 0; overflow: hidden; font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint); text-overflow: ellipsis; white-space: nowrap; }
+/* The name and who signs in where are shown whole: they wrap, never cut. */
+.server-name { margin: 0; font-size: 1.02rem; font-weight: 650; overflow-wrap: anywhere; }
+.server-meta { margin: 0.1rem 0 0; font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint); overflow-wrap: anywhere; }
 .server-help { margin: 0; font-size: 0.86rem; color: var(--ink-soft); }
 .server-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.5rem; margin-top: auto; padding-top: 0.85rem; border-top: 1px solid var(--rule); }
-.server-actions button { margin: 0; padding: 0.45rem 0.8rem; font-size: 0.85rem; }
+.server-actions button { margin: 0; padding: 0.45rem 0.8rem; font-size: 0.85rem; white-space: nowrap; }
 .server-actions button.ghost { margin-left: auto; }
+/* A phone: the state under the name, Connect across the card, and the other
+   actions in one row below it, Delete at its far end. */
+@media (max-width: 520px) {
+  .server-card-head { grid-template-columns: auto minmax(0, 1fr); row-gap: 0.45rem; }
+  .server-card-head .pill { grid-column: 2; justify-self: start; margin-top: 0; }
+  .server-actions { flex-wrap: wrap; }
+  .server-actions a.connect { flex: 1 0 100%; justify-content: center; }
+}
 /* Connect is the card's main action: a link drawn as the accent button. */
 a.connect {
   display: inline-flex;
@@ -621,7 +631,7 @@ body.workspace:not([data-stage="ready"]) .focus-foot { display: block; margin: 1
 body.workspace:not([data-stage="ready"]) .colophon { text-align: center; }
 /* The server names the stage in the page it sends, so the layout is right from
    the first paint; the words that need the account wait until it has loaded. */
-body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, .rail-nav, .rail-user, .focus-foot) { visibility: hidden; }
+body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, #rail-page, .rail-nav, .rail-user, .focus-foot) { visibility: hidden; }
 /* A command is copied whole, so it never breaks at one of its hyphens. */
 #connection-dialog .hint code { white-space: nowrap; }
 
@@ -654,14 +664,26 @@ body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, .rail-nav, .r
   .facts dd { margin-bottom: 0.6rem; }
 }
 
-/* Users: one row per person, the role in words and the state in a pill. */
+/* Users: one row per person, the role in words and the state in a pill. The
+   rows share one grid, so the name and role, the state and the actions line up
+   from row to row however many people there are; the actions sit at the right. */
 .person .record-icon { font-weight: 700; text-transform: uppercase; }
 .person-state[data-state=active] { color: var(--strong); }
 .person-state:is([data-state=setup], [data-state=invited]) { color: var(--weak); }
 .person-state:is([data-state=expired], [data-state=blocked]) { color: var(--insecure); }
-.person .record-actions { flex-wrap: wrap; }
+#people { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.person { grid-column: 1 / -1; grid-template-columns: subgrid; }
+.person .person-state { justify-self: start; }
+.person .record-actions { flex-wrap: wrap; min-width: 0; }
 @media (max-width: 760px) {
-  .person .person-state { grid-column: 1 / -1; justify-self: start; }
+  .person { grid-template-columns: auto minmax(0, 1fr); }
+  .person .person-state { grid-column: 1 / -1; }
+  /* Four actions do not fit one row: the role across, the rest below it. */
+  .person .record-actions button.secondary { flex: 1 0 100%; }
+}
+/* A card's system tile is a button too. */
+@media (max-width: 760px), (pointer: coarse) {
+  button.server-icon { width: 2.75rem; height: 2.75rem; }
 }
 /* A role is chosen from three described choices, never a bare word. */
 .role-choice { display: grid; gap: 0.5rem; min-width: 0; margin: 1.1rem 0 0; padding: 0; border: 0; }
