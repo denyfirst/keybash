@@ -357,7 +357,10 @@ dialog.sheet .hint { margin-bottom: 0; }
   width: calc(6 * var(--cell) + 5 * var(--gap) + 2 * var(--room));
   max-width: 100%;
   padding: var(--room);
-  overflow: hidden;
+  /* Clipped, never scrolled: a hidden overflow is still a scroll container,
+     and the browser scrolled it to show the caret after the sixth digit,
+     cutting the first box. */
+  overflow: clip;
 }
 .code-boxes > span {
   flex: none;

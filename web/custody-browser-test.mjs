@@ -52,7 +52,11 @@ try {
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); delete document.visibilityState; });
   assert.equal(await page.locator('#seed-qr path').count(), 0); assert.equal(await page.locator('#seed').textContent(), ''); assert(await page.locator('#qr-start').isVisible());
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); assert.equal(await page.locator('#seed').textContent(), seed); await settled();
-  await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30) - 1)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
+  // Typed digit by digit, the six boxes stay where they are: the first box is
+  // not scrolled out of sight after the sixth digit.
+  await page.locator('#enrollment-code').pressSequentially(otp(Math.floor(seconds / 30) - 1));
+  assert.deepEqual(await page.locator('.code-boxes').evaluate(box => [box.scrollLeft, box.querySelector('span').getBoundingClientRect().left >= box.getBoundingClientRect().left]), [0, true], 'the code boxes scrolled');
+  await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
   await alone(); await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert(await page.locator('.rail').isVisible() && !(await page.locator('#focus-logout').isVisible()), 'the ready workspace has no menu');
   assert.equal(await page.locator('#recovery-codes').inputValue(), '');
