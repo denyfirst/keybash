@@ -93,6 +93,10 @@ fi
   refused nobody-id scripts/install.sh ${base} --gateway-id=65534
   refused same-ids scripts/install.sh ${base} --gateway-id=65000 --worker-id=65000
   refused padded-id scripts/install.sh ${base} --gateway-id=065000
+  refused server-outside-networks scripts/install.sh ${base} --target-networks=10.45.0.0/24
+  refused protected-target-network scripts/install.sh ${base} --target-networks=10.44.0.0/24,10.99.0.0/24
+  refused metadata-target-network scripts/install.sh ${base} --target-networks=10.44.0.0/24,169.254.0.0/16
+  refused injected-networks scripts/install.sh ${base} '--target-networks=10.44.0.0/24 --listen=0.0.0.0:8443'
 }
 if test -z "${runtime}"; then
   refused rdp-catalog-without-runtime scripts/install.sh --stage="${stage}" --catalog="${work}/mixed.json" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/tls/key.pem"
@@ -136,6 +140,17 @@ check_owner /etc/keybash/tls/key.pem 'keybash-gateway:keybash-gateway 600'
 check_owner /var/lib/keybash 'keybash-gateway:keybash-gateway 700'
 check_owner /var/lib/keybash/custody.db 'keybash-gateway:keybash-gateway 600'
 check_owner /etc/systemd/system/keybash-gateway.service 'root:root 644'
+# The gateway reaches only its target networks, which systemd loaded; without
+# --target-networks they are one host network per catalog server.
+hosts=10.44.0.8/32
+test -z "${runtime}" || hosts=10.44.0.8/32,10.44.0.9/32
+bounded() {
+  grep -qx 'IPAddressDeny=any' /etc/systemd/system/keybash-gateway.service &&
+    grep -qx "IPAddressAllow=localhost $(printf '%s' "$1" | tr ',' ' ')" /etc/systemd/system/keybash-gateway.service &&
+    grep -q -- " --target-networks=$1\$" /etc/systemd/system/keybash-gateway.service &&
+    systemctl show --property=IPAddressAllow keybash-gateway.service | grep -qF "$(printf '%s' "$1" | cut -d , -f 1 | cut -d / -f 1)"
+}
+bounded "${hosts}" || { echo 'the install has no network boundary' >&2; exit 1; }
 echo 'Installed service runs, serves verified HTTPS and accepted the printed bootstrap code'
 
 # --- Upgrade ------------------------------------------------------------------
@@ -239,6 +254,27 @@ check_owner "${backup}" 'root:root 700'
 check_owner "${backup}/custody.db" 'keybash-gateway:keybash-gateway 600'
 test ! -e /run/keybash-upgrade.lock
 echo 'Upgrade pinned the new worker, kept the account and left a root-only backup'
+
+# The upgrade kept the network boundary. An install from before it, whose
+# gateway unit the plan wrote without one, gets one host network per catalog
+# server. --target-networks names others, and later upgrades keep them; it is
+# refused before any change when it leaves a server out.
+bounded "${hosts}" || { echo 'the upgrade lost the network boundary' >&2; exit 1; }
+sudo -n sed -i -e '/^IPAddressDeny=any$/d' -e '/^IPAddressAllow=/d' -e 's| --target-networks=[^ ]*$||' /etc/systemd/system/keybash-gateway.service
+sudo -n systemctl daemon-reload
+if grep -q 'IPAddress\|--target-networks' /etc/systemd/system/keybash-gateway.service; then echo 'the older unit was not reconstructed' >&2; exit 1; fi
+upgrade_ok scripts/upgrade.sh "${stage_b}"
+bounded "${hosts}" || { echo 'an install from before the boundary did not get one' >&2; exit 1; }
+refused_upgrade server-outside-networks scripts/upgrade.sh --stage="${stage_b}" --target-networks=10.45.0.0/24
+sleep 1
+sudo -n sh scripts/upgrade.sh --stage="${stage_b}" --target-networks=10.44.0.0/24 >"${work}/upgrade.out" 2>"${work}/upgrade.err" ||
+  { cat "${work}/upgrade.err" >&2; exit 1; }
+bounded 10.44.0.0/24 || { echo 'the upgrade did not set the named networks' >&2; exit 1; }
+upgrade_ok scripts/upgrade.sh "${stage_b}"
+bounded 10.44.0.0/24 || { echo 'the next upgrade did not keep the named networks' >&2; exit 1; }
+serves
+signs_in
+echo 'Upgrades keep, set and add the network boundary, and refuse networks that leave a server out'
 
 # Stage C passes every check but its gateway never serves: the upgrade must put
 # the previous programs, units and database back and start them.
@@ -351,5 +387,19 @@ reset_host
 fresh_mutant
 mutate 'getent group "$1" >/dev/null && return 1' 'return 1'
 if install_ok "${work}/mutant.sh" 2>/dev/null; then escaped no-free-id; fi
+reset_host
+# Refusing direction: networks that leave a server out must stop the install
+# before its first change.
+fresh_mutant
+mutate '"${stage}/bin/keybash" check-targets --config="${work}/targets.json" --target-networks="${networks}"' 'true'
+if refused server-outside-networks "${work}/mutant.sh" ${base} --target-networks=10.45.0.0/24 >/dev/null 2>&1; then
+  escaped skip-target-networks-check
+fi
+reset_host
+# Accepting direction: a valid install must carry the network boundary.
+fresh_mutant
+mutate 'set -- "$@" --target-networks="${networks}"' 'true'
+install_ok "${work}/mutant.sh"
+if bounded "${hosts}"; then escaped drop-network-boundary; fi
 reset_host
 echo 'Installer mutations in both directions failed their intended checks'

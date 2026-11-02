@@ -34,9 +34,11 @@ the same power, so their reach needs a limit the gateway cannot lift.
 
 ### A. A kernel network boundary, set by root
 
-- The catalog gains `target_networks`: the networks servers may be in, written
-  by root at install or upgrade. `protected_networks` stays as it is and wins
-  over `target_networks`.
+- Root names the networks servers may be in with `--target-networks` at
+  install or upgrade. They are an argument of the root-owned gateway unit,
+  rendered by `keybash-service-plan` and read back by `upgrade.sh` like
+  `--allow-from`. So one root-owned source sets both the gateway's own check
+  and the kernel's.
 - `keybash-service-plan` renders, on the gateway unit:
   - `IPAddressDeny=any`;
   - `IPAddressAllow=` for loopback (clients through a tunnel, and the local DNS
@@ -44,11 +46,14 @@ the same power, so their reach needs a limit the gateway cannot lift.
 - systemd enforces this in the kernel (cgroup BPF), for incoming and outgoing
   traffic alike. Even a compromised gateway cannot reach outside those
   networks.
-- `install.sh` and `upgrade.sh` refuse a catalog whose servers lie outside its
-  target networks or inside protected ones.
-- An existing install without `target_networks` gets one host route per
-  catalog address. It keeps working and allows nothing new until the operator
-  names networks with `upgrade.sh --target-networks=…`.
+- An allowed network cannot have a hole in it, so a target network may touch
+  no protected network, loopback, link-local, multicast, translation range or
+  metadata endpoint.
+- `install.sh`, `upgrade.sh` and the gateway itself refuse target networks
+  that leave a catalog server out.
+- An install that names none gets one host network per catalog address. It
+  reaches what it reached before and nothing new, until the operator names
+  networks with `upgrade.sh --target-networks=…`.
 - Name resolution goes to the system resolver. On Ubuntu that is the loopback
   stub, so it stays allowed. A resolver elsewhere must be inside an allowed
   network; the install check says so.

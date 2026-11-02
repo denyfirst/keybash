@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/denyfirst/keybash/internal/ingress"
+	"github.com/denyfirst/keybash/internal/targetguard"
 )
 
 var ErrPolicy = errors.New("service policy refused")
@@ -26,6 +27,11 @@ type Config struct {
 	// address with the networks it admits and an optional server name, held
 	// to exactly the rules the gateway itself applies (ingress.Exposure).
 	Listen, AllowFrom, ServerName string
+	// The networks the gateway may reach, as root set them. When given, the
+	// gateway unit denies every other address in the kernel, so the gateway's
+	// own checks no longer stand alone. Empty keeps an older install's unit
+	// as it was.
+	TargetNetworks string
 }
 
 func Default() Config {
@@ -49,6 +55,11 @@ func (c Config) Valid() bool {
 	if _, _, err := ingress.Exposure(c.Listen, c.AllowFrom, c.ServerName); err != nil {
 		return false
 	}
+	if c.TargetNetworks != "" {
+		if _, err := targetguard.ParseNetworks(c.TargetNetworks, nil); err != nil {
+			return false
+		}
+	}
 	digest, err := hex.DecodeString(c.WorkerDigest)
 	return c.GatewayUID != c.WorkerUID && c.GatewayGID != c.WorkerGID &&
 		err == nil && len(digest) == 32 && c.WorkerDigest == strings.ToLower(c.WorkerDigest) && c.WorkerDigest != strings.Repeat("0", 64) &&
@@ -71,6 +82,17 @@ func Render(c Config) (map[string]string, error) {
 	}
 	if c.ServerName != "" {
 		exposed += " --server-name=" + c.ServerName
+	}
+	// Allowed beside loopback: the networks the listener admits and the
+	// networks servers are in. systemd enforces both directions in the kernel.
+	network := ""
+	if c.TargetNetworks != "" {
+		exposed += " --target-networks=" + c.TargetNetworks
+		allowed := []string{"localhost"}
+		if c.AllowFrom != "" {
+			allowed = append(allowed, strings.Split(c.AllowFrom, ",")...)
+		}
+		network = "IPAddressDeny=any\nIPAddressAllow=" + strings.Join(append(allowed, strings.Split(c.TargetNetworks, ",")...), " ") + "\n"
 	}
 	common := `Slice=keybash.slice
 Type=exec
@@ -108,7 +130,7 @@ Group=%d
 %sCapabilityBoundingSet=
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-MemoryDenyWriteExecute=yes
+%sMemoryDenyWriteExecute=yes
 ReadWritePaths=/var/lib/keybash
 InaccessiblePaths=-/etc/keybash/worker-private
 ExecStartPre=/usr/local/libexec/keybash/keybash-service-check --role=gateway %s
@@ -116,7 +138,7 @@ ExecStart=/usr/local/libexec/keybash/keybash serve-ssh-lab --data=/var/lib/keyba
 
 [Install]
 WantedBy=multi-user.target
-`, c.GatewayUID, c.GatewayGID, common, args, c.Listen, exposed)
+`, c.GatewayUID, c.GatewayGID, common, network, args, c.Listen, exposed)
 	manager := fmt.Sprintf(`[Unit]
 Description=Keybash fixed SSH worker manager
 

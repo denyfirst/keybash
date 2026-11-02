@@ -26,6 +26,7 @@ func main() {
 	flag.StringVar(&c.Listen, "listen", c.Listen, "gateway listener; loopback unless --allow-from is given")
 	flag.StringVar(&c.AllowFrom, "allow-from", "", "networks an exposed gateway admits")
 	flag.StringVar(&c.ServerName, "server-name", "", "DNS name browsers use for an exposed gateway")
+	flag.StringVar(&c.TargetNetworks, "target-networks", "", "networks the gateway may reach; the kernel denies every other address")
 	output := flag.String("output", "", "new staging directory; must not exist")
 	flag.Parse()
 	if flag.NArg() != 0 || gu > 2147483647 || gg > 2147483647 || wu > 2147483647 || wg > 2147483647 || !filepath.IsAbs(*output) || filepath.Clean(*output) != *output {
