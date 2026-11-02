@@ -145,12 +145,31 @@ secret, and counts against a per-administrator budget:
   and per source. An invited account cannot sign in with any password.
 - **Change role, block, unblock, reset access, delete:** each bumps the
   account's revision, which ends its sessions and terminals at once.
-  - Reset clears the phone and recovery codes and gives a new setup code. The
-    password stays and the account is not made an invite, so only its holder,
-    with their own password and that code, can enroll again; the
-    administrator who holds the code cannot sign in as them. Its keys and
-    passwords stay. A holder who also lost their password needs the
-    operator's offline `account-recover`, or deletion and a new invite.
+  - "Reset access" asks what the person lost:
+    - **Their phone** clears the phone and recovery codes and gives a new
+      setup code. The password stays and the account is not made an invite,
+      so only its holder, with their own password and that code, can enroll
+      again; the administrator who holds the code cannot sign in as them.
+    - **Their password** (`/api/users/{id}/password`) gives a password-reset
+      code and changes nothing else. On the sign-in page the holder chooses
+      "Forgot password?" and sends their username, the code, their own
+      current phone code or a recovery code, and a new password to
+      `/api/password-reset`. All of it is checked in one transaction, which
+      sets the password, spends the code and the factor, ends every session
+      and signs that browser in.
+      - A wrong name or code is refused before the factor is looked at, so it
+        never spends the holder's factor budget.
+      - The administrator, who holds the code but not the phone, cannot
+        become the account.
+      - Only an enrolled account that is neither invited nor blocked gets a
+        code. The code expires after 72 hours, and a new one replaces it.
+      - Attempts count per name and per source, each after an Argon2id
+        derivation.
+    - **Both: start over** (`/api/users/{id}/restart`) deletes the account's
+      keys, passwords and connections and makes it an invite with a new code,
+      in one transaction, so the administrator who receives the code never
+      reaches what it held. Its ID, name and role stay.
+  - In every case the keys and passwords stay, except after starting over.
   - Delete removes its keys, passwords and connections in the same
     transaction.
 

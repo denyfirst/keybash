@@ -118,6 +118,8 @@ function errorMessage(error) {
   if (error.status === 'ended') return 'Too many wrong codes: this session was closed. Sign in again.';
   if (error.status === 'code-shape') return 'That code is incomplete: it has 43 letters, digits, - and _. Paste the whole code again.';
   if (error.status === 'setup') return 'The setup code was not accepted. Use the newest one-time code from your administrator: a new code replaces the old one, and a code expires after 72 hours.';
+  if (error.status === 'reset') return 'That did not match. Check your username, the newest code from your administrator and the current code on your phone (or a recovery code). A code works once and expires after 72 hours.';
+  if (error.status === 'no-phone') return 'They have no phone to confirm a new password with, or they are blocked. Choose “Their phone” or “Both: start over”, or unblock them first.';
   if (error.status === 'invite') return 'The username or code was not accepted. Check both, and use the newest code: a new code replaces the old one, a code works once and expires after 72 hours. If you already chose your password with it, sign in instead.';
   if (error.status === 'taken') return 'That username is already taken. Choose another.';
   if (error.status === 'last-admin') return 'At least one administrator must remain.';
@@ -183,7 +185,6 @@ const confirmKinds = {
   person: { title: 'Delete this person?', hint: 'Their account goes, with their keys, passwords and connections, and they are signed out at once. This cannot be undone.', path: id => `/api/users/${id}` },
   block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their keys and passwords stay.', path: id => `/api/users/${id}/block`, method: 'POST', word: 'Block' },
   newcode: { title: 'Make a new invite code?', hint: 'The earlier code stops working at once. You get a new one to give them.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Make new code' },
-  reset: { title: 'Reset this person’s access?', hint: 'Their phone stops working and they are signed out. You get a new code. They sign in with their own password and enter it to set up a phone again. Their password, keys and passwords stay, and the code alone opens nothing.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Reset access' },
 };
 function askConfirm(kind, record) {
   pendingDelete = { kind, id: record.id, name: record.name };
@@ -419,12 +420,33 @@ function pastedCode(id) {
 const codeSteps = {
   invite: [['Give them the code apart from their username, for example by phone.'], ['On the Keybash sign-in page they choose ', 'I have an invite', ', enter both and choose their own password.'], ['Then they set up their phone. The code works once and expires in 72 hours.']],
   reset: [['Give them the code by another channel, for example by phone.'], ['They sign in as usual with their own username and password, not with ', 'I have an invite', '.'], ['Keybash then asks for this code and shows a new QR code for their phone. The code works once and expires in 72 hours.']],
+  password: [['Give them the code by another channel, for example by phone.'], ['On the Keybash sign-in page they choose ', 'Forgot password?', ' and enter their username, this code and the current code from their phone.'], ['Then they choose a new password. The code works once and expires in 72 hours.']],
 };
 const codeDialogs = {
   invite: { title: name => `Invite for ${name}`, lead: name => `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
   newcode: { title: name => `New invite code for ${name}`, lead: name => `This code is shown only now and replaces the earlier one. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
   reset: { title: name => `New phone code for ${name}`, lead: name => `This code is shown only now. ${name} signs in with their own password, then enters it to set up a new phone. The code alone opens nothing.`, steps: codeSteps.reset },
+  password: { title: name => `Password reset code for ${name}`, lead: name => `This code is shown only now. ${name} needs it with the current code on their phone to choose a new password: the code alone opens nothing.`, steps: codeSteps.password },
+  restart: { title: name => `New invite for ${name}`, lead: name => `${name}’s keys, passwords and connections were deleted. This code is shown only now; with it, ${name} chooses a new password and sets up a phone.`, steps: codeSteps.invite },
 };
+// What a person lost decides the reset: a phone keeps the password, a
+// password keeps the phone, and losing both starts the account over.
+const resetKinds = {
+  phone: { path: 'reset', word: 'Make phone code', dialog: 'reset', done: name => `${name}’s phone was reset.` },
+  password: { path: 'password', word: 'Make password code', dialog: 'password', done: name => `${name} has a password reset code.` },
+  restart: { path: 'restart', word: 'Start over', dialog: 'restart', done: name => `${name} starts over: their keys, passwords and connections were deleted.` },
+};
+function chooseReset() {
+  const kind = document.querySelector('input[name=reset-kind]:checked')?.value;
+  if (!Object.hasOwn(resetKinds, kind)) return;
+  $('reset-submit').textContent = resetKinds[kind].word; $('reset-submit').classList.toggle('danger', kind === 'restart');
+}
+function openReset(person) {
+  if (busy) return;
+  pendingPerson = person; $('reset-title').textContent = `Reset access for ${person.username}`; dialogNotice('');
+  document.querySelectorAll('input[name=reset-kind]').forEach(input => { input.checked = input.value === 'phone'; });
+  chooseReset(); $('reset-dialog').showModal();
+}
 function showCode(code, name, kind) {
   if (!codeOK(code) || !Object.hasOwn(codeDialogs, kind)) throw new Error('invalid code');
   const dialog = codeDialogs[kind];
@@ -462,7 +484,8 @@ function personRow(person, self) {
   if (person.state === 'blocked') button('Unblock', 'ghost', () => { void run(async () => { await request(`/api/users/${person.id}/unblock`, 'POST', {}); await loadUsers(); notice(`${person.username} can sign in again.`); }); });
   else button('Block', 'ghost', () => askConfirm('block', record));
   const invited = ['invited', 'expired'].includes(person.state);
-  button(invited ? 'New code' : 'Reset access', 'ghost', () => askConfirm(invited ? 'newcode' : 'reset', record));
+  if (invited) button('New code', 'ghost', () => askConfirm('newcode', record));
+  else button('Reset access…', 'ghost', () => openReset(person));
   button('Delete', 'ghost destructive', () => askConfirm('person', record));
   return row;
 }
@@ -542,11 +565,24 @@ bind('claim', async () => {
   catch (error) { throw error.status === 401 ? Object.assign(new Error('invite'), { status: 'invite' }) : error; }
   location.replace('/');
 });
-function showClaim(on) {
+// Someone who forgot their password sets a new one with their administrator's
+// code and the code on their phone, which also signs them in.
+bind('recover', async () => {
+  const code = pastedCode('recover-code'), factor = $('recover-phone-code').value.replace(/\s/g, ''), username = $('recover-user').value.trim(), password = $('recover-password').value, confirm = $('recover-confirm').value; clearInputs();
+  if (password !== confirm) { notice('The passwords don’t match.'); return; }
+  try { await request('/api/password-reset', 'POST', { username, code, factor, password }); }
+  catch (error) { throw error.status === 401 ? Object.assign(new Error('reset'), { status: 'reset' }) : error; }
+  location.replace('/');
+});
+// The sign-in page shows one form at a time: sign in, accept an invite, or
+// reset a forgotten password.
+const signinForms = { signin: ['Sign in', 'username'], claim: ['Accept your invite', 'claim-user'], recover: ['Reset your password', 'recover-user'] };
+function showForm(which) {
   clearInputs(); notice('');
-  $('signin').hidden = on; $('claim').hidden = !on; $('show-claim').hidden = on; $('show-signin').hidden = !on;
-  $('signin-title').textContent = on ? 'Accept your invite' : 'Sign in'; document.title = on ? 'Keybash · Accept invite' : 'Keybash · Sign in';
-  $(on ? 'claim-user' : 'username').focus();
+  for (const name of Object.keys(signinForms)) $(name).hidden = name !== which;
+  $('show-claim').hidden = $('show-recover').hidden = which !== 'signin'; $('show-signin').hidden = which === 'signin';
+  $('signin-title').textContent = signinForms[which][0]; document.title = `Keybash · ${signinForms[which][0]}`;
+  $(signinForms[which][1]).focus();
 }
 // On a phone the menu folds behind one button: it opens when asked, and
 // Escape or a tap elsewhere folds it again.
@@ -561,8 +597,20 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && $('menu-toggle')?.getAttribute('aria-expanded') === 'true') { setMenu(false); $('menu-toggle').focus(); }
 });
 document.addEventListener('click', event => { if (!event.target.closest?.('.rail')) setMenu(false); });
-$('show-claim')?.addEventListener('click', () => showClaim(true));
-$('show-signin')?.addEventListener('click', () => showClaim(false));
+$('show-claim')?.addEventListener('click', () => showForm('claim'));
+$('show-recover')?.addEventListener('click', () => showForm('recover'));
+$('show-signin')?.addEventListener('click', () => showForm('signin'));
+document.querySelectorAll('input[name=reset-kind]').forEach(input => input.addEventListener('change', chooseReset));
+$('reset-cancel')?.addEventListener('click', () => $('reset-dialog').close());
+$('reset-dialog')?.addEventListener('close', () => { pendingPerson = null; });
+bind('reset-form', async () => {
+  const person = pendingPerson, kind = document.querySelector('input[name=reset-kind]:checked')?.value;
+  if (!person || !Object.hasOwn(resetKinds, kind)) return;
+  let reply;
+  try { reply = await request(`/api/users/${person.id}/${resetKinds[kind].path}`, 'POST', {}); }
+  catch (error) { throw error.status === 409 ? Object.assign(new Error('conflict'), { status: kind === 'password' ? 'no-phone' : 'last-admin' }) : error; }
+  $('reset-dialog').close(); await loadUsers(); showCode(reply?.code, person.username, resetKinds[kind].dialog); notice(resetKinds[kind].done(person.username));
+});
 $('invite-person')?.addEventListener('click', () => {
   if (busy) return;
   $('invite-form').reset(); dialogNotice(''); $('invite-dialog').showModal(); $('invite-name').focus();
@@ -702,8 +750,8 @@ click('confirm-delete', async () => {
   else if (kind === 'connection') { await loadConnections(); notice('Deleted.'); }
   else {
     await loadUsers();
-    if (kind === 'reset' || kind === 'newcode') showCode(reply?.code, name, kind);
-    notice(kind === 'person' ? 'Deleted.' : kind === 'block' ? `${name} is blocked and signed out.` : kind === 'newcode' ? `${name} has a new invite code.` : `${name}’s access was reset.`);
+    if (kind === 'newcode') showCode(reply?.code, name, kind);
+    notice(kind === 'person' ? 'Deleted.' : kind === 'block' ? `${name} is blocked and signed out.` : `${name} has a new invite code.`);
   }
 });
 $('cancel-delete')?.addEventListener('click', () => $('delete-dialog').close());

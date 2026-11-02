@@ -197,6 +197,10 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		l.inviteHTTP(w, r)
 		return
 	}
+	if r.URL.Path == "/api/password-reset" && r.Method == "POST" {
+		l.passwordResetHTTP(w, r)
+		return
+	}
 	if r.URL.Path == "/api/session" && r.Method == "POST" {
 		fields, ok := readInput(w, r, "username", "password")
 		if !ok || !usernameInput(fields["username"]) || !passwordInput(fields["password"]) {

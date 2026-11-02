@@ -7,11 +7,11 @@ assert.equal(new URL(config.Origin).hostname, '127.0.0.1');
 const browser = await chromium.launch({ headless: true, ...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
 const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 1100 } });
 const page = await context.newPage(); const errors = [], external = [], secretURLs = [];
-const vaultSecret = 'Synthetic browser custody canary 73', inviteePassword = 'Synthetic invitee password 2026!'; let seed = '', codes = [], seconds = config.Unix, invite = '', inviteSeed = '', resetCode = '', resetSeed = '';
+const vaultSecret = 'Synthetic browser custody canary 73', inviteePassword = 'Synthetic invitee password 2026!', inviteeNewPassword = 'Synthetic invitee new password 2026!'; let seed = '', codes = [], seconds = config.Unix, invite = '', inviteSeed = '', resetCode = '', resetSeed = '', passwordCode = '';
 page.on('pageerror', error => errors.push(error.name));
 page.on('request', request => {
   if (!request.url().startsWith(config.Origin + '/')) external.push('external request');
-  if ([config.Password, config.Code, vaultSecret, seed, invite, inviteSeed, inviteePassword, resetCode, resetSeed, ...codes].filter(Boolean).some(secret => request.url().includes(secret) || request.url().includes(encodeURIComponent(secret)))) secretURLs.push('secret URL');
+  if ([config.Password, config.Code, vaultSecret, seed, invite, inviteSeed, inviteePassword, inviteeNewPassword, resetCode, resetSeed, passwordCode, ...codes].filter(Boolean).some(secret => request.url().includes(secret) || request.url().includes(encodeURIComponent(secret)))) secretURLs.push('secret URL');
 });
 function otp(counter = Math.floor(seconds / 30), key32 = seed) {
   // Independent RFC 4226/6238 test oracle, never shipped by the application.
@@ -190,8 +190,9 @@ try {
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await fixture('tick');
   await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users'); await page.locator('#users-panel').waitFor({ state: 'visible' }); await settled();
-  await page.locator('.person', { hasText: 'invitee' }).getByRole('button', { name: 'Reset access', exact: true }).click(); assert.equal(await page.locator('#delete-title').textContent(), 'Reset this person’s access?');
-  await page.locator('#confirm-delete').click(); await page.locator('#code-dialog').waitFor({ state: 'visible' }); await settled();
+  await page.locator('.person', { hasText: 'invitee' }).getByRole('button', { name: 'Reset access…', exact: true }).click(); await page.locator('#reset-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#reset-dialog input[value=phone]').isChecked(), true); assert.equal(await page.locator('#reset-submit').textContent(), 'Make phone code');
+  await page.locator('#reset-submit').click(); await page.locator('#code-dialog').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#code-title').textContent(), 'New phone code for invitee'); assert.match(await page.locator('#code-steps').textContent(), /sign in as usual/);
   resetCode = await page.locator('#person-code').textContent(); assert.match(resetCode, /^[A-Za-z0-9_-]{43}$/); await page.locator('#close-code').click();
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
@@ -202,8 +203,27 @@ try {
   resetSeed = await page.locator('#seed').textContent(); assert.match(resetSeed, /^[A-Z2-7]{32}$/); assert.notEqual(resetSeed, inviteSeed);
   await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30), resetSeed)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); await settled();
   await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
-  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
+  // A forgotten password: the administrator's code alone is refused, and with
+  // the current code from the person's phone it sets a new password and signs
+  // them in; the old password no longer works.
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await fixture('tick');
+  await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users'); await page.locator('#users-panel').waitFor({ state: 'visible' }); await settled();
+  await page.locator('.person', { hasText: 'invitee' }).getByRole('button', { name: 'Reset access…', exact: true }).click(); await page.locator('#reset-dialog').waitFor({ state: 'visible' });
+  await page.locator('#reset-dialog input[value=password]').check(); assert.equal(await page.locator('#reset-submit').textContent(), 'Make password code');
+  await page.locator('#reset-submit').click(); await page.locator('#code-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#code-title').textContent(), 'Password reset code for invitee'); assert.match(await page.locator('#code-steps').textContent(), /they choose Forgot password\?/);
+  passwordCode = await page.locator('#person-code').textContent(); assert.match(passwordCode, /^[A-Za-z0-9_-]{43}$/); await page.locator('#close-code').click();
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
+  await page.locator('#show-recover').click(); await page.locator('#recover').waitFor({ state: 'visible' }); assert(!(await page.locator('#signin').isVisible()));
+  const recover = async factor => { await page.locator('#recover-user').fill('invitee'); await page.locator('#recover-code').fill(' ' + passwordCode + ' '); await page.locator('#recover-phone-code').fill(factor); await page.locator('#recover-password').fill(inviteeNewPassword); await page.locator('#recover-confirm').fill(inviteeNewPassword); await page.locator('#recover button').click(); };
+  await recover('not-a-code'); await page.locator('#notice').filter({ hasText: 'did not match' }).waitFor(); await settled();
+  await fixture('tick'); await recover(otp(Math.floor(seconds / 30), resetSeed));
+  await page.waitForURL(config.Origin + '/'); await page.locator('#vault').waitFor({ state: 'visible' }); await settled(); assert.equal(await page.locator('h1').textContent(), 'Account');
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
+  assert.equal((await page.request.post(config.Origin + '/api/session', { headers: { Origin: config.Origin, 'X-Keybash-Request': '1', 'Content-Type': 'application/json' }, data: { username: 'invitee', password: inviteePassword } })).status(), 401, 'the forgotten password still signs in');
+  await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
-  console.log('Browser custody: bootstrap, mandatory MFA, phone navigation, code-only step-up, encrypted record UX, invites and roles, restart, replay refusal and failure handling passed');
+  console.log('Browser custody: bootstrap, mandatory MFA, phone navigation, code-only step-up, encrypted record UX, invites, roles and resets, forgotten password, restart, replay refusal and failure handling passed');
 } catch (error) { console.log(error.code === 'ERR_ASSERTION' ? error.message : error.name); throw new Error('browser custody checks failed'); }
 finally { await context.close(); await browser.close(); }

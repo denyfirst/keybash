@@ -86,6 +86,11 @@ type durableAccount struct {
 	Role     string `json:",omitempty"`
 	Disabled bool   `json:",omitempty"`
 	Invited  bool   `json:",omitempty"`
+	// Digest and expiry of a code an administrator issued for a holder who
+	// forgot their password. It sets a new one only with the holder's own
+	// factor. Omitted when empty, like Enrollment.
+	PasswordReset    []byte `json:",omitempty"`
+	PasswordResetEnd int64  `json:",omitempty"`
 }
 
 // A password alone must not let whoever learns it first enroll their own
@@ -466,6 +471,9 @@ func (s *Store) readAccount(tx *bolt.Tx, id string) (durableAccount, error) {
 	if !validRole(a.Role) || a.Invited && (a.Seed != "" || len(a.Enrollment) == 0) {
 		return durableAccount{}, errRefused
 	}
+	if a.PasswordResetEnd < 0 || len(a.PasswordReset) != 0 && len(a.PasswordReset) != 32 || (len(a.PasswordReset) == 0) != (a.PasswordResetEnd == 0) || a.Invited && len(a.PasswordReset) != 0 {
+		return durableAccount{}, errRefused
+	}
 	return a, nil
 }
 func (s *Store) saveAccount(tx *bolt.Tx, a durableAccount) error {
@@ -666,6 +674,7 @@ func (s *Store) RecoverAccount(name, password string, lostFactor, admin bool) (s
 			return errRefused
 		}
 		a.Hash = storedPassword(next)
+		a.PasswordReset, a.PasswordResetEnd = nil, 0
 		a.Revision++
 		a.Invited = false // the operator chose the password
 		if admin {

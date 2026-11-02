@@ -84,9 +84,19 @@ invites people, without the terminal:
    their own password. Then they set up their phone. The code works once and
    expires after 72 hours.
 
-The same page changes a role, blocks and unblocks, resets access (a new phone
-code that works only with the person's own password; their password, keys and
-passwords stay) and deletes an account with everything it owns.
+The same page changes a role, blocks and unblocks, and deletes an account with
+everything it owns. "Reset access" asks what the person lost, and gives a
+one-time code to hand over:
+- **Their phone:** they sign in as usual with their own password, and the
+  code lets them set up a new phone.
+- **Their password:** on the sign-in page they choose "Forgot password?" and
+  enter the code with the current code from their phone (or a recovery code),
+  then a new password.
+- **Both:** their keys, passwords and connections are deleted, and they accept
+  a new invite.
+
+Neither code alone opens the account, so the administrator who holds it cannot
+become that person.
 Each change asks for the phone and signs that person out at once. An
 administrator cannot change their own account there, so one always remains.
 
