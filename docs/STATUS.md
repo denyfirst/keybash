@@ -36,6 +36,14 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   one-time code from the Users page, and change roles, block, reset access and
   delete accounts there. Every change ends that person's sessions at once, and
   the last administrator cannot be removed.
+- Resets from the web, for what a person lost:
+  - **Their phone:** a code they enter after signing in with their own
+    password.
+  - **Their password:** "Forgot password?" with an administrator's code and
+    their own phone code.
+  - **Both:** start over, which deletes their keys and passwords.
+
+  No administrator can become someone else.
 - `keybash account-recover --admin` on the server, for when no administrator
   can sign in.
 
