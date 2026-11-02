@@ -21,6 +21,10 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
 - HTTPS only. By default it listens on loopback; it can open to named LAN or
   VPN networks only, with per-source limits (`LAN-INGRESS.md`). A test
   certificate authority can sign for exactly one name.
+- The gateway reaches only loopback, its listener's networks and the target
+  networks root set at install. The kernel denies every other address to its
+  unit, even if the gateway is compromised. By default those are exactly the
+  catalog's server addresses (`INSTALL.md`, `adr/0005-web-managed-servers.md`).
 
 **Accounts and sign-in**
 - A one-time bootstrap code for the first account; no default password.

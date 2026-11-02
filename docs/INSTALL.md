@@ -89,6 +89,11 @@ At the end the terminal shows two codes, **once**:
 
 Never put these codes in a chat, a screenshot or notes.
 
+The gateway can then reach only the servers in `targets.json`; the kernel
+refuses it every other address. To allow a whole network for servers you add
+later, add `--target-networks=192.168.1.0/24` (it must hold every server in
+the list).
+
 ### 5. First sign-in
 
 Open the printed address in the browser, for example
