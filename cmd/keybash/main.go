@@ -64,12 +64,16 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	out := flags.String("out", "", "new backup file, never beside the instance key")
 	in := flags.String("in", "", "backup file to restore")
 	sshOnlyCatalog := flags.Bool("ssh-only", false, "check-targets: also refuse any target that is not SSH")
+	targetNetworks := flags.String("target-networks", "", "networks the gateway may reach; every catalog server must lie inside them")
+	printNetworks := flags.Bool("print-host-networks", false, "check-targets: print one host network per catalog server address")
 	serverLabel := flags.String("name", "", "server-add: the name people will see")
 	serverHost := flags.String("host", "", "server-add: the server's IP address")
 	serverPort := flags.Int("port", 22, "server-add: the server's SSH port")
 	serverPrint := flags.String("fingerprint", "", "server-add: the SHA256 host key fingerprint you compared, instead of answering yes")
 	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || (*lost || *admin) && command != "account-recover" || (*out != "") != (command == "backup") || (*in != "") != (command == "restore") ||
 		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") && command != "check-tls" || *sshOnlyCatalog && command != "check-targets" ||
+		*targetNetworks != "" && command != "check-targets" && command != "serve-ssh-lab" && command != "serve-remote-lab" ||
+		*printNetworks && (command != "check-targets" || *targetNetworks != "") ||
 		(*serverLabel != "" || *serverHost != "" || *serverPrint != "" || *serverPort != 22) && command != "server-add" {
 		return refused
 	}
@@ -93,7 +97,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	limits := sessionlimits.Default()
 	if command == "check-targets" {
 		validFlags := true
-		flags.Visit(func(f *flag.Flag) { validFlags = validFlags && (f.Name == "config" || f.Name == "ssh-only") })
+		flags.Visit(func(f *flag.Flag) {
+			validFlags = validFlags && (f.Name == "config" || f.Name == "ssh-only" || f.Name == "target-networks" || f.Name == "print-host-networks")
+		})
 		if !validFlags || *catalog == "" {
 			return refused
 		}
@@ -103,6 +109,16 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		targets = snapshot.Targets
 		if e != nil || *sshOnlyCatalog && !sshOnly(targets) {
 			return refused
+		}
+		// An install that names no networks reaches exactly its servers.
+		if *printNetworks {
+			_, e = fmt.Fprintln(output, snapshot.HostNetworks())
+			return e
+		}
+		if *targetNetworks != "" {
+			if _, e = snapshot.Networks(*targetNetworks); e != nil {
+				return refused
+			}
 		}
 		_, e = fmt.Fprintf(output, "Target configuration valid (%d servers; capacity %d total, %d per owner).\n", len(targets), snapshot.Capacity.Total, snapshot.Capacity.PerOwner)
 		return reportUnavailable(output, e, targets, time.Now())
@@ -137,6 +153,11 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		var snapshot operatorconfig.Catalog
 		snapshot, e = operatorconfig.LoadCatalog(*catalog)
 		targets, limits = snapshot.Targets, snapshot.Capacity
+		// The unit's kernel boundary uses the same networks; a server outside
+		// them could never be reached, so the gateway does not start.
+		if e == nil && *targetNetworks != "" {
+			_, e = snapshot.Networks(*targetNetworks)
+		}
 		if e != nil || command == "serve-ssh-lab" && !sshOnly(targets) || command == "serve-remote-lab" && (!filepath.IsAbs(*rdpManager) || filepath.Clean(*rdpManager) != *rdpManager || len(*rdpManager) > 100 || *rdpManager == *manager) {
 			return refused
 		}

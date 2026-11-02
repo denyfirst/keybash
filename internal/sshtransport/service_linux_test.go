@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -139,15 +140,16 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 	cfg := servicepolicy.Default()
 	cfg.GatewayUID, cfg.GatewayGID, cfg.WorkerUID, cfg.WorkerGID = gatewayFixtureUID, gatewayFixtureUID, 65531, 65531
 	cfg.WorkerDigest = hex.EncodeToString(digest[:])
+	cfg.TargetNetworks = "10.44.0.0/24"
 	files, err := servicepolicy.Render(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	plan := filepath.Join(build, "plan")
 	// Exercise the actual offline plan CLI, including refusal to overwrite.
-	run(filepath.Join(build, "keybash-service-plan"), "--gateway-uid=65533", "--gateway-gid=65533", "--worker-uid=65531", "--worker-gid=65531", "--worker-digest="+cfg.WorkerDigest, "--output="+plan)
+	run(filepath.Join(build, "keybash-service-plan"), "--gateway-uid=65533", "--gateway-gid=65533", "--worker-uid=65531", "--worker-gid=65531", "--worker-digest="+cfg.WorkerDigest, "--target-networks="+cfg.TargetNetworks, "--output="+plan)
 	t.Cleanup(func() { _ = os.RemoveAll(plan) })
-	if _, err := command(filepath.Join(build, "keybash-service-plan"), "--gateway-uid=65533", "--gateway-gid=65533", "--worker-uid=65531", "--worker-gid=65531", "--worker-digest="+cfg.WorkerDigest, "--output="+plan); err == nil {
+	if _, err := command(filepath.Join(build, "keybash-service-plan"), "--gateway-uid=65533", "--gateway-gid=65533", "--worker-uid=65531", "--worker-gid=65531", "--worker-digest="+cfg.WorkerDigest, "--target-networks="+cfg.TargetNetworks, "--output="+plan); err == nil {
 		t.Fatal("plan overwrote existing output")
 	}
 	for name, expected := range files {
@@ -228,6 +230,31 @@ func TestKeybashSystemdServiceBoundary(t *testing.T) {
 	}
 	for _, unit := range units[:2] {
 		run("/usr/bin/systemctl", "is-active", "--quiet", unit)
+	}
+	// The gateway reaches only loopback and its target networks: the kernel
+	// refuses every other address to its unit. A probe given the unit's own
+	// two lines is refused an address outside them at once and still reaches
+	// the gateway on loopback; the same probe without them is not refused, so
+	// the lines are what refuse it.
+	var boundary []string
+	for _, line := range strings.Split(files["keybash-gateway.service"], "\n") {
+		if strings.HasPrefix(line, "IPAddressDeny=") || strings.HasPrefix(line, "IPAddressAllow=") {
+			boundary = append(boundary, "--property="+line)
+		}
+	}
+	if shown, e := command("/usr/bin/systemctl", "show", "--property=IPAddressDeny", "--property=IPAddressAllow", "keybash-gateway.service"); len(boundary) != 2 || e != nil || !bytes.Contains(shown, []byte("10.44.0.0/24")) {
+		t.Fatalf("the gateway unit's network boundary is not loaded: %s", shown)
+	}
+	networkProbe := func(expect string, properties ...string) ([]byte, error) {
+		args := append([]string{"--quiet", "--wait", "--pipe", "--collect", "--unit=keybash-network-probe", "--property=User=65533", "--property=Group=65533",
+			"--setenv=KEYBASH_SERVICE_PROBE=network", "--setenv=KEYBASH_PROBE_EXPECT=" + expect}, properties...)
+		return command("/usr/bin/systemd-run", append(args, os.Args[0], "-test.run=^TestKeybashServiceResourceProbeChild$", "-test.timeout=12s")...)
+	}
+	if raw, e := networkProbe("denied", boundary...); e != nil || !bytes.Contains(raw, []byte("network-denied")) {
+		t.Fatalf("kernel network boundary missing: %s", raw)
+	}
+	if raw, e := networkProbe("open"); e != nil || !bytes.Contains(raw, []byte("network-open")) {
+		t.Fatalf("network probe control failed: %s", raw)
 	}
 	serviceSSH := func() {
 		t.Helper()
@@ -382,6 +409,30 @@ func TestKeybashServiceResourceProbeChild(t *testing.T) {
 		t.Fatal("probe must be unprivileged")
 	}
 	switch mode {
+	case "network":
+		// 192.0.2.1 is documentation space and never a target. A datagram to
+		// it is refused at once with EPERM only by the unit's lines; unrefused,
+		// it simply leaves. (A TCP connect ignores that refusal and retries
+		// its SYN until it times out, so it cannot tell the two apart.)
+		conn, err := net.Dial("udp", "192.0.2.1:9")
+		if err == nil {
+			_, err = conn.Write([]byte{0})
+			_ = conn.Close()
+		}
+		outside, denied := err, errors.Is(err, syscall.EPERM)
+		local, err := net.DialTimeout("tcp", "127.0.0.1:8443", 2*time.Second)
+		if err != nil {
+			t.Fatal("loopback gateway unreachable from the probe")
+		}
+		_ = local.Close()
+		if denied != (os.Getenv("KEYBASH_PROBE_EXPECT") == "denied") {
+			t.Fatalf("an address outside the target networks: denied %v (%v)", denied, outside)
+		}
+		if denied {
+			fmt.Println("network-denied")
+		} else {
+			fmt.Println("network-open")
+		}
 	case "cpu":
 		start := time.Now()
 		var count uint64

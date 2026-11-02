@@ -162,6 +162,11 @@ func TestOperatorLinuxBackupKeyRecoveryAndRestore(t *testing.T) {
 	at := func(data, key string, extra ...string) []string {
 		return append([]string{"--data", data, "--key-file", key}, extra...)
 	}
+	// The target networks belong to the gateway's commands: init, which would
+	// otherwise succeed here, refuses them and writes nothing.
+	if _, e := call("init", "", at(dirs["data4"], filepath.Join(dirs["keys3"], "networks.key"), "--target-networks", "10.44.0.0/24")...); e == nil {
+		t.Fatal("init accepted target networks")
+	}
 	code, e := call("init", "", at(dirs["data"], key)...)
 	if e != nil {
 		t.Fatal("valid private Linux init refused")

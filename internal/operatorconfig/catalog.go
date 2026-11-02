@@ -27,8 +27,43 @@ var ErrConfiguration = errors.New("operator target configuration refused")
 
 // Catalog carries network approvals and admission limits from one checked file.
 type Catalog struct {
-	Targets  []identity.RemoteTarget
-	Capacity sessionlimits.Limits
+	Targets   []identity.RemoteTarget
+	Capacity  sessionlimits.Limits
+	Protected []netip.Prefix
+}
+
+// Networks reads the target networks root set for the gateway, checked against
+// this catalog: they avoid its protected networks, and every address of every
+// server in it lies inside them, so the kernel boundary never cuts one off.
+func (c Catalog) Networks(list string) ([]netip.Prefix, error) {
+	networks, err := targetguard.ParseNetworks(list, c.Protected)
+	if err != nil {
+		return nil, ErrConfiguration
+	}
+	for _, addr := range c.addresses() {
+		if !targetguard.Within(networks, addr) {
+			return nil, ErrConfiguration
+		}
+	}
+	return networks, nil
+}
+
+// HostNetworks is the narrowest list of target networks for this catalog: one
+// host network per server address. An install that names no networks gets it.
+func (c Catalog) HostNetworks() string {
+	return targetguard.JoinNetworks(targetguard.HostNetworks(c.addresses()))
+}
+
+func (c Catalog) addresses() []netip.Addr {
+	var addrs []netip.Addr
+	for _, target := range c.Targets {
+		for _, value := range target.Target.Snapshot().Addresses {
+			if addr, err := netip.ParseAddr(value); err == nil {
+				addrs = append(addrs, addr)
+			}
+		}
+	}
+	return addrs
 }
 
 // ParseCatalog validates bounded public metadata. Parsing untrusted bytes alone
@@ -80,7 +115,7 @@ func ParseCatalog(input io.Reader) (Catalog, error) {
 		ids[target.ID] = true
 		targets = append(targets, target)
 	}
-	return Catalog{Targets: targets, Capacity: limits}, nil
+	return Catalog{Targets: targets, Capacity: limits, Protected: protected}, nil
 }
 
 func parseCapacity(raw []byte) (sessionlimits.Limits, error) {

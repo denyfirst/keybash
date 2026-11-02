@@ -159,3 +159,43 @@ func TestServicePlanListenerFollowsTheGatewayRule(t *testing.T) {
 		}
 	}
 }
+
+// Given target networks, the gateway unit denies every address in the kernel
+// but loopback, the networks its listener admits and the target networks, and
+// passes the same networks to the gateway. Without them the unit is as before.
+func TestServicePlanDeniesEveryAddressOutsideTheTargetNetworks(t *testing.T) {
+	c := fixtureConfig()
+	files, e := Render(c)
+	if e != nil || strings.Contains(files["keybash-gateway.service"], "IPAddress") || strings.Contains(files["keybash-gateway.service"], "--target-networks") {
+		t.Fatal("a plan without target networks changed the gateway unit")
+	}
+	c.TargetNetworks = "10.44.0.0/24,fd00:1::/64"
+	files, e = Render(c)
+	gateway := files["keybash-gateway.service"]
+	if e != nil || !strings.Contains(gateway, "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nIPAddressDeny=0.0.0.0/0 ::/0\nIPAddressAllow=127.0.0.0/8 ::1/128 10.44.0.0/24 fd00:1::/64\nMemoryDenyWriteExecute=yes\n") ||
+		!strings.Contains(gateway, "--ssh-manager=/run/keybash-manager/control.sock --target-networks=10.44.0.0/24,fd00:1::/64\n") {
+		t.Fatal("loopback gateway unit lacks its network boundary")
+	}
+	if strings.Contains(files["keybash-ssh-manager.service"], "IPAddress") || !strings.Contains(files["keybash-ssh-manager.service"], "PrivateNetwork=yes\n") {
+		t.Fatal("the manager's private network changed")
+	}
+	c.Listen, c.AllowFrom, c.ServerName = "192.168.1.10:8443", "192.168.1.0/24,10.8.0.0/16", "keybash.lan"
+	c.RDPWorkerDigest, c.RDPRuntimeDigest = strings.Repeat("b", 64), strings.Repeat("c", 64)
+	files, e = Render(c)
+	gateway = files["keybash-gateway.service"]
+	if e != nil || !strings.Contains(gateway, "\nIPAddressAllow=127.0.0.0/8 ::1/128 192.168.1.0/24 10.8.0.0/16 10.44.0.0/24 fd00:1::/64\n") ||
+		!strings.Contains(gateway, "--rdp-manager=/run/keybash-rdp-manager/control.sock --allow-from=192.168.1.0/24,10.8.0.0/16 --server-name=keybash.lan --target-networks=10.44.0.0/24,fd00:1::/64\n") ||
+		strings.Contains(files["keybash-rdp-manager.service"], "IPAddress") {
+		t.Fatal("exposed RDP gateway unit lacks its network boundary")
+	}
+	for _, bad := range []string{
+		"0.0.0.0/0", "::/0", "10.44.0.1/24", "169.254.0.0/16", "127.0.0.0/8", "100.64.0.0/10", ",",
+		"10.44.0.0/24\nUser=root", "10.44.0.0/24 192.168.2.0/24", "10.44.0.0/24,10.44.0.0/24", "%n", "10.44.0.0/24\nIPAddressAllow=any",
+	} {
+		copy := c
+		copy.TargetNetworks = bad
+		if _, e := Render(copy); e == nil {
+			t.Fatalf("target networks %q rendered", bad)
+		}
+	}
+}
