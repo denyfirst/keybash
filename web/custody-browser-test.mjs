@@ -71,6 +71,23 @@ try {
   assert.equal(await page.locator('h1').textContent(), 'Installation'); assert(!(await page.locator('#account-panel').isVisible()));
   assert.match(await page.locator('#install-version').textContent(), /^(Not recorded in this build\.|[0-9a-f]{7}( · .+)?)$/);
   assert.match(await page.locator('#command-upgrade').textContent(), /sudo sh scripts\/upgrade\.sh --stage=/); assert(!(await page.locator('#command-build').textContent()).endsWith('--with-rdp'));
+  // A phone: one bar naming the page, the content within the first 120 px, no
+  // sideways scroll, and the menu behind one button that the keyboard opens,
+  // Escape closes and a link leaves.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const toggle = page.locator('#menu-toggle');
+  assert(await toggle.isVisible(), 'no menu button on a phone'); assert.equal(await toggle.getAttribute('aria-expanded'), 'false'); assert.equal(await page.locator('#rail-page').textContent(), 'Installation');
+  assert(!(await page.locator('.rail-item[data-page=keys]').isVisible()) && !(await page.locator('#logout').isVisible()) && !(await page.locator('.topbar').isVisible()), 'the phone menu or breadcrumb shows unasked');
+  assert((await page.locator('h1').boundingBox()).y <= 120, 'phone content starts below the first 120 px');
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'the phone page scrolls sideways');
+  await toggle.focus(); await page.keyboard.press('Enter');
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true'); assert(await page.locator('#logout').isVisible(), 'Sign out is not in the phone menu');
+  await page.keyboard.press('Tab'); assert.equal(await page.evaluate(() => document.activeElement.dataset.page), 'keys');
+  await page.keyboard.press('Escape'); assert.equal(await toggle.getAttribute('aria-expanded'), 'false'); assert.equal(await page.evaluate(() => document.activeElement.id), 'menu-toggle');
+  assert(!(await page.locator('.rail-item[data-page=keys]').isVisible()), 'Escape left the phone menu open');
+  await toggle.click(); await page.locator('.rail-item[data-page=account]').click(); await page.waitForURL(config.Origin + '/account'); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'false'); assert.equal(await page.locator('#rail-page').textContent(), 'Account');
+  await page.setViewportSize({ width: 1280, height: 1100 });
   await page.locator('.rail-item[data-page=keys]').click(); await page.waitForURL(config.Origin + '/keys'); await page.locator('#records-panel').waitFor({ state: 'visible' }); await settled();
   // Completing sign-in counts as fresh proof for ten minutes; let it lapse.
   // Adding a record needs the ready session only.
@@ -150,6 +167,6 @@ try {
   assert.equal((await page.request.get(config.Origin + '/api/users')).status(), 403, 'an auditor listed accounts');
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
-  console.log('Browser custody: bootstrap, mandatory MFA, code-only step-up, encrypted record UX, invites and roles, restart, replay refusal and failure handling passed');
+  console.log('Browser custody: bootstrap, mandatory MFA, phone navigation, code-only step-up, encrypted record UX, invites and roles, restart, replay refusal and failure handling passed');
 } catch (error) { console.log(error.code === 'ERR_ASSERTION' ? error.message : error.name); throw new Error('browser custody checks failed'); }
 finally { await context.close(); await browser.close(); }
