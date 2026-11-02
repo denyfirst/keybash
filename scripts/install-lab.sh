@@ -145,8 +145,8 @@ check_owner /etc/systemd/system/keybash-gateway.service 'root:root 644'
 hosts=10.44.0.8/32
 test -z "${runtime}" || hosts=10.44.0.8/32,10.44.0.9/32
 bounded() {
-  grep -qx 'IPAddressDeny=any' /etc/systemd/system/keybash-gateway.service &&
-    grep -qx "IPAddressAllow=localhost $(printf '%s' "$1" | tr ',' ' ')" /etc/systemd/system/keybash-gateway.service &&
+  grep -qx 'IPAddressDeny=0.0.0.0/0 ::/0' /etc/systemd/system/keybash-gateway.service &&
+    grep -qx "IPAddressAllow=127.0.0.0/8 ::1/128 $(printf '%s' "$1" | tr ',' ' ')" /etc/systemd/system/keybash-gateway.service &&
     grep -q -- " --target-networks=$1\$" /etc/systemd/system/keybash-gateway.service &&
     systemctl show --property=IPAddressAllow keybash-gateway.service | grep -qF "$(printf '%s' "$1" | cut -d , -f 1 | cut -d / -f 1)"
 }
@@ -260,7 +260,7 @@ echo 'Upgrade pinned the new worker, kept the account and left a root-only backu
 # server. --target-networks names others, and later upgrades keep them; it is
 # refused before any change when it leaves a server out.
 bounded "${hosts}" || { echo 'the upgrade lost the network boundary' >&2; exit 1; }
-sudo -n sed -i -e '/^IPAddressDeny=any$/d' -e '/^IPAddressAllow=/d' -e 's| --target-networks=[^ ]*$||' /etc/systemd/system/keybash-gateway.service
+sudo -n sed -i -e '/^IPAddressDeny=/d' -e '/^IPAddressAllow=/d' -e 's| --target-networks=[^ ]*$||' /etc/systemd/system/keybash-gateway.service
 sudo -n systemctl daemon-reload
 if grep -q 'IPAddress\|--target-networks' /etc/systemd/system/keybash-gateway.service; then echo 'the older unit was not reconstructed' >&2; exit 1; fi
 upgrade_ok scripts/upgrade.sh "${stage_b}"

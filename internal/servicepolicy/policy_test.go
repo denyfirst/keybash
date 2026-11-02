@@ -172,7 +172,7 @@ func TestServicePlanDeniesEveryAddressOutsideTheTargetNetworks(t *testing.T) {
 	c.TargetNetworks = "10.44.0.0/24,fd00:1::/64"
 	files, e = Render(c)
 	gateway := files["keybash-gateway.service"]
-	if e != nil || !strings.Contains(gateway, "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nIPAddressDeny=any\nIPAddressAllow=localhost 10.44.0.0/24 fd00:1::/64\nMemoryDenyWriteExecute=yes\n") ||
+	if e != nil || !strings.Contains(gateway, "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\nIPAddressDeny=0.0.0.0/0 ::/0\nIPAddressAllow=127.0.0.0/8 ::1/128 10.44.0.0/24 fd00:1::/64\nMemoryDenyWriteExecute=yes\n") ||
 		!strings.Contains(gateway, "--ssh-manager=/run/keybash-manager/control.sock --target-networks=10.44.0.0/24,fd00:1::/64\n") {
 		t.Fatal("loopback gateway unit lacks its network boundary")
 	}
@@ -183,7 +183,7 @@ func TestServicePlanDeniesEveryAddressOutsideTheTargetNetworks(t *testing.T) {
 	c.RDPWorkerDigest, c.RDPRuntimeDigest = strings.Repeat("b", 64), strings.Repeat("c", 64)
 	files, e = Render(c)
 	gateway = files["keybash-gateway.service"]
-	if e != nil || !strings.Contains(gateway, "\nIPAddressAllow=localhost 192.168.1.0/24 10.8.0.0/16 10.44.0.0/24 fd00:1::/64\n") ||
+	if e != nil || !strings.Contains(gateway, "\nIPAddressAllow=127.0.0.0/8 ::1/128 192.168.1.0/24 10.8.0.0/16 10.44.0.0/24 fd00:1::/64\n") ||
 		!strings.Contains(gateway, "--rdp-manager=/run/keybash-rdp-manager/control.sock --allow-from=192.168.1.0/24,10.8.0.0/16 --server-name=keybash.lan --target-networks=10.44.0.0/24,fd00:1::/64\n") ||
 		strings.Contains(files["keybash-rdp-manager.service"], "IPAddress") {
 		t.Fatal("exposed RDP gateway unit lacks its network boundary")

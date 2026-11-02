@@ -85,14 +85,16 @@ func Render(c Config) (map[string]string, error) {
 	}
 	// Allowed beside loopback: the networks the listener admits and the
 	// networks servers are in. systemd enforces both directions in the kernel.
+	// The prefixes are written out rather than as "any" and "localhost", so
+	// systemd-run reads the same two lines a test probe is given.
 	network := ""
 	if c.TargetNetworks != "" {
 		exposed += " --target-networks=" + c.TargetNetworks
-		allowed := []string{"localhost"}
+		allowed := []string{"127.0.0.0/8", "::1/128"}
 		if c.AllowFrom != "" {
 			allowed = append(allowed, strings.Split(c.AllowFrom, ",")...)
 		}
-		network = "IPAddressDeny=any\nIPAddressAllow=" + strings.Join(append(allowed, strings.Split(c.TargetNetworks, ",")...), " ") + "\n"
+		network = "IPAddressDeny=0.0.0.0/0 ::/0\nIPAddressAllow=" + strings.Join(append(allowed, strings.Split(c.TargetNetworks, ",")...), " ") + "\n"
 	}
 	common := `Slice=keybash.slice
 Type=exec

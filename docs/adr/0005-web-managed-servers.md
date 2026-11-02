@@ -40,9 +40,13 @@ the same power, so their reach needs a limit the gateway cannot lift.
   `--allow-from`. So one root-owned source sets both the gateway's own check
   and the kernel's.
 - `keybash-service-plan` renders, on the gateway unit:
-  - `IPAddressDeny=any`;
-  - `IPAddressAllow=` for loopback (clients through a tunnel, and the local DNS
-    stub), the `--allow-from` networks when exposed, and the target networks.
+  - `IPAddressDeny=0.0.0.0/0 ::/0`, every address;
+  - `IPAddressAllow=` for loopback (`127.0.0.0/8 ::1/128`: clients through a
+    tunnel, and the local DNS stub), the `--allow-from` networks when exposed,
+    and the target networks.
+  - The prefixes are written out rather than as systemd's `any` and
+    `localhost`, which `systemd-run` does not read, so a test probe runs with
+    the unit's very lines.
 - systemd enforces this in the kernel (cgroup BPF), for incoming and outgoing
   traffic alike. Even a compromised gateway cannot reach outside those
   networks.
