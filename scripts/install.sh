@@ -3,7 +3,8 @@
 # Linux x86-64 host with systemd and cgroup v2. Run as root.
 #
 # It never replaces an existing file, unit or account: every check, including
-# the catalog, the TLS pair and the service plan, runs before the first change.
+# the catalog, the TLS pair, the target networks and the service plan, runs
+# before the first change.
 # The bootstrap code and the instance key's recovery code go to this terminal
 # only. See docs/INSTALL.md.
 set -eu
@@ -13,7 +14,7 @@ export PATH
 
 refuse() { printf 'install refused: %s\n' "$1" >&2; exit 1; }
 
-stage='' catalog='' cert='' key='' listen=127.0.0.1:8443 allow='' name=''
+stage='' catalog='' cert='' key='' listen=127.0.0.1:8443 allow='' name='' networks=''
 cpu=200 memory=1024 tasks=512 gateway_id='' worker_id=''
 for argument in "$@"; do
   case "${argument}" in
@@ -24,6 +25,7 @@ for argument in "$@"; do
     --listen=*) listen="${argument#*=}" ;;
     --allow-from=*) allow="${argument#*=}" ;;
     --server-name=*) name="${argument#*=}" ;;
+    --target-networks=*) networks="${argument#*=}" ;;
     --cpu-percent=*) cpu="${argument#*=}" ;;
     --memory-mib=*) memory="${argument#*=}" ;;
     --tasks=*) tasks="${argument#*=}" ;;
@@ -142,6 +144,16 @@ test -z "${allow}" || set -- "$@" --allow-from="${allow}"
 test -z "${name}" || set -- "$@" --server-name="${name}"
 "${stage}/bin/keybash" check-tls --tls-cert="${cert}" --tls-key="${key}" "$@" >/dev/null ||
   refuse 'TLS pair refused: it must load, be valid now and cover the address or --server-name browsers use'
+# The gateway reaches only these networks: the kernel denies every other
+# address to its unit. Without --target-networks it reaches exactly the
+# catalog's servers.
+if test -z "${networks}"; then
+  networks="$("${stage}/bin/keybash" check-targets --config="${work}/targets.json" --print-host-networks)" || refuse 'catalog refused (keybash check-targets)'
+fi
+test -n "${networks}" || refuse 'the catalog lists no server address'
+"${stage}/bin/keybash" check-targets --config="${work}/targets.json" --target-networks="${networks}" >/dev/null ||
+  refuse 'target networks refused: every catalog server must lie inside them, and none may touch a protected network, loopback, link-local or a metadata address'
+set -- "$@" --target-networks="${networks}"
 digest() { sha256sum -- "$1" | cut -d ' ' -f 1; }
 ssh_digest="$(digest "${stage}/bin/keybash-ssh-worker")"
 plan_args="--gateway-uid=${gateway_id} --gateway-gid=${gateway_id} --worker-uid=${worker_id} --worker-gid=${worker_id} --worker-digest=${ssh_digest} --cpu-percent=${cpu} --memory-mib=${memory} --tasks=${tasks}"

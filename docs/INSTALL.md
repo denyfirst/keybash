@@ -146,6 +146,7 @@ programs and units.
 | `--tls-cert=…`, `--tls-key=…` | the gateway's HTTPS pair (required) |
 | `--listen=IP:PORT` | default `127.0.0.1:8443`; another address needs `--allow-from` (`LAN-INGRESS.md`) |
 | `--allow-from=NETS`, `--server-name=NAME` | exposed listener only |
+| `--target-networks=NETS` | the networks the gateway may reach, such as `192.168.1.0/24`; the kernel denies every other address to its unit. Default: one host network per catalog server. Each must hold every catalog server and touch no protected network, loopback, link-local or metadata address |
 | `--cpu-percent`, `--memory-mib`, `--tasks` | aggregate limits, defaults 200, 1024, 512 |
 | `--gateway-id`, `--worker-id` | otherwise picked |
 
@@ -240,6 +241,9 @@ git pull --ff-only
 sh scripts/build-stage.sh ~/keybash-stage-$(git rev-parse --short HEAD)    # add --with-rdp for an RDP install
 sudo sh scripts/upgrade.sh --stage=$HOME/keybash-stage-$(git rev-parse --short HEAD)
 ```
+
+`upgrade.sh --target-networks=NETS` changes the networks the gateway may reach; an
+install from before that boundary gets one host network per catalog server.
 
 `upgrade.sh` replaces the programs (and the RDP runtime) and keeps everything
 else: accounts, IDs, listener, networks, server name, limits, catalog, TLS

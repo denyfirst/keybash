@@ -70,6 +70,17 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	if run([]string{"check-targets", "--config", config}, nil, &check) != nil || check.String() != "Target configuration valid (1 servers; capacity 16 total, 4 per owner).\n" {
 		t.Fatal("valid offline CLI catalog refused")
 	}
+	// Target networks are read against the catalog, and an install that names
+	// none gets one host network per server address.
+	var printed bytes.Buffer
+	if run([]string{"check-targets", "--config", config, "--print-host-networks"}, nil, &printed) != nil || printed.String() != "10.44.0.8/32\n" {
+		t.Fatal("host networks not printed")
+	}
+	for networks, want := range map[string]bool{"10.44.0.0/24": true, "10.44.0.8/32,192.168.1.0/24": true, "192.168.1.0/24": false, "10.99.0.0/24": false, "10.0.0.0/8": false, "10.44.0.1/24": false} {
+		if (run([]string{"check-targets", "--config", config, "--target-networks", networks}, nil, &bytes.Buffer{}) == nil) != want {
+			t.Fatalf("target networks %q: accepted is not %v", networks, want)
+		}
+	}
 	keyFile := filepath.Join(keyDir, "instance.key")
 	common := []string{"--data", data, "--key-file", keyFile}
 	command := func(args ...string) *exec.Cmd {

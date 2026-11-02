@@ -292,3 +292,29 @@ func FuzzOperatorCatalog(f *testing.F) {
 		}
 	})
 }
+
+// Target networks are read against the catalog: every server inside them,
+// none touching its protected networks. With none named, an install gets one
+// host network per server address.
+func TestCatalogTargetNetworksCoverEveryServer(t *testing.T) {
+	catalog, err := ParseCatalog(strings.NewReader(fixture(t)))
+	if err != nil {
+		t.Fatal("valid catalog refused")
+	}
+	if len(catalog.Protected) != 1 || catalog.Protected[0].String() != "10.99.0.0/16" {
+		t.Fatal("catalog lost its protected networks")
+	}
+	if catalog.HostNetworks() != "10.44.0.8/32" {
+		t.Fatalf("host networks: %s", catalog.HostNetworks())
+	}
+	for _, good := range []string{"10.44.0.0/24", "10.44.0.8/32", "10.44.0.0/16,192.168.1.0/24"} {
+		if _, err := catalog.Networks(good); err != nil {
+			t.Fatalf("target networks %q refused", good)
+		}
+	}
+	for _, bad := range []string{"", "192.168.1.0/24", "10.44.0.9/32", "10.0.0.0/8", "10.99.0.0/24", "10.44.0.0/24,"} {
+		if _, err := catalog.Networks(bad); err == nil {
+			t.Fatalf("target networks %q accepted", bad)
+		}
+	}
+}

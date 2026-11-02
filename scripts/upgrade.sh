@@ -10,6 +10,11 @@
 # change: the new programs must accept this host's catalog and TLS pair and
 # write a plan from the same settings with the new workers' digests.
 #
+# The gateway may reach only its target networks; the kernel denies every
+# other address to its unit. They are kept too, --target-networks=NETS names
+# others, and an install from before that boundary gets one host network per
+# catalog server, so it reaches what it reached before and nothing more.
+#
 # Before anything is replaced, the old programs, units, RDP runtime and
 # database are copied to /var/backups/keybash/<time>. If the new version does
 # not come up, they are put back and the old version is started again.
@@ -22,10 +27,11 @@ export PATH
 refuse() { printf 'upgrade refused: %s\n' "$1" >&2; exit 1; }
 fail() { printf 'upgrade failed: %s\n' "$1" >&2; exit 1; }
 
-stage=''
+stage='' networks=''
 for argument in "$@"; do
   case "${argument}" in
     --stage=*) stage="${argument#*=}" ;;
+    --target-networks=*) networks="${argument#*=}" ;;
     *) refuse "unknown option ${argument} (options take the --name=value form)" ;;
   esac
 done
@@ -97,7 +103,7 @@ pre="$(sed -n 's|^ExecStartPre=/usr/local/libexec/keybash/keybash-service-check 
 start="$(sed -n 's|^ExecStart=/usr/local/libexec/keybash/keybash serve-[a-z]*-lab ||p' "${systemd}/keybash-gateway.service")"
 test -n "${pre}" && test -n "${start}" && test "$(printf '%s\n' "${pre}" | wc -l)" = 1 && test "$(printf '%s\n' "${start}" | wc -l)" = 1 ||
   refuse 'the gateway unit is not one install.sh wrote'
-kept='' exposure='' listen='' old_worker='' old_rdp_worker='' old_runtime=''
+kept='' exposure='' listen='' old_networks='' old_worker='' old_rdp_worker='' old_runtime=''
 for word in ${pre}; do
   case "${word}" in
     --worker-digest=*) old_worker="${word#*=}" ;;
@@ -115,6 +121,10 @@ for word in ${start}; do
     --listen=* | --allow-from=* | --server-name=*)
       printf '%s\n' "${word#*=}" | grep -Eqx '[][A-Za-z0-9.:,/_-]{1,255}' || refuse "unexpected setting in the gateway unit: ${word}"
       case "${word}" in --listen=*) listen="${word#*=}" ;; *) exposure="${exposure} ${word}" ;; esac
+      ;;
+    --target-networks=*)
+      printf '%s\n' "${word#*=}" | grep -Eqx '[0-9a-f.:,/]{1,4096}' || refuse "unexpected setting in the gateway unit: ${word}"
+      old_networks="${word#*=}"
       ;;
     --data=/var/lib/keybash | --key-file=/etc/keybash/keys/instance.key | --tls-cert=/etc/keybash/tls/cert.pem | \
       --tls-key=/etc/keybash/tls/key.pem | --config=/etc/keybash/targets.json | \
@@ -197,6 +207,7 @@ chmod 0700 "${work}"
 
 # shellcheck disable=SC2086 # kept, exposure and old_rdp hold only the words checked above
 "${libexec}/keybash-service-plan" ${kept} --worker-digest="${old_worker}" ${old_rdp} --listen="${listen}" ${exposure} \
+  ${old_networks:+"--target-networks=${old_networks}"} \
   --output="${work}/installed" >/dev/null || refuse 'the installed service plan refused the settings read back from the gateway unit'
 for unit in ${units}; do
   cmp -s "${work}/installed/${unit}" "${systemd}/${unit}" ||
@@ -211,6 +222,17 @@ else
   "${stage}/bin/keybash" check-targets --config=/etc/keybash/targets.json --ssh-only >/dev/null ||
     refuse 'catalog refused by the new version (keybash check-targets --ssh-only)'
 fi
+# The networks the gateway may reach: given with --target-networks, or kept
+# from the installed unit. An install from before this boundary gets one host
+# network per catalog server, so it reaches what it reached before and no more.
+test -n "${networks}" || networks="${old_networks}"
+if test -z "${networks}"; then
+  networks="$("${stage}/bin/keybash" check-targets --config=/etc/keybash/targets.json --print-host-networks)" ||
+    refuse 'catalog refused by the new version (keybash check-targets)'
+fi
+test -n "${networks}" || refuse 'the catalog lists no server address'
+"${stage}/bin/keybash" check-targets --config=/etc/keybash/targets.json --target-networks="${networks}" >/dev/null ||
+  refuse 'target networks refused: every catalog server must lie inside them, and none may touch a protected network, loopback, link-local or a metadata address'
 # shellcheck disable=SC2086
 "${stage}/bin/keybash" check-tls --tls-cert=/etc/keybash/tls/cert.pem --tls-key=/etc/keybash/tls/key.pem --listen="${listen}" ${exposure} >/dev/null ||
   refuse 'TLS pair refused by the new version (keybash check-tls)'
@@ -228,7 +250,7 @@ fi
 new_worker="$(digest "${stage}/bin/keybash-ssh-worker")"
 # shellcheck disable=SC2086
 "${stage}/bin/keybash-service-plan" ${kept} --worker-digest="${new_worker}" ${new_rdp} --listen="${listen}" ${exposure} \
-  --output="${work}/plan" >/dev/null || refuse 'the new service plan refused this installation'"'"'s settings'
+  --target-networks="${networks}" --output="${work}/plan" >/dev/null || refuse 'the new service plan refused this installation'"'"'s settings'
 cmp -s "${work}/plan/keybash.conf" /etc/sysusers.d/keybash.conf || refuse 'the new plan changes the service accounts; reinstall instead'
 planned=''
 for unit in ${units}; do planned="${planned} ${work}/plan/${unit}"; done
