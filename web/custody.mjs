@@ -116,8 +116,9 @@ function errorMessage(error) {
   hideSecret();
   if (error.status === 'cancelled') return 'Confirmation cancelled. Nothing changed.';
   if (error.status === 'ended') return 'Too many wrong codes: this session was closed. Sign in again.';
-  if (error.status === 'setup') return 'The setup code was not accepted. Check the one-time code from your administrator, or ask for a new one if it expired.';
-  if (error.status === 'invite') return 'The username or code was not accepted. Check both: a code works once and expires after 72 hours. Ask your administrator for a new one if needed.';
+  if (error.status === 'code-shape') return 'That code is incomplete: it has 43 letters, digits, - and _. Paste the whole code again.';
+  if (error.status === 'setup') return 'The setup code was not accepted. Use the newest one-time code from your administrator: a new code replaces the old one, and a code expires after 72 hours.';
+  if (error.status === 'invite') return 'The username or code was not accepted. Check both, and use the newest code: a new code replaces the old one, a code works once and expires after 72 hours. If you already chose your password with it, sign in instead.';
   if (error.status === 'taken') return 'That username is already taken. Choose another.';
   if (error.status === 'last-admin') return 'At least one administrator must remain.';
   if (error.status === 403) return 'That is not allowed. Reload the page and try again.';
@@ -165,9 +166,12 @@ function recordRow(record) {
   meta.textContent = `${record.kind === 'ssh-key' ? 'SSH key' : 'Password'} · ${record.username ? `user ${record.username}` : 'no user'}`;
   titles.append(name, meta);
   if (record.generated) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'Made in Keybash'; titles.append(badge); }
+  if (record.fingerprint) {
+    const line = document.createElement('p'); line.className = 'record-print';
+    const print = document.createElement('code'); print.className = 'fingerprint'; print.textContent = record.fingerprint; print.title = 'Key fingerprint';
+    line.append(print); titles.append(line);
+  }
   row.append(tile, titles);
-  const print = document.createElement('code'); print.className = 'fingerprint'; print.textContent = record.fingerprint; print.title = 'Key fingerprint';
-  if (record.fingerprint) row.append(print);
   const actions = document.createElement('div'); actions.className = 'record-actions'; row.append(actions);
   return { row, actions };
 }
@@ -193,7 +197,7 @@ async function loadRecords() {
   for (const record of records) {
     if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
     const { row, actions } = recordRow(record);
-    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost'; remove.textContent = 'Delete';
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost destructive'; remove.textContent = 'Delete';
     remove.addEventListener('click', () => askConfirm('credential', record));
     // A key made here is never shown; its row offers the install command instead.
     if (record.generated) {
@@ -354,7 +358,7 @@ function serverCard(record, target) {
     link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
   }
   if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
-  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost'; remove.addEventListener('click', () => askConfirm('connection', record));
+  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost destructive'; remove.addEventListener('click', () => askConfirm('connection', record));
   actions.append(remove); card.append(actions);
   return card;
 }
@@ -398,6 +402,15 @@ const access = { user: ['connections', 'keys', 'account'], admin: ['connections'
 const roleWords = { user: 'User', admin: 'Administrator', auditor: 'Auditor' };
 const stateWords = { active: 'Active', setup: 'Setting up phone', invited: 'Invited', expired: 'Code expired', blocked: 'Blocked' };
 const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+// A one-time code from an administrator or the operator, as pasted: spaces
+// around it are dropped, and a code of the wrong shape is refused here, before
+// it costs an attempt. Only its field is cleared then, so the passwords typed
+// beside it need not be typed again.
+function pastedCode(id) {
+  const code = $(id).value.trim();
+  if (codeOK(code)) return code;
+  $(id).value = ''; throw Object.assign(new Error('code shape'), { status: 'code-shape' });
+}
 // The one-time code for an invite or a reset, shown once to give to the person.
 function showCode(code, name, kind) {
   if (!codeOK(code)) throw new Error('invalid code');
@@ -433,7 +446,7 @@ function personRow(person, self) {
   if (person.state === 'blocked') button('Unblock', 'ghost', () => { void run(async () => { await request(`/api/users/${person.id}/unblock`, 'POST', {}); await loadUsers(); notice(`${person.username} can sign in again.`); }); });
   else button('Block', 'ghost', () => askConfirm('block', record));
   button(['invited', 'expired'].includes(person.state) ? 'New code' : 'Reset access', 'ghost', () => askConfirm('reset', record));
-  button('Delete', 'ghost', () => askConfirm('person', record));
+  button('Delete', 'ghost destructive', () => askConfirm('person', record));
   return row;
 }
 async function loadUsers() {
@@ -476,7 +489,7 @@ function showPage(ready) {
     item.hidden = !allowed.includes(item.dataset.page);
   });
   $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys'; $('invite-person').hidden = !ready || name !== 'users';
-  $('topbar-page').textContent = ready ? pages[name].title : 'Sign-in';
+  $('topbar-page').textContent = $('rail-page').textContent = ready ? pages[name].title : 'Sign-in';
   $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
   if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
   return name;
@@ -501,12 +514,12 @@ bind('signin', async () => {
   await request('/api/session', 'POST', { username, password }); location.replace('/');
 });
 bind('bootstrap', async () => {
-  const code = $('setup-code').value, username = $('setup-user').value, password = $('setup-password').value; clearInputs();
+  const code = pastedCode('setup-code'), username = $('setup-user').value.trim(), password = $('setup-password').value; clearInputs();
   await request('/api/bootstrap', 'POST', { code, username, password }); location.replace('/');
 });
 // An invited person chooses their password with the code, then sets up their phone.
 bind('claim', async () => {
-  const username = $('claim-user').value, code = $('claim-code').value, password = $('claim-password').value, confirm = $('claim-confirm').value; clearInputs();
+  const code = pastedCode('claim-code'), username = $('claim-user').value.trim(), password = $('claim-password').value, confirm = $('claim-confirm').value; clearInputs();
   if (password !== confirm) { notice('The passwords don’t match.'); return; }
   try { await request('/api/invite', 'POST', { username, code, password }); }
   catch (error) { throw error.status === 401 ? Object.assign(new Error('invite'), { status: 'invite' }) : error; }
@@ -518,6 +531,19 @@ function showClaim(on) {
   $('signin-title').textContent = on ? 'Accept your invite' : 'Sign in'; document.title = on ? 'Keybash · Accept invite' : 'Keybash · Sign in';
   $(on ? 'claim-user' : 'username').focus();
 }
+// On a phone the menu folds behind one button: it opens when asked, and
+// Escape or a tap elsewhere folds it again.
+function setMenu(open) {
+  const toggle = $('menu-toggle'), rail = toggle?.closest('.rail');
+  if (!rail) return;
+  toggle.setAttribute('aria-expanded', String(open));
+  if (open) rail.dataset.open = ''; else delete rail.dataset.open;
+}
+$('menu-toggle')?.addEventListener('click', () => setMenu($('menu-toggle').getAttribute('aria-expanded') !== 'true'));
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && $('menu-toggle')?.getAttribute('aria-expanded') === 'true') { setMenu(false); $('menu-toggle').focus(); }
+});
+document.addEventListener('click', event => { if (!event.target.closest?.('.rail')) setMenu(false); });
 $('show-claim')?.addEventListener('click', () => showClaim(true));
 $('show-signin')?.addEventListener('click', () => showClaim(false));
 $('invite-person')?.addEventListener('click', () => {
@@ -552,7 +578,7 @@ $('code-dialog')?.addEventListener('close', () => { $('person-code').textContent
 click('begin-enroll', async () => {
   // An operator-created account proves its one-time setup code before a seed
   // is shown; a bootstrap or replacement session needs none.
-  const body = setupRequired ? { setup: $('enroll-setup').value } : {}; clearInputs();
+  const body = setupRequired ? { setup: pastedCode('enroll-setup') } : {}; clearInputs();
   let data;
   try { data = await request('/api/mfa/enrollment', 'POST', body); }
   catch (error) { throw setupRequired && error.status === 403 ? Object.assign(new Error('setup'), { status: 'setup' }) : error; }

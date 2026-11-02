@@ -127,6 +127,19 @@ a:hover { text-decoration-thickness: 2px; }
 
 :focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
 
+/* Words for a screen reader only, such as what a button that names a page does. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 h1 {
   margin: 0 0 0.4rem;
   font-size: 1.9rem;
@@ -198,6 +211,9 @@ textarea {
   line-height: 1.6;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--tool); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool) 22%, transparent); }
+/* A choice box keeps the plain focus line: a ring drawn around it is square. */
+input:is([type="radio"], [type="checkbox"]):focus { box-shadow: none; }
+input:is([type="radio"], [type="checkbox"]):focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 input::placeholder, textarea::placeholder { color: var(--ink-faint); }
 
 /* The one action a form asks for, in the accent. */
@@ -371,6 +387,9 @@ body.workspace {
   gap: 0.6rem;
   margin: 0 0.6rem 2.2rem;
 }
+/* The pages and the person, below the mark; on a phone, behind one button. */
+.rail-menu { display: flex; flex: 1; flex-direction: column; }
+.menu-toggle { display: none; }
 .rail-caption {
   margin: 0 0.75rem 0.6rem;
   font-size: 0.66rem;
@@ -431,10 +450,12 @@ body.workspace {
 .topbar-path { margin: 0; font-size: 0.82rem; color: var(--ink-faint); }
 .topbar-path strong { font-weight: 500; color: var(--ink); }
 .topbar-slash { margin: 0 0.35rem; }
+/* Rows stay short enough to read across on a wide screen: about 976 px of
+   content beside the menu. */
 body.workspace main {
   flex: 1;
   width: 100%;
-  max-width: 72rem;
+  max-width: 65rem;
   padding: 2rem 2rem 3rem;
 }
 .work-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.8rem; }
@@ -445,6 +466,13 @@ body.workspace main {
 /* A quiet action: text in ink, no box until hovered. */
 button.ghost { color: var(--ink-soft); background: transparent; border-color: transparent; box-shadow: none; }
 button.ghost:hover:not(:disabled) { color: var(--ink); background: var(--paper-sunk); border-color: var(--rule); }
+/* Delete rests as quietly as the other small actions, at the far end of its
+   row, and shows its red when pointed at or focused. */
+button.ghost.destructive:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--insecure);
+  background: color-mix(in srgb, var(--insecure) 8%, var(--card));
+  border-color: color-mix(in srgb, var(--insecure) 45%, var(--rule));
+}
 /* An action that reads as a link, such as Sign out under the card. */
 button.link-button {
   display: inline;
@@ -471,26 +499,49 @@ button.link-button:hover:not(:disabled) { color: var(--link); background: none; 
 .colophon p { margin: 0; }
 .signin-page .colophon { text-align: center; }
 
-/* A phone: the rail becomes a bar above the page. */
+/* A phone: the rail becomes one bar above the page, the mark and a button
+   naming the current page. The button opens the pages and Sign out below it,
+   so the page itself starts near the top. The breadcrumb would only repeat
+   the heading, so it goes. */
 @media (max-width: 760px) {
   body.workspace { display: block; }
   .rail {
-    position: static;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
+    position: sticky;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.9rem 1rem;
+    gap: 0 0.8rem;
+    height: auto;
+    max-height: 100vh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    padding: 0.5rem 1rem;
     border-right: 0;
     border-bottom: 1px solid var(--rule);
   }
   .rail-identity { margin: 0; }
+  .rail-identity .wordmark { font-size: 1.4rem; }
+  .rail-identity .tag { display: none; }
+  .menu-toggle { display: inline-flex; max-width: 100%; margin: 0; padding: 0.5rem 0.8rem; }
+  .menu-toggle #rail-page { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-toggle[aria-expanded="true"] .menu-open,
+  .menu-toggle:not([aria-expanded="true"]) .menu-close { display: none; }
+  .rail-menu { grid-column: 1 / -1; padding: 0.7rem 0 0.4rem; }
+  .rail:not([data-open]) .rail-menu { display: none; }
   .rail-caption { display: none; }
-  .rail-nav { display: flex; flex-wrap: wrap; margin: 0; }
-  .rail-foot { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0 auto; padding: 0; border: 0; }
+  .rail-nav { margin: 0 0 0.8rem; }
+  .rail-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.8rem 0.25rem 0; }
   .rail-foot button { width: auto; margin: 0; }
-  .topbar, body.workspace main, .colophon { padding-left: 1rem; padding-right: 1rem; }
+  .topbar { display: none; }
+  body.workspace main { padding: 1.4rem 1rem 2.4rem; }
+  .colophon { padding-left: 1rem; padding-right: 1rem; }
+}
+/* A finger needs a larger target than a pointer: every control is at least
+   44 px tall on a phone or a touch screen. */
+@media (max-width: 760px), (pointer: coarse) {
+  button, a.connect, .rail-item, summary { min-height: 44px; }
+  button.link-button { display: inline-flex; align-items: center; }
 }
 
 /* ── Signal: the few places Keybash's colour shows itself ──────────────── */
@@ -528,16 +579,23 @@ body.signin-page {
 .signin-mark { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .signin .panel { padding: 1.8rem 1.8rem 1.5rem; box-shadow: var(--shadow-lg); }
 .signin .panel h1 { margin-bottom: 0.3rem; }
+/* What Keybash keeps: one row under the card where it fits, a short list on
+   a phone, never two and then one. */
 .signin-facts {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.4rem 1.1rem;
-  margin: 1.4rem 0 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  width: fit-content;
+  margin: 1.4rem auto 0;
   padding: 0;
   list-style: none;
   font-size: 0.8rem;
   color: var(--ink-soft);
+}
+/* The row is wider than the card, so it reaches past the card's edges. */
+@media (min-width: 640px) {
+  .signin-facts { flex-direction: row; justify-content: center; gap: 1.1rem; width: auto; margin-inline: -4rem; white-space: nowrap; }
 }
 .signin-facts li { display: inline-flex; align-items: center; gap: 0.4rem; }
 .signin-facts li::before { content: ""; width: 0.38rem; height: 0.38rem; background: var(--tool); border-radius: 50%; }

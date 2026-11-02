@@ -32,7 +32,7 @@ async function stepUp(code) { await page.locator('#stepup-dialog').waitFor({ sta
 try {
   await page.goto(config.Origin + '/'); await page.waitForURL(config.Origin + '/login');
   await page.locator('#bootstrap').waitFor({ state: 'visible' });
-  await page.locator('#setup-code').fill(config.Code); await page.locator('#setup-user').fill(config.Username); await page.locator('#setup-password').fill(config.Password); await page.locator('#bootstrap button').click();
+  await page.locator('#setup-code').fill(' ' + config.Code + '  '); await page.locator('#setup-user').fill(config.Username); await page.locator('#setup-password').fill(config.Password); await page.locator('#bootstrap button').click();
   await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
   // Until the second factor is done the page is its card alone: no menu, and Sign out under the card.
   const alone = async () => { assert(!(await page.locator('.rail').isVisible()) && !(await page.locator('.topbar').isVisible()), 'the menu shows before the second factor'); assert(await page.locator('#focus-logout').isVisible(), 'no Sign out under the card'); assert.equal(await page.locator('#focus-account').textContent(), await page.locator('#account').textContent()); };
@@ -52,7 +52,11 @@ try {
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); delete document.visibilityState; });
   assert.equal(await page.locator('#seed-qr path').count(), 0); assert.equal(await page.locator('#seed').textContent(), ''); assert(await page.locator('#qr-start').isVisible());
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); assert.equal(await page.locator('#seed').textContent(), seed); await settled();
-  await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30) - 1)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
+  // Typed digit by digit, the six boxes stay where they are: the first box is
+  // not scrolled out of sight after the sixth digit.
+  await page.locator('#enrollment-code').pressSequentially(otp(Math.floor(seconds / 30) - 1));
+  assert.deepEqual(await page.locator('.code-boxes').evaluate(box => [box.scrollLeft, box.querySelector('span').getBoundingClientRect().left >= box.getBoundingClientRect().left]), [0, true], 'the code boxes scrolled');
+  await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
   await alone(); await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert(await page.locator('.rail').isVisible() && !(await page.locator('#focus-logout').isVisible()), 'the ready workspace has no menu');
   assert.equal(await page.locator('#recovery-codes').inputValue(), '');
@@ -71,6 +75,23 @@ try {
   assert.equal(await page.locator('h1').textContent(), 'Installation'); assert(!(await page.locator('#account-panel').isVisible()));
   assert.match(await page.locator('#install-version').textContent(), /^(Not recorded in this build\.|[0-9a-f]{7}( · .+)?)$/);
   assert.match(await page.locator('#command-upgrade').textContent(), /sudo sh scripts\/upgrade\.sh --stage=/); assert(!(await page.locator('#command-build').textContent()).endsWith('--with-rdp'));
+  // A phone: one bar naming the page, the content within the first 120 px, no
+  // sideways scroll, and the menu behind one button that the keyboard opens,
+  // Escape closes and a link leaves.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const toggle = page.locator('#menu-toggle');
+  assert(await toggle.isVisible(), 'no menu button on a phone'); assert.equal(await toggle.getAttribute('aria-expanded'), 'false'); assert.equal(await page.locator('#rail-page').textContent(), 'Installation');
+  assert(!(await page.locator('.rail-item[data-page=keys]').isVisible()) && !(await page.locator('#logout').isVisible()) && !(await page.locator('.topbar').isVisible()), 'the phone menu or breadcrumb shows unasked');
+  assert((await page.locator('h1').boundingBox()).y <= 120, 'phone content starts below the first 120 px');
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'the phone page scrolls sideways');
+  await toggle.focus(); await page.keyboard.press('Enter');
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true'); assert(await page.locator('#logout').isVisible(), 'Sign out is not in the phone menu');
+  await page.keyboard.press('Tab'); assert.equal(await page.evaluate(() => document.activeElement.dataset.page), 'keys');
+  await page.keyboard.press('Escape'); assert.equal(await toggle.getAttribute('aria-expanded'), 'false'); assert.equal(await page.evaluate(() => document.activeElement.id), 'menu-toggle');
+  assert(!(await page.locator('.rail-item[data-page=keys]').isVisible()), 'Escape left the phone menu open');
+  await toggle.click(); await page.locator('.rail-item[data-page=account]').click(); await page.waitForURL(config.Origin + '/account'); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'false'); assert.equal(await page.locator('#rail-page').textContent(), 'Account');
+  await page.setViewportSize({ width: 1280, height: 1100 });
   await page.locator('.rail-item[data-page=keys]').click(); await page.waitForURL(config.Origin + '/keys'); await page.locator('#records-panel').waitFor({ state: 'visible' }); await settled();
   // Completing sign-in counts as fresh proof for ten minutes; let it lapse.
   // Adding a record needs the ready session only.
@@ -139,7 +160,13 @@ try {
   assert.equal(await invited.locator('.person-state').textContent(), 'Invited'); assert.equal(await invited.locator('.record-meta').textContent(), 'Auditor');
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
   await page.locator('#show-claim').click(); await page.locator('#claim').waitFor({ state: 'visible' }); assert(!(await page.locator('#signin').isVisible()));
-  await page.locator('#claim-user').fill('invitee'); await page.locator('#claim-code').fill(invite); await page.locator('#claim-password').fill(inviteePassword); await page.locator('#claim-confirm').fill(inviteePassword); await page.locator('#claim button').click();
+  // A code cut short is refused on the page before it costs an attempt, and
+  // only its field is cleared; a code pasted with spaces around it is accepted.
+  let claims = 0; page.on('request', request => { if (request.url() === config.Origin + '/api/invite') claims++; });
+  await page.locator('#claim-user').fill('invitee'); await page.locator('#claim-code').fill(invite.slice(0, 40)); await page.locator('#claim-password').fill(inviteePassword); await page.locator('#claim-confirm').fill(inviteePassword); await page.locator('#claim button').click();
+  await page.locator('#notice').filter({ hasText: 'code is incomplete' }).waitFor(); assert.equal(claims, 0, 'an incomplete code was sent');
+  assert.equal(await page.locator('#claim-code').inputValue(), ''); assert.equal(await page.locator('#claim-password').inputValue(), inviteePassword);
+  await page.locator('#claim-code').fill('  ' + invite + ' '); await page.locator('#claim button').click();
   await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
   assert(!(await page.locator('#setup-proof').isVisible()), 'the invite was asked for again');
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); inviteSeed = await page.locator('#seed').textContent(); assert.match(inviteSeed, /^[A-Z2-7]{32}$/); await settled();
@@ -150,6 +177,6 @@ try {
   assert.equal((await page.request.get(config.Origin + '/api/users')).status(), 403, 'an auditor listed accounts');
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
-  console.log('Browser custody: bootstrap, mandatory MFA, code-only step-up, encrypted record UX, invites and roles, restart, replay refusal and failure handling passed');
+  console.log('Browser custody: bootstrap, mandatory MFA, phone navigation, code-only step-up, encrypted record UX, invites and roles, restart, replay refusal and failure handling passed');
 } catch (error) { console.log(error.code === 'ERR_ASSERTION' ? error.message : error.name); throw new Error('browser custody checks failed'); }
 finally { await context.close(); await browser.close(); }
