@@ -410,21 +410,23 @@ func TestKeybashServiceResourceProbeChild(t *testing.T) {
 	}
 	switch mode {
 	case "network":
-		// 192.0.2.1 is documentation space and never a target, so only the
-		// unit's lines can refuse it at once, with EPERM; unrefused, the
-		// attempt simply times out.
-		conn, err := net.DialTimeout("tcp", "192.0.2.1:80", 2*time.Second)
-		if conn != nil {
+		// 192.0.2.1 is documentation space and never a target. A datagram to
+		// it is refused at once with EPERM only by the unit's lines; unrefused,
+		// it simply leaves. (A TCP connect ignores that refusal and retries
+		// its SYN until it times out, so it cannot tell the two apart.)
+		conn, err := net.Dial("udp", "192.0.2.1:9")
+		if err == nil {
+			_, err = conn.Write([]byte{0})
 			_ = conn.Close()
 		}
-		denied := errors.Is(err, syscall.EPERM)
+		outside, denied := err, errors.Is(err, syscall.EPERM)
 		local, err := net.DialTimeout("tcp", "127.0.0.1:8443", 2*time.Second)
 		if err != nil {
 			t.Fatal("loopback gateway unreachable from the probe")
 		}
 		_ = local.Close()
 		if denied != (os.Getenv("KEYBASH_PROBE_EXPECT") == "denied") {
-			t.Fatalf("an address outside the target networks: denied %v", denied)
+			t.Fatalf("an address outside the target networks: denied %v (%v)", denied, outside)
 		}
 		if denied {
 			fmt.Println("network-denied")
