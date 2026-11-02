@@ -116,8 +116,9 @@ function errorMessage(error) {
   hideSecret();
   if (error.status === 'cancelled') return 'Confirmation cancelled. Nothing changed.';
   if (error.status === 'ended') return 'Too many wrong codes: this session was closed. Sign in again.';
-  if (error.status === 'setup') return 'The setup code was not accepted. Check the one-time code from your administrator, or ask for a new one if it expired.';
-  if (error.status === 'invite') return 'The username or code was not accepted. Check both: a code works once and expires after 72 hours. Ask your administrator for a new one if needed.';
+  if (error.status === 'code-shape') return 'That code is incomplete: it has 43 letters, digits, - and _. Paste the whole code again.';
+  if (error.status === 'setup') return 'The setup code was not accepted. Use the newest one-time code from your administrator: a new code replaces the old one, and a code expires after 72 hours.';
+  if (error.status === 'invite') return 'The username or code was not accepted. Check both, and use the newest code: a new code replaces the old one, a code works once and expires after 72 hours. If you already chose your password with it, sign in instead.';
   if (error.status === 'taken') return 'That username is already taken. Choose another.';
   if (error.status === 'last-admin') return 'At least one administrator must remain.';
   if (error.status === 403) return 'That is not allowed. Reload the page and try again.';
@@ -401,6 +402,15 @@ const access = { user: ['connections', 'keys', 'account'], admin: ['connections'
 const roleWords = { user: 'User', admin: 'Administrator', auditor: 'Auditor' };
 const stateWords = { active: 'Active', setup: 'Setting up phone', invited: 'Invited', expired: 'Code expired', blocked: 'Blocked' };
 const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+// A one-time code from an administrator or the operator, as pasted: spaces
+// around it are dropped, and a code of the wrong shape is refused here, before
+// it costs an attempt. Only its field is cleared then, so the passwords typed
+// beside it need not be typed again.
+function pastedCode(id) {
+  const code = $(id).value.trim();
+  if (codeOK(code)) return code;
+  $(id).value = ''; throw Object.assign(new Error('code shape'), { status: 'code-shape' });
+}
 // The one-time code for an invite or a reset, shown once to give to the person.
 function showCode(code, name, kind) {
   if (!codeOK(code)) throw new Error('invalid code');
@@ -504,12 +514,12 @@ bind('signin', async () => {
   await request('/api/session', 'POST', { username, password }); location.replace('/');
 });
 bind('bootstrap', async () => {
-  const code = $('setup-code').value, username = $('setup-user').value, password = $('setup-password').value; clearInputs();
+  const code = pastedCode('setup-code'), username = $('setup-user').value.trim(), password = $('setup-password').value; clearInputs();
   await request('/api/bootstrap', 'POST', { code, username, password }); location.replace('/');
 });
 // An invited person chooses their password with the code, then sets up their phone.
 bind('claim', async () => {
-  const username = $('claim-user').value, code = $('claim-code').value, password = $('claim-password').value, confirm = $('claim-confirm').value; clearInputs();
+  const code = pastedCode('claim-code'), username = $('claim-user').value.trim(), password = $('claim-password').value, confirm = $('claim-confirm').value; clearInputs();
   if (password !== confirm) { notice('The passwords don’t match.'); return; }
   try { await request('/api/invite', 'POST', { username, code, password }); }
   catch (error) { throw error.status === 401 ? Object.assign(new Error('invite'), { status: 'invite' }) : error; }
@@ -568,7 +578,7 @@ $('code-dialog')?.addEventListener('close', () => { $('person-code').textContent
 click('begin-enroll', async () => {
   // An operator-created account proves its one-time setup code before a seed
   // is shown; a bootstrap or replacement session needs none.
-  const body = setupRequired ? { setup: $('enroll-setup').value } : {}; clearInputs();
+  const body = setupRequired ? { setup: pastedCode('enroll-setup') } : {}; clearInputs();
   let data;
   try { data = await request('/api/mfa/enrollment', 'POST', body); }
   catch (error) { throw setupRequired && error.status === 403 ? Object.assign(new Error('setup'), { status: 'setup' }) : error; }

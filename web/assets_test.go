@@ -77,6 +77,33 @@ func TestEveryPageLoadsTheSharedDesign(t *testing.T) {
 	}
 }
 
+// A one-time code is never a password field. A password manager would fill
+// a saved password into it, hidden behind dots in front of a pasted code, or
+// save the code as the account's password. Each is a visible one-time-code
+// field, long enough to take a paste with spaces around it.
+func TestOneTimeCodesAreNeverPasswordFields(t *testing.T) {
+	input := regexp.MustCompile(`<input[^>]*>`)
+	id := regexp.MustCompile(`\bid="([^"]+)"`)
+	found := map[string]bool{}
+	for _, page := range []string{"custody-login.html", "custody-workspace.html"} {
+		for _, field := range input.FindAllString(sheet(t, page), -1) {
+			m := id.FindStringSubmatch(field)
+			if m == nil || !strings.HasSuffix(m[1], "-code") && m[1] != "enroll-setup" {
+				continue
+			}
+			found[m[1]] = true
+			if strings.Contains(field, `type="password"`) || !strings.Contains(field, `autocomplete="one-time-code"`) || !strings.Contains(field, `spellcheck="false"`) {
+				t.Errorf("%s: %s is not a visible one-time-code field", page, m[1])
+			}
+		}
+	}
+	for _, want := range []string{"setup-code", "claim-code", "enroll-setup", "enrollment-code", "factor-code", "stepup-code"} {
+		if !found[want] {
+			t.Errorf("the one-time code field %s was not found", want)
+		}
+	}
+}
+
 // The ratio text needs at the sizes these pages use. Nothing is set at a size
 // where the large-text allowance would apply.
 const readableContrast = 4.5
