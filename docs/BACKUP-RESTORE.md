@@ -3,7 +3,54 @@
 Keybash keeps two things that only together open the stored credentials: the
 custody database in the data directory, and the 32-byte instance key in its own
 directory. A backup copies the first; the key is written down once, separately.
-The operator's step-by-step guide is `BACKUP-AZ.md`.
+
+## Step by step on an installed server
+
+The database has one owner at a time, so each command runs as the gateway's
+account with the gateway stopped. Sessions close while it is stopped.
+
+**The recovery code.** The installer printed it once. Keep it on paper or in a
+password manager, apart from the server and from the backups. To print it
+again:
+
+```sh
+sudo systemctl stop keybash-gateway
+sudo setpriv --reuid=keybash-gateway --regid=keybash-gateway --clear-groups --reset-env -- \
+  /usr/local/libexec/keybash/keybash key-export --data=/var/lib/keybash --key-file=/etc/keybash/keys/instance.key
+sudo systemctl start keybash-gateway
+```
+
+**A backup.** Make a private directory for it once, then:
+
+```sh
+sudo install -d -o keybash-gateway -g keybash-gateway -m 0700 /var/backups/keybash-custody
+sudo systemctl stop keybash-gateway
+sudo setpriv --reuid=keybash-gateway --regid=keybash-gateway --clear-groups --reset-env -- \
+  /usr/local/libexec/keybash/keybash backup --data=/var/lib/keybash --key-file=/etc/keybash/keys/instance.key \
+  --out=/var/backups/keybash-custody/keybash-$(date -u +%Y%m%dT%H%M%SZ).backup
+sudo systemctl start keybash-gateway
+```
+
+The file holds no key and no plaintext secret, not even usernames, so it can
+be copied to another disk or site. Never keep it with the recovery code.
+
+**A restore.** Restore writes into an empty private directory owned by the
+account that runs it, with the key written from the recovery code (read from
+standard input, never from an argument):
+
+```sh
+mkdir -m 700 restored-data restored-keys
+keybash key-import --data=restored-data --key-file=restored-keys/instance.key
+keybash restore --data=restored-data --key-file=restored-keys/instance.key --in=keybash-….backup
+```
+
+It prints one setup code per account; give each person their own. Every
+account sets up its phone again (see "Restore" below). Pointing an installed
+service at a restored directory is not scripted yet.
+
+**Check your backups.** From time to time, restore one into a spare empty
+directory, check that it opens, then delete that directory. Making backups
+alone is not enough.
 
 ## Commands
 

@@ -3,7 +3,8 @@
 By default every `serve-*` command listens on a loopback address and admits
 loopback clients only; reaching it from another machine needs an SSH tunnel.
 An operator can instead expose it on a LAN or VPN address, for the networks
-they name. The operator's guide is in `TEST-SETUP-AZ.md` ("Lokal şəbəkədən").
+they name. The operator's steps are in `INSTALL.md` (the `--listen`, `--allow-from` and
+`--server-name` options) and `TEST-SETUP.md` ("From the local network").
 
 ```sh
 keybash serve-remote-lab ... \

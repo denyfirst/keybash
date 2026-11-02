@@ -24,7 +24,7 @@ Output, instruction and pixel work are paced per second instead of ending at
 a lifetime total (see `BROWSER-RDP-LAB.md`); long sessions on real Windows
 hosts are still unmeasured.
 
-The user has no test VMs yet and requested a setup guide. `TEST-SETUP-AZ.md`
+On 21 October the user had no test VMs and requested a setup guide. `TEST-SETUP.md`
 provides the separate Ubuntu/Linux/Windows setup and pinned source build path;
 no VM or customer service has been deployed from this workstation.
 
@@ -36,7 +36,7 @@ Implemented source and its required acceptance boundaries:
 | Installed service lifecycle | Actual generated gateway/SSH/RDP units, live distinct worker identity, exact cgroup membership and aggregate values, stop/reap, mismatched-limit refusal and restart |
 | Clipboard | Completed UTF-8 only, stream collisions and malformed/NUL/oversize refusal, explicit copy/paste, permission fallback, actual headless OS clipboard through native CLIPRDR, session cleanup and late-read refusal |
 | Desktop size | Bounded request/flood refusal, actual DISPLAYCONTROL monitor layout, native display resize and browser geometry |
-| Separate VM preparation | `TEST-SETUP-AZ.md`: fresh Ubuntu source build, approved Linux/Windows identities, trusted HTTPS, account/MFA setup and first connection instructions; customer VMs are not provisioned or tested |
+| Separate VM preparation | `TEST-SETUP.md`: fresh Ubuntu source build, approved Linux/Windows identities, trusted HTTPS, account/MFA setup and first connection instructions; customer VMs are not provisioned or tested |
 
 `native/clipboard.c` uses the already pinned WinPR conversion API after querying
 capacities. It validates surrogate pairs and termination, refuses lossy UTF-8

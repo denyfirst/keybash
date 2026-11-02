@@ -19,7 +19,7 @@ try {
     }
     $null = Get-Command node -ErrorAction Stop
     if (-not (Test-Path -LiteralPath (Join-Path $taskDemoRoot 'web/node_modules/playwright'))) {
-        throw 'Pinned web development dependencies are missing. See docs/INTERACTIVE-DEMO-AZ.md.'
+        throw 'Pinned web development dependencies are missing. See docs/INTERACTIVE-DEMO.md.'
     }
     if (-not $env:KEYBASH_BROWSER_CHANNEL -and [System.Environment]::OSVersion.Platform -eq 'Win32NT') { $env:KEYBASH_BROWSER_CHANNEL = 'msedge' }
     if ($Check) {

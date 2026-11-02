@@ -433,7 +433,7 @@ aggregate memory/CPU guarantee. This self-review is not independent audit.
 ## Interactive workstation UI preview — 2026-10-15
 
 `scripts/demo.ps1` opens a disposable Edge development context and a private
-loopback TLS fixture for manual feedback. `INTERACTIVE-DEMO-AZ.md` states the
+loopback TLS fixture for manual feedback. `INTERACTIVE-DEMO.md` states the
 simulation boundary. Synthetic terminal commands never spawn a local process
 or dial a host; desktop PNGs and input are a generated test picture, not Windows
 or a native RDP authentication claim. Simulated workers and portable custody

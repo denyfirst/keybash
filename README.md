@@ -35,7 +35,7 @@ the existing SSH and isolated native RDP browser fixtures, with one-use socket
 admission, approval binding and account-wide logout revocation.
 A disposable interactive UI preview now opens sample terminal/desktop views
 through the normal MFA/owned-connection flow. These are simulations, not real
-Linux/Windows sessions; see the [local demo guide](docs/INTERACTIVE-DEMO-AZ.md).
+Linux/Windows sessions; see the [local demo guide](docs/INTERACTIVE-DEMO.md).
 Production packaging, real Windows/browser matrices, deployment and an
 independently audited release remain gates.
 A separate Linux/amd64 SSH process laboratory now uses a hash-bound static
@@ -70,13 +70,15 @@ native path; optional RDP units share the checked aggregate service slice.
 This workspace adds explicit bounded plain-text clipboard, permission fallback,
 paste review and bounded display-update resizing. Actual native/browser/service
 tests are required gates; see [the integration work record](docs/RDP-WORKSPACE-INTEGRATION.md).
-The user has no separate test VMs yet. [The source test setup guide](docs/TEST-SETUP-AZ.md)
-prepares that next step without deploying anything on this workstation.
+[The source test setup guide](docs/TEST-SETUP.md) prepares a separate test VM
+without deploying anything on the workstation.
 
 ## Start here
 
-- [Product plan (Azerbaijani)](docs/PRODUCT-PLAN-AZ.md)
-- [Current status (Azerbaijani)](docs/STATUS-AZ.md)
+- [Product plan](docs/PRODUCT-PLAN.md)
+- [Current status and what remains before a release](docs/STATUS.md)
+- [Installing, upgrading and adding people](docs/INSTALL.md)
+- [Backup, key recovery and restore](docs/BACKUP-RESTORE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Engineering and signing workflow](docs/ENGINEERING.md)
 - [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
@@ -87,9 +89,8 @@ prepares that next step without deploying anything on this workstation.
 - [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)
 - [Durable MFA/custody lab and operator usage](docs/CUSTODY-LAB.md)
 - [Account-owned SSH/RDP session integration](docs/OWNED-REMOTE-LAB.md)
-- [Try the local interactive UI demo (Azerbaijani)](docs/INTERACTIVE-DEMO-AZ.md)
-- [Remaining product steps (Azerbaijani)](docs/READY-CHECKLIST-AZ.md)
-- [Separate test VM setup (Azerbaijani)](docs/TEST-SETUP-AZ.md)
+- [Try the local interactive UI demo](docs/INTERACTIVE-DEMO.md)
+- [Separate test VM setup](docs/TEST-SETUP.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
 
 ## Development checks

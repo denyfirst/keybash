@@ -3,11 +3,111 @@
 `scripts/build-stage.sh` builds a stage as an ordinary user and
 `scripts/install.sh` installs it, as root, on a **fresh** Linux x86-64 host
 with systemd and cgroup v2. `scripts/uninstall.sh` removes programs and units
-and keeps data. The operator's step-by-step guide is `INSTALL-AZ.md`; the
-manual steps these scripts replace remain in `TEST-SETUP-AZ.md`.
+and keeps data. The manual steps these scripts replace remain in
+`TEST-SETUP.md`.
 
-This is a source installer for test and small self-hosted use. It is not a
-package, an updater or a release; upgrades and signed releases remain gates.
+This is a source installer for test and small self-hosted use, not a package
+or a release; signed releases remain a gate. Keep only test data on it for now.
+
+## Step by step
+
+For a **fresh** Ubuntu 24.04 x86-64 VM with systemd and cgroup v2. The
+installer writes over no file, service or account; it checks everything first
+and stops without touching anything when something is wrong.
+
+### 1. Build the stage, as an ordinary user, not root
+
+```sh
+sudo apt-get update
+sudo apt-get install --no-install-recommends git golang-go python3 curl ca-certificates \
+  bubblewrap openssl openssh-client
+git clone https://github.com/denyfirst/keybash.git
+cd keybash
+sh scripts/build-stage.sh "$HOME/keybash-stage"
+```
+
+To reach Windows servers over RDP as well, install the extra packages and add
+`--with-rdp`; this can take 15 to 30 minutes:
+
+```sh
+sudo apt-get install --no-install-recommends build-essential clang cmake ninja-build pkg-config \
+  libssl-dev libcairo2-dev libjpeg-dev libpng-dev libwebp-dev libpango1.0-dev libuuid1 uuid-dev
+sh scripts/build-stage.sh "$HOME/keybash-stage" --with-rdp
+```
+
+### 2. An HTTPS certificate, for testing
+
+For the name or address browsers will use:
+
+```sh
+"$HOME/keybash-stage/bin/keybash-test-tls" --name keybash.lan --output "$HOME/keybash-tls"
+```
+
+Use `--address 127.0.0.1` instead when you will reach it through a tunnel.
+
+The command writes `ca.pem`, `cert.pem` and `key.pem` and prints the
+authority's fingerprint. The authority can sign **this one name only**, and
+its private key was never written to disk (see "Test HTTPS" below).
+1. Copy `ca.pem` to the PC and compare the fingerprint.
+2. On Windows, add it to "Trusted Root Certification Authorities".
+
+The browser then shows no warning.
+
+### 3. The server list
+
+Write the servers to connect to in `targets.json` (the format is in
+`OPERATOR-CATALOG-LAB.md`). Take each SSH server's host key and each Windows
+server's RDP certificate separately, over a channel you trust. After the
+install, `keybash server-add` adds SSH servers without hand-written JSON
+("Adding a server later").
+
+### 4. Install, as root
+
+For use on this machine only, through a tunnel:
+
+```sh
+sudo sh scripts/install.sh --stage="$HOME/keybash-stage" --catalog="$HOME/targets.json" \
+  --tls-cert="$HOME/keybash-tls/cert.pem" --tls-key="$HOME/keybash-tls/key.pem"
+```
+
+So everyone in the office can connect without a tunnel. It is open only to
+the networks you name (`LAN-INGRESS.md`):
+
+```sh
+sudo sh scripts/install.sh --stage="$HOME/keybash-stage" --catalog="$HOME/targets.json" \
+  --tls-cert="$HOME/keybash-tls/cert.pem" --tls-key="$HOME/keybash-tls/key.pem" \
+  --listen=192.168.1.10:8443 --allow-from=192.168.1.0/24 --server-name=keybash.lan
+```
+
+At the end the terminal shows two codes, **once**:
+
+- **The bootstrap code** creates the first account and is valid for 15
+  minutes.
+- **The instance key's recovery code** (`KB1-…`). Write it on paper or into a
+  password manager, and keep it **apart** from the server and the backups.
+  Without it no backup can be restored.
+
+Never put these codes in a chat, a screenshot or notes.
+
+The gateway can then reach only the servers in `targets.json`; the kernel
+refuses it every other address. To allow a whole network for servers you add
+later, add `--target-networks=192.168.1.0/24` (it must hold every server in
+the list).
+
+### 5. First sign-in
+
+Open the printed address in the browser, for example
+`https://keybash.lan:8443/login`. Create the first account with the bootstrap
+code, then set up the phone and save the recovery codes.
+
+If the bootstrap code has expired:
+
+```sh
+sudo systemctl stop keybash-gateway
+sudo setpriv --reuid=keybash-gateway --regid=keybash-gateway --clear-groups --reset-env -- \
+  /usr/local/libexec/keybash/keybash bootstrap-renew --data=/var/lib/keybash --key-file=/etc/keybash/keys/instance.key
+sudo systemctl start keybash-gateway
+```
 
 ## What the installer does
 
@@ -106,6 +206,17 @@ prints a setup code when the account has no factor.
 
 ## Adding a server later
 
+```sh
+sudo /usr/local/libexec/keybash/keybash server-add --config=/etc/keybash/targets.json \
+  --name="Web server" --host=192.168.1.20 --port=22
+sudo systemctl restart keybash-ssh-manager keybash-gateway
+```
+
+Compare the printed fingerprint with
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on that server's own
+console, type `yes` if they match, then restart Keybash so it reads the list;
+open sessions close.
+
 `keybash server-add --config=/etc/keybash/targets.json --name=… --host=IP
 [--port=22] [--fingerprint=SHA256:…]`, as root, adds one SSH server by IP
 without hand-written JSON:
@@ -172,7 +283,14 @@ serves over HTTPS; signed commits are checked in CI, not on the server.
 `uninstall.sh` stops and disables the units, removes unit files, the sysusers
 file, `/usr/local/libexec/keybash` and `/usr/local/lib/keybash`, and reloads
 systemd. It keeps `/var/lib/keybash`, `/etc/keybash` and both accounts; a fresh
-install needs them removed deliberately, after a backup if the data matters.
+install needs them removed deliberately, after a backup if the data matters:
+
+```sh
+sudo sh scripts/uninstall.sh
+sudo rm -rf /var/lib/keybash /etc/keybash
+sudo userdel keybash-gateway; sudo userdel keybash-worker
+sudo groupdel keybash-gateway; sudo groupdel keybash-worker
+```
 
 ## Evidence
 
