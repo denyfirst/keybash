@@ -7,11 +7,11 @@ assert.equal(new URL(config.Origin).hostname, '127.0.0.1');
 const browser = await chromium.launch({ headless: true, ...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
 const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 1100 } });
 const page = await context.newPage(); const errors = [], external = [], secretURLs = [];
-const vaultSecret = 'Synthetic browser custody canary 73', inviteePassword = 'Synthetic invitee password 2026!'; let seed = '', codes = [], seconds = config.Unix, invite = '', inviteSeed = '';
+const vaultSecret = 'Synthetic browser custody canary 73', inviteePassword = 'Synthetic invitee password 2026!'; let seed = '', codes = [], seconds = config.Unix, invite = '', inviteSeed = '', resetCode = '', resetSeed = '';
 page.on('pageerror', error => errors.push(error.name));
 page.on('request', request => {
   if (!request.url().startsWith(config.Origin + '/')) external.push('external request');
-  if ([config.Password, config.Code, vaultSecret, seed, invite, inviteSeed, inviteePassword, ...codes].filter(Boolean).some(secret => request.url().includes(secret) || request.url().includes(encodeURIComponent(secret)))) secretURLs.push('secret URL');
+  if ([config.Password, config.Code, vaultSecret, seed, invite, inviteSeed, inviteePassword, resetCode, resetSeed, ...codes].filter(Boolean).some(secret => request.url().includes(secret) || request.url().includes(encodeURIComponent(secret)))) secretURLs.push('secret URL');
 });
 function otp(counter = Math.floor(seconds / 30), key32 = seed) {
   // Independent RFC 4226/6238 test oracle, never shipped by the application.
@@ -158,8 +158,17 @@ try {
   await page.locator('#close-code').click(); await page.waitForFunction(() => document.getElementById('person-code').textContent === '');
   const invited = page.locator('.person', { hasText: 'invitee' });
   assert.equal(await invited.locator('.person-state').textContent(), 'Invited'); assert.equal(await invited.locator('.record-meta').textContent(), 'Auditor');
+  // A new code for someone still invited replaces the first, and its dialog
+  // gives the invite's steps.
+  await invited.getByRole('button', { name: 'New code', exact: true }).click(); assert.equal(await page.locator('#delete-title').textContent(), 'Make a new invite code?');
+  await page.locator('#confirm-delete').click(); await page.locator('#code-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#code-title').textContent(), 'New invite code for invitee'); assert.match(await page.locator('#code-steps').textContent(), /they choose I have an invite/);
+  const replaced = invite; invite = await page.locator('#person-code').textContent(); assert.match(invite, /^[A-Za-z0-9_-]{43}$/); assert.notEqual(invite, replaced);
+  await page.locator('#close-code').click();
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
   await page.locator('#show-claim').click(); await page.locator('#claim').waitFor({ state: 'visible' }); assert(!(await page.locator('#signin').isVisible()));
+  await page.locator('#claim-user').fill('invitee'); await page.locator('#claim-code').fill(replaced); await page.locator('#claim-password').fill(inviteePassword); await page.locator('#claim-confirm').fill(inviteePassword); await page.locator('#claim button').click();
+  await page.locator('#notice').filter({ hasText: 'use the newest code' }).waitFor(); await settled();
   // A code cut short is refused on the page before it costs an attempt, and
   // only its field is cleared; a code pasted with spaces around it is accepted.
   let claims = 0; page.on('request', request => { if (request.url() === config.Origin + '/api/invite') claims++; });
@@ -175,6 +184,24 @@ try {
   assert.equal(await page.locator('h1').textContent(), 'Account'); assert.deepEqual(await page.locator('.rail-item:visible').evaluateAll(items => items.map(item => item.dataset.page)), ['account']);
   assert.equal((await page.request.get(config.Origin + '/api/credentials')).status(), 403, 'an auditor reached keys and passwords');
   assert.equal((await page.request.get(config.Origin + '/api/users')).status(), 403, 'an auditor listed accounts');
+  // A reset of an active account: its dialog says to sign in as usual, and the
+  // person does so with their own password, then sets up a new phone with the
+  // code, pasted with spaces around it.
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await fixture('tick');
+  await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users'); await page.locator('#users-panel').waitFor({ state: 'visible' }); await settled();
+  await page.locator('.person', { hasText: 'invitee' }).getByRole('button', { name: 'Reset access', exact: true }).click(); assert.equal(await page.locator('#delete-title').textContent(), 'Reset this person’s access?');
+  await page.locator('#confirm-delete').click(); await page.locator('#code-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#code-title').textContent(), 'New phone code for invitee'); assert.match(await page.locator('#code-steps').textContent(), /sign in as usual/);
+  resetCode = await page.locator('#person-code').textContent(); assert.match(resetCode, /^[A-Za-z0-9_-]{43}$/); await page.locator('#close-code').click();
+  await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
+  await page.locator('#username').fill('invitee'); await page.locator('#password').fill(inviteePassword); await page.locator('#signin button').click();
+  await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
+  assert(await page.locator('#setup-proof').isVisible(), 'a reset account was not asked for its code');
+  await page.locator('#enroll-setup').fill(' ' + resetCode + ' '); await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); await settled();
+  resetSeed = await page.locator('#seed').textContent(); assert.match(resetSeed, /^[A-Z2-7]{32}$/); assert.notEqual(resetSeed, inviteSeed);
+  await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30), resetSeed)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
   console.log('Browser custody: bootstrap, mandatory MFA, phone navigation, code-only step-up, encrypted record UX, invites and roles, restart, replay refusal and failure handling passed');
