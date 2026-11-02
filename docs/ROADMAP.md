@@ -6,7 +6,7 @@ Stages are evidence gates, not delivery dates. Update decisions as we learn.
 text clipboard, bounded display-update profile and optional shared-cgroup RDP
 service plan are implemented. Required actual native/browser/service evidence
 is tracked in `RDP-WORKSPACE-INTEGRATION.md`; the disposable test-VM guide is
-`TEST-SETUP-AZ.md`. The user has no test VMs yet. These additions do not complete
+`TEST-SETUP.md`. These additions do not complete
 the real Windows/browser matrix, production installer, restore or release gates.
 
 1. **Foundation (completed):** independent signed repository with the

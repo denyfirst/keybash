@@ -148,7 +148,7 @@ For manual UI feedback, `scripts/demo.ps1` runs a disposable, opt-in test-only
 preview with simulated terminal/desktop workers. It uses ordinary MFA and owned
 connection APIs, not an installed launcher or a CLI admission exception. This
 does not change the custody-only `serve-lab` behavior or establish real Windows/
-Linux support. See `INTERACTIVE-DEMO-AZ.md` for scope and shutdown instructions.
+Linux support. See `INTERACTIVE-DEMO.md` for scope and shutdown instructions.
 
 Required evidence includes `TestOwnedRemoteLeaseOwnershipReplayExpiryAndRevocation`,
 `TestOwnedRemoteExpiryLimitsAndDelete`, `TestOwnedRemoteSocketEchoLogoutAndLateSetup`,
