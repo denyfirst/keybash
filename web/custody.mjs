@@ -182,6 +182,7 @@ const confirmKinds = {
   connection: { title: 'Delete this connection?', hint: 'The key or password it signs in with stays under Keys & passwords. This cannot be undone.', path: id => `/api/connections/${id}` },
   person: { title: 'Delete this person?', hint: 'Their account goes, with their keys, passwords and connections, and they are signed out at once. This cannot be undone.', path: id => `/api/users/${id}` },
   block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their keys and passwords stay.', path: id => `/api/users/${id}/block`, method: 'POST', word: 'Block' },
+  newcode: { title: 'Make a new invite code?', hint: 'The earlier code stops working at once. You get a new one to give them.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Make new code' },
   reset: { title: 'Reset this person’s access?', hint: 'Their phone stops working and they are signed out. You get a new code. They sign in with their own password and enter it to set up a phone again. Their password, keys and passwords stay, and the code alone opens nothing.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Reset access' },
 };
 function askConfirm(kind, record) {
@@ -412,12 +413,27 @@ function pastedCode(id) {
   $(id).value = ''; throw Object.assign(new Error('code shape'), { status: 'code-shape' });
 }
 // The one-time code for an invite or a reset, shown once to give to the person.
+// With the steps that person takes: an invite is accepted with "I have an
+// invite"; after a reset they sign in as usual and the phone setup asks for
+// the code. Each step is text, with the words they click in bold.
+const codeSteps = {
+  invite: [['Give them the code apart from their username, for example by phone.'], ['On the Keybash sign-in page they choose ', 'I have an invite', ', enter both and choose their own password.'], ['Then they set up their phone. The code works once and expires in 72 hours.']],
+  reset: [['Give them the code by another channel, for example by phone.'], ['They sign in as usual with their own username and password, not with ', 'I have an invite', '.'], ['Keybash then asks for this code and shows a new QR code for their phone. The code works once and expires in 72 hours.']],
+};
+const codeDialogs = {
+  invite: { title: name => `Invite for ${name}`, lead: name => `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
+  newcode: { title: name => `New invite code for ${name}`, lead: name => `This code is shown only now and replaces the earlier one. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
+  reset: { title: name => `New phone code for ${name}`, lead: name => `This code is shown only now. ${name} signs in with their own password, then enters it to set up a new phone. The code alone opens nothing.`, steps: codeSteps.reset },
+};
 function showCode(code, name, kind) {
-  if (!codeOK(code)) throw new Error('invalid code');
-  $('code-title').textContent = kind === 'invite' ? `Invite for ${name}` : `New code for ${name}`;
-  $('code-lead').textContent = kind === 'invite'
-    ? `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`
-    : `This code is shown only now. ${name} needs it with their own password to set up a phone; a person still to accept an invite chooses their password with it.`;
+  if (!codeOK(code) || !Object.hasOwn(codeDialogs, kind)) throw new Error('invalid code');
+  const dialog = codeDialogs[kind];
+  $('code-title').textContent = dialog.title(name); $('code-lead').textContent = dialog.lead(name);
+  $('code-steps').replaceChildren(...dialog.steps.map(parts => {
+    const step = document.createElement('li');
+    parts.forEach((part, i) => { if (i % 2) { const strong = document.createElement('strong'); strong.textContent = part; step.append(strong); } else step.append(part); });
+    return step;
+  }));
   $('person-code').textContent = code; $('code-dialog').showModal();
 }
 function openRole(person) {
@@ -445,7 +461,8 @@ function personRow(person, self) {
   button('Change role', 'secondary', () => openRole(person));
   if (person.state === 'blocked') button('Unblock', 'ghost', () => { void run(async () => { await request(`/api/users/${person.id}/unblock`, 'POST', {}); await loadUsers(); notice(`${person.username} can sign in again.`); }); });
   else button('Block', 'ghost', () => askConfirm('block', record));
-  button(['invited', 'expired'].includes(person.state) ? 'New code' : 'Reset access', 'ghost', () => askConfirm('reset', record));
+  const invited = ['invited', 'expired'].includes(person.state);
+  button(invited ? 'New code' : 'Reset access', 'ghost', () => askConfirm(invited ? 'newcode' : 'reset', record));
   button('Delete', 'ghost destructive', () => askConfirm('person', record));
   return row;
 }
@@ -685,8 +702,8 @@ click('confirm-delete', async () => {
   else if (kind === 'connection') { await loadConnections(); notice('Deleted.'); }
   else {
     await loadUsers();
-    if (kind === 'reset') showCode(reply?.code, name, 'reset');
-    notice(kind === 'person' ? 'Deleted.' : kind === 'block' ? `${name} is blocked and signed out.` : `${name}’s access was reset.`);
+    if (kind === 'reset' || kind === 'newcode') showCode(reply?.code, name, kind);
+    notice(kind === 'person' ? 'Deleted.' : kind === 'block' ? `${name} is blocked and signed out.` : kind === 'newcode' ? `${name} has a new invite code.` : `${name}’s access was reset.`);
   }
 });
 $('cancel-delete')?.addEventListener('click', () => $('delete-dialog').close());
