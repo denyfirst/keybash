@@ -57,7 +57,7 @@ trusted root-owned public catalog metadata at startup; session private keys and
 terminal bytes still pass directly to the worker rather than its parser.
 
 Capacity refusal is authenticated HTTP 503 with fixed `X-Keybash-Capacity: full`
-and a five-second retry hint. Terminal/desktop entry displays a fixed Azerbaijani
+and a five-second retry hint. Terminal/desktop entry displays a fixed English
 busy message, preserves existing sessions and performs no automatic retry.
 Authentication/mutation attempt budgets remain separate. Ready MFA accounts
 may GET `/api/remote/capacity` for configured numbers only, without other owners'

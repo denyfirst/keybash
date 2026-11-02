@@ -5,7 +5,7 @@
 # It never replaces an existing file, unit or account: every check, including
 # the catalog, the TLS pair and the service plan, runs before the first change.
 # The bootstrap code and the instance key's recovery code go to this terminal
-# only. See docs/INSTALL.md and docs/INSTALL-AZ.md.
+# only. See docs/INSTALL.md.
 set -eu
 umask 022
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

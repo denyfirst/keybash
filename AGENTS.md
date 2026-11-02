@@ -1,6 +1,6 @@
 # Working on Keybash
 
-Read `docs/ENGINEERING.md`, `docs/PRODUCT-PLAN-AZ.md`, and
+Read `docs/ENGINEERING.md`, `docs/PRODUCT-PLAN.md`, and
 `docs/SECURITY-INVARIANTS.md` before changing code.
 
 Keybash is exclusively self-hosted. Security comes before convenience.
