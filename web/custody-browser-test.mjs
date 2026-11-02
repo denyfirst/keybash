@@ -32,7 +32,7 @@ async function stepUp(code) { await page.locator('#stepup-dialog').waitFor({ sta
 try {
   await page.goto(config.Origin + '/'); await page.waitForURL(config.Origin + '/login');
   await page.locator('#bootstrap').waitFor({ state: 'visible' });
-  await page.locator('#setup-code').fill(config.Code); await page.locator('#setup-user').fill(config.Username); await page.locator('#setup-password').fill(config.Password); await page.locator('#bootstrap button').click();
+  await page.locator('#setup-code').fill(' ' + config.Code + '  '); await page.locator('#setup-user').fill(config.Username); await page.locator('#setup-password').fill(config.Password); await page.locator('#bootstrap button').click();
   await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
   // Until the second factor is done the page is its card alone: no menu, and Sign out under the card.
   const alone = async () => { assert(!(await page.locator('.rail').isVisible()) && !(await page.locator('.topbar').isVisible()), 'the menu shows before the second factor'); assert(await page.locator('#focus-logout').isVisible(), 'no Sign out under the card'); assert.equal(await page.locator('#focus-account').textContent(), await page.locator('#account').textContent()); };
@@ -160,7 +160,13 @@ try {
   assert.equal(await invited.locator('.person-state').textContent(), 'Invited'); assert.equal(await invited.locator('.record-meta').textContent(), 'Auditor');
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
   await page.locator('#show-claim').click(); await page.locator('#claim').waitFor({ state: 'visible' }); assert(!(await page.locator('#signin').isVisible()));
-  await page.locator('#claim-user').fill('invitee'); await page.locator('#claim-code').fill(invite); await page.locator('#claim-password').fill(inviteePassword); await page.locator('#claim-confirm').fill(inviteePassword); await page.locator('#claim button').click();
+  // A code cut short is refused on the page before it costs an attempt, and
+  // only its field is cleared; a code pasted with spaces around it is accepted.
+  let claims = 0; page.on('request', request => { if (request.url() === config.Origin + '/api/invite') claims++; });
+  await page.locator('#claim-user').fill('invitee'); await page.locator('#claim-code').fill(invite.slice(0, 40)); await page.locator('#claim-password').fill(inviteePassword); await page.locator('#claim-confirm').fill(inviteePassword); await page.locator('#claim button').click();
+  await page.locator('#notice').filter({ hasText: 'code is incomplete' }).waitFor(); assert.equal(claims, 0, 'an incomplete code was sent');
+  assert.equal(await page.locator('#claim-code').inputValue(), ''); assert.equal(await page.locator('#claim-password').inputValue(), inviteePassword);
+  await page.locator('#claim-code').fill('  ' + invite + ' '); await page.locator('#claim button').click();
   await page.waitForURL(config.Origin + '/'); await page.locator('#enroll').waitFor({ state: 'visible' }); await settled();
   assert(!(await page.locator('#setup-proof').isVisible()), 'the invite was asked for again');
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); inviteSeed = await page.locator('#seed').textContent(); assert.match(inviteSeed, /^[A-Z2-7]{32}$/); await settled();
