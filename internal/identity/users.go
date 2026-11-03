@@ -17,6 +17,7 @@ var (
 	errTaken     = errors.New("username taken")
 	errMissing   = errors.New("no such account")
 	errLastAdmin = errors.New("no administrator would remain")
+	errNoPhone   = errors.New("no phone to confirm a new password with")
 )
 
 // updateWhy is update that keeps the reason fn refused with; a failed commit
@@ -210,28 +211,36 @@ func (s *Store) deleteAccount(actor, target string) error {
 		if e != nil {
 			return errMissing
 		}
-		prefix := []byte(a.ID + "/")
-		for _, name := range [][]byte{credentialBucket, connectionBucket} {
-			b := tx.Bucket(name)
-			if b == nil {
-				continue
-			}
-			var keys [][]byte
-			c := b.Cursor()
-			for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
-				keys = append(keys, slices.Clone(k))
-			}
-			for _, k := range keys {
-				if b.Delete(k) != nil {
-					return errRefused
-				}
-			}
+		if e = s.deleteOwned(tx, a.ID); e != nil {
+			return e
 		}
 		if tx.Bucket(nameBucket).Delete(s.nameIndex(a.Username)) != nil || tx.Bucket(accountBucket).Delete([]byte(a.ID)) != nil {
 			return errRefused
 		}
 		return s.anAdminRemains(tx)
 	})
+}
+
+// deleteOwned removes every key, password and connection an account owns.
+func (s *Store) deleteOwned(tx *bolt.Tx, owner string) error {
+	prefix := []byte(owner + "/")
+	for _, name := range [][]byte{credentialBucket, connectionBucket} {
+		b := tx.Bucket(name)
+		if b == nil {
+			continue
+		}
+		var keys [][]byte
+		c := b.Cursor()
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			keys = append(keys, slices.Clone(k))
+		}
+		for _, k := range keys {
+			if b.Delete(k) != nil {
+				return errRefused
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Store) anAdminRemains(tx *bolt.Tx) error {
@@ -288,7 +297,105 @@ func resetAccess(now time.Time) (func(*durableAccount) error, *string) {
 	return func(a *durableAccount) error {
 		var e error
 		a.Seed, a.Recovery, a.LastCounter = "", nil, -1
+		a.PasswordReset, a.PasswordResetEnd = nil, 0 // it needed the phone just cleared
 		*code, e = issueEnrollment(a, now)
 		return e
 	}, code
+}
+
+// passwordReset gives an account a one-time code for choosing a new password,
+// for a holder who forgot theirs but keeps their phone. The password, phone
+// and recovery codes stay until the code is used, and it works only with the
+// holder's own phone code or a recovery code: the administrator who receives
+// it still cannot become the account. An account without a phone, invited or
+// blocked has nothing to confirm it with.
+func passwordReset(now time.Time) (func(*durableAccount) error, *string) {
+	code := new(string)
+	return func(a *durableAccount) error {
+		if a.Seed == "" || a.Invited || a.Disabled {
+			return errNoPhone
+		}
+		raw, e := token()
+		if e != nil {
+			return errRefused
+		}
+		digest, _ := tokenID(raw)
+		a.PasswordReset, a.PasswordResetEnd, *code = digest[:], now.Add(enrollmentLife).Unix(), raw
+		return nil
+	}, code
+}
+
+// resetPassword sets the password a holder chose with an administrator's
+// reset code and their own factor, once. A wrong name or code is refused
+// before the factor is looked at, so nobody without the code can spend the
+// holder's factor budget; a wrong factor after a right code spends it, as at
+// sign-in. The code is spent, and every session ends, when it succeeds.
+func (s *Store) resetPassword(name, code, factor string, hash PasswordHash, now time.Time) error {
+	digest, ok := tokenID(code)
+	if !ok || !hash.valid() {
+		return errRefused
+	}
+	accepted := false
+	e := s.update(func(tx *bolt.Tx) error {
+		if _, e := s.meta(tx); e != nil {
+			return e
+		}
+		id := tx.Bucket(nameBucket).Get(s.nameIndex(name))
+		if id == nil {
+			return errRefused
+		}
+		a, e := s.readAccount(tx, string(id))
+		if e != nil || a.Username != name || a.Invited || a.Disabled || a.Seed == "" || len(a.PasswordReset) != 32 ||
+			now.Unix() >= a.PasswordResetEnd || subtle.ConstantTimeCompare(digest[:], a.PasswordReset) != 1 || !factorBudget(&a, now) {
+			return errRefused
+		}
+		if accepted = s.spendFactor(&a, factor, now); accepted {
+			a.Hash, a.PasswordReset, a.PasswordResetEnd = storedPassword(hash), nil, 0
+			a.Revision++
+		}
+		return s.saveAccount(tx, a)
+	})
+	if e != nil || !accepted {
+		return errRefused
+	}
+	return nil
+}
+
+// startOverAccount sends an account back to an invite when its holder lost
+// both password and phone. Its keys, passwords and connections are deleted in
+// the same transaction, so the administrator who receives the new invite code
+// never reaches what the account held. Its ID, username and role stay; a
+// blocked account stays blocked. hash is of a random secret nobody keeps.
+func (s *Store) startOverAccount(actor, target string, hash PasswordHash, now time.Time) (string, error) {
+	var code string
+	e := s.updateWhy(func(tx *bolt.Tx) error {
+		if actor == target {
+			return errRefused
+		}
+		by, e := s.readAccount(tx, actor)
+		if e != nil || !activeAdmin(by) {
+			return errRefused
+		}
+		a, e := s.readAccount(tx, target)
+		if e != nil {
+			return errMissing
+		}
+		if e = s.deleteOwned(tx, a.ID); e != nil {
+			return e
+		}
+		a.Hash, a.Invited, a.Seed, a.Recovery, a.LastCounter = storedPassword(hash), true, "", nil, -1
+		a.PasswordReset, a.PasswordResetEnd = nil, 0
+		if code, e = issueEnrollment(&a, now); e != nil {
+			return errRefused
+		}
+		a.Revision++
+		if s.saveAccount(tx, a) != nil {
+			return errRefused
+		}
+		return s.anAdminRemains(tx)
+	})
+	if e != nil {
+		return "", e
+	}
+	return code, nil
 }

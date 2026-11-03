@@ -162,19 +162,7 @@ func (s *Store) consumeFactor(id string, revision uint64, code string, now time.
 		if !factorBudget(&a, now) {
 			return errRefused
 		}
-		if counter, ok := factorCounter(a.Seed, code, now, a.LastCounter); ok {
-			a.LastCounter = counter
-			accepted = true
-		} else if len(code) == 22 {
-			digest := s.recoveryDigest(id, code)
-			for i, h := range a.Recovery {
-				if subtle.ConstantTimeCompare(h[:], digest[:]) == 1 {
-					a.Recovery = append(a.Recovery[:i], a.Recovery[i+1:]...)
-					accepted = true
-					break
-				}
-			}
-		}
+		accepted = s.spendFactor(&a, code, now)
 		// Invalid attempts also commit their durable budget; returning the
 		// refusal from inside this transaction would roll that budget back.
 		return s.saveAccount(tx, a)
@@ -183,6 +171,26 @@ func (s *Store) consumeFactor(id string, revision uint64, code string, now time.
 		return errRefused
 	}
 	return nil
+}
+
+// spendFactor accepts the current phone code, strictly after the last one
+// used, or spends one recovery code, and records either on a.
+func (s *Store) spendFactor(a *durableAccount, code string, now time.Time) bool {
+	if counter, ok := factorCounter(a.Seed, code, now, a.LastCounter); ok {
+		a.LastCounter = counter
+		return true
+	}
+	if len(code) != 22 {
+		return false
+	}
+	digest := s.recoveryDigest(a.ID, code)
+	for i, h := range a.Recovery {
+		if subtle.ConstantTimeCompare(h[:], digest[:]) == 1 {
+			a.Recovery = append(a.Recovery[:i], a.Recovery[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 func (s *Store) enroll(id string, revision uint64, seed, code string, now time.Time, replace bool) (recoveryCodes, error) {
 	accepted := false
@@ -220,6 +228,7 @@ func (s *Store) replacePassword(id string, revision uint64, next PasswordHash) e
 			return errRefused
 		}
 		a.Hash = storedPassword(next)
+		a.PasswordReset, a.PasswordResetEnd = nil, 0
 		a.Revision++
 		return s.saveAccount(tx, a)
 	})

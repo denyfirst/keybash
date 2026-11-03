@@ -400,6 +400,7 @@ func (s *Store) resetFactors(tx *bolt.Tx, now time.Time) ([]SetupCode, error) {
 		}
 		a.Revision++
 		a.Seed, a.Recovery, a.LastCounter = "", nil, -1
+		a.PasswordReset, a.PasswordResetEnd = nil, 0 // a code from before the backup opens nothing
 		code, e := issueEnrollment(&a, now)
 		if e != nil || s.saveAccount(tx, a) != nil {
 			return nil, errRefused

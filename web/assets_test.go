@@ -97,7 +97,7 @@ func TestOneTimeCodesAreNeverPasswordFields(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"setup-code", "claim-code", "enroll-setup", "enrollment-code", "factor-code", "stepup-code"} {
+	for _, want := range []string{"setup-code", "claim-code", "recover-code", "recover-phone-code", "enroll-setup", "enrollment-code", "factor-code", "stepup-code"} {
 		if !found[want] {
 			t.Errorf("the one-time code field %s was not found", want)
 		}

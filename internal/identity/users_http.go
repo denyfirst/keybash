@@ -8,6 +8,7 @@ import (
 const (
 	userAttempts   = 20 // administrator changes per administrator and minute
 	inviteAttempts = 5  // invite claims per submitted username and minute
+	resetAttempts  = 5  // password resets per submitted username and minute
 )
 
 // randomPassword is the hash of a secret nobody keeps, for an account whose
@@ -131,6 +132,38 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 				Code string `json:"code"`
 			}{*code}
 		}
+	case action == "password" && r.Method == "POST":
+		if _, ok := readFields(w, r, 1024); !ok {
+			refuse(w, 400)
+			return
+		}
+		change, code := passwordReset(now)
+		if e = l.store.changeAccount(actor, target, change); e == nil {
+			reply = struct {
+				Code string `json:"code"`
+			}{*code}
+		}
+	case action == "restart" && r.Method == "POST":
+		if _, ok := readFields(w, r, 1024); !ok {
+			refuse(w, 400)
+			return
+		}
+		if !l.slot(r.Context()) {
+			identityError(w, errLimited)
+			return
+		}
+		hash, he := randomPassword()
+		<-l.derive
+		if he != nil {
+			refuse(w, 503)
+			return
+		}
+		var code string
+		if code, e = l.store.startOverAccount(actor, target, hash, now); e == nil {
+			reply = struct {
+				Code string `json:"code"`
+			}{code}
+		}
 	case action == "" && r.Method == "DELETE":
 		if _, ok := readFields(w, r, 1024); !ok {
 			refuse(w, 400)
@@ -152,7 +185,7 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 	}
 	l.mu.Unlock()
 	switch {
-	case e == errTaken || e == errLastAdmin:
+	case e == errTaken || e == errLastAdmin || e == errNoPhone:
 		refuse(w, 409)
 	case e == errMissing:
 		refuse(w, 404)
@@ -212,6 +245,59 @@ func (l *Lab) inviteHTTP(w http.ResponseWriter, r *http.Request) {
 	// The invite is the administrator's setup code, just proved.
 	newID, _ := tokenID(raw)
 	l.sessions[newID].setupProved = true
+	http.SetCookie(w, sessionCookie(raw, int(absoluteLife.Seconds())))
+	w.WriteHeader(204)
+}
+
+// passwordResetHTTP lets a holder who forgot their password choose a new one
+// with their administrator's reset code and their own factor: the current
+// phone code or a recovery code. Like a claim, every attempt costs one
+// Argon2id derivation first and counts per source and per name. Success ends
+// every other session of the account and signs this browser in: the factor
+// was just proved, as at sign-in.
+func (l *Lab) passwordResetHTTP(w http.ResponseWriter, r *http.Request) {
+	fields, ok := readFields(w, r, 16*1024, "username", "code", "factor", "password")
+	if !ok || !usernameInput(fields["username"]) || !passwordInput(fields["password"]) || len(fields["factor"]) > 64 {
+		refuse(w, 400)
+		return
+	}
+	defer clear(fields)
+	if !l.slot(r.Context()) {
+		identityError(w, errLimited)
+		return
+	}
+	defer func() { <-l.derive }()
+	source := l.source(r)
+	l.mu.Lock()
+	allowed := !l.closed && (source == "" || l.attemptLocked("source:"+source, sourceAttempts)) && l.attemptLocked("reset:"+fields["username"], resetAttempts)
+	l.mu.Unlock()
+	if !allowed {
+		identityError(w, errLimited)
+		return
+	}
+	hash, e := HashPassword(fields["password"])
+	if e != nil {
+		refuse(w, 400)
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed || r.Context().Err() != nil || l.store.resetPassword(fields["username"], fields["code"], fields["factor"], hash, l.now()) != nil {
+		refuse(w, 401)
+		return
+	}
+	if !l.refreshLocked(fields["username"]) {
+		refuse(w, 503)
+		return
+	}
+	raw, e := l.issueLocked(fields["username"], requestToken(r))
+	if e != nil {
+		identityError(w, e)
+		return
+	}
+	newID, _ := tokenID(raw)
+	l.sessions[newID].stage = "ready"
+	l.sessions[newID].reauthUntil = l.now().Add(freshProof)
 	http.SetCookie(w, sessionCookie(raw, int(absoluteLife.Seconds())))
 	w.WriteHeader(204)
 }
