@@ -306,10 +306,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	return refused
 }
 
+// sshOnly reports whether no server needs the RDP runtime. A file with no
+// server is valid: servers are added on the Servers page.
 func sshOnly(targets []identity.RemoteTarget) bool {
-	if len(targets) == 0 {
-		return false
-	}
 	for _, target := range targets {
 		if target.Protocol != "ssh" {
 			return false

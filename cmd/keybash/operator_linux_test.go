@@ -81,6 +81,23 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 			t.Fatalf("target networks %q: accepted is not %v", networks, want)
 		}
 	}
+	// A file with no server is valid: servers are added on the Servers page,
+	// inside networks root names, so it offers no host network of its own.
+	empty := filepath.Join(base, "empty.json")
+	if os.WriteFile(empty, []byte(`{"version":1,"protected_networks":[],"targets":[]}`), 0644) != nil { // #nosec G306 -- public root-owned fixture catalog, not credentials.
+		t.Fatal("fixture empty catalog failed")
+	}
+	check.Reset()
+	if run([]string{"check-targets", "--config", empty, "--ssh-only"}, nil, &check) != nil || !strings.HasPrefix(check.String(), "Target configuration valid (0 servers;") {
+		t.Fatal("a server file with no server refused")
+	}
+	printed.Reset()
+	if run([]string{"check-targets", "--config", empty, "--print-host-networks"}, nil, &printed) != nil || printed.String() != "\n" {
+		t.Fatal("a server file with no server offered host networks")
+	}
+	if run([]string{"check-targets", "--config", empty, "--target-networks", "192.168.1.0/24"}, nil, &bytes.Buffer{}) != nil {
+		t.Fatal("named networks refused for a server file with no server")
+	}
 	keyFile := filepath.Join(keyDir, "instance.key")
 	common := []string{"--data", data, "--key-file", keyFile}
 	command := func(args ...string) *exec.Cmd {

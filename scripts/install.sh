@@ -171,6 +171,9 @@ plan_args="--gateway-uid=${gateway_id} --gateway-gid=${gateway_id} --worker-uid=
 # shellcheck disable=SC2086 # plan_args holds only the integers and digest above
 "${stage}/bin/keybash-service-plan" ${plan_args} "$@" --output="${work}/preview" >/dev/null ||
   refuse 'service plan refused (listener, networks, server name or limits)'
+# The plan renders the kernel boundary only when it is given networks, so this
+# is checked on what will be installed, whatever led here.
+grep -qx 'IPAddressDeny=0.0.0.0/0 ::/0' "${work}/preview/keybash-gateway.service" || refuse 'the service plan has no network boundary'
 
 # --- Install: the first change -------------------------------------------------
 changed=yes
