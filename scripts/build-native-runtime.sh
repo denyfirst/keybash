@@ -22,8 +22,17 @@ test ! -e "${lab}/guacamole-server-1.6.0"
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
   https://github.com/FreeRDP/FreeRDP/releases/download/3.32.2/freerdp-3.32.2.tar.gz -o "${lab}/freerdp.tar.gz"
 printf '%s  %s\n' e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c "${lab}/freerdp.tar.gz" | sha256sum -c -
-curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
-  https://archive.apache.org/dist/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz -o "${lab}/guacamole.tar.gz"
+# The digest below, not the host, pins the file: Apache's permanent archive
+# first, then its download server, which holds the same release while it is
+# current. An unreachable host only moves on to the next one.
+for url in https://archive.apache.org/dist/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz \
+  https://downloads.apache.org/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz; do
+  if curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 --connect-timeout 30 \
+    "${url}" -o "${lab}/guacamole.tar.gz"; then
+    break
+  fi
+  rm -f -- "${lab}/guacamole.tar.gz"
+done
 printf '%s  %s\n' 8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b "${lab}/guacamole.tar.gz" | sha256sum -c -
 tar -xf "${lab}/freerdp.tar.gz" -C "${lab}"
 tar -xf "${lab}/guacamole.tar.gz" -C "${lab}"
