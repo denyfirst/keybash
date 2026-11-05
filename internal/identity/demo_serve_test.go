@@ -144,6 +144,7 @@ func TestInteractiveDemoServe(t *testing.T) {
 			t.Fatal("demo connection failed")
 		}
 	}
+	openTo(t, lab, account.ID)
 
 	server.Config.Handler = lab
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{demoServeCertificate(t, endpoint.Addr())}}

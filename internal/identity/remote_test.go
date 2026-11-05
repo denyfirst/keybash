@@ -103,6 +103,7 @@ func remoteFixtureWithLimits(t *testing.T, origin string, limits sessionlimits.L
 		t.Fatal("remote constructor refused")
 	}
 	t.Cleanup(func() { _ = l.Close() })
+	openTo(t, l, mustLookup(t, store, "alice").ID)
 	c := &custodyClient{t: t, l: l}
 	c.login()
 	c.session("challenge")

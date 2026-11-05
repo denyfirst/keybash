@@ -58,7 +58,7 @@
 <section id="servers-panel" hidden>
 <p id="server-networks" class="hint networks-note"></p>
 <div id="servers" class="record-list"></div>
-<p class="hint page-foot">A server added here is reachable only inside the networks set on the Keybash server, and only by the people you choose: nobody, you included, until you do. Its identity (SSH host key) is pinned, and Keybash refuses the server if that changes until you accept the new one.</p>
+<p class="hint page-foot">A server is reachable only inside the networks set on the Keybash server, and only by the people an administrator chooses: nobody, administrators included, until they do. Its identity (SSH host key or RDP certificate) is pinned, and Keybash refuses the server if that changes until an administrator accepts the new one.</p>
 </section>
 <section id="users-panel" hidden>
 <div id="people" class="record-list"></div>
@@ -72,13 +72,6 @@
 <dt>Your secrets</dt><dd>Encrypted on this server under its own key. A secret opens only after your phone confirms it.</dd>
 <dt>Sent to us</dt><dd>Nothing. This copy reports to no one and never checks for updates by itself.</dd>
 </dl></article>
-<article class="install-card" id="install-add"><div class="install-card-head"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3.5" y="4.5" width="17" height="11" rx="1.6"/><path d="M9 19.5h6M12 15.5v4M12 7.5v5M9.5 10h5"/></svg></span><h2>Add a server</h2></div>
-<p class="hint">Administrators add SSH servers on the <a href="/servers">Servers</a> page, with no restart, and choose who may use each one. The server file below is the other way, on the Keybash server as root: everyone with a key or password can use what it lists. The command reads the server’s identity, prints its fingerprint to compare on that server’s own console, and adds it only once you confirm. RDP servers go into <code>/etc/keybash/targets.json</code> by hand.</p>
-<ol class="command-steps">
-<li><p>Add the server by its address and give it a name:</p><output id="command-add">sudo /usr/local/libexec/keybash/keybash server-add \
-  --config=/etc/keybash/targets.json --name="Web server" --host=192.0.2.10</output><button id="copy-add" type="button" class="secondary">Copy</button></li>
-<li><p>Restart Keybash so it reads the new list. Open sessions close.</p><output id="command-restart">sudo systemctl restart keybash-ssh-manager keybash-gateway</output><button id="copy-restart" type="button" class="secondary">Copy</button></li>
-</ol></article>
 <article class="install-card" id="install-update"><div class="install-card-head"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/></svg></span><h2>Update</h2></div>
 <p class="hint">Updating stops Keybash for a moment, so open sessions close. Your settings, keys, passwords and accounts stay. The previous version is copied to <code>/var/backups/keybash</code> first and put back by itself if the new one does not start.</p>
 <ol class="command-steps">

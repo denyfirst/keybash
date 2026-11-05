@@ -53,21 +53,26 @@ its private key was never written to disk (see "Test HTTPS" below).
 
 The browser then shows no warning.
 
-### 3. The server list
+### 3. The networks your servers are in
 
-Write the servers to connect to in `targets.json` (the format is in
-`OPERATOR-CATALOG-LAB.md`). Take each SSH server's host key and each Windows
-server's RDP certificate separately, over a channel you trust. After the
-install, administrators add SSH servers on the Servers page, and
-`keybash server-add` adds them to this file without hand-written JSON
-("Adding a server later").
+Servers are added after the install, on the Servers page. At the install you
+name only the networks they are in, with `--target-networks`, for example
+`192.168.1.0/24`. The gateway can reach nothing else: the kernel refuses it
+every other address, and the page adds servers inside these networks only.
+No website setting can widen them; that takes `upgrade.sh` on the server.
+When you leave them out, the installer stops and suggests this host's own
+network.
+
+An existing `targets.json` (the format is in `OPERATOR-CATALOG-LAB.md`) can
+still be given with `--catalog`: its servers move into the Servers page at the
+first start, and their addresses become the default networks.
 
 ### 4. Install, as root
 
 For use on this machine only, through a tunnel:
 
 ```sh
-sudo sh scripts/install.sh --stage="$HOME/keybash-stage" --catalog="$HOME/targets.json" \
+sudo sh scripts/install.sh --stage="$HOME/keybash-stage" --target-networks=192.168.1.0/24 \
   --tls-cert="$HOME/keybash-tls/cert.pem" --tls-key="$HOME/keybash-tls/key.pem"
 ```
 
@@ -75,7 +80,7 @@ So everyone in the office can connect without a tunnel. It is open only to
 the networks you name (`LAN-INGRESS.md`):
 
 ```sh
-sudo sh scripts/install.sh --stage="$HOME/keybash-stage" --catalog="$HOME/targets.json" \
+sudo sh scripts/install.sh --stage="$HOME/keybash-stage" --target-networks=192.168.1.0/24 \
   --tls-cert="$HOME/keybash-tls/cert.pem" --tls-key="$HOME/keybash-tls/key.pem" \
   --listen=192.168.1.10:8443 --allow-from=192.168.1.0/24 --server-name=keybash.lan
 ```
@@ -89,11 +94,6 @@ At the end the terminal shows two codes, **once**:
   Without it no backup can be restored.
 
 Never put these codes in a chat, a screenshot or notes.
-
-The gateway can then reach only the servers in `targets.json`; the kernel
-refuses it every other address. To allow a whole network for servers you add
-later, on the Servers page or with `server-add`, add
-`--target-networks=192.168.1.0/24` (it must hold every server in the list).
 
 ### 5. First sign-in
 
@@ -148,11 +148,11 @@ programs and units.
 | Option | Meaning |
 |---|---|
 | `--stage=/abs/stage` | from `build-stage.sh` (required) |
-| `--catalog=/abs/targets.json` | the server catalog (`OPERATOR-CATALOG-LAB.md`, required) |
+| `--catalog=/abs/targets.json` | an existing server file (`OPERATOR-CATALOG-LAB.md`); its servers move into the Servers page at the first start. Optional |
 | `--tls-cert=…`, `--tls-key=…` | the gateway's HTTPS pair (required) |
 | `--listen=IP:PORT` | default `127.0.0.1:8443`; another address needs `--allow-from` (`LAN-INGRESS.md`) |
 | `--allow-from=NETS`, `--server-name=NAME` | exposed listener only |
-| `--target-networks=NETS` | the networks the gateway may reach, such as `192.168.1.0/24`; the kernel denies every other address to its unit. Default: one host network per catalog server. Each must hold every catalog server and touch no protected network, loopback, link-local or metadata address |
+| `--target-networks=NETS` | the networks the gateway may reach, such as `192.168.1.0/24`; the kernel denies every other address to its unit. Required without `--catalog`; with one, the default is one host network per server in it. Each must hold every server in the file and touch no protected network, loopback, link-local or metadata address |
 | `--cpu-percent`, `--memory-mib`, `--tasks` | aggregate limits, defaults 200, 1024, 512 |
 | `--gateway-id`, `--worker-id` | otherwise picked |
 
@@ -236,44 +236,25 @@ example after a reinstall, once compared on the console; open sessions end and
 each person accepts it again on their connection) and **Remove** (open
 sessions end; connections to it show as unavailable).
 
-The page offers adding only when the gateway has target networks
-(`--target-networks`, set at install or with `upgrade.sh`), and only inside
-them; a server added earlier that is outside them now stays listed but
-unreachable. Servers from `targets.json` are listed too: they change only on
-the host, and for now everyone with a key or password can use them.
+The page adds servers only inside the gateway's target networks
+(`--target-networks`, set at install or with `upgrade.sh`); a server added
+earlier that is outside them now stays listed but unreachable. Auditors see
+the page read-only. RDP servers cannot be added on the page yet; one in an
+existing `targets.json` moves in like the others.
 
-On the host, as root, `server-add` adds a server to `targets.json` instead:
+### Servers from `targets.json`
 
-```sh
-sudo /usr/local/libexec/keybash/keybash server-add --config=/etc/keybash/targets.json \
-  --name="Web server" --host=192.168.1.20 --port=22
-sudo systemctl restart keybash-ssh-manager keybash-gateway
-```
+At the first start of this version, every server in `/etc/keybash/targets.json`
+moves into the Servers page once:
 
-Compare the printed fingerprint with
-`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on that server's own
-console, type `yes` if they match, then restart Keybash so it reads the list;
-open sessions close.
+- It keeps its ID, so every connection to it stays approved.
+- Exactly the people who already had a connection to it can use it; nobody
+  else, administrators included.
+- From then on it is managed on the page like any other. Removing it there is
+  remembered, so the file never brings it back. A server added to the file
+  later moves in at the next start, open to nobody.
 
-`keybash server-add --config=/etc/keybash/targets.json --name=… --host=IP
-[--port=22] [--fingerprint=SHA256:…]`, as root, adds one SSH server by IP
-without hand-written JSON:
-
-- It first checks the name and address against the catalog with a stand-in key.
-  Protected networks, loopback, link-local and an address and port already
-  listed are refused without any connection.
-- It then reads the server's Ed25519 host key over an SSH handshake that
-  stops at the key. It offers no other key type and never authenticates.
-- It prints the fingerprint and the command to compare it on the server's
-  console. It changes nothing until the operator types `yes`, or passes the
-  `--fingerprint` they compared.
-- The catalog is replaced through `operatorconfig.ReplaceCatalog`:
-  - as root;
-  - only if its bytes are still those it read;
-  - only with a catalog that loads;
-  - by writing a root-owned 0644 file beside it and renaming it over.
-- The services read the catalog at start, so the command ends by naming the
-  restart, which closes open sessions.
+The file is still read for its protected networks and session capacity.
 
 ## Upgrading
 

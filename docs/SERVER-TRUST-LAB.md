@@ -12,10 +12,11 @@ The local operator still supplies immutable `RemoteTarget` entries: stable ID,
 label, protocol, guarded hostname/port/approved IP pins and an independently
 approved SSH public key or RDP leaf certificate. The browser cannot add a host,
 IP, port, key, worker URL or network permission. There is no discovery scan,
-unauthenticated key probe or trust-on-first-use fallback. The one key read is the
-operator's own `keybash server-add` (see `INSTALL.md`): once, as root, outside
-the services, before approval, and only after the address passes the
-catalog's network checks; the operator compares and confirms it. Reviewing metadata
+unauthenticated key probe or trust-on-first-use fallback. The one key read is an
+administrator's scan on the Servers page (see `INSTALL.md`): inside the target
+networks only, through the target guard, after a fresh phone code; the
+administrator compares the fingerprint on the server's console, and the key is
+read again and must match when the server is added. Reviewing metadata
 performs no DNS, TCP, SSH, RDP or credential-worker operation.
 
 A ready MFA account can select a configured server and inspect its hostname,

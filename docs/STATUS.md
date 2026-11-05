@@ -57,11 +57,12 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   the server's console, and it is read again and pinned when added. Nobody
   can use a new server until an administrator chooses who may; taking someone
   off, a new key or removing the server ends open sessions at once.
-- An operator catalog on the host also pins SSH host keys and RDP
-  certificates; `keybash server-add` adds to it. Its servers are open to
-  everyone with a key or password until access lists cover them too. Changed
-  identities block the connection until the owner accepts them again
-  (`SERVER-TRUST-LAB.md`, `OPERATOR-CATALOG-LAB.md`, `INSTALL.md`).
+- Every server has an access list, auditors read the page, and nothing is
+  open to everyone. Servers in an older `targets.json` move into the page once
+  at the first start, open to exactly the people who already connect to them.
+  A new install needs no server file: it names only the networks servers are
+  in. Changed identities block the connection until the owner accepts them
+  again (`SERVER-TRUST-LAB.md`, `INSTALL.md`).
 - Dials go to the pinned addresses only, with DNS answers checked and
   metadata, loopback and protected networks refused.
 
@@ -97,9 +98,8 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   maintainer's own review do not count as one.
 - **The audit record** for auditors: administrator actions, who connected where
   and when, and a readable log of typed command lines.
-- **Access lists for the servers in the operator catalog**, an auditor's view
-  of servers and access, RDP servers from the web, and shared keys a user
-  connects with without seeing them.
+- **Adding RDP servers on the Servers page**, and shared keys a user connects
+  with without seeing them.
 - **SFTP**, an SSH bastion or jump host, and an RDP domain field.
 - **Online or scheduled backups**, a passphrase on the backup file, and instance
   key rotation.

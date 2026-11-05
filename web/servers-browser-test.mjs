@@ -32,9 +32,10 @@ try {
   stage = 'servers page';
   await page.locator('.rail-item[data-page=servers]').click(); await page.waitForURL(config.Origin + '/servers'); await page.locator('#servers-panel').waitFor({ state: 'visible' }); await settled();
   await row('Catalog box').waitFor();
-  assert.equal(await row('Catalog box').getAttribute('data-source'), 'file');
-  assert.match(await row('Catalog box').textContent(), /From the server file/);
-  assert.equal(await row('Catalog box').locator('button').count(), 0, 'a server from the file can be changed on the page');
+  // The server from the file moved into the list with nobody on it, and is
+  // managed here like any other.
+  assert.match(await row('Catalog box').textContent(), /Nobody can use it yet/, 'a server from the file came open to people');
+  assert.equal(await row('Catalog box').getByRole('button', { name: 'Who can use it', exact: true }).count(), 1, 'a server from the file cannot be managed here');
   assert.match(await page.locator('#server-networks').textContent(), /inside 10\.20\.0\.0\/24/);
   assert(await page.locator('#add-server').isVisible(), 'no Add server button');
 
@@ -71,7 +72,8 @@ try {
   stage = 'connection form';
   await page.locator('.rail-item[data-page=connections]').click(); await page.waitForURL(config.Origin + '/'); await settled();
   const options = await page.locator('#connection-target option').allTextContents();
-  assert(options.includes('Build box · SSH') && options.includes('Catalog box · SSH'), 'the server given to alice is not offered');
+  assert(options.includes('Build box · SSH'), 'the server given to alice is not offered');
+  assert(!options.includes('Catalog box · SSH'), 'a server nobody gave alice is offered');
 
   stage = 'remove';
   await page.locator('.rail-item[data-page=servers]').click(); await page.waitForURL(config.Origin + '/servers'); await row('Build box').waitFor(); await settled();

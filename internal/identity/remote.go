@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/netip"
 	"slices"
@@ -59,10 +58,9 @@ type remoteConfig struct {
 	limits  sessionlimits.Limits
 	sockets map[string]int
 	ssh     SSHWorker
-	// targets is every server a lease can reach: the operator catalog, fixed
-	// for the process, and the web servers, rebuilt on each change
-	// (reloadServersLocked). access lists who may use each web server.
-	targets, catalog    map[string]RemoteTarget
+	// targets is every server a lease can reach, rebuilt from the store on
+	// each change (reloadServersLocked); access lists who may use each.
+	targets             map[string]RemoteTarget
 	access              map[string]map[string]bool
 	networks, protected []netip.Prefix // see TargetNetworks
 	scan                func(context.Context, *targetguard.NamedTarget) (ssh.PublicKey, error)
@@ -80,9 +78,11 @@ type remoteLease struct {
 
 // NewRemoteLab adds ownership authorization to the existing loopback TLS lab.
 // Stock SSH uses the guarded/pinned connector. A nil RDP launcher refuses RDP.
-// The catalog targets are immutable for this process; administrators add web
-// servers beside them (see TargetNetworks). Restart kills every pending and
-// active lease. Production isolation and audit remain gates.
+// targets are the operator's server file: each moves into the store's server
+// list once (importServers). From then on every server is managed on the
+// Servers page and reached only by the accounts on its access list. Restart
+// kills every pending and active lease. Production isolation and audit
+// remain gates.
 func NewRemoteLab(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, options ...Option) (*Lab, error) {
 	return NewRemoteLabWithLimits(origin, store, targets, worker, rdp, sessionlimits.Default(), options...)
 }
@@ -90,12 +90,14 @@ func NewRemoteLab(origin string, store *Store, targets []RemoteTarget, worker SS
 // NewRemoteLabWithLimits copies an administrator-selected immutable capacity.
 // Browser requests cannot change it; restart revokes old sessions and leases.
 func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, limits sessionlimits.Limits, options ...Option) (*Lab, error) {
-	if !limits.Valid() || len(targets) == 0 || len(targets) > 256 {
+	if !limits.Valid() || len(targets) > 256 {
 		return nil, errRefused
 	}
-	config := &remoteConfig{limits: limits, targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease)}
+	config := &remoteConfig{limits: limits, targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease), scan: scanHostKey}
+	seen := make(map[string]bool, len(targets))
+	var addresses []netip.Addr
 	for _, t := range targets {
-		if !validID(t.ID) || !label(t.Name, 160, false) || t.Target == nil || t.Target.Hostname() == "" || config.targets[t.ID].ID != "" {
+		if !validID(t.ID) || !label(t.Name, 160, false) || t.Target == nil || t.Target.Hostname() == "" || seen[t.ID] {
 			return nil, errRefused
 		}
 		switch t.Protocol {
@@ -120,18 +122,32 @@ func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget,
 		default:
 			return nil, errRefused
 		}
-		t.Identity = append([]byte(nil), t.Identity...)
-		config.targets[t.ID] = t
+		seen[t.ID] = true
+		for _, value := range t.Target.Snapshot().Addresses {
+			if addr, e := netip.ParseAddr(value); e == nil {
+				addresses = append(addresses, addr)
+			}
+		}
 	}
-	config.catalog, config.scan = maps.Clone(config.targets), scanHostKey
 	l, e := NewPersistent(origin, store, options...)
 	if e != nil {
 		return nil, e
 	}
+	// The file's servers move into the list before anything is served; a
+	// start that cannot move them does not start.
+	if store.importServers(targets, time.Now()) != nil {
+		_ = l.Close()
+		return nil, errRefused
+	}
 	l.mu.Lock()
+	// Without target networks the gateway reaches exactly the file's servers,
+	// as an install that names none does.
 	config.networks, config.protected = l.networks, l.protected
+	if config.networks == nil {
+		config.networks = targetguard.HostNetworks(addresses)
+	}
 	l.remote = config
-	// A store whose servers cannot be read starts with the catalog alone.
+	// A store whose servers cannot be read starts with none.
 	_ = l.reloadServersLocked()
 	l.mu.Unlock()
 	return l, nil
@@ -506,7 +522,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 403
 			return
 		}
-		// The identity is the operator catalog's pin; the person confirms the
+		// The identity is the server list's pin; the person confirms the
 		// snapshot they were shown (approval), not a fingerprint they retype.
 		if !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
 			status = 409

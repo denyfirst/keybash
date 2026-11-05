@@ -5,13 +5,18 @@ bounded JSON. `keybash check-targets --config /absolute/path/targets.json`
 performs offline validation and prints only a count. It opens no database,
 listener, DNS lookup, target TCP stream or worker. No dependency changes.
 
+Since 6 November 2026 servers are managed on the Servers page. The file is
+optional: its servers move into that page once, at the first start of the
+gateway (`INSTALL.md`, `adr/0005-web-managed-servers.md`), and it is still read
+for its protected networks and capacity.
+
 ## Schema and authority
 
 Version 1 requires `version`, `protected_networks`, and `targets`. The optional
 strict `capacity` member selects finite total/per-owner admission; omission
 keeps defaults. See `SESSION-CAPACITY.md` for schema, gates and limits.
-The complete file is at most 256 KiB. There are 1–64 canonical protected CIDRs,
-1–256 targets and 1–16 canonical IP pins per target. Duplicate IDs, CIDRs and
+The complete file is at most 256 KiB. There are 0–64 canonical protected CIDRs,
+0–256 targets and 1–16 canonical IP pins per target. Duplicate IDs, CIDRs and
 IPs refuse. A bad entry refuses the whole snapshot, with a fixed error and
 no partial catalog. JSON duplicates (including escaped keys), case variants,
 unknown fields, trailing values, null/coerced values, invalid UTF-8 and lone

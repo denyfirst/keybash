@@ -52,6 +52,10 @@ try {
   stage = 'sample connections';
   const state = await (await account.request.get(config.Origin + '/api/session')).json();
   const headers = {Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf};
+  // Nobody may use a server until an administrator puts them on it, the
+  // administrator included; the first account is one, as on the Servers page.
+  const self = (await (await account.request.get(config.Origin + '/api/users')).json()).self;
+  for (const target of [config.SSH, config.RDP]) assert.equal((await account.request.post(config.Origin + '/api/servers/' + target + '/grant', {headers, data: {account: self}})).status(), 204);
   const connections = {};
   for (const [mode, name, secret, target] of [
     ['ssh', 'Linux SSH · UI simulation', config.SSHSecret, config.SSH],

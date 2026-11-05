@@ -206,7 +206,18 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	if json.Unmarshal(call("GET", "/api/remote/capacity", nil, 200), &capacity) != nil || capacity.Total != 16 || capacity.PerOwner != 4 {
 		t.Fatal("configured CLI capacity ignored")
 	}
+	// The file's server moved into the server list with nobody on it: the
+	// administrator puts themself on it first, as on the Servers page.
 	var targets []struct{ ID, Name, Protocol string }
+	if json.Unmarshal(call("GET", "/api/targets", nil, 200), &targets) != nil || len(targets) != 0 {
+		t.Fatal("a server from the file was open before anyone was given it")
+	}
+	var users struct{ Self string }
+	if json.Unmarshal(call("GET", "/api/session", nil, 200), &session) != nil || json.Unmarshal(call("GET", "/api/users", nil, 200), &users) != nil {
+		t.Fatal("configured CLI account unreadable")
+	}
+	csrf = session.CSRF
+	call("POST", "/api/servers/"+strings.Repeat("a", 32)+"/grant", map[string]string{"account": users.Self}, 204)
 	if json.Unmarshal(call("GET", "/api/targets", nil, 200), &targets) != nil || len(targets) != 1 || targets[0].ID != strings.Repeat("a", 32) || targets[0].Protocol != "ssh" {
 		t.Fatal("configured CLI catalog missing after MFA")
 	}

@@ -166,3 +166,10 @@ func canonicalHostname(host string) (string, bool) {
 	}
 	return strings.ToLower(host), true
 }
+
+// CanonicalHostname reports whether host is a DNS name exactly as a target
+// stores it: lowercase, without a root dot, never an address literal.
+func CanonicalHostname(host string) bool {
+	canonical, ok := canonicalHostname(host)
+	return ok && canonical == host
+}

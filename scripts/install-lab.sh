@@ -83,6 +83,7 @@ fi
 {
   refused relative-stage scripts/install.sh --stage=stage --catalog="${catalog}" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/tls/key.pem"
   refused unknown-option scripts/install.sh ${base} --force
+  refused no-servers-no-networks scripts/install.sh --stage="${stage}" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/tls/key.pem"
   refused other-name-certificate scripts/install.sh --stage="${stage}" --catalog="${catalog}" --tls-cert="${work}/other-tls/cert.pem" --tls-key="${work}/other-tls/key.pem"
   refused mismatched-key scripts/install.sh --stage="${stage}" --catalog="${catalog}" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/other-tls/key.pem"
   refused lan-without-networks scripts/install.sh ${base} --listen=192.0.2.10:8443

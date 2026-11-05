@@ -3,7 +3,6 @@ package identity
 import (
 	"bytes"
 	"context"
-	"maps"
 	"net/http"
 	"net/netip"
 	"slices"
@@ -65,39 +64,49 @@ func (l *Lab) listedLocked(endpoint netip.AddrPort) bool {
 	return false
 }
 
-// webTargetLocked makes a stored server dialable: inside the target networks
-// and outside every address the guard refuses, with an SSH worker to reach
-// it, and not where a catalog server already answers. Otherwise it stays
-// listed for administrators and nobody can reach it.
+// webTargetLocked makes a listed server dialable: every address inside the
+// target networks and outside every address the guard refuses, and a worker
+// for its protocol. Otherwise it stays listed and nobody can reach it.
 func (l *Lab) webTargetLocked(w webServer) (RemoteTarget, bool) {
-	addr, _ := serverAddress(w.Address)
-	endpoint := netip.AddrPortFrom(addr, w.Port)
-	if _, catalog := l.remote.catalog[w.ID]; catalog || l.remote.ssh == nil {
+	if w.Removed || w.Protocol == "ssh" && l.remote.ssh == nil || w.Protocol == "rdp" && l.remote.rdp == nil {
 		return RemoteTarget{}, false
 	}
-	for _, t := range l.remote.catalog {
-		snapshot := t.Target.Snapshot()
-		if snapshot.Port == w.Port && slices.Contains(snapshot.Addresses, w.Address) {
+	var target *targetguard.NamedTarget
+	endpoints := w.endpoints()
+	if w.Hostname == "" {
+		var ok bool
+		if target, ok = guardedTarget(endpoints[0], l.remote.networks, l.remote.protected); !ok {
+			return RemoteTarget{}, false
+		}
+	} else {
+		pins := make([]netip.Addr, 0, len(endpoints))
+		for _, at := range endpoints {
+			if !targetguard.Within(l.remote.networks, at.Addr()) {
+				return RemoteTarget{}, false
+			}
+			pins = append(pins, at.Addr())
+		}
+		policy, e := targetguard.New(endpoints, l.remote.protected)
+		if e != nil {
+			return RemoteTarget{}, false
+		}
+		if target, e = targetguard.NewNamedTarget(policy, w.Hostname, w.Port, pins); e != nil {
 			return RemoteTarget{}, false
 		}
 	}
-	target, ok := guardedTarget(endpoint, l.remote.networks, l.remote.protected)
-	if !ok {
-		return RemoteTarget{}, false
-	}
-	return RemoteTarget{ID: w.ID, Name: w.Name, Protocol: "ssh", Target: target, Identity: bytes.Clone(w.HostKey)}, true
+	return RemoteTarget{ID: w.ID, Name: w.Name, Protocol: w.Protocol, Target: target, Identity: bytes.Clone(w.identity())}, true
 }
 
-// reloadServersLocked rebuilds the reachable servers from the catalog and the
-// store, then ends every lease whose owner may no longer use its server or
-// whose server's identity changed since it was granted. A store whose
-// servers cannot be read leaves the catalog alone.
+// reloadServersLocked rebuilds the reachable servers from the store, then
+// ends every lease whose owner may no longer use its server or whose server's
+// identity changed since it was granted. A store whose servers cannot be read
+// leaves none.
 func (l *Lab) reloadServersLocked() error {
 	list, e := l.store.listServers()
 	if e != nil {
 		list = nil
 	}
-	targets, access := maps.Clone(l.remote.catalog), make(map[string]map[string]bool)
+	targets, access := make(map[string]RemoteTarget), make(map[string]map[string]bool)
 	for _, w := range list {
 		if t, ok := l.webTargetLocked(w); ok {
 			targets[w.ID], access[w.ID] = t, make(map[string]bool, len(w.Access))
@@ -118,13 +127,12 @@ func (l *Lab) reloadServersLocked() error {
 	return e
 }
 
-// mayUseLocked is the server owner may connect to: a catalog server, which
-// every account that reaches servers may use until access lists cover the
-// catalog too, or a web server whose access list names owner. Administrators
-// manage every web server but connect only where they are listed.
+// mayUseLocked is the server owner may connect to: a reachable server whose
+// access list names owner. Administrators manage every server but connect
+// only where they are listed.
 func (l *Lab) mayUseLocked(owner, id string) (RemoteTarget, bool) {
 	t, ok := l.remote.targets[id]
-	if _, catalog := l.remote.catalog[id]; !ok || !catalog && !l.remote.access[id][owner] {
+	if !ok || !l.remote.access[id][owner] {
 		return RemoteTarget{}, false
 	}
 	return t, true
@@ -147,38 +155,53 @@ type serverView struct {
 	Port        uint16   `json:"port"`
 	Addresses   []string `json:"addresses"`
 	Fingerprint string   `json:"fingerprint"`
-	Source      string   `json:"source"` // "file": the operator catalog; "web": added on the page
 	Available   bool     `json:"available"`
-	Access      []string `json:"access"` // who may use a web server; null for the catalog
-	AddedBy     string   `json:"added_by,omitempty"`
-	Added       int64    `json:"added,omitempty"`
+	Access      []string `json:"access"`             // who may use it
+	AddedBy     string   `json:"added_by,omitempty"` // empty when it came from the server file
+	Added       int64    `json:"added"`
 }
 type serversView struct {
-	Networks []string     `json:"networks"`
-	Adding   bool         `json:"adding"` // this installation serves SSH and names target networks
-	Servers  []serverView `json:"servers"`
+	Networks []string          `json:"networks"`
+	Adding   bool              `json:"adding"` // the viewer administers, this installation serves SSH and names target networks
+	Servers  []serverView      `json:"servers"`
+	Names    map[string]string `json:"names"` // username of everyone on a list, and of whoever added a server
 }
 
-func (l *Lab) serversViewLocked() (serversView, error) {
+// serversViewLocked is what an administrator manages and an auditor reads.
+func (l *Lab) serversViewLocked(admin bool) (serversView, error) {
 	list, e := l.store.listServers()
 	if e != nil {
 		return serversView{}, e
 	}
-	view := serversView{Networks: make([]string, 0, len(l.remote.networks)), Adding: l.remote.ssh != nil && len(l.remote.networks) > 0, Servers: make([]serverView, 0, len(l.remote.catalog)+len(list))}
+	accounts, e := l.store.listAccounts(l.now())
+	if e != nil {
+		return serversView{}, e
+	}
+	view := serversView{Networks: make([]string, 0, len(l.remote.networks)), Adding: admin && l.remote.ssh != nil && len(l.remote.networks) > 0,
+		Servers: make([]serverView, 0, len(list)), Names: make(map[string]string)}
 	for _, network := range l.remote.networks {
 		view.Networks = append(view.Networks, network.String())
 	}
-	for _, t := range l.remote.catalog {
-		snapshot := t.Target.Snapshot()
-		view.Servers = append(view.Servers, serverView{ID: t.ID, Name: t.Name, Protocol: t.Protocol, Hostname: snapshot.Hostname, Port: snapshot.Port,
-			Addresses: snapshot.Addresses, Fingerprint: identityFingerprint(t), Source: "file", Available: usableTarget(t, l.now())})
+	named := func(id string) {
+		if i := slices.IndexFunc(accounts, func(a accountSummary) bool { return a.ID == id }); i >= 0 {
+			view.Names[id] = accounts[i].Username
+		}
 	}
 	for _, w := range list {
+		if w.Removed {
+			continue
+		}
 		_, reachable := l.remote.targets[w.ID]
-		_, catalog := l.remote.catalog[w.ID]
-		view.Servers = append(view.Servers, serverView{ID: w.ID, Name: w.Name, Protocol: w.Protocol, Hostname: w.Address, Port: w.Port, Addresses: []string{w.Address},
-			Fingerprint: identityFingerprint(RemoteTarget{Protocol: "ssh", Identity: w.HostKey}), Source: "web", Available: reachable && !catalog,
-			Access: append([]string{}, w.Access...), AddedBy: w.AddedBy, Added: w.Added})
+		row := serverView{ID: w.ID, Name: w.Name, Protocol: w.Protocol, Hostname: w.Hostname, Port: w.Port, Addresses: slices.Clone(w.Pins),
+			Fingerprint: identityFingerprint(RemoteTarget{Protocol: w.Protocol, Identity: w.identity()}), Available: reachable && usableTarget(l.remote.targets[w.ID], l.now()),
+			Access: append([]string{}, w.Access...), AddedBy: w.AddedBy, Added: w.Added}
+		if w.Hostname == "" {
+			row.Hostname, row.Addresses = w.Address, []string{w.Address}
+		}
+		for _, id := range append(slices.Clone(w.Access), w.AddedBy) {
+			named(id)
+		}
+		view.Servers = append(view.Servers, row)
 	}
 	slices.SortFunc(view.Servers, func(a, b serverView) int {
 		if order := strings.Compare(a.Name, b.Name); order != 0 {
@@ -267,12 +290,14 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			refuse(w, status)
 		}
 	}()
-	if l.roleLocked(s) != roleAdmin || l.remote == nil {
+	// An auditor reads the list; only an administrator changes it.
+	role := l.roleLocked(s)
+	if l.remote == nil || role != roleAdmin && (role != roleAuditor || r.URL.Path != "/api/servers" || r.Method != "GET") {
 		status = 403
 		return
 	}
 	if r.URL.Path == "/api/servers" && r.Method == "GET" {
-		view, e := l.serversViewLocked()
+		view, e := l.serversViewLocked(role == roleAdmin)
 		if e != nil {
 			status = 503
 			return
@@ -314,10 +339,10 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 		Fingerprint string `json:"fingerprint"`
 		Algorithm   string `json:"algorithm"`
 	}
-	// rescan reads the current key of a stored, reachable web server.
+	// rescan reads the current host key of a reachable SSH server.
 	rescan := func() (ssh.PublicKey, int) {
 		t, ok := l.remote.targets[server]
-		if _, catalog := l.remote.catalog[server]; !ok || catalog {
+		if !ok || t.Protocol != "ssh" {
 			return nil, 404
 		}
 		return l.scanLocked(r.Context(), id, s, t.Target)
