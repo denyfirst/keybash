@@ -12,9 +12,25 @@ parser.add_argument("--archive", type=Path)
 parser.add_argument("--check", action="store_true")
 args = parser.parse_args()
 expected = "81f9fd5a7b4377fb0ee295d0d4fec92e9667f2aafaa3d0ed8937f535deabdee4"
-archive = args.archive.read_bytes() if args.archive else urllib.request.urlopen(
+# The digest below, not the host, pins the file: Apache's permanent archive
+# first, then its download server, which holds the same release while it is
+# current. An unreachable host only moves on to the next one.
+sources = [
     "https://archive.apache.org/dist/guacamole/1.6.0/source/guacamole-client-1.6.0.tar.gz",
-    timeout=120).read(32 * 1024 * 1024)
+    "https://downloads.apache.org/guacamole/1.6.0/source/guacamole-client-1.6.0.tar.gz",
+]
+
+
+def fetch():
+    for url in sources:
+        try:
+            return urllib.request.urlopen(url, timeout=60).read(32 * 1024 * 1024)
+        except OSError:
+            continue
+    raise SystemExit("Guacamole source archive unreachable")
+
+
+archive = args.archive.read_bytes() if args.archive else fetch()
 if hashlib.sha256(archive).hexdigest() != expected:
     raise SystemExit("Guacamole source archive digest mismatch")
 prefix = "guacamole-client-1.6.0/"
