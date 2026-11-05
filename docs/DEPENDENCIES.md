@@ -321,8 +321,10 @@ Its release signature verified with Apache's published public signing key
 The source/security reports and JS display/parser/input code were reviewed on
 14 October 2026. No blanket vulnerability-free or independent-audit claim.
 
-`scripts/vendor-guacamole.py` verifies the archive before reading named members,
-concatenates 35 unmodified modules deterministically and preserves LICENSE/NOTICE.
+`scripts/vendor-guacamole.py` fetches the archive from archive.apache.org, or
+from downloads.apache.org when the archive is unreachable, and verifies its
+digest before reading named members. It concatenates 35 unmodified modules
+deterministically and preserves LICENSE/NOTICE.
 The manifest contains each module/file hash; required CI regenerates exact bytes.
 No npm wrapper, new runtime package, Maven/Java application or CDN is adopted.
 The existing xterm/pnpm assets remain unchanged. Node is copied into the disposable
