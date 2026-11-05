@@ -1,7 +1,7 @@
 import { systems } from '/systems.mjs';
 const $ = id => document.getElementById(id);
-let csrf = '', busy = false, secretTimer, pendingDelete = null, remoteEnabled = false, setupRequired = false, role = 'user', pendingPerson = null;
-let catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0, owned = new Map();
+let csrf = '', busy = false, secretTimer, pendingDelete = null, remoteEnabled = false, setupRequired = false, role = 'user', pendingPerson = null, pendingServer = null;
+let scanned = null, catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0, owned = new Map();
 // The page's answer goes where the person is looking: into the open sheet
 // that asked, or under the page.
 const notice = text => {
@@ -45,8 +45,8 @@ function showSeed(secret, rows) {
   $('qr-start').hidden = true; $('seed-panel').hidden = false;
 }
 function clearAll() {
-  hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration; pendingPerson = null;
-  for (const id of ['account', 'account-name', 'focus-account', 'records', 'connections', 'connection-server', 'people', 'person-code']) if ($(id)) $(id).textContent = '';
+  hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration; pendingPerson = null; pendingServer = null; scanned = null;
+  for (const id of ['account', 'account-name', 'focus-account', 'records', 'connections', 'connection-server', 'people', 'person-code', 'servers', 'server-networks']) if ($(id)) $(id).textContent = '';
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
@@ -122,6 +122,11 @@ function errorMessage(error) {
   if (error.status === 'no-phone') return 'They have no phone to confirm a new password with, or they are blocked. Choose “Their phone” or “Both: start over”, or unblock them first.';
   if (error.status === 'invite') return 'The username or code was not accepted. Check both, and use the newest code: a new code replaces the old one, a code works once and expires after 72 hours. If you already chose your password with it, sign in instead.';
   if (error.status === 'taken') return 'That username is already taken. Choose another.';
+  if (error.status === 'server-input') return 'Check the address and port: an IP address such as 192.168.1.20, and a port from 1 to 65535.';
+  if (error.status === 'outside') return 'That address is outside the networks this Keybash may reach. To allow it, run upgrade.sh with --target-networks on the Keybash server.';
+  if (error.status === 'listed') return 'A server at that address and port is already listed.';
+  if (error.status === 'changed') return 'The server shows another identity than the one you compared, or it is already listed. Read it again and compare.';
+  if (error.status === 'unreachable') return 'No SSH server with an Ed25519 key answered there. Check the address and port, and that the server is on.';
   if (error.status === 'last-admin') return 'At least one administrator must remain.';
   if (error.status === 403) return 'That is not allowed. Reload the page and try again.';
   if (error.status === 428) return 'This needs confirmation with your phone. Try again.';
@@ -185,6 +190,7 @@ const confirmKinds = {
   person: { title: 'Delete this person?', hint: 'Their account goes, with their keys, passwords and connections, and they are signed out at once. This cannot be undone.', path: id => `/api/users/${id}` },
   block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their keys and passwords stay.', path: id => `/api/users/${id}/block`, method: 'POST', word: 'Block' },
   newcode: { title: 'Make a new invite code?', hint: 'The earlier code stops working at once. You get a new one to give them.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Make new code' },
+  server: { title: 'Remove this server?', hint: 'Open sessions to it end at once, and connections to it stop working. People’s keys and passwords stay. This cannot be undone.', path: id => `/api/servers/${id}`, word: 'Remove' },
 };
 function askConfirm(kind, record) {
   pendingDelete = { kind, id: record.id, name: record.name };
@@ -232,17 +238,19 @@ function updateTrustButtons() {
   if ($('trust-save')) $('trust-save').disabled = busy || !reviewing?.target.available;
 }
 function validateTarget(data, id) {
-  if (data?.id !== id || typeof data.name !== 'string' || data.name.length > 160 || !['ssh', 'rdp'].includes(data.protocol) || typeof data.hostname !== 'string' || !/^[a-z0-9.-]{1,253}$/.test(data.hostname) || !Number.isInteger(data.port) || data.port < 1 || data.port > 65535 || !Array.isArray(data.addresses) || !data.addresses.length || data.addresses.length > 16 || !data.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) || typeof data.algorithm !== 'string' || data.algorithm.length > 80 || !fingerprintOK(data.fingerprint) || typeof data.approval !== 'string' || !/^[a-f0-9]{64}$/.test(data.approval) || typeof data.available !== 'boolean') throw new Error('invalid server identity');
+  if (data?.id !== id || typeof data.name !== 'string' || data.name.length > 160 || !['ssh', 'rdp'].includes(data.protocol) || typeof data.hostname !== 'string' || !/^[a-z0-9.:-]{1,253}$/.test(data.hostname) || !Number.isInteger(data.port) || data.port < 1 || data.port > 65535 || !Array.isArray(data.addresses) || !data.addresses.length || data.addresses.length > 16 || !data.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) || typeof data.algorithm !== 'string' || data.algorithm.length > 80 || !fingerprintOK(data.fingerprint) || typeof data.approval !== 'string' || !/^[a-f0-9]{64}$/.test(data.approval) || typeof data.available !== 'boolean') throw new Error('invalid server identity');
   if (catalog.get(id)?.protocol !== data.protocol || data.protocol === 'ssh' && !/^SHA256:[A-Za-z0-9+/]{43}$/.test(data.fingerprint) || data.protocol === 'rdp' && !/^SHA256:[a-f0-9]{64}$/.test(data.fingerprint)) throw new Error('inconsistent server identity');
   return data;
 }
+// An IPv6 address is written in brackets before its port.
+const hostPort = (host, port) => `${host.includes(':') ? `[${host}]` : host}:${port}`;
 function serverText(data) {
-  return `Address: ${data.hostname}:${data.port} · ${data.protocol.toUpperCase()}\nIP: ${data.addresses.join(', ')}\nIdentity (fingerprint): ${data.fingerprint}${data.available ? '' : '\nThis server identity cannot be used right now.'}`;
+  return `Address: ${hostPort(data.hostname, data.port)} · ${data.protocol.toUpperCase()}\nIP: ${data.addresses.join(', ')}\nIdentity (fingerprint): ${data.fingerprint}${data.available ? '' : '\nThis server identity cannot be used right now.'}`;
 }
 async function chooseTarget() {
   const id = $('connection-target').value, generation = ++targetGeneration;
   selectedTarget = null; $('connection-server').textContent = 'Checking the server…'; updateTrustButtons();
-  if (!idOK(id)) { $('connection-server').textContent = 'Your administrator has not added any servers yet.'; return; }
+  if (!idOK(id)) { $('connection-server').textContent = 'No server is open to you yet. Ask your administrator to let you use one.'; return; }
   try {
     const target = validateTarget(await request(`/api/targets/${id}`), id);
     if (generation !== targetGeneration || $('connection-target').value !== id) return;
@@ -332,7 +340,7 @@ function emptyState(title, text, picture = 'terminal', action) {
   box.append(heading, body); if (action) box.append(action); return box;
 }
 const trustWords = { verified: 'Ready', changed: 'Identity changed', unverified: 'Needs approval', unavailable: 'Unavailable' };
-const trustHelp = { changed: 'The administrator changed this server’s identity. Review it before connecting.', unverified: 'Review and accept this server’s identity before connecting.', unavailable: 'This server is not in the administrator’s list right now.' };
+const trustHelp = { changed: 'The administrator changed this server’s identity. Review it before connecting.', unverified: 'Review and accept this server’s identity before connecting.', unavailable: 'This server is not open to you right now: it was removed, or you were taken off it.' };
 // A connection as a card: what it is, who it signs in as, whether it is
 // ready, and the one action that matters most.
 function serverCard(record, target) {
@@ -396,11 +404,12 @@ const pages = {
   keys: { path: '/keys', panel: 'records-panel', title: 'Keys & passwords', lead: 'What you sign in to servers with, encrypted on this server.' },
   account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, your phone authenticator and your recovery codes.' },
   installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, how to add a server, and how to update it.' },
+  servers: { path: '/servers', panel: 'servers-panel', title: 'Servers', lead: 'Where people here connect, and who may use each server.' },
   users: { path: '/users', panel: 'users-panel', title: 'Users', lead: 'Who signs in here, and what each person may do.' },
 };
 // Which pages each role sees, in rail order; the first is where a role lands.
 // The server refuses the rest whatever the page shows.
-const access = { user: ['connections', 'keys', 'account'], admin: ['connections', 'keys', 'users', 'installation', 'account'], auditor: ['account'] };
+const access = { user: ['connections', 'keys', 'account'], admin: ['connections', 'keys', 'servers', 'users', 'installation', 'account'], auditor: ['account'] };
 const roleWords = { user: 'User', admin: 'Administrator', auditor: 'Auditor' };
 const stateWords = { active: 'Active', setup: 'Setting up phone', invited: 'Invited', expired: 'Code expired', blocked: 'Blocked' };
 const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
@@ -489,22 +498,183 @@ function personRow(person, self) {
   button('Delete', 'ghost destructive', () => askConfirm('person', record));
   return row;
 }
-async function loadUsers() {
+// Everyone on this installation, as the Users page lists them.
+async function loadPeople() {
   const data = await request('/api/users');
   if (!idOK(data?.self) || !Array.isArray(data.accounts) || data.accounts.length > 256) throw new Error('invalid users');
-  const rows = document.createDocumentFragment();
   for (const person of data.accounts) {
     if (!idOK(person.id) || typeof person.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(person.username) || !Object.hasOwn(roleWords, person.role) || !Object.hasOwn(stateWords, person.state)) throw new Error('invalid person');
-    rows.append(personRow(person, person.id === data.self));
   }
+  return data;
+}
+async function loadUsers() {
+  const data = await loadPeople(), rows = document.createDocumentFragment();
+  for (const person of data.accounts) rows.append(personRow(person, person.id === data.self));
   $('people').replaceChildren(rows);
 }
+// The Servers page: each server, where it is, its pinned identity, and who
+// may use it. Servers from the server file on the Keybash host are listed
+// too; they change only there.
+const sshPrintOK = value => typeof value === 'string' && /^SHA256:[A-Za-z0-9+/]{43}$/.test(value);
+const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length <= 160 && ['ssh', 'rdp'].includes(s.protocol) && typeof s.hostname === 'string' && /^[a-z0-9.:-]{1,253}$/.test(s.hostname) &&
+  Number.isInteger(s.port) && s.port >= 1 && s.port <= 65535 && Array.isArray(s.addresses) && s.addresses.length >= 1 && s.addresses.length <= 16 && s.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) &&
+  fingerprintOK(s.fingerprint) && typeof s.available === 'boolean' &&
+  (s.source === 'file' ? s.access === null : s.source === 'web' && s.protocol === 'ssh' && sshPrintOK(s.fingerprint) && Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && idOK(s.added_by) && Number.isInteger(s.added));
+let people = new Map();
+async function loadServers() {
+  const data = await request('/api/servers'), everyone = await loadPeople();
+  if (!Array.isArray(data?.networks) || data.networks.length > 64 || !data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) || typeof data.adding !== 'boolean' ||
+    !Array.isArray(data.servers) || data.servers.length > 512 || !data.servers.every(serverOK)) throw new Error('invalid servers');
+  people = new Map(everyone.accounts.map(person => [person.id, person]));
+  $('add-server').hidden = !data.adding;
+  const code = text => { const element = document.createElement('code'); element.textContent = text; return element; };
+  const option = code('upgrade.sh --target-networks=…');
+  if (data.networks.length) $('server-networks').replaceChildren('Servers can be added inside ', ...data.networks.flatMap((n, i) => i ? [', ', code(n)] : [code(n)]), '. To allow other networks, run ', option, ' on the Keybash server.');
+  else $('server-networks').replaceChildren('This installation names no networks for servers, so none can be added here. On the Keybash server, run ', option, ' (see Installation).');
+  const rows = document.createDocumentFragment();
+  for (const server of data.servers) rows.append(serverRow(server));
+  $('servers').replaceChildren(rows);
+  return data.servers;
+}
+function serverRow(server) {
+  const row = document.createElement('article'); row.className = 'record server-row'; row.dataset.server = server.id; row.dataset.source = server.source;
+  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.append(glyph(server.protocol, 'server-glyph'));
+  const titles = document.createElement('div'); titles.className = 'record-titles';
+  const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = server.name;
+  const where = server.addresses.length === 1 && server.addresses[0] === server.hostname ? '' : ` (${server.addresses.join(', ')})`;
+  const meta = document.createElement('p'); meta.className = 'record-meta'; meta.textContent = `${server.protocol.toUpperCase()} · ${hostPort(server.hostname, server.port)}${where}`;
+  titles.append(name, meta);
+  if (server.source === 'file') { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'From the server file'; titles.append(badge); }
+  const print = document.createElement('p'); print.className = 'record-print';
+  const code = document.createElement('code'); code.className = 'fingerprint'; code.textContent = server.fingerprint; code.title = 'Identity (fingerprint)'; print.append(code);
+  const who = document.createElement('p'); who.className = 'server-access';
+  if (server.source === 'file') who.textContent = 'Everyone with a key or password can connect.';
+  else {
+    const names = server.access.map(id => people.get(id)?.username).filter(Boolean).sort();
+    who.textContent = names.length ? `Can use it: ${names.join(', ')}` : 'Nobody can use it yet.';
+  }
+  titles.append(print, who);
+  if (!server.available) {
+    const help = document.createElement('p'); help.className = 'server-help';
+    help.textContent = server.source === 'web' ? 'Not reachable: outside the networks this Keybash may reach, or already in the server file.' : 'Its identity cannot be used right now.';
+    titles.append(help);
+  }
+  const state = document.createElement('span'); state.className = 'pill server-state'; state.dataset.state = server.available ? 'ready' : 'unreachable'; state.textContent = server.available ? 'Ready' : 'Not reachable';
+  const actions = document.createElement('div'); actions.className = 'record-actions';
+  row.append(tile, titles, state, actions);
+  if (server.source !== 'web') return row;
+  const button = (text, style, act) => { const b = document.createElement('button'); b.type = 'button'; b.className = style; b.textContent = text; b.addEventListener('click', act); actions.append(b); };
+  button('Who can use it', 'secondary', () => openAccess(server));
+  button('Rename', 'ghost', () => openRename(server));
+  if (server.available) button('Check identity', 'ghost', () => { void run(() => openIdentity(server)); });
+  button('Remove', 'ghost destructive', () => askConfirm('server', server));
+  return row;
+}
+// Why a server request was refused, in the words of the step that asked.
+function serverError(error, adding = false) {
+  const words = { 400: 'server-input', 403: 'outside', 409: adding ? 'changed' : 'listed', 502: 'unreachable' };
+  return Object.hasOwn(words, error.status) ? Object.assign(new Error('server refused'), { status: words[error.status] }) : error;
+}
+function serverStep(checking) {
+  $('server-check').hidden = !checking; $('server-submit').textContent = checking ? 'Add server' : 'Read identity';
+  if (!checking) { scanned = null; $('server-print').textContent = ''; $('server-same').checked = false; }
+}
+function openAccess(server) { if (!busy) showAccess(server); }
+function showAccess(server) {
+  pendingServer = server; $('access-title').textContent = `Who can use ${server.name}?`; dialogNotice('');
+  const legend = document.createElement('legend'); legend.textContent = 'People';
+  const choices = [...people.values()].filter(person => person.role !== 'auditor').sort((a, b) => a.username.localeCompare(b.username)).map(person => {
+    const label = document.createElement('label'); label.className = 'role-option';
+    const input = document.createElement('input'); input.type = 'checkbox'; input.value = person.id; input.checked = server.access.includes(person.id);
+    const text = document.createElement('span'); text.className = 'role-text';
+    const strong = document.createElement('strong'); strong.textContent = person.username;
+    const role = document.createElement('span'); role.textContent = roleWords[person.role];
+    text.append(strong, role); label.append(input, text); return label;
+  });
+  $('access-people').replaceChildren(legend, ...choices);
+  $('access-dialog').showModal();
+}
+function openRename(server) {
+  if (busy) return;
+  pendingServer = server; $('rename-name').value = server.name; dialogNotice(''); $('rename-dialog').showModal(); $('rename-name').focus();
+}
+// Checking a server's identity reads it again; a different key is accepted
+// only after the administrator compares it on the server's console.
+async function openIdentity(server) {
+  pendingServer = server; scanned = null;
+  $('identity-title').textContent = `Identity of ${server.name}`; $('identity-pinned').textContent = server.fingerprint; $('identity-now').textContent = 'Reading the server…';
+  $('identity-change').hidden = true; $('identity-submit').hidden = true; $('identity-same').checked = false; dialogNotice(''); $('identity-dialog').showModal();
+  let data;
+  try { data = await request(`/api/servers/${server.id}/scan`, 'POST', {}); }
+  catch (error) { $('identity-now').textContent = 'It could not be read.'; throw serverError(error); }
+  if (!sshPrintOK(data?.fingerprint) || data.algorithm !== 'ssh-ed25519') throw new Error('invalid identity');
+  if (pendingServer !== server || !$('identity-dialog').open) return;
+  if (data.fingerprint === server.fingerprint) { $('identity-now').textContent = `${data.fingerprint}\nThe same: nothing to do.`; return; }
+  scanned = { id: server.id, fingerprint: data.fingerprint };
+  $('identity-now').textContent = data.fingerprint; $('identity-change').hidden = false; $('identity-submit').hidden = false;
+}
+$('add-server')?.addEventListener('click', () => {
+  if (busy) return;
+  $('server-form').reset(); serverStep(false); dialogNotice(''); $('server-dialog').showModal(); $('server-name').focus();
+});
+// Changing where the server is after it was read starts the comparison over.
+for (const id of ['server-address', 'server-port']) $(id)?.addEventListener('input', () => { if (scanned) serverStep(false); });
+$('server-cancel')?.addEventListener('click', () => $('server-dialog').close());
+$('server-dialog')?.addEventListener('close', () => serverStep(false));
+bind('server-form', async () => {
+  const name = $('server-name').value.trim(), address = $('server-address').value.trim().toLowerCase(), port = $('server-port').value.trim();
+  if (!scanned || scanned.address !== address || scanned.port !== port) {
+    let data;
+    try { data = await request('/api/servers/scan', 'POST', { address, port }); }
+    catch (error) { throw serverError(error); }
+    if (!sshPrintOK(data?.fingerprint) || data.algorithm !== 'ssh-ed25519') throw new Error('invalid identity');
+    serverStep(true); scanned = { address, port, fingerprint: data.fingerprint }; $('server-print').textContent = data.fingerprint;
+    return;
+  }
+  if (!$('server-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick “It is the same”.'); return; }
+  let made;
+  try { made = await request('/api/servers', 'POST', { name, address, port, fingerprint: scanned.fingerprint }); }
+  catch (error) { if (error.status === 409) serverStep(false); throw serverError(error, true); }
+  if (!idOK(made?.id)) throw new Error('invalid server');
+  $('server-dialog').close();
+  const added = (await loadServers()).find(server => server.id === made.id);
+  notice(`${name} was added. Nobody can use it yet: choose who may.`);
+  if (added) showAccess(added);
+});
+$('access-cancel')?.addEventListener('click', () => $('access-dialog').close());
+$('access-dialog')?.addEventListener('close', () => { pendingServer = null; });
+bind('access-form', async () => {
+  const server = pendingServer;
+  if (!server) return;
+  const chosen = new Set([...document.querySelectorAll('#access-people input:checked')].map(input => input.value).filter(idOK));
+  for (const id of chosen) if (!server.access.includes(id)) await request(`/api/servers/${server.id}/grant`, 'POST', { account: id });
+  for (const id of server.access) if (!chosen.has(id)) await request(`/api/servers/${server.id}/revoke`, 'POST', { account: id });
+  $('access-dialog').close(); await loadServers(); notice(`Saved who can use ${server.name}.`);
+});
+$('rename-cancel')?.addEventListener('click', () => $('rename-dialog').close());
+$('rename-dialog')?.addEventListener('close', () => { pendingServer = null; });
+bind('rename-form', async () => {
+  const server = pendingServer, name = $('rename-name').value.trim();
+  if (!server) return;
+  if (name !== server.name) await request(`/api/servers/${server.id}/name`, 'POST', { name });
+  $('rename-dialog').close(); await loadServers(); notice('Renamed.');
+});
+$('identity-cancel')?.addEventListener('click', () => $('identity-dialog').close());
+$('identity-dialog')?.addEventListener('close', () => { pendingServer = null; scanned = null; });
+bind('identity-form', async () => {
+  const server = pendingServer, next = scanned;
+  if (!server || next?.id !== server.id) return;
+  if (!$('identity-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick the box.'); return; }
+  try { await request(`/api/servers/${server.id}/key`, 'POST', { fingerprint: next.fingerprint }); }
+  catch (error) { throw serverError(error, true); }
+  $('identity-dialog').close(); await loadServers(); notice(`New identity pinned for ${server.name}. Open sessions to it were closed; each person accepts it on their connection.`);
+});
 // What this copy runs and serves comes from the server; the commands on the
 // page are fixed text, the same for every installation.
 async function loadInstallation() {
   const data = await request('/api/installation');
   if (typeof data?.revision !== 'string' || !/^(?:[0-9a-f]{40})?$/.test(data.revision) || typeof data.built !== 'string' || data.built !== '' && Number.isNaN(Date.parse(data.built)) ||
-    typeof data.modified !== 'boolean' || typeof data.ssh !== 'boolean' || typeof data.rdp !== 'boolean' || !Number.isInteger(data.servers) || data.servers < 0 || data.servers > 256) throw new Error('invalid installation');
+    typeof data.modified !== 'boolean' || typeof data.ssh !== 'boolean' || typeof data.rdp !== 'boolean' || !Number.isInteger(data.servers) || data.servers < 0 || data.servers > 512) throw new Error('invalid installation');
   if (data.revision) {
     const link = document.createElement('a'); link.href = `https://github.com/denyfirst/keybash/commit/${data.revision}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const code = document.createElement('code'); code.textContent = data.revision.slice(0, 7); link.append(code);
@@ -519,8 +689,8 @@ async function loadInstallation() {
   if (data.rdp && !$('command-build').textContent.endsWith(' --with-rdp')) $('command-build').textContent += ' --with-rdp';
 }
 function showPage(ready) {
-  // Without an operator catalog there is nothing to connect to.
-  const allowed = access[role].filter(key => key !== 'connections' || remoteEnabled);
+  // Without an operator catalog there is nothing to connect to or manage.
+  const allowed = access[role].filter(key => !['connections', 'servers'].includes(key) || remoteEnabled);
   let name = Object.keys(pages).find(key => pages[key].path === location.pathname) ?? 'connections';
   if (!allowed.includes(name)) name = allowed[0];
   for (const [key, page] of Object.entries(pages)) $(page.panel).hidden = !ready || key !== name;
@@ -528,7 +698,7 @@ function showPage(ready) {
     if (item.dataset.page === name) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
     item.hidden = !allowed.includes(item.dataset.page);
   });
-  $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys'; $('invite-person').hidden = !ready || name !== 'users';
+  $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys'; $('invite-person').hidden = !ready || name !== 'users'; $('add-server').hidden = true; /* shown once the page knows it can add */
   $('topbar-page').textContent = $('rail-page').textContent = ready ? pages[name].title : 'Sign-in';
   $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
   if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
@@ -548,6 +718,7 @@ async function loadAccount() {
   if (data.stage === 'ready' && role !== 'auditor') await loadRecords();
   if (data.stage === 'ready' && page === 'installation') await loadInstallation();
   if (data.stage === 'ready' && page === 'users') await loadUsers();
+  if (data.stage === 'ready' && page === 'servers') await loadServers();
 }
 bind('signin', async () => {
   const username = $('username').value, password = $('password').value; clearInputs();
@@ -748,6 +919,7 @@ click('confirm-delete', async () => {
   const reply = await request(confirmKinds[kind].path(id), confirmKinds[kind].method ?? 'DELETE', {});
   if (kind === 'credential') { hideSecret(); await loadRecords(); notice('Deleted.'); }
   else if (kind === 'connection') { await loadConnections(); notice('Deleted.'); }
+  else if (kind === 'server') { await loadServers(); notice(`${name} was removed.`); }
   else {
     await loadUsers();
     if (kind === 'newcode') showCode(reply?.code, name, kind);

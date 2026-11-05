@@ -214,6 +214,9 @@ func (s *Store) deleteAccount(actor, target string) error {
 		if e = s.deleteOwned(tx, a.ID); e != nil {
 			return e
 		}
+		if e = s.dropAccess(tx, a.ID); e != nil {
+			return e
+		}
 		if tx.Bucket(nameBucket).Delete(s.nameIndex(a.Username)) != nil || tx.Bucket(accountBucket).Delete([]byte(a.ID)) != nil {
 			return errRefused
 		}

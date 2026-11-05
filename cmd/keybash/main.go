@@ -94,6 +94,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return serverAdd(context.Background(), *catalog, *serverLabel, *serverHost, *serverPort, *serverPrint, input, output, load, probeHostKey, operatorconfig.ReplaceCatalog)
 	}
 	var targets []identity.RemoteTarget
+	var webServers identity.Option // where administrators may add servers from the web
 	limits := sessionlimits.Default()
 	if command == "check-targets" {
 		validFlags := true
@@ -154,9 +155,13 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		snapshot, e = operatorconfig.LoadCatalog(*catalog)
 		targets, limits = snapshot.Targets, snapshot.Capacity
 		// The unit's kernel boundary uses the same networks; a server outside
-		// them could never be reached, so the gateway does not start.
+		// them could never be reached, so the gateway does not start. They are
+		// also where administrators may add servers from the web.
 		if e == nil && *targetNetworks != "" {
-			_, e = snapshot.Networks(*targetNetworks)
+			var networks []netip.Prefix
+			if networks, e = snapshot.Networks(*targetNetworks); e == nil {
+				webServers = identity.TargetNetworks(networks, snapshot.Protected)
+			}
 		}
 		if e != nil || command == "serve-ssh-lab" && !sshOnly(targets) || command == "serve-remote-lab" && (!filepath.IsAbs(*rdpManager) || filepath.Clean(*rdpManager) != *rdpManager || len(*rdpManager) > 100 || *rdpManager == *manager) {
 			return refused
@@ -177,8 +182,8 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return refused
 		}
 		// Every factor was reset: hand each user their code, as with account-add.
-		_, e = fmt.Fprintf(output, "Restored instance %s from a backup made %s by %s: %d accounts, %d credentials, %d connections.\nMFA was reset for every account. Give each user their one-time setup code:\n",
-			summary.Instance, summary.Created.Format(time.RFC3339), summary.Program, summary.Accounts, summary.Credentials, summary.Connections)
+		_, e = fmt.Fprintf(output, "Restored instance %s from a backup made %s by %s: %d accounts, %d credentials, %d connections, %d servers.\nMFA was reset for every account. Give each user their one-time setup code:\n",
+			summary.Instance, summary.Created.Format(time.RFC3339), summary.Program, summary.Accounts, summary.Credentials, summary.Connections, summary.Servers)
 		for _, c := range codes {
 			if e == nil {
 				_, e = fmt.Fprintf(output, "%s\t%s\n", c.Username, c.Code)
@@ -215,8 +220,8 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		if e != nil {
 			return refused
 		}
-		_, e = fmt.Fprintf(output, "Backup of instance %s written %s: %d accounts, %d credentials, %d connections. It opens only with the instance key; keep the key's recovery code apart from it.\n",
-			summary.Instance, summary.Created.Format(time.RFC3339), summary.Accounts, summary.Credentials, summary.Connections)
+		_, e = fmt.Fprintf(output, "Backup of instance %s written %s: %d accounts, %d credentials, %d connections, %d servers. It opens only with the instance key; keep the key's recovery code apart from it.\n",
+			summary.Instance, summary.Created.Format(time.RFC3339), summary.Accounts, summary.Credentials, summary.Connections, summary.Servers)
 		return e
 	case "bootstrap-renew":
 		code, e := store.RenewBootstrap()
@@ -271,6 +276,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		var options []identity.Option
 		if sources != nil {
 			options = append(options, identity.FromSources(sources))
+		}
+		if webServers != nil {
+			options = append(options, webServers)
 		}
 		var lab *identity.Lab
 		if command == "serve-ssh-lab" || command == "serve-remote-lab" {

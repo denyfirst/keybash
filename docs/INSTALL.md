@@ -58,7 +58,8 @@ The browser then shows no warning.
 Write the servers to connect to in `targets.json` (the format is in
 `OPERATOR-CATALOG-LAB.md`). Take each SSH server's host key and each Windows
 server's RDP certificate separately, over a channel you trust. After the
-install, `keybash server-add` adds SSH servers without hand-written JSON
+install, administrators add SSH servers on the Servers page, and
+`keybash server-add` adds them to this file without hand-written JSON
 ("Adding a server later").
 
 ### 4. Install, as root
@@ -91,8 +92,8 @@ Never put these codes in a chat, a screenshot or notes.
 
 The gateway can then reach only the servers in `targets.json`; the kernel
 refuses it every other address. To allow a whole network for servers you add
-later, add `--target-networks=192.168.1.0/24` (it must hold every server in
-the list).
+later, on the Servers page or with `server-add`, add
+`--target-networks=192.168.1.0/24` (it must hold every server in the list).
 
 ### 5. First sign-in
 
@@ -215,6 +216,33 @@ It reads the username and a new password on two lines of standard input, and
 prints a setup code when the account has no factor.
 
 ## Adding a server later
+
+Administrators add SSH servers on the **Servers** page, with no restart:
+
+1. **Add server:** a name, the server's IP address and its SSH port. The
+   gateway reads the server's Ed25519 host key, through the target guard and
+   inside the target networks only. The handshake stops at the key and never
+   authenticates.
+2. Compare the fingerprint it shows with
+   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on that server's own
+   console, tick "It is the same" and add it. Keybash reads the key again and
+   adds the server only if it is still the one compared. This needs a phone
+   code from the last ten minutes.
+3. **Who can use it:** nobody, administrators included, until you choose.
+   Taking someone off ends their open sessions to that server at once.
+
+Each row also has **Rename**, **Check identity** (accept a new host key, for
+example after a reinstall, once compared on the console; open sessions end and
+each person accepts it again on their connection) and **Remove** (open
+sessions end; connections to it show as unavailable).
+
+The page offers adding only when the gateway has target networks
+(`--target-networks`, set at install or with `upgrade.sh`), and only inside
+them; a server added earlier that is outside them now stays listed but
+unreachable. Servers from `targets.json` are listed too: they change only on
+the host, and for now everyone with a key or password can use them.
+
+On the host, as root, `server-add` adds a server to `targets.json` instead:
 
 ```sh
 sudo /usr/local/libexec/keybash/keybash server-add --config=/etc/keybash/targets.json \

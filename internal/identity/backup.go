@@ -38,7 +38,7 @@ const (
 	backupMagic  = "keybash-custody-backup-v1"
 	backupSchema = 1
 	// The quotas bound the records: at most 64 MiB of credentials, 256
-	// accounts and 2048 connections stay under this.
+	// accounts, 2048 connections and 256 servers stay under this.
 	maxBackupBody = 96 << 20
 	// MaxBackupFile bounds what restore reads.
 	MaxBackupFile   = maxBackupBody + 4096
@@ -47,14 +47,14 @@ const (
 
 // backupBuckets is every namespace a backup carries, in file order. A store
 // holding anything else is refused rather than copied in part. The
-// connections namespace is optional, as on open.
+// connections and servers namespaces are optional, as on open.
 type backupBucket struct {
 	id       uint8
 	name     []byte
 	optional bool
 }
 
-var backupBuckets = []backupBucket{{1, metaBucket, false}, {2, accountBucket, false}, {3, nameBucket, false}, {4, credentialBucket, false}, {5, connectionBucket, true}}
+var backupBuckets = []backupBucket{{1, metaBucket, false}, {2, accountBucket, false}, {3, nameBucket, false}, {4, credentialBucket, false}, {5, connectionBucket, true}, {6, serverBucket, true}}
 
 type backupFile struct {
 	Header, Sealed []byte // Header is also the sealed body's associated data
@@ -76,10 +76,10 @@ type backupEntry struct {
 
 // BackupSummary describes a backup without anything secret.
 type BackupSummary struct {
-	Instance                           string
-	Created                            time.Time
-	Program                            string
-	Accounts, Credentials, Connections int
+	Instance                                    string
+	Created                                     time.Time
+	Program                                     string
+	Accounts, Credentials, Connections, Servers int
 }
 
 // SetupCode is one account's fresh one-time enrollment code after a restore.
@@ -244,6 +244,18 @@ func (s *Store) verifyAll(tx *bolt.Tx) (BackupSummary, error) {
 	if summary.Connections, e = owned(connectionBucket, 128, 2048, func(owner, id string) error { _, e := s.connection(tx, owner, id); return e }); e != nil {
 		return BackupSummary{}, errRefused
 	}
+	// Each server record names itself, within the quota, and lists only
+	// accounts that exist: deleting an account takes it off every list.
+	servers, e := s.servers(tx)
+	if e != nil {
+		return BackupSummary{}, errRefused
+	}
+	for _, w := range servers {
+		if slices.ContainsFunc(w.Access, func(id string) bool { return !accounts[id] }) {
+			return BackupSummary{}, errRefused
+		}
+	}
+	summary.Servers = len(servers)
 	return summary, nil
 }
 

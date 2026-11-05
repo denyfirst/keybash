@@ -22,7 +22,11 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		protocol, record = parts[0], parts[1]
 		c, e := l.store.readConnection(s.owner, record)
 		l.mu.Lock()
-		allowed := e == nil && !l.closed && s.ctx.Err() == nil && l.remote != nil && l.serversLocked(s) && l.remote.targets[c.Target].Protocol == protocol && connectionTrusted(c, l.remote.targets[c.Target], l.now())
+		allowed := e == nil && !l.closed && s.ctx.Err() == nil && l.remote != nil
+		if allowed {
+			target, ok := l.targetLocked(s, c.Target)
+			allowed = ok && target.Protocol == protocol && connectionTrusted(c, target, l.now())
+		}
 		l.mu.Unlock()
 		if !allowed {
 			refuse(w, 404)

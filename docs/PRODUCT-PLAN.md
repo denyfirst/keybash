@@ -51,7 +51,10 @@ an instance has three roles, all managed from the web:
   password or their keys and passwords.
 - **Auditor:** reads what happened; reaches no server and holds no secret.
 
-Planned next: administrators choose which servers each user may reach, and
+Since 5 November 2026 administrators add SSH servers on the Servers page and
+choose who may use each one; nobody can until they do, administrators
+included (`adr/0005-web-managed-servers.md`). Planned next: the same access
+lists for the servers in the operator catalog, an auditor's view of them, and
 shared keys a user can connect with without seeing them. These need their own
 design and review.
 
