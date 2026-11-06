@@ -219,7 +219,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	// The workspace is one document with a page per path; the script shows
 	// the part the path names. Loading a page counts as activity.
-	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account" || r.URL.Path == "/installation" || r.URL.Path == "/users")
+	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account" || r.URL.Path == "/installation" || r.URL.Path == "/users" || r.URL.Path == "/servers")
 	id, valid := tokenID(requestToken(r))
 	l.mu.Lock()
 	s := l.liveLocked(id, page)
@@ -375,6 +375,10 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/users" || strings.HasPrefix(r.URL.Path, "/api/users/") {
 		l.usersHTTP(w, r, id, s)
+		return
+	}
+	if r.URL.Path == "/api/servers" || strings.HasPrefix(r.URL.Path, "/api/servers/") {
+		l.serversHTTP(w, r, id, s)
 		return
 	}
 	// An auditor holds no key or password and reaches no server; only an

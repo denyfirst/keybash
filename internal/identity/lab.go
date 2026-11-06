@@ -86,6 +86,8 @@ type Lab struct {
 	store        *Store
 	remote       *remoteConfig
 	sources      []netip.Prefix // nil: loopback clients only
+	// Where web servers may be added; see TargetNetworks. nil: nowhere.
+	networks, protected []netip.Prefix
 }
 
 func usernameInput(value string) bool {

@@ -23,7 +23,7 @@ func TestWorkspaceArrivesInTheSessionStage(t *testing.T) {
 		}
 		return found[0][1]
 	}
-	for _, path := range []string{"/", "/keys", "/account", "/installation"} {
+	for _, path := range []string{"/", "/keys", "/account", "/installation", "/users", "/servers"} {
 		if stage := stageOf(c, path); stage != "ready" {
 			t.Fatalf("%s arrived as %q for a ready session", path, stage)
 		}

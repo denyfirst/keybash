@@ -7,7 +7,9 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,22 +59,30 @@ type remoteConfig struct {
 	limits  sessionlimits.Limits
 	sockets map[string]int
 	ssh     SSHWorker
-	targets map[string]RemoteTarget
-	rdp     RDPWorker
-	leases  map[[32]byte]*remoteLease
+	// targets is every server a lease can reach: the operator catalog, fixed
+	// for the process, and the web servers, rebuilt on each change
+	// (reloadServersLocked). access lists who may use each web server.
+	targets, catalog    map[string]RemoteTarget
+	access              map[string]map[string]bool
+	networks, protected []netip.Prefix // see TargetNetworks
+	scan                func(context.Context, *targetguard.NamedTarget) (ssh.PublicKey, error)
+	scans               int // running now
+	rdp                 RDPWorker
+	leases              map[[32]byte]*remoteLease
 }
 type remoteLease struct {
-	session                               [32]byte
-	owner, connection, credential, target string
-	expires                               time.Time
-	active                                bool
-	cancel                                context.CancelFunc
+	session                                         [32]byte
+	owner, connection, credential, target, approval string // approval: the target's when granted
+	expires                                         time.Time
+	active                                          bool
+	cancel                                          context.CancelFunc
 }
 
 // NewRemoteLab adds ownership authorization to the existing loopback TLS lab.
 // Stock SSH uses the guarded/pinned connector. A nil RDP launcher refuses RDP.
-// Targets are immutable for this process; restart kills every pending/active
-// lease. Production isolation, operator configuration and audit remain gates.
+// The catalog targets are immutable for this process; administrators add web
+// servers beside them (see TargetNetworks). Restart kills every pending and
+// active lease. Production isolation and audit remain gates.
 func NewRemoteLab(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, options ...Option) (*Lab, error) {
 	return NewRemoteLabWithLimits(origin, store, targets, worker, rdp, sessionlimits.Default(), options...)
 }
@@ -113,12 +123,16 @@ func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget,
 		t.Identity = append([]byte(nil), t.Identity...)
 		config.targets[t.ID] = t
 	}
+	config.catalog, config.scan = maps.Clone(config.targets), scanHostKey
 	l, e := NewPersistent(origin, store, options...)
 	if e != nil {
 		return nil, e
 	}
 	l.mu.Lock()
+	config.networks, config.protected = l.networks, l.protected
 	l.remote = config
+	// A store whose servers cannot be read starts with the catalog alone.
+	_ = l.reloadServersLocked()
 	l.mu.Unlock()
 	return l, nil
 }
@@ -174,7 +188,7 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	if e != nil {
 		return "", errRefused
 	}
-	t, ok := l.remote.targets[c.Target]
+	t, ok := l.targetLocked(s, c.Target)
 	if !ok || !connectionTrusted(c, t, l.now()) {
 		return "", errRefused
 	}
@@ -199,7 +213,7 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	if l.remote.leases[key] != nil {
 		return "", errRefused
 	}
-	l.remote.leases[key] = &remoteLease{session: id, owner: s.owner, connection: record, credential: c.Credential, target: c.Target, expires: l.now().Add(30 * time.Second)}
+	l.remote.leases[key] = &remoteLease{session: id, owner: s.owner, connection: record, credential: c.Credential, target: c.Target, approval: approvalFingerprint(t), expires: l.now().Add(30 * time.Second)}
 	s.last = l.now()
 	return raw, nil
 }
@@ -220,8 +234,8 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 	if e != nil || c.Credential != lease.credential || c.Target != lease.target {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
-	target, ok := l.remote.targets[c.Target]
-	if !ok || !connectionTrusted(c, target, l.now()) {
+	target, ok := l.targetLocked(s, c.Target)
+	if !ok || approvalFingerprint(target) != lease.approval || !connectionTrusted(c, target, l.now()) {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
 	credential, e := l.store.readCredential(s.owner, c.Credential)
@@ -407,8 +421,10 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			Protocol string `json:"protocol"`
 		}
 		items := make([]summary, 0, len(l.remote.targets))
-		for _, t := range l.remote.targets {
-			items = append(items, summary{t.ID, t.Name, t.Protocol})
+		for id := range l.remote.targets {
+			if t, ok := l.targetLocked(s, id); ok {
+				items = append(items, summary{t.ID, t.Name, t.Protocol})
+			}
 		}
 		slices.SortFunc(items, func(a, b summary) int {
 			if order := strings.Compare(a.Name, b.Name); order != 0 {
@@ -421,7 +437,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 	}
 	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/targets/") {
 		record := strings.TrimPrefix(r.URL.Path, "/api/targets/")
-		target, ok := l.remote.targets[record]
+		target, ok := l.targetLocked(s, record)
 		if !validID(record) || !ok {
 			status = 404
 			return
@@ -437,7 +453,9 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		}
 		rows := make([]connectionView, 0, len(items))
 		for _, item := range items {
-			rows = append(rows, describeConnection(item, l.remote.targets[item.Target], l.now()))
+			// A server this account may no longer use shows as unavailable.
+			target, _ := l.targetLocked(s, item.Target)
+			rows = append(rows, describeConnection(item, target, l.now()))
 		}
 		result = rows
 		return
@@ -483,7 +501,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			return
 		}
 		defer clear(fields)
-		target, ok := l.remote.targets[fields["target"]]
+		target, ok := l.targetLocked(s, fields["target"])
 		if !ok {
 			status = 403
 			return
@@ -528,7 +546,7 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 404
 			return
 		}
-		target, ok := l.remote.targets[row.Target]
+		target, ok := l.targetLocked(s, row.Target)
 		if !ok || !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
 			status = 409
 			return

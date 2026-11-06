@@ -684,6 +684,25 @@ body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, #rail-page, .
   /* Four actions do not fit one row: the role across, the rest below it. */
   .person .record-actions button.secondary { flex: 1 0 100%; }
 }
+/* Servers: one row per server, laid out like the Users page so the state and
+   the actions line up from row to row. Who may use it reads like the meta. */
+#servers { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.server-row { grid-column: 1 / -1; grid-template-columns: subgrid; }
+.server-row .server-state { justify-self: start; }
+.server-row .record-actions { flex-wrap: wrap; min-width: 0; }
+.server-access, .server-row .server-help { flex-basis: 100%; margin: 0.3rem 0 0; font-size: 0.86rem; color: var(--ink-soft); }
+.server-state[data-state=ready] { color: var(--strong); }
+.server-state[data-state=unreachable] { color: var(--insecure); }
+.networks-note { max-width: var(--measure); margin: 0 0 1rem; }
+.networks-note code { white-space: nowrap; }
+@media (max-width: 760px) {
+  .server-row { grid-template-columns: auto minmax(0, 1fr); }
+  .server-row .server-state { grid-column: 1 / -1; }
+  .server-row .record-actions button.secondary { flex: 1 0 100%; }
+}
+/* Compared by eye, then ticked: the box reads as a choice, like a role. */
+.same-check { margin-top: 0.9rem; }
+.console-command { white-space: pre; overflow-x: auto; overflow-wrap: normal; font-size: 0.8rem; }
 /* A card's system tile is a button too. */
 @media (max-width: 760px), (pointer: coarse) {
   button.server-icon { width: 2.75rem; height: 2.75rem; }

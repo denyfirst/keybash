@@ -107,6 +107,22 @@ the same power, so their reach needs a limit the gateway cannot lift.
 - It needs its own design: rotation, who can replace it, and how a removed
   person loses it.
 
+## Progress
+
+- **A** is merged: the gateway unit's kernel boundary and `--target-networks`.
+- **B**, with access lists for web servers from the start (part of **C**):
+  - SSH servers only. RDP servers stay in the server file for now.
+  - The gateway reads the host key itself, through the target guard: an
+    Ed25519- and Curve25519-only handshake stopped at the key, capped at
+    64 KiB and ten seconds. The SSH worker sandbox is not used for this; the
+    parser is Go's, and the kernel boundary keeps the dial inside the target
+    networks.
+  - Adding and accepting a new key scan again and compare the fingerprint the
+    administrator confirmed; the browser never supplies a key.
+  - The gateway still needs one catalog server to start.
+- **C** for catalog servers (with the grant on upgrade), the auditor's view
+  and **D** are next.
+
 ## Consequences
 
 - Kernel enforcement adds a boundary that does not exist today. A
