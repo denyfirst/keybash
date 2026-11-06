@@ -41,6 +41,7 @@ func adminFixtureAt(t *testing.T, origin string) *adminLab {
 	}
 	t.Cleanup(func() { _ = l.Close() })
 	f.l = l
+	openTo(t, l, mustLookup(t, store, "alice").ID)
 	l.mu.Lock()
 	l.now = func() time.Time { return f.now }
 	l.mu.Unlock()
@@ -377,6 +378,7 @@ func TestAuditorReachesNoServer(t *testing.T) {
 		return response.StatusCode
 	}
 	bob, b := f.person("bob", roleUser)
+	openTo(t, f.l, b.ID)
 	if socket(bob) != 101 {
 		t.Fatal("a user's terminal socket was refused")
 	}

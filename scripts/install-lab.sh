@@ -74,6 +74,19 @@ install_ok() {
     return 1
   fi
 }
+# Without a server file the networks must be named, and the refusal says so;
+# refused alone cannot tell this from a refusal for another reason.
+no_networks_refused() {
+  refused "$1" "$2" --stage="${stage}" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/tls/key.pem" &&
+    grep -q '^install refused: name the networks your servers are in, for example --target-networks=' "${work}/refused.err"
+}
+bare_install_ok() {
+  if ! sudo -n sh "$1" --stage="${stage}" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/tls/key.pem" --target-networks=10.44.0.0/24 >"${work}/install.out" 2>"${work}/install.err"; then
+    cat "${work}/install.err" >&2
+    sudo -n journalctl --no-pager -n 60 -u keybash-gateway.service -u keybash-ssh-manager.service -u keybash-rdp-manager.service >&2 || true
+    return 1
+  fi
+}
 
 if sh scripts/install.sh ${base} >/dev/null 2>"${work}/refused.err" || ! grep -q '^install refused: run as root' "${work}/refused.err"; then
   echo 'install ran without root' >&2
@@ -83,6 +96,7 @@ fi
 {
   refused relative-stage scripts/install.sh --stage=stage --catalog="${catalog}" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/tls/key.pem"
   refused unknown-option scripts/install.sh ${base} --force
+  no_networks_refused no-servers-no-networks scripts/install.sh || { echo 'an install with no server file did not ask for its networks' >&2; cat "${work}/refused.err" >&2; exit 1; }
   refused other-name-certificate scripts/install.sh --stage="${stage}" --catalog="${catalog}" --tls-cert="${work}/other-tls/cert.pem" --tls-key="${work}/other-tls/key.pem"
   refused mismatched-key scripts/install.sh --stage="${stage}" --catalog="${catalog}" --tls-cert="${work}/tls/cert.pem" --tls-key="${work}/other-tls/key.pem"
   refused lan-without-networks scripts/install.sh ${base} --listen=192.0.2.10:8443
@@ -346,6 +360,20 @@ if sudo -n sh scripts/install.sh ${base} >/dev/null 2>&1; then echo 'install reu
 echo 'Uninstall removed programs and units and kept the data'
 reset_host
 
+# A new install needs no server file, only the networks its servers are in:
+# the services start inside that boundary, and an upgrade keeps it.
+bare_install_ok scripts/install.sh
+sudo -n grep -qF '"targets":[]' /etc/keybash/targets.json || { echo 'the install did not write an empty server file' >&2; exit 1; }
+check_owner /etc/keybash/targets.json 'root:root 644'
+for unit in ${enabled}; do systemctl is-active --quiet "${unit}"; done
+bounded 10.44.0.0/24 || { echo 'an install with no server file has no network boundary' >&2; exit 1; }
+serves || { echo 'an install with no server file does not serve' >&2; exit 1; }
+upgrade_ok scripts/upgrade.sh "${stage_b}"
+bounded 10.44.0.0/24 || { echo 'an upgrade with no server file lost the named networks' >&2; exit 1; }
+serves
+reset_host
+echo 'A new install with no server file starts inside its named networks, and an upgrade keeps them'
+
 # Mutations on a copy of the installer, never the repository file. Each must
 # make the check above that it targets fail; the host is reset after each.
 fresh_mutant() { cp scripts/install.sh "${work}/mutant.sh"; }
@@ -396,10 +424,26 @@ if refused server-outside-networks "${work}/mutant.sh" ${base} --target-networks
   escaped skip-target-networks-check
 fi
 reset_host
-# Accepting direction: a valid install must carry the network boundary.
+# Refusing direction: a plan without the network boundary must stop the install.
 fresh_mutant
 mutate 'set -- "$@" --target-networks="${networks}"' 'true'
+if install_ok "${work}/mutant.sh" 2>/dev/null; then escaped skip-boundary-check; fi
+reset_host
+# Accepting direction: without that check too, the install lacks the boundary.
+fresh_mutant
+mutate 'set -- "$@" --target-networks="${networks}"' 'true'
+mutate '"${work}/preview/keybash-gateway.service" || refuse' '"${work}/preview/keybash-gateway.service" || true'
 install_ok "${work}/mutant.sh"
 if bounded "${hosts}"; then escaped drop-network-boundary; fi
+reset_host
+# Refusing direction: with no server file, no network may be assumed.
+fresh_mutant
+mutate 'refuse "name the networks your servers are in' 'true "name the networks your servers are in'
+if no_networks_refused skip-no-networks "${work}/mutant.sh" >/dev/null 2>&1; then escaped skip-no-networks-refusal; fi
+reset_host
+# Accepting direction: an install with no server file must start.
+fresh_mutant
+mutate '{"version":1,"protected_networks":[],"targets":[]}' '{"version":1,"targets":[]}'
+if bare_install_ok "${work}/mutant.sh" 2>/dev/null; then escaped broken-empty-file; fi
 reset_host
 echo 'Installer mutations in both directions failed their intended checks'

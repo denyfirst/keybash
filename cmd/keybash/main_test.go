@@ -35,11 +35,12 @@ func TestOperatorRemoteFlagsAndProtocolGate(t *testing.T) {
 			t.Fatal("invalid remote CLI flags accepted or emitted data")
 		}
 	}
-	if sshOnly(nil) || sshOnly([]identity.RemoteTarget{{Protocol: "rdp"}}) ||
+	if sshOnly([]identity.RemoteTarget{{Protocol: "rdp"}}) ||
 		sshOnly([]identity.RemoteTarget{{Protocol: "ssh"}, {Protocol: "rdp"}}) {
-		t.Fatal("missing or unsupported launcher catalog accepted")
+		t.Fatal("unsupported launcher catalog accepted")
 	}
-	if !sshOnly([]identity.RemoteTarget{{Protocol: "ssh"}}) {
+	// A file with no server is valid: servers are added on the Servers page.
+	if !sshOnly([]identity.RemoteTarget{{Protocol: "ssh"}}) || !sshOnly(nil) {
 		t.Fatal("valid SSH-only catalog refused")
 	}
 }

@@ -43,7 +43,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	}
 	command := args[0]
 	switch command {
-	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab", "backup", "restore", "key-export", "key-import", "check-tls", "server-add":
+	case "init", "bootstrap-renew", "account-add", "account-recover", "serve-lab", "check-targets", "serve-ssh-lab", "serve-remote-lab", "backup", "restore", "key-export", "key-import", "check-tls":
 	default:
 		return refused
 	}
@@ -66,32 +66,11 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	sshOnlyCatalog := flags.Bool("ssh-only", false, "check-targets: also refuse any target that is not SSH")
 	targetNetworks := flags.String("target-networks", "", "networks the gateway may reach; every catalog server must lie inside them")
 	printNetworks := flags.Bool("print-host-networks", false, "check-targets: print one host network per catalog server address")
-	serverLabel := flags.String("name", "", "server-add: the name people will see")
-	serverHost := flags.String("host", "", "server-add: the server's IP address")
-	serverPort := flags.Int("port", 22, "server-add: the server's SSH port")
-	serverPrint := flags.String("fingerprint", "", "server-add: the SHA256 host key fingerprint you compared, instead of answering yes")
 	if flags.Parse(args[1:]) != nil || flags.NArg() != 0 || (*lost || *admin) && command != "account-recover" || (*out != "") != (command == "backup") || (*in != "") != (command == "restore") ||
 		(*allowFrom != "" || *serverName != "") && !strings.HasPrefix(command, "serve-") && command != "check-tls" || *sshOnlyCatalog && command != "check-targets" ||
 		*targetNetworks != "" && command != "check-targets" && command != "serve-ssh-lab" && command != "serve-remote-lab" ||
-		*printNetworks && (command != "check-targets" || *targetNetworks != "") ||
-		(*serverLabel != "" || *serverHost != "" || *serverPrint != "" || *serverPort != 22) && command != "server-add" {
+		*printNetworks && (command != "check-targets" || *targetNetworks != "") {
 		return refused
-	}
-	if command == "server-add" {
-		validFlags := true
-		flags.Visit(func(f *flag.Flag) {
-			validFlags = validFlags && (f.Name == "config" || f.Name == "name" || f.Name == "host" || f.Name == "port" || f.Name == "fingerprint")
-		})
-		if !validFlags || *catalog == "" || *serverLabel == "" || *serverHost == "" || runtime.GOOS != "linux" || os.Geteuid() != 0 {
-			return refused
-		}
-		load := func(path string) ([]byte, error) {
-			if _, e := operatorconfig.LoadCatalog(path); e != nil {
-				return nil, e
-			}
-			return os.ReadFile(path) // #nosec G304 -- the root-owned catalog LoadCatalog just admitted; ReplaceCatalog rechecks its bytes.
-		}
-		return serverAdd(context.Background(), *catalog, *serverLabel, *serverHost, *serverPort, *serverPrint, input, output, load, probeHostKey, operatorconfig.ReplaceCatalog)
 	}
 	var targets []identity.RemoteTarget
 	var webServers identity.Option // where administrators may add servers from the web
@@ -156,10 +135,15 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		targets, limits = snapshot.Targets, snapshot.Capacity
 		// The unit's kernel boundary uses the same networks; a server outside
 		// them could never be reached, so the gateway does not start. They are
-		// also where administrators may add servers from the web.
-		if e == nil && *targetNetworks != "" {
+		// also where administrators may add servers on the Servers page. A
+		// unit that names none reaches exactly the file's servers.
+		list := *targetNetworks
+		if list == "" {
+			list = snapshot.HostNetworks()
+		}
+		if e == nil && list != "" {
 			var networks []netip.Prefix
-			if networks, e = snapshot.Networks(*targetNetworks); e == nil {
+			if networks, e = snapshot.Networks(list); e == nil {
 				webServers = identity.TargetNetworks(networks, snapshot.Protected)
 			}
 		}
@@ -322,10 +306,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	return refused
 }
 
+// sshOnly reports whether no server needs the RDP runtime. A file with no
+// server is valid: servers are added on the Servers page.
 func sshOnly(targets []identity.RemoteTarget) bool {
-	if len(targets) == 0 {
-		return false
-	}
 	for _, target := range targets {
 		if target.Protocol != "ssh" {
 			return false

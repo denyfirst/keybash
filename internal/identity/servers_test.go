@@ -310,17 +310,26 @@ func TestServerRecordsAreSealed(t *testing.T) {
 func TestServersPageIsForFreshAdministrators(t *testing.T) {
 	f, scans := serversFixture(t)
 	view := listServersView(t, f.alice)
-	if !slices.Equal(view.Networks, []string{"10.20.0.0/24"}) || !view.Adding || len(view.Servers) != 1 || view.Servers[0].Source != "file" || view.Servers[0].ID != f.target.ID || !view.Servers[0].Available || view.Servers[0].Access != nil {
+	if !slices.Equal(view.Networks, []string{"10.20.0.0/24"}) || !view.Adding || len(view.Servers) != 1 || view.Servers[0].ID != f.target.ID || !view.Servers[0].Available || view.Servers[0].Access == nil || len(view.Servers[0].Access) != 0 || view.Servers[0].AddedBy != "" {
 		t.Fatalf("servers view %+v", view)
 	}
-	bob, _ := f.person("bob", roleUser)
+	bob, b := f.person("bob", roleUser)
 	dave, _ := f.person("dave", roleAuditor)
 	scans.set("10.20.0.7:22", hostKeyFixture(t))
 	scan := inputJSON(map[string]string{"address": "10.20.0.7", "port": "22"})
+	// A user reaches none of it; an auditor reads the list and changes nothing.
+	bob.expect("GET", "/api/servers", "", 403)
+	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/grant", inputJSON(map[string]string{"account": b.ID}), 204)
+	var read serversView
+	if json.Unmarshal(dave.expect("GET", "/api/servers", "", 200).Body.Bytes(), &read) != nil || read.Adding || len(read.Servers) != 1 || !slices.Equal(read.Servers[0].Access, []string{b.ID}) || read.Names[b.ID] != "bob" {
+		t.Fatalf("auditor's view %+v", read)
+	}
 	for _, c := range []*custodyClient{bob, dave} {
-		c.expect("GET", "/api/servers", "", 403)
 		c.expect("POST", "/api/servers/scan", scan, 403)
 		c.expect("POST", "/api/servers", inputJSON(map[string]string{"name": "x", "address": "10.20.0.7", "port": "22", "fingerprint": "SHA256:" + strings.Repeat("A", 43)}), 403)
+		c.expect("POST", "/api/servers/"+f.target.ID+"/name", inputJSON(map[string]string{"name": "x"}), 403)
+		c.expect("POST", "/api/servers/"+f.target.ID+"/revoke", inputJSON(map[string]string{"account": b.ID}), 403)
+		c.expect("DELETE", "/api/servers/"+f.target.ID, "{}", 403)
 	}
 	// Listing needs the ready session; a scan, like any change, a fresh factor.
 	f.advance(freshProof + time.Minute)
@@ -385,14 +394,28 @@ func TestServerScansStayInsideTheTargetNetworks(t *testing.T) {
 	f.l.remote.scans = 0
 	f.l.mu.Unlock()
 	scan("10.20.0.5", "2222", 200)
-	// An installation that names no target networks adds nothing from the web.
+	// An installation that names no target networks reaches exactly its file's
+	// servers, and adds nothing else.
 	g, gs := serversFixtureWith(t)
-	if view := listServersView(t, g.alice); view.Adding || len(view.Networks) != 0 {
-		t.Fatal("an installation without target networks offered adding")
+	if view := listServersView(t, g.alice); !slices.Equal(view.Networks, []string{"10.20.0.5/32"}) {
+		t.Fatalf("an installation without target networks reaches %v", view.Networks)
 	}
 	g.alice.expect("POST", "/api/servers/scan", inputJSON(map[string]string{"address": "10.20.0.7", "port": "22"}), 403)
 	if gs.calls != 0 {
 		t.Fatal("an installation without target networks scanned")
+	}
+	// With no server and no networks at all, nothing can be added.
+	store, _, _ := bootstrapped(t)
+	empty, e := NewRemoteLabWithLimits("https://127.0.0.1:8443", store, nil, echoSSHWorker{}, nil, sessionlimits.Default())
+	if e != nil {
+		t.Fatal("a lab with no servers refused")
+	}
+	defer empty.Close()
+	empty.mu.Lock()
+	view, e := empty.serversViewLocked(true)
+	empty.mu.Unlock()
+	if e != nil || view.Adding || len(view.Networks) != 0 || len(view.Servers) != 0 {
+		t.Fatalf("a lab with no servers and no networks: %+v", view)
 	}
 }
 
@@ -416,6 +439,7 @@ func TestTargetNetworksOptionIsChecked(t *testing.T) {
 
 func TestServersAreAddedComparedRenamedRepinnedAndRemoved(t *testing.T) {
 	f, scans := serversFixture(t)
+	missing := strings.Repeat("9", 32)
 	first := hostKeyFixture(t)
 	scans.set("10.20.0.7:22", first)
 	add := func(fingerprint string, status int) {
@@ -424,7 +448,7 @@ func TestServersAreAddedComparedRenamedRepinnedAndRemoved(t *testing.T) {
 	}
 	// The key the server shows when it is added must be the one compared.
 	add(ssh.FingerprintSHA256(hostKeyFixture(t)), 409)
-	if list, _ := f.store.listServers(); len(list) != 0 {
+	if list, _ := f.store.listServers(); len(list) != 1 {
 		t.Fatal("a server whose key did not match was stored")
 	}
 	f.alice.expect("POST", "/api/servers", inputJSON(map[string]string{"name": "Web", "address": "10.21.0.7", "port": "22", "fingerprint": ssh.FingerprintSHA256(first)}), 403)
@@ -432,12 +456,12 @@ func TestServersAreAddedComparedRenamedRepinnedAndRemoved(t *testing.T) {
 	add(ssh.FingerprintSHA256(first), 200)
 	add(ssh.FingerprintSHA256(first), 409) // already listed
 	row, ok := serverRow(listServersView(t, f.alice), id)
-	if !ok || row.Source != "web" || !row.Available || row.Access == nil || len(row.Access) != 0 || row.Fingerprint != ssh.FingerprintSHA256(key) || row.Hostname != "10.20.0.8" || row.Port != 22 || row.AddedBy != mustLookup(t, f.store, "alice").ID {
+	if !ok || !row.Available || row.Access == nil || len(row.Access) != 0 || row.Fingerprint != ssh.FingerprintSHA256(key) || row.Hostname != "10.20.0.8" || row.Port != 22 || row.AddedBy != mustLookup(t, f.store, "alice").ID {
 		t.Fatalf("added server row %+v", row)
 	}
 	f.alice.expect("POST", "/api/servers/"+id+"/name", inputJSON(map[string]string{"name": "Build box"}), 204)
 	f.alice.expect("POST", "/api/servers/"+id+"/name", inputJSON(map[string]string{"name": ""}), 400)
-	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/name", inputJSON(map[string]string{"name": "Renamed"}), 404)
+	f.alice.expect("POST", "/api/servers/"+missing+"/name", inputJSON(map[string]string{"name": "Renamed"}), 404)
 	if row, _ = serverRow(listServersView(t, f.alice), id); row.Name != "Build box" {
 		t.Fatal("rename not shown")
 	}
@@ -449,13 +473,13 @@ func TestServersAreAddedComparedRenamedRepinnedAndRemoved(t *testing.T) {
 		t.Fatal("re-scan did not show the new key")
 	}
 	f.alice.expect("POST", "/api/servers/"+id+"/key", inputJSON(map[string]string{"fingerprint": ssh.FingerprintSHA256(key)}), 409)
-	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/scan", "{}", 404)
-	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/key", inputJSON(map[string]string{"fingerprint": ssh.FingerprintSHA256(next)}), 404)
+	f.alice.expect("POST", "/api/servers/"+missing+"/scan", "{}", 404)
+	f.alice.expect("POST", "/api/servers/"+missing+"/key", inputJSON(map[string]string{"fingerprint": ssh.FingerprintSHA256(next)}), 404)
 	f.alice.expect("POST", "/api/servers/"+id+"/key", inputJSON(map[string]string{"fingerprint": ssh.FingerprintSHA256(next)}), 204)
 	if row, _ = serverRow(listServersView(t, f.alice), id); row.Fingerprint != ssh.FingerprintSHA256(next) {
 		t.Fatal("re-pinned key not shown")
 	}
-	f.alice.expect("DELETE", "/api/servers/"+f.target.ID, "{}", 404)
+	f.alice.expect("DELETE", "/api/servers/"+missing, "{}", 404)
 	f.alice.expect("DELETE", "/api/servers/"+id, "{}", 204)
 	f.alice.expect("DELETE", "/api/servers/"+id, "{}", 404)
 	if _, ok = serverRow(listServersView(t, f.alice), id); ok {
@@ -487,8 +511,8 @@ func TestServerAccessListDecidesWhoConnects(t *testing.T) {
 		return ids
 	}
 	for _, c := range []*custodyClient{bob, f.alice} {
-		if slices.Contains(targets(c), id) || !slices.Contains(targets(c), f.target.ID) {
-			t.Fatal("an unlisted person sees the server")
+		if slices.Contains(targets(c), id) || slices.Contains(targets(c), f.target.ID) {
+			t.Fatal("an unlisted person sees a server")
 		}
 		c.expect("GET", "/api/targets/"+id, "", 404)
 	}
@@ -591,11 +615,11 @@ func TestServerAccessListDecidesWhoConnects(t *testing.T) {
 	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": d.ID}), 403)
 	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": strings.Repeat("9", 32)}), 404)
 	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": "bob"}), 400)
-	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/grant", inputJSON(map[string]string{"account": b.ID}), 404)
+	f.alice.expect("POST", "/api/servers/"+strings.Repeat("9", 32)+"/grant", inputJSON(map[string]string{"account": b.ID}), 404)
 }
 
-// Web servers come back after a restart, and only inside the networks the
-// gateway is given then.
+// Servers come back after a restart, and only inside the networks the gateway
+// is given then.
 func TestServersReloadInsideTheNetworksOfEachStart(t *testing.T) {
 	f, scans := serversFixture(t)
 	id, _ := addServerFixture(t, f.alice, scans, "Web", "10.20.0.7:22")
@@ -616,37 +640,13 @@ func TestServersReloadInsideTheNetworksOfEachStart(t *testing.T) {
 		}
 		l.mu.Lock()
 		_, reachable := l.mayUseLocked(b.ID, id)
-		view, ve := l.serversViewLocked()
+		view, ve := l.serversViewLocked(true)
 		l.mu.Unlock()
 		_ = l.Close()
 		row, listed := serverRow(view, id)
 		if ve != nil || reachable != start.reachable || !listed || row.Available != start.reachable || !slices.Equal(row.Access, []string{b.ID}) {
 			t.Fatalf("after restart: reachable %v, row %+v", reachable, row)
 		}
-	}
-	// Once the server file lists the same address and port, the file's entry
-	// is the one people reach; the web server stays listed, unreachable.
-	endpoint := netip.MustParseAddrPort("10.20.0.7:22")
-	policy, e := targetguard.New([]netip.AddrPort{endpoint}, serverProtected)
-	if e != nil {
-		t.Fatal("fixture policy failed")
-	}
-	named, e := targetguard.NewAddressTarget(policy, endpoint.Addr(), endpoint.Port())
-	if e != nil {
-		t.Fatal("fixture target failed")
-	}
-	copied := RemoteTarget{strings.Repeat("e", 32), "Catalog copy", "ssh", named, hostKeyFixture(t).Marshal()}
-	both, e := NewRemoteLabWithLimits("https://127.0.0.1:8443", f.store, []RemoteTarget{f.target, copied}, echoSSHWorker{}, nil, sessionlimits.Default(), TargetNetworks(serverNetworks, serverProtected))
-	if e != nil {
-		t.Fatal("restart refused")
-	}
-	both.mu.Lock()
-	_, reachable := both.mayUseLocked(b.ID, id)
-	view, _ := both.serversViewLocked()
-	both.mu.Unlock()
-	_ = both.Close()
-	if row, _ := serverRow(view, id); reachable || row.Available {
-		t.Fatal("a web server where the server file also answers is reachable")
 	}
 	// Without an SSH worker no web server is reachable.
 	worker := &fixtureRDPWorker{expected: "x"}
@@ -656,7 +656,7 @@ func TestServersReloadInsideTheNetworksOfEachStart(t *testing.T) {
 	}
 	defer l.Close()
 	l.mu.Lock()
-	_, reachable = l.mayUseLocked(b.ID, id)
+	_, reachable := l.mayUseLocked(b.ID, id)
 	adding := l.remote.ssh != nil
 	l.mu.Unlock()
 	if reachable || adding {
@@ -772,5 +772,32 @@ func TestReadHostKeyTakesOnlyAProvenEd25519Key(t *testing.T) {
 	_ = client.Close()
 	if total := <-written; total > 64<<10 {
 		t.Fatalf("read %d bytes from a server, over the bound", total)
+	}
+}
+
+// openTo puts these accounts on every server's access list, as an
+// administrator would on the Servers page, and reloads the lab.
+func openTo(t *testing.T, l *Lab, owners ...string) {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.store.update(func(tx *bolt.Tx) error {
+		list, e := l.store.servers(tx)
+		if e != nil {
+			return e
+		}
+		for _, w := range list {
+			for _, owner := range owners {
+				if at, listed := slices.BinarySearch(w.Access, owner); !listed && !w.Removed {
+					w.Access = slices.Insert(w.Access, at, owner)
+				}
+			}
+			if e = l.store.saveServer(tx, w); e != nil {
+				return e
+			}
+		}
+		return nil
+	}) != nil || l.reloadServersLocked() != nil {
+		t.Fatal("fixture access failed")
 	}
 }

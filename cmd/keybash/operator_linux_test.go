@@ -81,6 +81,23 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 			t.Fatalf("target networks %q: accepted is not %v", networks, want)
 		}
 	}
+	// A file with no server is valid: servers are added on the Servers page,
+	// inside networks root names, so it offers no host network of its own.
+	empty := filepath.Join(base, "empty.json")
+	if os.WriteFile(empty, []byte(`{"version":1,"protected_networks":[],"targets":[]}`), 0644) != nil { // #nosec G306 -- public root-owned fixture catalog, not credentials.
+		t.Fatal("fixture empty catalog failed")
+	}
+	check.Reset()
+	if run([]string{"check-targets", "--config", empty, "--ssh-only"}, nil, &check) != nil || !strings.HasPrefix(check.String(), "Target configuration valid (0 servers;") {
+		t.Fatal("a server file with no server refused")
+	}
+	printed.Reset()
+	if run([]string{"check-targets", "--config", empty, "--print-host-networks"}, nil, &printed) != nil || printed.String() != "\n" {
+		t.Fatal("a server file with no server offered host networks")
+	}
+	if run([]string{"check-targets", "--config", empty, "--target-networks", "192.168.1.0/24"}, nil, &bytes.Buffer{}) != nil {
+		t.Fatal("named networks refused for a server file with no server")
+	}
 	keyFile := filepath.Join(keyDir, "instance.key")
 	common := []string{"--data", data, "--key-file", keyFile}
 	command := func(args ...string) *exec.Cmd {
@@ -206,7 +223,18 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	if json.Unmarshal(call("GET", "/api/remote/capacity", nil, 200), &capacity) != nil || capacity.Total != 16 || capacity.PerOwner != 4 {
 		t.Fatal("configured CLI capacity ignored")
 	}
+	// The file's server moved into the server list with nobody on it: the
+	// administrator puts themself on it first, as on the Servers page.
 	var targets []struct{ ID, Name, Protocol string }
+	if json.Unmarshal(call("GET", "/api/targets", nil, 200), &targets) != nil || len(targets) != 0 {
+		t.Fatal("a server from the file was open before anyone was given it")
+	}
+	var users struct{ Self string }
+	if json.Unmarshal(call("GET", "/api/session", nil, 200), &session) != nil || json.Unmarshal(call("GET", "/api/users", nil, 200), &users) != nil {
+		t.Fatal("configured CLI account unreadable")
+	}
+	csrf = session.CSRF
+	call("POST", "/api/servers/"+strings.Repeat("a", 32)+"/grant", map[string]string{"account": users.Self}, 204)
 	if json.Unmarshal(call("GET", "/api/targets", nil, 200), &targets) != nil || len(targets) != 1 || targets[0].ID != strings.Repeat("a", 32) || targets[0].Protocol != "ssh" {
 		t.Fatal("configured CLI catalog missing after MFA")
 	}

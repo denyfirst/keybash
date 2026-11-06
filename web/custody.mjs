@@ -403,13 +403,13 @@ const pages = {
   connections: { path: '/', panel: 'connections-panel', title: 'Connections', lead: 'Your servers, one click from a terminal.' },
   keys: { path: '/keys', panel: 'records-panel', title: 'Keys & passwords', lead: 'What you sign in to servers with, encrypted on this server.' },
   account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, your phone authenticator and your recovery codes.' },
-  installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, how to add a server, and how to update it.' },
+  installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, and how to update it.' },
   servers: { path: '/servers', panel: 'servers-panel', title: 'Servers', lead: 'Where people here connect, and who may use each server.' },
   users: { path: '/users', panel: 'users-panel', title: 'Users', lead: 'Who signs in here, and what each person may do.' },
 };
 // Which pages each role sees, in rail order; the first is where a role lands.
 // The server refuses the rest whatever the page shows.
-const access = { user: ['connections', 'keys', 'account'], admin: ['connections', 'keys', 'servers', 'users', 'installation', 'account'], auditor: ['account'] };
+const access = { user: ['connections', 'keys', 'account'], admin: ['connections', 'keys', 'servers', 'users', 'installation', 'account'], auditor: ['servers', 'account'] };
 const roleWords = { user: 'User', admin: 'Administrator', auditor: 'Auditor' };
 const stateWords = { active: 'Active', setup: 'Setting up phone', invited: 'Invited', expired: 'Code expired', blocked: 'Blocked' };
 const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
@@ -513,60 +513,60 @@ async function loadUsers() {
   $('people').replaceChildren(rows);
 }
 // The Servers page: each server, where it is, its pinned identity, and who
-// may use it. Servers from the server file on the Keybash host are listed
-// too; they change only there.
+// may use it. Administrators change it; auditors read it.
 const sshPrintOK = value => typeof value === 'string' && /^SHA256:[A-Za-z0-9+/]{43}$/.test(value);
 const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length <= 160 && ['ssh', 'rdp'].includes(s.protocol) && typeof s.hostname === 'string' && /^[a-z0-9.:-]{1,253}$/.test(s.hostname) &&
   Number.isInteger(s.port) && s.port >= 1 && s.port <= 65535 && Array.isArray(s.addresses) && s.addresses.length >= 1 && s.addresses.length <= 16 && s.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) &&
-  fingerprintOK(s.fingerprint) && typeof s.available === 'boolean' &&
-  (s.source === 'file' ? s.access === null : s.source === 'web' && s.protocol === 'ssh' && sshPrintOK(s.fingerprint) && Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && idOK(s.added_by) && Number.isInteger(s.added));
-let people = new Map();
+  fingerprintOK(s.fingerprint) && (s.protocol === 'rdp' || sshPrintOK(s.fingerprint)) && typeof s.available === 'boolean' &&
+  Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added);
+let people = new Map(), names = new Map();
 async function loadServers() {
-  const data = await request('/api/servers'), everyone = await loadPeople();
+  const data = await request('/api/servers');
   if (!Array.isArray(data?.networks) || data.networks.length > 64 || !data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) || typeof data.adding !== 'boolean' ||
-    !Array.isArray(data.servers) || data.servers.length > 512 || !data.servers.every(serverOK)) throw new Error('invalid servers');
-  people = new Map(everyone.accounts.map(person => [person.id, person]));
+    !Array.isArray(data.servers) || data.servers.length > 256 || !data.servers.every(serverOK) || typeof data.names !== 'object' || data.names === null ||
+    !Object.entries(data.names).every(([id, name]) => idOK(id) && typeof name === 'string' && /^[a-z0-9._-]{1,64}$/.test(name))) throw new Error('invalid servers');
+  names = new Map(Object.entries(data.names));
+  // Only an administrator chooses people, so only they need the full list.
+  people = role === 'admin' ? new Map((await loadPeople()).accounts.map(person => [person.id, person])) : new Map();
   $('add-server').hidden = !data.adding;
   const code = text => { const element = document.createElement('code'); element.textContent = text; return element; };
   const option = code('upgrade.sh --target-networks=…');
   if (data.networks.length) $('server-networks').replaceChildren('Servers can be added inside ', ...data.networks.flatMap((n, i) => i ? [', ', code(n)] : [code(n)]), '. To allow other networks, run ', option, ' on the Keybash server.');
   else $('server-networks').replaceChildren('This installation names no networks for servers, so none can be added here. On the Keybash server, run ', option, ' (see Installation).');
+  $('server-networks').hidden = role !== 'admin';
   const rows = document.createDocumentFragment();
   for (const server of data.servers) rows.append(serverRow(server));
   $('servers').replaceChildren(rows);
+  if (!data.servers.length) $('servers').append(emptyState('No servers yet', role === 'admin' ? 'Add one, then choose who may use it.' : 'An administrator adds servers here.', 'terminal'));
   return data.servers;
 }
 function serverRow(server) {
-  const row = document.createElement('article'); row.className = 'record server-row'; row.dataset.server = server.id; row.dataset.source = server.source;
+  const row = document.createElement('article'); row.className = 'record server-row'; row.dataset.server = server.id;
   const tile = document.createElement('span'); tile.className = 'record-icon'; tile.append(glyph(server.protocol, 'server-glyph'));
   const titles = document.createElement('div'); titles.className = 'record-titles';
   const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = server.name;
   const where = server.addresses.length === 1 && server.addresses[0] === server.hostname ? '' : ` (${server.addresses.join(', ')})`;
   const meta = document.createElement('p'); meta.className = 'record-meta'; meta.textContent = `${server.protocol.toUpperCase()} · ${hostPort(server.hostname, server.port)}${where}`;
   titles.append(name, meta);
-  if (server.source === 'file') { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'From the server file'; titles.append(badge); }
   const print = document.createElement('p'); print.className = 'record-print';
   const code = document.createElement('code'); code.className = 'fingerprint'; code.textContent = server.fingerprint; code.title = 'Identity (fingerprint)'; print.append(code);
   const who = document.createElement('p'); who.className = 'server-access';
-  if (server.source === 'file') who.textContent = 'Everyone with a key or password can connect.';
-  else {
-    const names = server.access.map(id => people.get(id)?.username).filter(Boolean).sort();
-    who.textContent = names.length ? `Can use it: ${names.join(', ')}` : 'Nobody can use it yet.';
-  }
+  const listed = server.access.map(id => names.get(id)).filter(Boolean).sort();
+  who.textContent = listed.length ? `Can use it: ${listed.join(', ')}` : 'Nobody can use it yet.';
   titles.append(print, who);
   if (!server.available) {
     const help = document.createElement('p'); help.className = 'server-help';
-    help.textContent = server.source === 'web' ? 'Not reachable: outside the networks this Keybash may reach, or already in the server file.' : 'Its identity cannot be used right now.';
+    help.textContent = 'Nobody can connect to it now: it is outside the networks this Keybash may reach, or its identity cannot be used (for example an expired certificate).';
     titles.append(help);
   }
   const state = document.createElement('span'); state.className = 'pill server-state'; state.dataset.state = server.available ? 'ready' : 'unreachable'; state.textContent = server.available ? 'Ready' : 'Not reachable';
   const actions = document.createElement('div'); actions.className = 'record-actions';
   row.append(tile, titles, state, actions);
-  if (server.source !== 'web') return row;
+  if (role !== 'admin') return row;
   const button = (text, style, act) => { const b = document.createElement('button'); b.type = 'button'; b.className = style; b.textContent = text; b.addEventListener('click', act); actions.append(b); };
   button('Who can use it', 'secondary', () => openAccess(server));
   button('Rename', 'ghost', () => openRename(server));
-  if (server.available) button('Check identity', 'ghost', () => { void run(() => openIdentity(server)); });
+  if (server.available && server.protocol === 'ssh') button('Check identity', 'ghost', () => { void run(() => openIdentity(server)); });
   button('Remove', 'ghost destructive', () => askConfirm('server', server));
   return row;
 }
@@ -674,7 +674,7 @@ bind('identity-form', async () => {
 async function loadInstallation() {
   const data = await request('/api/installation');
   if (typeof data?.revision !== 'string' || !/^(?:[0-9a-f]{40})?$/.test(data.revision) || typeof data.built !== 'string' || data.built !== '' && Number.isNaN(Date.parse(data.built)) ||
-    typeof data.modified !== 'boolean' || typeof data.ssh !== 'boolean' || typeof data.rdp !== 'boolean' || !Number.isInteger(data.servers) || data.servers < 0 || data.servers > 512) throw new Error('invalid installation');
+    typeof data.modified !== 'boolean' || typeof data.ssh !== 'boolean' || typeof data.rdp !== 'boolean' || !Number.isInteger(data.servers) || data.servers < 0 || data.servers > 256) throw new Error('invalid installation');
   if (data.revision) {
     const link = document.createElement('a'); link.href = `https://github.com/denyfirst/keybash/commit/${data.revision}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
     const code = document.createElement('code'); code.textContent = data.revision.slice(0, 7); link.append(code);
@@ -684,7 +684,7 @@ async function loadInstallation() {
     $('install-version').replaceChildren(link, notes.length ? ` · ${notes.join(' · ')}` : '');
   } else $('install-version').textContent = 'Not recorded in this build.';
   const kinds = data.ssh && data.rdp ? 'SSH and RDP' : data.ssh ? 'SSH' : data.rdp ? 'RDP' : '';
-  $('install-serves').textContent = kinds ? `${kinds}, to ${data.servers} ${data.servers === 1 ? 'server' : 'servers'} on your administrator’s list.` : 'Keys and passwords only: no server list is set up.';
+  $('install-serves').textContent = kinds ? `${kinds}, to ${data.servers} ${data.servers === 1 ? 'server' : 'servers'} on the Servers page.` : 'Keys and passwords only: this copy connects to no server.';
   // An installation with RDP is rebuilt with its runtime.
   if (data.rdp && !$('command-build').textContent.endsWith(' --with-rdp')) $('command-build').textContent += ' --with-rdp';
 }
@@ -909,7 +909,7 @@ click('saved-recovery', async () => { $('recovery-codes').value = ''; await load
 const signOut = async () => { hideSecret(); clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); };
 click('logout', signOut); click('focus-logout', signOut);
 click('copy-seed', () => copy('seed')); click('copy-recovery', () => copy('recovery-codes'));
-for (const name of ['add', 'restart', 'build', 'upgrade']) click(`copy-${name}`, () => copy(`command-${name}`));
+for (const name of ['build', 'upgrade']) click(`copy-${name}`, () => copy(`command-${name}`));
 click('copy-secret', () => copy('revealed-secret')); click('copy-passphrase', () => copy('revealed-passphrase'));
 $('hide-secret')?.addEventListener('click', hideSecret);
 $('secret-dialog')?.addEventListener('close', hideSecret);

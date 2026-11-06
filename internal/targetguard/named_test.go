@@ -332,3 +332,16 @@ func FuzzCanonicalHostname(f *testing.F) {
 		}
 	})
 }
+
+func TestCanonicalHostnameIsTheStoredForm(t *testing.T) {
+	for _, host := range []string{"server.example", "a-b.c1", "x"} {
+		if !CanonicalHostname(host) {
+			t.Fatalf("%q refused", host)
+		}
+	}
+	for _, host := range []string{"", "Server.example", "server.example.", "10.0.0.1", "::1", "-a.example", "a_b.example", "a..b", strings.Repeat("a", 64) + ".example"} {
+		if CanonicalHostname(host) {
+			t.Fatalf("%q accepted", host)
+		}
+	}
+}

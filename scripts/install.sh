@@ -128,11 +128,18 @@ finish() {
 trap finish EXIT
 chmod 0700 "${work}"
 # The catalog loader requires a root-owned file in root-owned directories.
-for file in "${catalog}" "${cert}" "${key}"; do
+# Servers are added on the Servers page, so the file usually lists none; one
+# given with --catalog moves into that page at the first start.
+for file in ${catalog:+"${catalog}"} "${cert}" "${key}"; do
   case "${file}" in /*) ;; *) refuse '--catalog, --tls-cert and --tls-key must be absolute paths' ;; esac
   test -f "${file}" && test ! -L "${file}" || refuse "${file} is not a regular file"
 done
-install -o root -g root -m 0644 "${catalog}" "${work}/targets.json"
+if test -n "${catalog}"; then
+  install -o root -g root -m 0644 "${catalog}" "${work}/targets.json"
+else
+  printf '%s\n' '{"version":1,"protected_networks":[],"targets":[]}' > "${work}/targets.json"
+  chmod 0644 "${work}/targets.json"
+fi
 if test "${rdp}" = yes; then
   "${stage}/bin/keybash" check-targets --config="${work}/targets.json" >/dev/null || refuse 'catalog refused (keybash check-targets)'
 else
@@ -145,12 +152,16 @@ test -z "${name}" || set -- "$@" --server-name="${name}"
 "${stage}/bin/keybash" check-tls --tls-cert="${cert}" --tls-key="${key}" "$@" >/dev/null ||
   refuse 'TLS pair refused: it must load, be valid now and cover the address or --server-name browsers use'
 # The gateway reaches only these networks: the kernel denies every other
-# address to its unit. Without --target-networks it reaches exactly the
-# catalog's servers.
+# address to its unit, and the Servers page adds servers inside them only.
+# Without --target-networks it reaches exactly the catalog's servers; with no
+# catalog they must be named, so nothing wider is ever allowed by default.
 if test -z "${networks}"; then
   networks="$("${stage}/bin/keybash" check-targets --config="${work}/targets.json" --print-host-networks)" || refuse 'catalog refused (keybash check-targets)'
 fi
-test -n "${networks}" || refuse 'the catalog lists no server address'
+if test -z "${networks}"; then
+  local_network="$(ip -o -4 route show scope link 2>/dev/null | awk '$1 ~ /^[0-9.]+\/[0-9]+$/ {print $1; exit}')" || local_network=''
+  refuse "name the networks your servers are in, for example --target-networks=${local_network:-192.168.1.0/24}${local_network:+ (this host's own network)}"
+fi
 "${stage}/bin/keybash" check-targets --config="${work}/targets.json" --target-networks="${networks}" >/dev/null ||
   refuse 'target networks refused: every catalog server must lie inside them, and none may touch a protected network, loopback, link-local or a metadata address'
 set -- "$@" --target-networks="${networks}"
@@ -160,6 +171,9 @@ plan_args="--gateway-uid=${gateway_id} --gateway-gid=${gateway_id} --worker-uid=
 # shellcheck disable=SC2086 # plan_args holds only the integers and digest above
 "${stage}/bin/keybash-service-plan" ${plan_args} "$@" --output="${work}/preview" >/dev/null ||
   refuse 'service plan refused (listener, networks, server name or limits)'
+# The plan renders the kernel boundary only when it is given networks, so this
+# is checked on what will be installed, whatever led here.
+grep -qx 'IPAddressDeny=0.0.0.0/0 ::/0' "${work}/preview/keybash-gateway.service" || refuse 'the service plan has no network boundary'
 
 # --- Install: the first change -------------------------------------------------
 changed=yes

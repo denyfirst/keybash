@@ -119,9 +119,21 @@ the same power, so their reach needs a limit the gateway cannot lift.
     networks.
   - Adding and accepting a new key scan again and compare the fingerprint the
     administrator confirmed; the browser never supplies a key.
-  - The gateway still needs one catalog server to start.
-- **C** for catalog servers (with the grant on upgrade), the auditor's view
-  and **D** are next.
+- **C**, decided on 2026-11-06: after the install, servers are managed only on
+  the Servers page.
+  - The servers in the server file move into the store once, at the first
+    start: the same ID, so every connection keeps its approval, and on the
+    access list exactly the accounts with a connection to it. A server removed
+    on the page stays as a marker, so the file never brings it back.
+  - Every server is reached only through its access list; nothing is open to
+    everyone. Auditors read the page.
+  - The gateway starts with no server in the file. An install without one
+    must name its target networks: nothing wider is allowed by default.
+  - `keybash server-add` and the root-side catalog replacement are removed.
+  - The target networks stay a root setting (`upgrade.sh`): the website
+    cannot widen what the kernel lets the gateway reach.
+- Next: RDP servers on the page (a certificate read, and a DNS name with its
+  pinned addresses), then **D**.
 
 ## Consequences
 

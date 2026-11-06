@@ -39,6 +39,7 @@ func capacityOwner(t *testing.T, l *Lab, store *Store, name, record string) (*cu
 	if err != nil {
 		t.Fatal("capacity connection fixture failed")
 	}
+	openTo(t, l, account.ID)
 	l.mu.Lock()
 	if !l.refreshLocked(name) {
 		l.mu.Unlock()

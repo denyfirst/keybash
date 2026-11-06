@@ -230,7 +230,7 @@ if test -z "${networks}"; then
   networks="$("${stage}/bin/keybash" check-targets --config=/etc/keybash/targets.json --print-host-networks)" ||
     refuse 'catalog refused by the new version (keybash check-targets)'
 fi
-test -n "${networks}" || refuse 'the catalog lists no server address'
+test -n "${networks}" || refuse 'name the networks your servers are in with --target-networks'
 "${stage}/bin/keybash" check-targets --config=/etc/keybash/targets.json --target-networks="${networks}" >/dev/null ||
   refuse 'target networks refused: every catalog server must lie inside them, and none may touch a protected network, loopback, link-local or a metadata address'
 # shellcheck disable=SC2086
@@ -251,6 +251,7 @@ new_worker="$(digest "${stage}/bin/keybash-ssh-worker")"
 # shellcheck disable=SC2086
 "${stage}/bin/keybash-service-plan" ${kept} --worker-digest="${new_worker}" ${new_rdp} --listen="${listen}" ${exposure} \
   --target-networks="${networks}" --output="${work}/plan" >/dev/null || refuse 'the new service plan refused this installation'"'"'s settings'
+grep -qx 'IPAddressDeny=0.0.0.0/0 ::/0' "${work}/plan/keybash-gateway.service" || refuse 'the new service plan has no network boundary'
 cmp -s "${work}/plan/keybash.conf" /etc/sysusers.d/keybash.conf || refuse 'the new plan changes the service accounts; reinstall instead'
 planned=''
 for unit in ${units}; do planned="${planned} ${work}/plan/${unit}"; done

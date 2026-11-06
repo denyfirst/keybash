@@ -83,7 +83,7 @@ func TestOperatorCatalogRejectsAmbiguousAndForbidden(t *testing.T) {
 		{`"name":"Əsas server"`, `"name":"\ud800"`}, {`"name":"Əsas server"`, `"name":"\u202espoof"`},
 		{`"name":"Əsas server"`, `"name":" line\n"`},
 		{strings.Repeat("a", 32), strings.Repeat("A", 32)},
-		{`["10.99.0.0/16"]`, `[]`}, {`["10.99.0.0/16"]`, `null`},
+		{`["10.99.0.0/16"]`, `null`},
 		{`["10.99.0.0/16"]`, `["10.99.0.1/16"]`},
 		{`["10.99.0.0/16"]`, `["10.99.0.0/16","10.99.0.0/16"]`},
 		{`["10.44.0.8"]`, `[]`}, {`["10.44.0.8"]`, `["10.44.0.8","10.44.0.8"]`},
@@ -287,7 +287,7 @@ func FuzzOperatorCatalog(f *testing.F) {
 		if err != nil && (err != ErrConfiguration || catalog.Targets != nil || catalog.Capacity.Valid()) {
 			t.Fatal("parser leaked partial authority or diagnostics")
 		}
-		if err == nil && (len(catalog.Targets) == 0 || len(catalog.Targets) > 256 || !catalog.Capacity.Valid()) {
+		if err == nil && (len(catalog.Targets) > 256 || !catalog.Capacity.Valid()) {
 			t.Fatal("parser returned invalid authority count")
 		}
 	})
@@ -315,6 +315,20 @@ func TestCatalogTargetNetworksCoverEveryServer(t *testing.T) {
 	for _, bad := range []string{"", "192.168.1.0/24", "10.44.0.9/32", "10.0.0.0/8", "10.99.0.0/24", "10.44.0.0/24,"} {
 		if _, err := catalog.Networks(bad); err == nil {
 			t.Fatalf("target networks %q accepted", bad)
+		}
+	}
+}
+
+// Servers are added on the Servers page, so a file may name none, and no
+// protected network either; the lists are still required.
+func TestOperatorCatalogMayListNothing(t *testing.T) {
+	catalog, err := ParseCatalog(strings.NewReader(`{"version":1,"protected_networks":[],"targets":[]}`))
+	if err != nil || len(catalog.Targets) != 0 || len(catalog.Protected) != 0 || !catalog.Capacity.Valid() || catalog.HostNetworks() != "" {
+		t.Fatal("an empty server file refused")
+	}
+	for _, raw := range []string{`{"version":1,"protected_networks":[]}`, `{"version":1,"targets":[]}`, `{"version":1,"protected_networks":null,"targets":[]}`, `{"version":1,"protected_networks":[],"targets":null}`} {
+		if _, err := ParseCatalog(strings.NewReader(raw)); err == nil {
+			t.Fatalf("incomplete server file accepted: %s", raw)
 		}
 	}
 }

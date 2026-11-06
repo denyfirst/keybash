@@ -86,7 +86,7 @@ func ParseCatalog(input io.Reader) (Catalog, error) {
 	if err != nil {
 		return zero, ErrConfiguration
 	}
-	prefixes, err := array(root["protected_networks"], 64)
+	prefixes, err := list(root["protected_networks"], 64)
 	if err != nil {
 		return zero, ErrConfiguration
 	}
@@ -101,7 +101,7 @@ func ParseCatalog(input io.Reader) (Catalog, error) {
 		seenPrefixes[prefix] = true
 		protected = append(protected, prefix)
 	}
-	entries, err := array(root["targets"], 256)
+	entries, err := list(root["targets"], 256)
 	if err != nil {
 		return zero, ErrConfiguration
 	}
@@ -244,6 +244,15 @@ func text(raw []byte) (string, error) {
 		return "", ErrConfiguration
 	}
 	return value, nil
+}
+
+// list is array that may be empty: a file may name no protected network and
+// no server, since servers are added on the Servers page.
+func list(raw []byte, limit int) ([]json.RawMessage, error) {
+	if string(bytes.TrimSpace(raw)) == "[]" {
+		return nil, nil
+	}
+	return array(raw, limit)
 }
 
 func array(raw []byte, limit int) ([]json.RawMessage, error) {

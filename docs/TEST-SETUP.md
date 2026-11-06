@@ -90,8 +90,8 @@ Take the SSH host public key from the Linux VM's console, from
 `/etc/ssh/ssh_host_ed25519_key.pub`, drop the comment, and check its SHA256
 fingerprint separately. Never trust `ssh-keyscan` output on its own. Make a
 separate Ed25519 user key for the test account; never bring a production
-private key here. For SSH servers, `keybash server-add` reads the host key
-itself and asks you to compare the fingerprint (`INSTALL.md`).
+private key here. For SSH servers, the Servers page reads the host key itself
+and asks you to compare the fingerprint (`INSTALL.md`).
 
 For RDP, keep NLA on. The certificate needs:
 - a SHA-256 or stronger signature;
