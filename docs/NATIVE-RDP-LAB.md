@@ -37,8 +37,16 @@ approved leaf and validate its DNS SAN, validity, server-auth/digital-signature
 usage, critical extensions and key strength. It refuses gateway/redirect flags.
 TLS has a 1.2 floor and ECDHE/AEAD TLS 1.2 suites. The check occurs on the native
 worker's actual TLS connection, before CredSSP, not on a separate probe.
-CN-only default certificates are deliberately unsupported; an approved
-certificate with a matching DNS SAN is required for this lab.
+A server reached by DNS name needs an approved certificate with a matching DNS
+SAN; a CN alone is refused.
+
+A server at a literal address is identified by its exact certificate (ADR 0003):
+the sealed name file then holds exactly `@exact-leaf`, the name check does not
+run, and the key usage may be key encipherment instead of digital signature,
+which is what Windows' own RDP certificate carries. Everything else above still
+applies. An empty, cut or longer name file refuses. CI runs Windows' shape of
+certificate through the hook, NLA and the manager's sealed files, and mutates the
+actual C callback for each thing this relaxes, in both directions.
 
 `native/prepare.py` applies narrow checked patches to the pinned sources. The
 FreeRDP sample is a synthetic fixture only: NLA enabled, legacy/TLS-only mode

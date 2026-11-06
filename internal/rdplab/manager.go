@@ -41,15 +41,25 @@ func (w ManagerWorker) OpenRDP(ctx context.Context, request identity.RDPRequest)
 	if request.Target == nil {
 		return nil, errNative
 	}
-	pin, err := NewIdentity(request.Target.Hostname(), request.Certificate)
+	pin, err := identityFor(request.Target, request.Certificate)
 	if err != nil {
 		return nil, errNative
 	}
 	return w.open(ctx, request.Target, pin, request.Username, request.Password)
 }
 
+// identityFor takes the rules from the target, never from the certificate: a
+// server at a literal address is identified by its exact certificate, a server
+// with a DNS name also by that name.
+func identityFor(target *targetguard.NamedTarget, certificate []byte) (*Identity, error) {
+	if target.Literal() {
+		return NewExactIdentity(certificate)
+	}
+	return NewIdentity(target.Hostname(), certificate)
+}
+
 func (w ManagerWorker) open(ctx context.Context, target *targetguard.NamedTarget, pin *Identity, user, password string) (terminalweb.Stream, error) {
-	if target == nil || pin == nil || target.Hostname() != pin.name {
+	if !pin.boundTo(target) {
 		return nil, errNative
 	}
 	return w.openDial(ctx, target.DialContext, pin, user, password)

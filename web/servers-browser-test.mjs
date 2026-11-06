@@ -82,8 +82,61 @@ try {
   await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: /^Build box was removed\.$/ }).waitFor(); await settled();
   assert.equal(await row('Build box').count(), 0, 'the server was not removed');
 
+  stage = 'desktop: refused';
+  await page.locator('#add-server').click(); await page.locator('#server-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#server-port').inputValue(), '22');
+  await page.locator('#server-kind [data-protocol=rdp]').click();
+  assert.equal(await page.locator('#server-port').inputValue(), '3389', 'choosing a desktop did not offer its port');
+  assert.equal(await page.locator('#server-port-label').textContent(), 'RDP port');
+  await page.locator('#server-name').fill('Desk'); await page.locator('#server-address').fill('10.20.0.9'); await page.locator('#server-submit').click();
+  await sheetNotice('server-dialog').filter({ hasText: /No RDP server answered there/ }).waitFor(); await settled();
+  assert(await page.locator('#server-paste').isHidden(), 'a server that did not answer moved on to comparing');
+
+  stage = 'desktop: add with the console line';
+  await page.locator('#server-address').fill('10.20.0.8'); await page.locator('#server-submit').click();
+  await page.locator('#server-paste').waitFor({ state: 'visible' }); await settled();
+  assert(await page.locator('#server-check').isHidden(), 'a desktop showed the SSH comparison');
+  assert.match(await page.locator('#server-command').textContent(), /Win32_TSGeneralSetting.*SHA256/s);
+  assert.doesNotMatch(await page.locator('#server-dialog').textContent(), /SHA256:[a-f0-9]{64}/, 'the page showed the fingerprint it asks for');
+  await page.locator('#server-submit').click(); await sheetNotice('server-dialog').filter({ hasText: /Paste the whole line/ }).waitFor(); await settled();
+  await page.locator('#server-answer').fill(config.Renewed); await page.locator('#server-submit').click();
+  await sheetNotice('server-dialog').filter({ hasText: /not what the server shows/ }).waitFor(); await settled();
+  assert.equal(await row('Desk').count(), 0, 'a desktop was added with a line that differs');
+  // As pasted: a terminal's capitals and spaces do not matter.
+  await page.locator('#server-answer').fill(`  ${config.Desktop.toUpperCase()} `); await page.locator('#server-submit').click();
+  await page.locator('#access-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#access-title').textContent(), 'Who can use Desk?');
+  await page.locator('#access-cancel').click(); await page.locator('#access-dialog').waitFor({ state: 'hidden' });
+  assert.match(await row('Desk').textContent(), /Certificate until/);
+  assert.equal(await row('Desk').locator('.server-state').textContent(), 'Ready');
+  assert(await page.locator('#attention').isHidden(), 'a new desktop raised an alarm');
+
+  stage = 'desktop: Windows renews';
+  console.log('KB_RENEW');
+  for (let tries = 0; tries < 50 && await page.locator('#attention').isHidden(); tries++) { await page.waitForTimeout(200); await page.reload(); await settled(); await row('Desk').waitFor(); }
+  assert.match(await page.locator('#attention-text').textContent(), /^Desk shows a different certificate\. Nobody can connect to it until you check it\.$/);
+  assert.equal(await page.locator('#rail-attention').textContent(), '1');
+  assert.equal(await row('Desk').locator('.server-state').textContent(), 'Identity changed');
+  // Every page says so, with the way to the Servers page.
+  await page.locator('.rail-item[data-page=keys]').click(); await page.waitForURL(config.Origin + '/keys');
+  await page.locator('#attention').waitFor({ state: 'visible' }); assert(await page.locator('#attention-open').isVisible(), 'no way from the alarm to the Servers page');
+  await page.locator('#attention-open').click(); await page.waitForURL(config.Origin + '/servers'); await row('Desk').waitFor(); await settled();
+
+  stage = 'desktop: accept with the console line';
+  await row('Desk').getByRole('button', { name: 'Check identity', exact: true }).click(); await page.locator('#identity-paste').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#identity-now').textContent(), 'A different certificate.');
+  assert.doesNotMatch(await page.locator('#identity-dialog').textContent(), new RegExp(config.Renewed.slice(7)), 'the page showed the new fingerprint');
+  await page.locator('#identity-answer').fill(config.Desktop); await page.locator('#identity-submit').click();
+  await sheetNotice('identity-dialog').filter({ hasText: /not what the server shows/ }).waitFor(); await settled();
+  assert(await page.locator('#identity-dialog').isVisible(), 'a line that differs closed the dialog');
+  await page.locator('#identity-answer').fill(config.Renewed); await page.locator('#identity-submit').click();
+  await page.locator('#identity-dialog').waitFor({ state: 'hidden' }); await settled();
+  await page.locator('#notice').filter({ hasText: /^New identity pinned for Desk\./ }).waitFor();
+  assert.equal(await row('Desk').locator('.server-state').textContent(), 'Ready');
+  assert(await page.locator('#attention').isHidden() && await page.locator('#rail-attention').isHidden(), 'the alarm outlived the check');
+
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form and removal passed');
+  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop and renewal passed');
 } catch (error) {
   console.log('Servers browser stage:', stage, error.code === 'ERR_ASSERTION' ? error.message : error.name);
   if (process.env.KEYBASH_SERVERS_SCREENSHOT) await page.screenshot({ path: process.env.KEYBASH_SERVERS_SCREENSHOT });

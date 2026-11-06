@@ -9,6 +9,7 @@ async function json(path, method='GET', body, csrf='') {
   const bytes=new Uint8Array(length);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}
   return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
 }
+export const identityChangedMessage='This server now shows a different certificate, so Keybash did not connect and sent it no password. Your administrator can see this and has to check it.';
 export function remoteErrorMessage(error){if(error?.code==='capacity')return 'The server is at its session limit. Close an open session, or try again in a moment.';if(error?.code==='rate')return 'Too many connection attempts. Wait a moment and try again.';return 'The connection was refused. If your session ended, sign in again.';}
 // Another session to the same server opens in its own tab, as Connect does,
 // so each tab stays one session that closing it ends. SSH only: a second RDP

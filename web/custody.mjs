@@ -127,6 +127,10 @@ function errorMessage(error) {
   if (error.status === 'listed') return 'A server at that address and port is already listed.';
   if (error.status === 'changed') return 'The server shows another identity than the one you compared, or it is already listed. Read it again and compare.';
   if (error.status === 'unreachable') return 'No SSH server with an Ed25519 key answered there. Check the address and port, and that the server is on.';
+  if (error.status === 'rdp-unreachable') return 'No RDP server answered there. Check the address and port, that the server is on, and that its firewall lets this Keybash in.';
+  if (error.status === 'rdp-unfit') return 'An RDP server answered, but Keybash cannot use it: it must require Network Level Authentication and show a current certificate fit for a server.';
+  if (error.status === 'print-differs') return 'That is not what the server shows, so nothing changed. Check that you ran the command on this server and copied the whole line. If it still differs, someone may be between Keybash and the server: do not connect.';
+  if (error.status === 'print-shape') return 'Paste the whole line the command printed: it starts with SHA256: and has 64 more letters and digits.';
   if (error.status === 'last-admin') return 'At least one administrator must remain.';
   if (error.status === 403) return 'That is not allowed. Reload the page and try again.';
   if (error.status === 428) return 'This needs confirmation with your phone. Try again.';
@@ -339,8 +343,8 @@ function emptyState(title, text, picture = 'terminal', action) {
   const body = document.createElement('p'); body.className = 'hint'; body.textContent = text;
   box.append(heading, body); if (action) box.append(action); return box;
 }
-const trustWords = { verified: 'Ready', changed: 'Identity changed', unverified: 'Needs approval', unavailable: 'Unavailable' };
-const trustHelp = { changed: 'The administrator changed this server’s identity. Review it before connecting.', unverified: 'Review and accept this server’s identity before connecting.', unavailable: 'This server is not open to you right now: it was removed, or you were taken off it.' };
+const trustWords = { verified: 'Ready', changed: 'Identity changed', stopped: 'Server changed', unverified: 'Needs approval', unavailable: 'Unavailable' };
+const trustHelp = { changed: 'The administrator changed this server’s identity. Review it before connecting.', stopped: 'This server now shows a different certificate, so Keybash will not connect and sends it no password. Your administrator can see this and has to check it.', unverified: 'Review and accept this server’s identity before connecting.', unavailable: 'This server is not open to you right now: it was removed, you were taken off it, or its certificate has ended.' };
 // A connection as a card: what it is, who it signs in as, whether it is
 // ready, and the one action that matters most.
 function serverCard(record, target) {
@@ -367,7 +371,7 @@ function serverCard(record, target) {
     const link = document.createElement('a'); link.className = 'connect'; link.href = `/remote/${target.protocol}/${record.id}`; link.target = '_blank'; link.rel = 'noopener'; /* each session in its own tab */
     link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
   }
-  if (target) { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
+  if (target && record.trust !== 'stopped') { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
   const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost destructive'; remove.addEventListener('click', () => askConfirm('connection', record));
   actions.append(remove); card.append(actions);
   return card;
@@ -383,7 +387,7 @@ async function loadConnections() {
     approved.set(target.id, target); const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.protocol.toUpperCase()}`; options.append(option);
   }
   for (const record of connections) {
-    if (!idOK(record.id) || typeof record.name !== 'string' || record.name.length > 160 || !idOK(record.target) || !idOK(record.credential) || typeof record.revision !== 'string' || !/^[1-9][0-9]{0,9}$/.test(record.revision) || !['verified', 'changed', 'unverified', 'unavailable'].includes(record.trust) || record.fingerprint !== '' && !fingerprintOK(record.fingerprint) || record.trust === 'verified' && !fingerprintOK(record.fingerprint)) throw new Error('invalid connection');
+    if (!idOK(record.id) || typeof record.name !== 'string' || record.name.length > 160 || !idOK(record.target) || !idOK(record.credential) || typeof record.revision !== 'string' || !/^[1-9][0-9]{0,9}$/.test(record.revision) || !['verified', 'changed', 'stopped', 'unverified', 'unavailable'].includes(record.trust) || record.fingerprint !== '' && !fingerprintOK(record.fingerprint) || record.trust === 'verified' && !fingerprintOK(record.fingerprint)) throw new Error('invalid connection');
     rows.append(serverCard(record, approved.get(record.target)));
   }
   catalog = approved; $('connection-target').replaceChildren(options); if (approved.has(previous)) $('connection-target').value = previous; $('connections').replaceChildren(rows);
@@ -518,16 +522,52 @@ const sshPrintOK = value => typeof value === 'string' && /^SHA256:[A-Za-z0-9+/]{
 const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length <= 160 && ['ssh', 'rdp'].includes(s.protocol) && typeof s.hostname === 'string' && /^[a-z0-9.:-]{1,253}$/.test(s.hostname) &&
   Number.isInteger(s.port) && s.port >= 1 && s.port <= 65535 && Array.isArray(s.addresses) && s.addresses.length >= 1 && s.addresses.length <= 16 && s.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) &&
   fingerprintOK(s.fingerprint) && (s.protocol === 'rdp' || sshPrintOK(s.fingerprint)) && typeof s.available === 'boolean' &&
+  (s.certificate === undefined || ['current', 'soon', 'expired', 'changed'].includes(s.certificate)) && (s.expires === undefined || Number.isInteger(s.expires)) &&
   Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added);
-let people = new Map(), names = new Map();
+const serversOK = data => Array.isArray(data?.networks) && data.networks.length <= 64 && data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) && typeof data.adding === 'boolean' && typeof data.ssh === 'boolean' && typeof data.rdp === 'boolean' &&
+  Array.isArray(data.servers) && data.servers.length <= 256 && data.servers.every(serverOK) && typeof data.names === 'object' && data.names !== null &&
+  Object.entries(data.names).every(([id, name]) => idOK(id) && typeof name === 'string' && /^[a-z0-9._-]{1,64}$/.test(name));
+// The command an administrator runs on a Windows server: the fingerprint of the
+// certificate Remote Desktop uses now. Fixed text, the same for every server.
+const windowsCommand = `$t = (Get-CimInstance -Namespace root/cimv2/TerminalServices -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-Tcp'").SSLCertificateSHA1Hash; $c = Get-ChildItem Cert:\\LocalMachine -Recurse | Where-Object Thumbprint -eq $t | Select-Object -First 1; 'SHA256:' + -join ([Security.Cryptography.SHA256]::Create().ComputeHash($c.RawData) | ForEach-Object { $_.ToString('x2') })`;
+for (const id of ['server-command', 'identity-command']) if ($(id)) $(id).textContent = windowsCommand;
+click('server-copy', () => copy('server-command'));
+click('identity-copy', () => copy('identity-command'));
+// The line that command prints, as pasted: the spaces and breaks a terminal may
+// add are dropped. Keybash, not the person, compares it with what the server
+// shows, and the page is never told that value.
+function pastedPrint(id) {
+  const value = $(id).value.replace(/\s+/g, '');
+  if (/^SHA256:[A-Fa-f0-9]{64}$/.test(value)) return `SHA256:${value.slice(7).toLowerCase()}`;
+  throw Object.assign(new Error('print shape'), { status: 'print-shape' });
+}
+const dayOf = seconds => new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const needsChecking = server => server.certificate === 'changed' || server.certificate === 'expired';
+// An administrator is told on every page: a mark on the rail and a line above
+// the page. There is no mail yet, so this is seen at the next sign-in.
+function paintAttention(servers) {
+  const needing = role === 'admin' ? servers.filter(needsChecking) : [];
+  $('rail-attention').hidden = $('attention').hidden = !needing.length;
+  if (!needing.length) return;
+  const count = needing.length;
+  $('rail-attention').textContent = String(count); $('rail-attention').setAttribute('aria-label', `${count} ${count === 1 ? 'server needs' : 'servers need'} checking`);
+  $('attention-text').textContent = count > 1 ? `${count} servers need checking. Nobody can connect to them until you do.` :
+    `${needing[0].name} ${needing[0].certificate === 'changed' ? 'shows a different certificate' : 'has a certificate that ended'}. Nobody can connect to it until you check it.`;
+  $('attention-open').hidden = location.pathname === '/servers';
+}
+// On the other pages the same check runs behind the page; failing it changes nothing there.
+async function checkAttention() {
+  try { const data = await request('/api/servers'); if (serversOK(data)) paintAttention(data.servers); } catch { /* the Servers page itself reports this */ }
+}
+let people = new Map(), names = new Map(), serverKinds = { ssh: true, rdp: false }, serverProtocol = 'ssh';
 async function loadServers() {
   const data = await request('/api/servers');
-  if (!Array.isArray(data?.networks) || data.networks.length > 64 || !data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) || typeof data.adding !== 'boolean' ||
-    !Array.isArray(data.servers) || data.servers.length > 256 || !data.servers.every(serverOK) || typeof data.names !== 'object' || data.names === null ||
-    !Object.entries(data.names).every(([id, name]) => idOK(id) && typeof name === 'string' && /^[a-z0-9._-]{1,64}$/.test(name))) throw new Error('invalid servers');
+  if (!serversOK(data)) throw new Error('invalid servers');
   names = new Map(Object.entries(data.names));
+  serverKinds = { ssh: data.ssh, rdp: data.rdp };
   // Only an administrator chooses people, so only they need the full list.
   people = role === 'admin' ? new Map((await loadPeople()).accounts.map(person => [person.id, person])) : new Map();
+  paintAttention(data.servers);
   $('add-server').hidden = !data.adding;
   const code = text => { const element = document.createElement('code'); element.textContent = text; return element; };
   const option = code('upgrade.sh --target-networks=…');
@@ -554,31 +594,53 @@ function serverRow(server) {
   const listed = server.access.map(id => names.get(id)).filter(Boolean).sort();
   who.textContent = listed.length ? `Can use it: ${listed.join(', ')}` : 'Nobody can use it yet.';
   titles.append(print, who);
-  if (!server.available) {
-    const help = document.createElement('p'); help.className = 'server-help';
-    help.textContent = 'Nobody can connect to it now: it is outside the networks this Keybash may reach, or its identity cannot be used (for example an expired certificate).';
-    titles.append(help);
-  }
-  const state = document.createElement('span'); state.className = 'pill server-state'; state.dataset.state = server.available ? 'ready' : 'unreachable'; state.textContent = server.available ? 'Ready' : 'Not reachable';
+  if (server.certificate === 'current') { const until = document.createElement('p'); until.className = 'server-access'; until.textContent = `Certificate until ${dayOf(server.expires)}`; titles.append(until); }
+  const whoChecks = role === 'admin' ? 'you check it' : 'an administrator checks it';
+  const said = {
+    changed: `It shows a different certificate, usually because Windows renewed its own. Nobody can connect until ${whoChecks}.`,
+    expired: `Its certificate ended on ${dayOf(server.expires ?? 0)}. Nobody can connect until ${whoChecks}.`,
+    soon: `Its certificate ends on ${dayOf(server.expires ?? 0)}. Windows renews it by itself; Keybash then asks ${role === 'admin' ? 'you' : 'an administrator'} to check the new one.`,
+  }[server.certificate] ?? (server.available ? '' : 'Nobody can connect to it now: it is outside the networks this Keybash may reach, or its identity cannot be used.');
+  const stateName = needsChecking(server) ? server.certificate : !server.available ? 'unreachable' : server.certificate === 'soon' ? 'soon' : 'ready';
+  const state = document.createElement('span'); state.className = 'pill server-state'; state.dataset.state = stateName;
+  state.textContent = { changed: 'Identity changed', expired: 'Certificate ended', unreachable: 'Not reachable', soon: 'Ending soon', ready: 'Ready' }[stateName];
   const actions = document.createElement('div'); actions.className = 'record-actions';
   row.append(tile, titles, state, actions);
+  if (said) { const help = document.createElement('p'); help.className = 'server-help server-note'; help.textContent = said; row.append(help); }
   if (role !== 'admin') return row;
   const button = (text, style, act) => { const b = document.createElement('button'); b.type = 'button'; b.className = style; b.textContent = text; b.addEventListener('click', act); actions.append(b); };
+  const check = () => { void run(() => openIdentity(server)); };
+  // What needs doing comes first, and looks like it.
+  if (needsChecking(server)) button('Check identity', '', check);
   button('Who can use it', 'secondary', () => openAccess(server));
   button('Rename', 'ghost', () => openRename(server));
-  if (server.available && server.protocol === 'ssh') button('Check identity', 'ghost', () => { void run(() => openIdentity(server)); });
+  if (server.available && !needsChecking(server)) button('Check identity', 'ghost', check);
   button('Remove', 'ghost destructive', () => askConfirm('server', server));
   return row;
 }
 // Why a server request was refused, in the words of the step that asked.
-function serverError(error, adding = false) {
-  const words = { 400: 'server-input', 403: 'outside', 409: adding ? 'changed' : 'listed', 502: 'unreachable' };
+function serverError(error, adding = false, protocol = 'ssh') {
+  const rdp = protocol === 'rdp';
+  const words = { 400: 'server-input', 403: 'outside', 409: adding ? (rdp ? 'print-differs' : 'changed') : 'listed', 422: 'rdp-unfit', 502: rdp ? 'rdp-unreachable' : 'unreachable' };
   return Object.hasOwn(words, error.status) ? Object.assign(new Error('server refused'), { status: words[error.status] }) : error;
 }
 function serverStep(checking) {
-  $('server-check').hidden = !checking; $('server-submit').textContent = checking ? 'Add server' : 'Read identity';
-  if (!checking) { scanned = null; $('server-print').textContent = ''; $('server-same').checked = false; }
+  const rdp = serverProtocol === 'rdp';
+  $('server-check').hidden = !checking || rdp; $('server-paste').hidden = !checking || !rdp;
+  $('server-submit').textContent = checking ? 'Add server' : rdp ? 'Continue' : 'Read identity';
+  if (!checking) { scanned = null; $('server-print').textContent = ''; $('server-same').checked = false; $('server-answer').value = ''; }
 }
+// SSH or a desktop: the words and the usual port follow the choice, and a port
+// someone typed themselves stays.
+function chooseServerKind(protocol) {
+  serverProtocol = protocol; const rdp = protocol === 'rdp';
+  document.querySelectorAll('#server-kind .segment').forEach(segment => segment.setAttribute('aria-pressed', String(segment.dataset.protocol === protocol)));
+  $('server-lead').textContent = rdp ? 'Keybash compares the server’s certificate with a line you bring from the server’s own screen, so nobody in between can pass for it. Nobody can use the server until you choose who may.' : 'Keybash reads the server’s SSH identity, and you compare it on the server’s own console before it is added. Nobody can use the server until you choose who may.';
+  $('server-port-label').textContent = rdp ? 'RDP port' : 'SSH port';
+  if (['', '22', '3389'].includes($('server-port').value)) $('server-port').value = rdp ? '3389' : '22';
+  serverStep(false);
+}
+document.querySelectorAll('#server-kind .segment').forEach(segment => segment.addEventListener('click', () => { if (!busy) chooseServerKind(segment.dataset.protocol); }));
 function openAccess(server) { if (!busy) showAccess(server); }
 function showAccess(server) {
   pendingServer = server; $('access-title').textContent = `Who can use ${server.name}?`; dialogNotice('');
@@ -599,42 +661,59 @@ function openRename(server) {
   pendingServer = server; $('rename-name').value = server.name; dialogNotice(''); $('rename-dialog').showModal(); $('rename-name').focus();
 }
 // Checking a server's identity reads it again; a different key is accepted
-// only after the administrator compares it on the server's console.
+// only after the administrator compares it on the server's console. For a
+// desktop the page never learns the new fingerprint: the administrator brings
+// it from the server's own screen, so it cannot be accepted without looking.
 async function openIdentity(server) {
+  const rdp = server.protocol === 'rdp';
   pendingServer = server; scanned = null;
   $('identity-title').textContent = `Identity of ${server.name}`; $('identity-pinned').textContent = server.fingerprint; $('identity-now').textContent = 'Reading the server…';
-  $('identity-change').hidden = true; $('identity-submit').hidden = true; $('identity-same').checked = false; dialogNotice(''); $('identity-dialog').showModal();
+  $('identity-change').hidden = true; $('identity-paste').hidden = true; $('identity-submit').hidden = true; $('identity-same').checked = false; $('identity-answer').value = ''; dialogNotice(''); $('identity-dialog').showModal();
   let data;
   try { data = await request(`/api/servers/${server.id}/scan`, 'POST', {}); }
-  catch (error) { $('identity-now').textContent = 'It could not be read.'; throw serverError(error); }
-  if (!sshPrintOK(data?.fingerprint) || data.algorithm !== 'ssh-ed25519') throw new Error('invalid identity');
+  catch (error) { $('identity-now').textContent = 'It could not be read.'; throw serverError(error, false, server.protocol); }
+  if (rdp ? typeof data?.same !== 'boolean' || !Number.isInteger(data.expires) : !sshPrintOK(data?.fingerprint) || data.algorithm !== 'ssh-ed25519') throw new Error('invalid identity');
   if (pendingServer !== server || !$('identity-dialog').open) return;
+  if (rdp) {
+    // What was just read also settles the mark on the page.
+    await loadServers();
+    if (data.same) { $('identity-now').textContent = server.certificate === 'expired' ? 'The same certificate, and it has ended. Restart Remote Desktop Services on the server: Windows then makes a new one.' : 'The same certificate: nothing to do.'; return; }
+    scanned = { id: server.id, rdp: true };
+    $('identity-now').textContent = 'A different certificate.'; $('identity-paste').hidden = false; $('identity-submit').textContent = 'Compare and accept'; $('identity-submit').hidden = false; $('identity-answer').focus();
+    return;
+  }
   if (data.fingerprint === server.fingerprint) { $('identity-now').textContent = `${data.fingerprint}\nThe same: nothing to do.`; return; }
   scanned = { id: server.id, fingerprint: data.fingerprint };
-  $('identity-now').textContent = data.fingerprint; $('identity-change').hidden = false; $('identity-submit').hidden = false;
+  $('identity-now').textContent = data.fingerprint; $('identity-change').hidden = false; $('identity-submit').textContent = 'Accept new identity'; $('identity-submit').hidden = false;
 }
 $('add-server')?.addEventListener('click', () => {
   if (busy) return;
-  $('server-form').reset(); serverStep(false); dialogNotice(''); $('server-dialog').showModal(); $('server-name').focus();
+  $('server-form').reset(); dialogNotice('');
+  $('server-kind').hidden = !(serverKinds.ssh && serverKinds.rdp); $('server-no-rdp').hidden = serverKinds.rdp;
+  chooseServerKind(serverKinds.ssh ? 'ssh' : 'rdp');
+  $('server-dialog').showModal(); $('server-name').focus();
 });
 // Changing where the server is after it was read starts the comparison over.
 for (const id of ['server-address', 'server-port']) $(id)?.addEventListener('input', () => { if (scanned) serverStep(false); });
 $('server-cancel')?.addEventListener('click', () => $('server-dialog').close());
 $('server-dialog')?.addEventListener('close', () => serverStep(false));
 bind('server-form', async () => {
-  const name = $('server-name').value.trim(), address = $('server-address').value.trim().toLowerCase(), port = $('server-port').value.trim();
+  const name = $('server-name').value.trim(), address = $('server-address').value.trim().toLowerCase(), port = $('server-port').value.trim(), protocol = serverProtocol, rdp = protocol === 'rdp';
   if (!scanned || scanned.address !== address || scanned.port !== port) {
     let data;
-    try { data = await request('/api/servers/scan', 'POST', { address, port }); }
-    catch (error) { throw serverError(error); }
-    if (!sshPrintOK(data?.fingerprint) || data.algorithm !== 'ssh-ed25519') throw new Error('invalid identity');
-    serverStep(true); scanned = { address, port, fingerprint: data.fingerprint }; $('server-print').textContent = data.fingerprint;
+    try { data = await request('/api/servers/scan', 'POST', { protocol, address, port }); }
+    catch (error) { throw serverError(error, false, protocol); }
+    if (rdp ? !Number.isInteger(data?.expires) : !sshPrintOK(data?.fingerprint) || data.algorithm !== 'ssh-ed25519') throw new Error('invalid identity');
+    serverStep(true); scanned = { address, port, fingerprint: data.fingerprint };
+    if (rdp) $('server-answer').focus(); else $('server-print').textContent = data.fingerprint;
     return;
   }
-  if (!$('server-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick “It is the same”.'); return; }
+  let fingerprint = scanned.fingerprint;
+  if (rdp) fingerprint = pastedPrint('server-answer');
+  else if (!$('server-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick “It is the same”.'); return; }
   let made;
-  try { made = await request('/api/servers', 'POST', { name, address, port, fingerprint: scanned.fingerprint }); }
-  catch (error) { if (error.status === 409) serverStep(false); throw serverError(error, true); }
+  try { made = await request('/api/servers', 'POST', { protocol, name, address, port, fingerprint }); }
+  catch (error) { if (error.status === 409 && !rdp) serverStep(false); throw serverError(error, true, protocol); }
   if (!idOK(made?.id)) throw new Error('invalid server');
   $('server-dialog').close();
   const added = (await loadServers()).find(server => server.id === made.id);
@@ -664,9 +743,11 @@ $('identity-dialog')?.addEventListener('close', () => { pendingServer = null; sc
 bind('identity-form', async () => {
   const server = pendingServer, next = scanned;
   if (!server || next?.id !== server.id) return;
-  if (!$('identity-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick the box.'); return; }
-  try { await request(`/api/servers/${server.id}/key`, 'POST', { fingerprint: next.fingerprint }); }
-  catch (error) { throw serverError(error, true); }
+  let fingerprint = next.fingerprint;
+  if (next.rdp) fingerprint = pastedPrint('identity-answer');
+  else if (!$('identity-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick the box.'); return; }
+  try { await request(`/api/servers/${server.id}/key`, 'POST', { fingerprint }); }
+  catch (error) { throw serverError(error, true, server.protocol); }
   $('identity-dialog').close(); await loadServers(); notice(`New identity pinned for ${server.name}. Open sessions to it were closed; each person accepts it on their connection.`);
 });
 // What this copy runs and serves comes from the server; the commands on the
@@ -719,6 +800,7 @@ async function loadAccount() {
   if (data.stage === 'ready' && page === 'installation') await loadInstallation();
   if (data.stage === 'ready' && page === 'users') await loadUsers();
   if (data.stage === 'ready' && page === 'servers') await loadServers();
+  else if (data.stage === 'ready' && role === 'admin' && remoteEnabled) void checkAttention();
 }
 bind('signin', async () => {
   const username = $('username').value, password = $('password').value; clearInputs();

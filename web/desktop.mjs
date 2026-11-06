@@ -1,6 +1,6 @@
 import { Guacamole } from './vendor/guacamole.mjs';
 import { workspaceControls } from './desktop-workspace.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
@@ -49,7 +49,7 @@ function begin(proof=null) {
     socket.addEventListener('close',()=>clearTimeout(timer));
     socket.onerror = end; socket.onclose = end;
     socket.onmessage = event => {
-      if(!ready){if(event.data!=='{"type":"ready"}'){end();return;}ready=true;clearTimeout(timer);if(!stopped)tunnel.setState(Guacamole.Tunnel.State.OPEN);return;}
+      if(!ready){if(event.data==='{"type":"identity-changed"}'){$('notice').textContent=identityChangedMessage;end();return;}if(event.data!=='{"type":"ready"}'){end();return;}ready=true;clearTimeout(timer);if(!stopped)tunnel.setState(Guacamole.Tunnel.State.OPEN);return;}
       if (stopped) return;
       try {
         if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 5 || event.data.byteLength > 8196) throw new Error('frame');

@@ -1,11 +1,13 @@
 package identity
 
 import (
+	"crypto/x509"
 	"net/netip"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/denyfirst/keybash/internal/rdpcert"
 	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	bolt "go.etcd.io/bbolt"
@@ -163,6 +165,25 @@ func TestServerRecordShapes(t *testing.T) {
 	if !ssh().valid() || !rdp().valid() {
 		t.Fatal("valid shapes refused")
 	}
+	// At a literal address an RDP server's identity is its exact certificate,
+	// so the certificate alone must be fit; it names no address.
+	literal := func(der []byte) webServer {
+		return webServer{ID: strings.Repeat("a", 32), Name: "Desk", Protocol: "rdp", Address: "10.34.0.8", Port: 3389, Certificate: der, AddedBy: strings.Repeat("b", 32), Added: 1}
+	}
+	if !literal(windowsLeaf(t, nil).Raw).valid() || !literal(desktop.Identity).valid() {
+		t.Fatal("an RDP server at a literal address was refused")
+	}
+	for name, der := range map[string][]byte{
+		"a CA":            windowsLeaf(t, func(c *x509.Certificate) { c.IsCA, c.BasicConstraintsValid = true, true }).Raw,
+		"no server usage": windowsLeaf(t, func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} }).Raw,
+		"no key usage":    windowsLeaf(t, func(c *x509.Certificate) { c.KeyUsage = 0 }).Raw,
+		"not one at all":  []byte("not a certificate"),
+		"too long":        make([]byte, rdpcert.MaxCertificate+1),
+	} {
+		if literal(der).valid() {
+			t.Fatalf("an RDP server at a literal address with %s was accepted", name)
+		}
+	}
 	repeated := []string{strings.Repeat("c", 32), strings.Repeat("c", 32)}
 	for i, change := range []func(*webServer){
 		func(w *webServer) { w.Removed = true },                          // removed, never from the file
@@ -181,13 +202,12 @@ func TestServerRecordShapes(t *testing.T) {
 		}
 	}
 	for i, change := range []func(*webServer){
-		func(w *webServer) { w.Hostname, w.Pins, w.Address = "", nil, "10.34.0.8" }, // RDP without a name
-		func(w *webServer) { w.Hostname = "other.invalid" },                         // a certificate for another name
-		func(w *webServer) { w.Pins = []string{"10.34.0.9", "10.34.0.8"} },          // pins out of order
-		func(w *webServer) { w.Pins = []string{"10.34.0.8", "10.34.0.8"} },          // a pin twice
-		func(w *webServer) { w.Hostname = "RDP.invalid" },                           // not the stored form
-		func(w *webServer) { w.HostKey = hostKeyFixture(t).Marshal() },              // RDP with a host key
-		func(w *webServer) { w.Removed, w.Access = true, repeated[:1] },             // a marker with people on it
+		func(w *webServer) { w.Hostname = "other.invalid" },                // a certificate for another name
+		func(w *webServer) { w.Pins = []string{"10.34.0.9", "10.34.0.8"} }, // pins out of order
+		func(w *webServer) { w.Pins = []string{"10.34.0.8", "10.34.0.8"} }, // a pin twice
+		func(w *webServer) { w.Hostname = "RDP.invalid" },                  // not the stored form
+		func(w *webServer) { w.HostKey = hostKeyFixture(t).Marshal() },     // RDP with a host key
+		func(w *webServer) { w.Removed, w.Access = true, repeated[:1] },    // a marker with people on it
 	} {
 		w := rdp()
 		change(&w)
