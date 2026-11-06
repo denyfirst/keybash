@@ -51,13 +51,12 @@ an instance has three roles, all managed from the web:
   password or their keys and passwords.
 - **Auditor:** reads what happened; reaches no server and holds no secret.
 
-Since November 2026 administrators add SSH servers on the Servers page and
-choose who may use each one; nobody can until they do, administrators
+Since November 2026 administrators add SSH and Windows RDP servers on the Servers
+page and choose who may use each one; nobody can until they do, administrators
 included, and auditors read the page (`adr/0005-web-managed-servers.md`).
 After the install, servers are managed only there: the server file of
-earlier versions moves into the page once. Planned next: adding RDP servers
-on the page, and shared keys a user can connect with without seeing them.
-These need their own design and review.
+earlier versions moves into the page once. Planned next: shared keys a user can
+connect with without seeing them. These need their own design and review.
 
 ## 3. Third-party components and local operation
 

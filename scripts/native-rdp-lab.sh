@@ -100,6 +100,36 @@ printf '%s\n' '#include <stddef.h>' \
 rebuild_identity
 expect_mutation_failure '^TestNativeRDPAuthenticationRenderingAndRevocation$/password_valid_true$' \
   'native account did not authenticate'
+# The exact-certificate rules, in both directions and for each thing they relax.
+mutate_identity() {
+  cp "${lab}/identity.original" "${identity}"
+  sed -i "$1" "${identity}"
+  if cmp -s "${identity}" "${lab}/identity.original"; then
+    echo 'native identity mutation did not apply' >&2
+    exit 1
+  fi
+  rebuild_identity
+}
+# Every server treated as exact: a certificate for another name passes.
+mutate_identity 's/^    const int exact = .*$/    const int exact = 1;/'
+expect_mutation_failure '^TestNativeRDPCertificateRefusalBeforeCredentials$/name$' \
+  'native worker sent CredSSP before certificate refusal'
+# No server treated as exact: Windows' own certificate is refused.
+mutate_identity 's/^    const int exact = .*$/    const int exact = 0;/'
+expect_mutation_failure '^TestNativeRDPExactCertificateAuthenticates$' \
+  'native account did not authenticate'
+# Part of the mark is enough: a cut name file turns the name check off.
+mutate_identity 's/^    const int exact = .*$/    const int exact = size >= 1 \&\& name[0] == 0x40;/'
+expect_mutation_failure '^TestNativeRDPCertificateRefusalBeforeCredentials$/exact-cut$' \
+  'native worker sent CredSSP before certificate refusal'
+# Key encipherment passes for a name too.
+mutate_identity 's/(exact ? (KU_DIGITAL_SIGNATURE | KU_KEY_ENCIPHERMENT) : KU_DIGITAL_SIGNATURE)/(KU_DIGITAL_SIGNATURE | KU_KEY_ENCIPHERMENT)/'
+expect_mutation_failure '^TestNativeRDPCertificateRefusalBeforeCredentials$/windows-named$' \
+  'native worker sent CredSSP before certificate refusal'
+# Only digital signature passes: Windows' own certificate is refused.
+mutate_identity 's/(exact ? (KU_DIGITAL_SIGNATURE | KU_KEY_ENCIPHERMENT) : KU_DIGITAL_SIGNATURE)/KU_DIGITAL_SIGNATURE/'
+expect_mutation_failure '^TestNativeRDPExactCertificateAuthenticates$' \
+  'native account did not authenticate'
 cp "${lab}/identity.original" "${identity}"
 cmp "${identity}" "${repo}/native/identity.c"
 rebuild_identity

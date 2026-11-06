@@ -111,7 +111,7 @@ the same power, so their reach needs a limit the gateway cannot lift.
 
 - **A** is merged: the gateway unit's kernel boundary and `--target-networks`.
 - **B**, with access lists for web servers from the start (part of **C**):
-  - SSH servers only. RDP servers stay in the server file for now.
+  - SSH servers at first; RDP servers came with the update below.
   - The gateway reads the host key itself, through the target guard: an
     Ed25519- and Curve25519-only handshake stopped at the key, capped at
     64 KiB and ten seconds. The SSH worker sandbox is not used for this; the
@@ -132,8 +132,23 @@ the same power, so their reach needs a limit the gateway cannot lift.
   - `keybash server-add` and the root-side catalog replacement are removed.
   - The target networks stay a root setting (`upgrade.sh`): the website
     cannot widen what the kernel lets the gateway reach.
-- Next: RDP servers on the page (a certificate read, and a DNS name with its
-  pinned addresses), then **D**.
+- **RDP servers on the page,** decided on 2026-11-06:
+  - A server at a literal address, identified by its exact certificate; the
+    reasons and what stays checked are in ADR 0003.
+  - The gateway reads the certificate through the target guard: a negotiation
+    that must select HYBRID and a TLS handshake that proves the key, capped at
+    64 KiB and ten seconds, with no credential. The parser is Go's.
+  - Adding and accepting a new certificate take the fingerprint from the
+    server's own screen; the page is never told what it should be.
+  - The gateway reads every RDP server hourly and before each session. An
+    administrator sees a mark on the rail and a line above every page, and the
+    person connecting is told no password was sent. There is no mail yet, so an
+    administrator sees this at the next sign-in. What was read is kept in memory
+    only and changes no record.
+  - After an administrator accepts a new certificate, each person still accepts
+    it once on their own connection. A compromised administrator account could
+    otherwise point someone's stored password at another machine.
+- Next: **D**.
 
 ## Consequences
 

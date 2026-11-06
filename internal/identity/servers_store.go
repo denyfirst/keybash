@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/rdpcert"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/ssh"
@@ -28,13 +29,14 @@ const maxServers = 256
 
 var errDuplicate = errors.New("server already listed")
 
-// webServer is one server: at one literal address, or at a DNS name that
-// resolves only to its pinned addresses (RDP needs the name for its
-// certificate). It is reachable only inside the target networks root set for
-// the gateway, and only by the accounts on its access list: none when an
-// administrator adds it. A server moved in from the file keeps its ID, so
-// connections to it keep their approval; one removed on the page stays as a
-// marker so the file never brings it back.
+// webServer is one server: at one literal address, where its pinned key or
+// exact certificate is the whole identity, or at a DNS name that resolves only
+// to its pinned addresses and that its certificate also names. It is reachable
+// only inside the target networks root set for the gateway, and only by the
+// accounts on its access list: none when an administrator adds it. A server
+// moved in from the file keeps its ID, so connections to it keep their
+// approval; one removed on the page stays as a marker so the file never brings
+// it back.
 type webServer struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -105,11 +107,19 @@ func (w webServer) valid() bool {
 		_, ok := ed25519HostKey(w.HostKey)
 		return ok && len(w.Certificate) == 0
 	case "rdp":
-		if w.Hostname == "" || len(w.HostKey) != 0 || len(w.Certificate) == 0 || len(w.Certificate) > 32*1024 {
+		if len(w.HostKey) != 0 || len(w.Certificate) == 0 || len(w.Certificate) > rdpcert.MaxCertificate {
 			return false
 		}
 		cert, e := x509.ParseCertificate(w.Certificate)
-		return e == nil && cert.VerifyHostname(w.Hostname) == nil
+		if e != nil {
+			return false
+		}
+		// At a literal address the exact certificate is the identity; with a
+		// DNS name the certificate must also name the server.
+		if w.Hostname == "" {
+			return rdpcert.Check(cert) == nil
+		}
+		return cert.VerifyHostname(w.Hostname) == nil
 	}
 	return false
 }
@@ -219,11 +229,21 @@ func overlaps(list []webServer, w webServer) bool {
 // addServer stores a new SSH server at a literal address with nobody on its
 // access list. A listed server at the same address and port is refused.
 func (s *Store) addServer(actor, name, address string, port uint16, hostKey []byte, now time.Time) (string, error) {
+	return s.addWebServer(actor, webServer{Name: name, Protocol: "ssh", Address: address, Port: port, HostKey: bytes.Clone(hostKey)}, now)
+}
+
+// addRDPServer stores a new RDP server at a literal address, identified by its
+// exact certificate, with nobody on its access list.
+func (s *Store) addRDPServer(actor, name, address string, port uint16, certificate []byte, now time.Time) (string, error) {
+	return s.addWebServer(actor, webServer{Name: name, Protocol: "rdp", Address: address, Port: port, Certificate: bytes.Clone(certificate)}, now)
+}
+
+func (s *Store) addWebServer(actor string, w webServer, now time.Time) (string, error) {
 	id, e := randomID()
 	if e != nil {
 		return "", e
 	}
-	w := webServer{ID: id, Name: name, Protocol: "ssh", Address: address, Port: port, HostKey: bytes.Clone(hostKey), AddedBy: actor, Added: now.Unix()}
+	w.ID, w.AddedBy, w.Added = id, actor, now.Unix()
 	if !w.valid() {
 		return "", errRefused
 	}
@@ -278,6 +298,18 @@ func (s *Store) repinServer(actor, id string, hostKey []byte) error {
 			return errRefused
 		}
 		w.HostKey = bytes.Clone(hostKey)
+		return nil
+	})
+}
+
+// repinCertificate replaces an RDP server's pinned certificate. Connections to
+// it then show it as changed until each owner accepts the new one.
+func (s *Store) repinCertificate(actor, id string, certificate []byte) error {
+	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error {
+		if w.Protocol != "rdp" {
+			return errRefused
+		}
+		w.Certificate = bytes.Clone(certificate)
 		return nil
 	})
 }

@@ -1,5 +1,9 @@
 /* Keybash native RDP lab: OpenSSL identity checks on the worker's own TLS.
- * No credential handling or certificate-ignore/TOFU fallback. */
+ * No credential handling or certificate-ignore/TOFU fallback.
+ *
+ * The name file holds a DNS name, or exactly KEYBASH_EXACT_LEAF for a server at
+ * a literal address, whose identity is the pinned certificate alone. '@' is in
+ * no DNS name, so an empty, cut or missing file refuses and never relaxes. */
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -8,6 +12,8 @@
 #include <openssl/x509v3.h>
 #include <stdio.h>
 #include <string.h>
+
+#define KEYBASH_EXACT_LEAF "@exact-leaf"
 
 int keybash_verify_identity(const char* pem, size_t length) {
     int accepted = 0;
@@ -35,7 +41,8 @@ int keybash_verify_identity(const char* pem, size_t length) {
     int tail = fgetc(file);
     fclose(file); file = NULL;
     if (size == 0 || tail != EOF || strlen(name) != size) goto done;
-    for (size_t i = 0; i < size; i++) {
+    const int exact = size == sizeof(KEYBASH_EXACT_LEAF) - 1 && memcmp(name, KEYBASH_EXACT_LEAF, size) == 0;
+    for (size_t i = 0; !exact && i < size; i++) {
         if (!((name[i] >= 'a' && name[i] <= 'z') || (name[i] >= '0' && name[i] <= '9') || name[i] == '.' || name[i] == '-')) goto done;
     }
     if (X509_check_ca(actual) != 0 ||
@@ -45,7 +52,7 @@ int keybash_verify_identity(const char* pem, size_t length) {
         CRYPTO_memcmp(actual_hash, approved_hash, 32) != 0) goto done;
     if (X509_get_ext_by_NID(actual, NID_key_usage, -1) < 0 ||
         X509_get_ext_by_NID(actual, NID_ext_key_usage, -1) < 0 ||
-        !(X509_get_key_usage(actual) & KU_DIGITAL_SIGNATURE) ||
+        !(X509_get_key_usage(actual) & (exact ? (KU_DIGITAL_SIGNATURE | KU_KEY_ENCIPHERMENT) : KU_DIGITAL_SIGNATURE)) ||
         !(X509_get_extended_key_usage(actual) & XKU_SSL_SERVER)) goto done;
     public_key = X509_get_pubkey(actual);
     if (!public_key) goto done;
@@ -59,7 +66,7 @@ int keybash_verify_identity(const char* pem, size_t length) {
     if (!roots || !verify || !X509_STORE_add_cert(roots, approved) ||
         !X509_STORE_CTX_init(verify, roots, actual, NULL)) goto done;
     X509_VERIFY_PARAM* params = X509_STORE_CTX_get0_param(verify);
-    if (!params || !X509_VERIFY_PARAM_set1_host(params, name, size) ||
+    if (!params || (!exact && !X509_VERIFY_PARAM_set1_host(params, name, size)) ||
         !X509_VERIFY_PARAM_set_purpose(params, X509_PURPOSE_SSL_SERVER) ||
         !X509_VERIFY_PARAM_set_flags(params, X509_V_FLAG_PARTIAL_CHAIN)) goto done;
     X509_VERIFY_PARAM_set_hostflags(params, X509_CHECK_FLAG_NEVER_CHECK_SUBJECT | X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);

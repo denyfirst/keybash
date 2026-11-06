@@ -133,7 +133,7 @@ func addServerFixture(t *testing.T, c *custodyClient, scans *fixtureScans, name,
 	key := hostKeyFixture(t)
 	scans.set(endpoint, key)
 	at := netip.MustParseAddrPort(endpoint)
-	fields := map[string]string{"address": at.Addr().String(), "port": strings.TrimPrefix(endpoint, at.Addr().String()+":")}
+	fields := map[string]string{"protocol": "ssh", "address": at.Addr().String(), "port": strings.TrimPrefix(endpoint, at.Addr().String()+":")}
 	var shown struct{ Fingerprint, Algorithm string }
 	if json.Unmarshal(c.expect("POST", "/api/servers/scan", inputJSON(fields), 200).Body.Bytes(), &shown) != nil || shown.Fingerprint != ssh.FingerprintSHA256(key) || shown.Algorithm != ssh.KeyAlgoED25519 {
 		t.Fatal("scan did not show the server's fingerprint")
@@ -316,7 +316,7 @@ func TestServersPageIsForFreshAdministrators(t *testing.T) {
 	bob, b := f.person("bob", roleUser)
 	dave, _ := f.person("dave", roleAuditor)
 	scans.set("10.20.0.7:22", hostKeyFixture(t))
-	scan := inputJSON(map[string]string{"address": "10.20.0.7", "port": "22"})
+	scan := inputJSON(map[string]string{"protocol": "ssh", "address": "10.20.0.7", "port": "22"})
 	// A user reaches none of it; an auditor reads the list and changes nothing.
 	bob.expect("GET", "/api/servers", "", 403)
 	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/grant", inputJSON(map[string]string{"account": b.ID}), 204)
@@ -326,7 +326,7 @@ func TestServersPageIsForFreshAdministrators(t *testing.T) {
 	}
 	for _, c := range []*custodyClient{bob, dave} {
 		c.expect("POST", "/api/servers/scan", scan, 403)
-		c.expect("POST", "/api/servers", inputJSON(map[string]string{"name": "x", "address": "10.20.0.7", "port": "22", "fingerprint": "SHA256:" + strings.Repeat("A", 43)}), 403)
+		c.expect("POST", "/api/servers", inputJSON(map[string]string{"protocol": "ssh", "name": "x", "address": "10.20.0.7", "port": "22", "fingerprint": "SHA256:" + strings.Repeat("A", 43)}), 403)
 		c.expect("POST", "/api/servers/"+f.target.ID+"/name", inputJSON(map[string]string{"name": "x"}), 403)
 		c.expect("POST", "/api/servers/"+f.target.ID+"/revoke", inputJSON(map[string]string{"account": b.ID}), 403)
 		c.expect("DELETE", "/api/servers/"+f.target.ID, "{}", 403)
@@ -340,15 +340,17 @@ func TestServersPageIsForFreshAdministrators(t *testing.T) {
 		t.Fatal("a refused request scanned")
 	}
 	for _, malformed := range [][3]string{
-		{"POST", "/api/servers/scan", `{"address":"10.20.0.7","port":"22","extra":"x"}`},
-		{"POST", "/api/servers/scan", `{"address":"10.20.0.7","port":22}`},
-		{"POST", "/api/servers/scan", `{"address":"10.20.0.7","port":"022"}`},
-		{"POST", "/api/servers/scan", `{"address":"10.20.0.7","port":"65536"}`},
-		{"POST", "/api/servers/scan", `{"address":"10.20.0.7","port":"0"}`},
-		{"POST", "/api/servers/scan", `{"address":"10.20.0.7/32","port":"22"}`},
-		{"POST", "/api/servers/scan", `{"address":"server.invalid","port":"22"}`},
-		{"POST", "/api/servers", `{"name":" x","address":"10.20.0.7","port":"22","fingerprint":"SHA256:` + strings.Repeat("A", 43) + `"}`},
-		{"POST", "/api/servers", `{"name":"x","address":"10.20.0.7","port":"22","fingerprint":"MD5:00"}`},
+		{"POST", "/api/servers/scan", `{"protocol":"ssh","address":"10.20.0.7","port":"22","extra":"x"}`},
+		{"POST", "/api/servers/scan", `{"protocol":"ssh","address":"10.20.0.7","port":22}`},
+		{"POST", "/api/servers/scan", `{"protocol":"ssh","address":"10.20.0.7","port":"022"}`},
+		{"POST", "/api/servers/scan", `{"protocol":"ssh","address":"10.20.0.7","port":"65536"}`},
+		{"POST", "/api/servers/scan", `{"protocol":"ssh","address":"10.20.0.7","port":"0"}`},
+		{"POST", "/api/servers/scan", `{"protocol":"ssh","address":"10.20.0.7/32","port":"22"}`},
+		{"POST", "/api/servers/scan", `{"protocol":"telnet","address":"10.20.0.7","port":"22"}`},
+		{"POST", "/api/servers/scan", `{"address":"10.20.0.7","port":"22"}`},
+		{"POST", "/api/servers/scan", `{"protocol":"ssh","address":"server.invalid","port":"22"}`},
+		{"POST", "/api/servers", `{"protocol":"ssh","name":" x","address":"10.20.0.7","port":"22","fingerprint":"SHA256:` + strings.Repeat("A", 43) + `"}`},
+		{"POST", "/api/servers", `{"protocol":"ssh","name":"x","address":"10.20.0.7","port":"22","fingerprint":"MD5:00"}`},
 	} {
 		f.alice.expect(malformed[0], malformed[1], malformed[2], 400)
 	}
@@ -364,7 +366,7 @@ func TestServerScansStayInsideTheTargetNetworks(t *testing.T) {
 	f, scans := serversFixture(t)
 	scan := func(address, port string, status int) {
 		t.Helper()
-		f.alice.expect("POST", "/api/servers/scan", inputJSON(map[string]string{"address": address, "port": port}), status)
+		f.alice.expect("POST", "/api/servers/scan", inputJSON(map[string]string{"protocol": "ssh", "address": address, "port": port}), status)
 	}
 	for _, outside := range []string{"10.21.0.7", "10.99.0.7", "192.0.2.7", "127.0.0.1", "169.254.169.254", "168.63.129.16", "::1", "2001:db8::7"} {
 		scan(outside, "22", 403)
@@ -377,7 +379,7 @@ func TestServerScansStayInsideTheTargetNetworks(t *testing.T) {
 	key := hostKeyFixture(t)
 	scans.set("10.20.0.5:2222", key)
 	var shown struct{ Fingerprint string }
-	if json.Unmarshal(f.alice.expect("POST", "/api/servers/scan", inputJSON(map[string]string{"address": "10.20.0.5", "port": "2222"}), 200).Body.Bytes(), &shown) != nil || shown.Fingerprint != ssh.FingerprintSHA256(key) {
+	if json.Unmarshal(f.alice.expect("POST", "/api/servers/scan", inputJSON(map[string]string{"protocol": "ssh", "address": "10.20.0.5", "port": "2222"}), 200).Body.Bytes(), &shown) != nil || shown.Fingerprint != ssh.FingerprintSHA256(key) {
 		t.Fatal("scan did not show the key")
 	}
 	// Scans are bounded per administrator and for the gateway.
@@ -400,7 +402,7 @@ func TestServerScansStayInsideTheTargetNetworks(t *testing.T) {
 	if view := listServersView(t, g.alice); !slices.Equal(view.Networks, []string{"10.20.0.5/32"}) {
 		t.Fatalf("an installation without target networks reaches %v", view.Networks)
 	}
-	g.alice.expect("POST", "/api/servers/scan", inputJSON(map[string]string{"address": "10.20.0.7", "port": "22"}), 403)
+	g.alice.expect("POST", "/api/servers/scan", inputJSON(map[string]string{"protocol": "ssh", "address": "10.20.0.7", "port": "22"}), 403)
 	if gs.calls != 0 {
 		t.Fatal("an installation without target networks scanned")
 	}
@@ -444,14 +446,14 @@ func TestServersAreAddedComparedRenamedRepinnedAndRemoved(t *testing.T) {
 	scans.set("10.20.0.7:22", first)
 	add := func(fingerprint string, status int) {
 		t.Helper()
-		f.alice.expect("POST", "/api/servers", inputJSON(map[string]string{"name": "Web", "address": "10.20.0.7", "port": "22", "fingerprint": fingerprint}), status)
+		f.alice.expect("POST", "/api/servers", inputJSON(map[string]string{"protocol": "ssh", "name": "Web", "address": "10.20.0.7", "port": "22", "fingerprint": fingerprint}), status)
 	}
 	// The key the server shows when it is added must be the one compared.
 	add(ssh.FingerprintSHA256(hostKeyFixture(t)), 409)
 	if list, _ := f.store.listServers(); len(list) != 1 {
 		t.Fatal("a server whose key did not match was stored")
 	}
-	f.alice.expect("POST", "/api/servers", inputJSON(map[string]string{"name": "Web", "address": "10.21.0.7", "port": "22", "fingerprint": ssh.FingerprintSHA256(first)}), 403)
+	f.alice.expect("POST", "/api/servers", inputJSON(map[string]string{"protocol": "ssh", "name": "Web", "address": "10.21.0.7", "port": "22", "fingerprint": ssh.FingerprintSHA256(first)}), 403)
 	id, key := addServerFixture(t, f.alice, scans, "Web", "10.20.0.8:22")
 	add(ssh.FingerprintSHA256(first), 200)
 	add(ssh.FingerprintSHA256(first), 409) // already listed

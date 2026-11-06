@@ -744,9 +744,42 @@ func nativeTLSRefusalPeer(t *testing.T, cert tls.Certificate, version uint16, se
 	return l.Addr().String(), done
 }
 
+// What Windows makes for itself, pinned exactly, carries a session through the
+// worker's own TLS and NLA: no name, and key encipherment without signature.
+func TestNativeRDPExactCertificateAuthenticates(t *testing.T) {
+	prefix := nativePrefix(t)
+	cert := windowsCertificate(t, nil, nil)
+	identity, err := NewExactIdentity(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	address, authenticated := nativePeer(t, ctx, prefix, cert, "Synthetic-NLA-password")
+	control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
+		fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
+		return (&net.Dialer{}).DialContext(c, "tcp", address)
+	})
+	plan, err := newNativePlan(identity, "synthetic-user", "Synthetic-NLA-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := nativeConnect(ctx, control, plan)
+	if err != nil {
+		t.Fatal("native control handshake failed")
+	}
+	defer stream.close()
+	select {
+	case <-authenticated:
+	case <-ctx.Done():
+		t.Fatal("native account did not authenticate")
+	}
+}
+
 func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 	prefix := nativePrefix(t)
-	for _, reason := range []string{"changed", "expired", "name", "purpose", "critical", "TLS11", "TLS-only", "plain-RDP"} {
+	for _, reason := range []string{"changed", "expired", "name", "purpose", "critical", "TLS11", "TLS-only", "plain-RDP", "windows-named",
+		"exact-changed", "exact-expired", "exact-purpose", "exact-usage", "exact-critical", "exact-ca", "exact-cut", "exact-longer", "exact-empty"} {
 		t.Run(reason, func(t *testing.T) {
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
 			if err != nil {
@@ -760,6 +793,51 @@ func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 			serverCert := cert
 			version := uint16(tls.VersionTLS12)
 			selected := byte(2)
+			// A server at a literal address, showing exactly what is pinned
+			// unless the case changes it: the native rules on their own, since
+			// NewExactIdentity would refuse these certificates first.
+			exact := func(change func(*x509.Certificate)) {
+				serverCert = windowsCertificate(t, key, change)
+				identity.name, identity.der = exactLeaf, bytes.Clone(serverCert.Certificate[0])
+			}
+			named := identity
+			switch reason {
+			case "windows-named":
+				// Key encipherment passes only for an exact pin, never for a name.
+				serverCert = windowsCertificate(t, key, func(c *x509.Certificate) { c.DNSNames = []string{"synthetic-rdp.invalid"} })
+				identity.der = bytes.Clone(serverCert.Certificate[0])
+			case "exact-changed":
+				exact(nil)
+				serverCert = windowsCertificate(t, key, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(10) })
+			case "exact-expired":
+				exact(func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Minute) })
+			case "exact-purpose":
+				exact(func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} })
+			case "exact-usage":
+				exact(func(c *x509.Certificate) { c.KeyUsage = x509.KeyUsageDataEncipherment })
+			case "exact-critical":
+				exact(func(c *x509.Certificate) {
+					c.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 2, 3, 4, 5}, Critical: true, Value: []byte{5, 0}}}
+				})
+			case "exact-ca":
+				exact(func(c *x509.Certificate) {
+					c.IsCA, c.BasicConstraintsValid = true, true
+					c.KeyUsage |= x509.KeyUsageCertSign
+				})
+			case "exact-cut":
+				// Only the whole mark turns the name check off.
+				exact(nil)
+				identity.name = strings.TrimSuffix(exactLeaf, "f")
+			case "exact-longer":
+				exact(nil)
+				identity.name = exactLeaf + "f"
+			case "exact-empty":
+				// A file that was never written relaxes nothing.
+				exact(nil)
+				copied := *identity
+				copied.name = ""
+				named = &copied
+			}
 			switch reason {
 			case "changed":
 				serverCert, _ = labCertificate(t, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(2) }, key)
@@ -786,7 +864,7 @@ func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
 			address, noCredentials := nativeTLSRefusalPeer(t, serverCert, version, selected)
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
-			control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
+			control, _, _ := launchNativeWorker(t, ctx, prefix, named, func(c context.Context) (net.Conn, error) {
 				fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
 				return (&net.Dialer{}).DialContext(c, "tcp", address)
 			})

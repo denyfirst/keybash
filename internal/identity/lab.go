@@ -88,6 +88,8 @@ type Lab struct {
 	sources      []netip.Prefix // nil: loopback clients only
 	// Where web servers may be added; see TargetNetworks. nil: nowhere.
 	networks, protected []netip.Prefix
+	watchEvery          time.Duration // see WatchCertificates; 0: never
+	background          sync.WaitGroup
 }
 
 func usernameInput(value string) bool {
@@ -214,6 +216,7 @@ func (l *Lab) Close() error {
 	}
 	l.mu.Unlock()
 	<-l.done
+	l.background.Wait()
 	return nil
 }
 
