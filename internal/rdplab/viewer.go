@@ -120,14 +120,19 @@ func (w viewerBoundedWriter) Write(data []byte) (int, error) {
 // guacd numbers buffers from libguac's pool, which hands out new numbers until
 // 1024 have been used and only then reuses freed ones, so a buffer's number
 // says nothing about how many are live: a real Windows desktop reached -33 with
-// 30 live, and 46 live with its caches off. What bounds the browser's memory is
-// the pixel budget in fit (4 Mi pixels, each layer rounded up to 64 by 64),
-// which alone holds fewer than 600 small buffers beside a full-HD display; the
-// live count only caps per-canvas overhead below that. A number only has to
-// stay within what guacd can reach under that count.
+// 30 live, and 90 later. What bounds the browser's memory is the pixel budget
+// in fit, each layer rounded up to 64 by 64. It is sized from what a real
+// Windows Server 2025 desktop needs, not from the 1024 by 768 lab: at full HD
+// guacd copies the whole display into a buffer of the same size, and FreeRDP
+// may hold up to 129 pointers of up to 384 by 384 (the native build caps the
+// cache at 32; FreeRDP keeps the server's large-pointer sizes). 16 Mi pixels,
+// at most 64 MiB of canvas, holds two full-HD surfaces beside every pointer
+// FreeRDP could hold at that cap. The live count only caps per-canvas overhead
+// below that, and a number only has to stay within what guacd can reach.
 const (
-	viewerLayers       = 256   // live layers and buffers at once, the display included
-	viewerLowestBuffer = -4096 // well past 1024 + viewerLayers
+	viewerLayers       = 1024     // live layers and buffers at once, the display included
+	viewerPixels       = 16 << 20 // every live layer's pixels, rounded up to 64 by 64
+	viewerLowestBuffer = -4096    // past 1024 + viewerLayers
 	viewerHighestLayer = 32
 )
 
@@ -184,7 +189,7 @@ func (s *viewerStream) fit(id, x, y, w, h int, exact bool) bool {
 		}
 		pixels += ((l.width + 63) / 64 * 64) * ((l.height + 63) / 64 * 64)
 	}
-	if pixels > 4*1024*1024 {
+	if pixels > viewerPixels {
 		return false
 	}
 	s.layers[id] = layer

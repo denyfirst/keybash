@@ -213,11 +213,12 @@ func TestViewerRefusesMalformedAndExcessDrawing(t *testing.T) {
 		}
 	}
 	s, _, _ := viewerFixture(t)
-	for i := 1; i <= 5; i++ {
-		in := instruction{"size", string(rune('0' + i)), "1024", "768"}
-		if s.drawing(in) != (i < 5) {
-			t.Fatal("aggregate canvas quota failed")
-		}
+	accepted := 0
+	for i := 1; i <= 32 && s.drawing(instruction{"size", strconv.Itoa(i), "1024", "768"}); i++ {
+		accepted++
+	}
+	if want := viewerPixels/(1024*768) - 1; accepted != want {
+		t.Fatalf("aggregate canvas quota took %d full layers beside the display, want %d", accepted, want)
 	}
 	for i := 0; i < 9; i++ {
 		if s.drawing(instruction{"push", "0"}) != (i < 8) {
@@ -310,6 +311,41 @@ func TestViewerImagesNeedNoBrowserAck(t *testing.T) {
 	}
 	if _, err := s.Write(encodedInstruction(t, instruction{"ack", "77", "OK", "0"})); err != errNative {
 		t.Fatal("an ack for a stream never sent was accepted")
+	}
+}
+
+// What a real Windows Server 2025 desktop needs at full HD fits: the display, the
+// copy of it guacd keeps in a buffer the same size (which ended every session
+// at the old budget), and every pointer FreeRDP may hold at the native cap, at
+// the largest size it allows. Past that the budget still refuses.
+func TestViewerHoldsAFullHDWindowsDesktop(t *testing.T) {
+	a, _ := net.Pipe()
+	defer a.Close()
+	s := newViewerStream(&nativeStream{raw: a, reader: bufio.NewReader(a), stop: func() bool { return true }, workspace: true})
+	for _, in := range []instruction{{"size", "0", "1920", "1080"}, {"copy", "0", "0", "0", "1920", "1080", "14", "-1", "0", "0"}} {
+		if !s.drawing(in) {
+			t.Fatalf("a full-HD desktop was refused at %v", in)
+		}
+	}
+	for i := range 33 { // 32 cached pointers and the one in use
+		if !s.drawing(instruction{"size", strconv.Itoa(-2 - i), "384", "384"}) {
+			t.Fatalf("pointer %d of 384 by 384 was refused", i+1)
+		}
+	}
+	for i := range 64 { // and small buffers besides
+		if !s.drawing(instruction{"size", strconv.Itoa(-100 - i), "96", "96"}) {
+			t.Fatalf("small buffer %d was refused", i+1)
+		}
+	}
+	refused := false
+	for i := range 8 {
+		if !s.drawing(instruction{"copy", "0", "0", "0", "1920", "1080", "14", strconv.Itoa(-200 - i), "0", "0"}) {
+			refused = true
+			break
+		}
+	}
+	if !refused {
+		t.Fatal("eight more full-HD buffers fitted: the pixel budget is not bounding")
 	}
 }
 

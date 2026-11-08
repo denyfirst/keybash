@@ -786,11 +786,11 @@ func TestNativeRDPExactCertificateAuthenticates(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("native account did not authenticate")
 	}
-	// The client asked for 32 pointers of at most 96 by 96 pixels: FreeRDP's
-	// defaults (128 entries, 384 by 384) would outgrow the viewer's bounds.
-	// The server settles on the smaller cache and the flags both support.
-	if got := marker.clientPointers(); got != "32_32_1" {
-		t.Fatalf("pointer cache and large pointers settled as %q, want 32_32_1", got)
+	// The client asked for 32 pointers: FreeRDP's 128, at up to 384 by 384,
+	// would outgrow the viewer's pixel budget. The server offers 128 and
+	// settles on the smaller; the large-pointer flags are FreeRDP's to settle.
+	if got := marker.clientPointers(); !strings.HasPrefix(got, "32_32_") {
+		t.Fatalf("pointer caches settled as %q, want 32 and 32", got)
 	}
 }
 

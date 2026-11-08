@@ -68,14 +68,17 @@ not a general browser drawing-instruction validator.
 
 A real Windows Server 2025 desktop (2026-11-08) showed what the synthetic peer
 never did. guacd 1.6 numbers buffers from a pool that reuses a number only
-after 1024 have been used, so the viewer bounds live layers (256) and pixels
-(4 Mi), not numbers. Its browser client never acknowledges image blobs, so the
-viewer requires no such ack. Its only browser buffers besides the cursor are
-pointers, one per pointer FreeRDP holds, and FreeRDP's defaults (128 entries of
-up to 384 by 384) would outgrow those bounds, so the build caps the cache at 32
-pointers of at most 96 by 96; the RDP bitmap and offscreen caches never become
+after 1024 have been used, so the viewer bounds live layers (1024) and pixels
+(16 Mi), not numbers. The pixel budget is sized from that desktop, not from
+this lab's 1024x768: at full HD guacd copies the whole display into a buffer
+of the same size, and each pointer FreeRDP holds is a buffer of up to 384 by
+384. Its browser client never acknowledges image blobs, so the viewer requires
+no such ack. The build caps FreeRDP's pointer cache at 32 (FreeRDP takes the
+smaller of both sides' sizes; it keeps the server's large-pointer sizes
+whatever the client asks). The RDP bitmap and offscreen caches never become
 browser buffers and stay on. `TestNativeRDPExactCertificateAuthenticates`
-checks the pointer capabilities the server settles on. Browser-selected params,
+checks the pointer cache the server settles on, with the sample server
+offering 128. Browser-selected params,
 target/gateway selection, drive, file transfer,
 SFTP, arbitrary channels, programs, audio, printing and recording are unavailable.
 Credentials travel on private Unix control IPC, never command arguments, URLs or
