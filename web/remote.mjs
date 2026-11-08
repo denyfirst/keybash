@@ -46,7 +46,27 @@ export async function enterFullscreen(element){
  try{await navigator.keyboard?.lock?.();}catch{}
 }
 export function watchFullscreen(button,changed=()=>{}){
- document.addEventListener('fullscreenchange',()=>{const on=Boolean(document.fullscreenElement);if(!on)navigator.keyboard?.unlock?.();button.textContent=on?'Exit full screen':'Full screen';changed(on);});
+ document.addEventListener('fullscreenchange',()=>{const on=Boolean(document.fullscreenElement);if(!on)navigator.keyboard?.unlock?.();const label=button.querySelector('.label')??button;label.textContent=on?'Exit full screen':'Full screen';button.title=label.textContent;changed(on);});
+}
+// What a terminal and a desktop page share around the session. In full screen
+// the bar steps aside and comes back at the top edge, from its handle, or
+// while it has focus or a menu is open. Short messages fade; once the session
+// has ended its reason stays, with Connect again for an owned session.
+export function sessionChrome(){
+ const session=document.querySelector('.session'),bar=session.querySelector('.bar'),notice=document.getElementById('notice'),reconnect=document.getElementById('reconnect');
+ let hideTimer=0,noticeTimer=0;
+ const full=()=>session.classList.contains('full');
+ const show=()=>{clearTimeout(hideTimer);session.classList.add('bar-shown');};
+ const hide=(delay=900)=>{clearTimeout(hideTimer);hideTimer=setTimeout(()=>{if(full()&&!bar.matches(':hover, :focus-within')&&!session.querySelector('.menu:not([hidden])'))session.classList.remove('bar-shown');},delay);};
+ session.addEventListener('pointermove',event=>{if(!full())return;if(event.clientY<=6)show();else if(!bar.contains(event.target))hide();});
+ session.querySelector('.bar-handle').addEventListener('click',show);
+ bar.addEventListener('focusin',()=>{if(full())show();});
+ bar.addEventListener('focusout',()=>{if(full())hide();});
+ document.addEventListener('fullscreenchange',()=>{const on=document.fullscreenElement===session;session.classList.toggle('full',on);if(on){show();hide(2500);}else{clearTimeout(hideTimer);session.classList.remove('bar-shown');}});
+ const ended=()=>document.body.classList.contains('ended');
+ new MutationObserver(()=>{clearTimeout(noticeTimer);const said=notice.textContent!=='';notice.classList.toggle('shown',said);if(said&&!ended())noticeTimer=setTimeout(()=>notice.classList.remove('shown'),6000);}).observe(notice,{childList:true,characterData:true,subtree:true});
+ reconnect.addEventListener('click',()=>location.reload());
+ return {end(){if(ended())return;document.body.classList.add('ended');clearTimeout(noticeTimer);notice.classList.toggle('shown',notice.textContent!=='');reconnect.hidden=!ownedRemote;}};
 }
 // The connection's own name, for the tab title, so several open sessions are
 // told apart. A missing or oversized list keeps the generic title.

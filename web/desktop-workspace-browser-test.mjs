@@ -21,11 +21,16 @@ await context.addInitScript(({native})=>{
 const page=await context.newPage(),errors=[],outbound=[];
 page.on('pageerror',e=>errors.push(e.name+': '+e.message));
 page.on('request',r=>{if(!r.url().startsWith(config.Origin+'/'))outbound.push('external request');});
+// The clipboard lives in a small sheet under its button in the bar.
+const sheet=async()=>{if(await page.locator('#clipboard-menu').isHidden())await page.locator('#clipboard').click();await page.locator('#clipboard-menu').waitFor();};
 try{
   await page.goto(config.Origin);await page.locator('#code').fill(config.Code);await page.getByRole('button',{name:'Open session',exact:true}).click();
   await page.locator('#status').filter({hasText:/^Connected$/}).waitFor();
   const remote=config.Native?'Remote Azərbaycan 🔑':'Remote Azərbaycan 🔑 <img src=x onerror=alert(1)>';
   await page.waitForFunction(expected=>document.getElementById('remote-text').value===expected,remote,{timeout:10000});
+  // Remote text waits behind the button, never written here unasked.
+  assert.equal(await page.locator('#clipboard').getAttribute('data-new'),'','the remote copy was not marked');
+  await sheet();assert.equal(await page.locator('#clipboard').getAttribute('data-new'),null,'opening the sheet kept the mark');
   assert.equal(await page.locator('#copy-remote').isEnabled(),true);
   assert.deepEqual(await page.evaluate(()=>[clipState.reads,clipState.writes]),[0,0]);
   await page.locator('#copy-remote').click();
@@ -38,11 +43,12 @@ try{
   assert.equal(await page.locator('#paste-preview').textContent(),local);
   await page.locator('#paste-send').click();
   assert.equal(await page.locator('#paste-text').inputValue(),'');
+  assert.equal(await page.locator('#clipboard-menu').isHidden(),true,'the sheet stayed open after the paste');
   await page.locator('#resolution').selectOption('1280x720');
   await page.waitForFunction(()=>document.getElementById('size').textContent==='1280 × 720',undefined,{timeout:10000});
   await page.waitForFunction(()=>[...document.querySelectorAll('#display canvas')].some(c=>c.width>=1280&&c.height>=720));
   await page.evaluate(()=>{clipState.mode='deny';});
-  await page.locator('#copy-remote').click();
+  await sheet();await page.locator('#copy-remote').click();
   await page.locator('#notice').filter({hasText:'No clipboard permission'}).waitFor();
   assert.equal(await page.locator('#remote-text').inputValue(),remote);
   await page.locator('#paste-local').click();
@@ -57,6 +63,7 @@ try{
   await page.evaluate(()=>clipState.resolve('late-local-text-must-not-send'));
   assert.equal(await page.locator('#paste-text').inputValue(),'');assert.equal(await page.locator('#remote-text').inputValue(),'');
   assert.equal(await page.locator('#resolution').isDisabled(),true);
+  assert.equal(await page.locator('#clipboard').isDisabled(),true);assert.equal(await page.locator('#clipboard-menu').isHidden(),true,'the sheet outlived the session');
   assert.equal(await page.locator('#display').evaluate(e=>e.childElementCount),0);
   assert.equal(await page.evaluate(()=>localStorage.length+sessionStorage.length),0);
   assert.deepEqual(errors,[]);assert.deepEqual(outbound,[]);

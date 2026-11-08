@@ -4,8 +4,23 @@ import { inspectPaste } from './paste.mjs';
 export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   const encoder = new TextEncoder();
   let enabled = false, remoteText = '', generation = 0, resizeTimer, lastSize = '';
-  const buttons = ['copy-remote', 'paste-local', 'paste-send', 'resolution'];
+  const buttons = ['clipboard', 'copy-remote', 'paste-local', 'paste-send', 'resolution'];
   const usable = () => enabled && live();
+  // The clipboard sheet opens from its button and closes on a press outside
+  // it, on Esc, and once a paste is sent.
+  const menu = $('clipboard-menu'), toggle = $('clipboard');
+  function openMenu(focus) {
+    if (!usable()) return;
+    menu.hidden = false; toggle.setAttribute('aria-expanded', 'true'); delete toggle.dataset.new;
+    focus?.focus();
+  }
+  function closeMenu() {
+    if (menu.hidden) return;
+    menu.hidden = true; toggle.setAttribute('aria-expanded', 'false');
+  }
+  toggle.addEventListener('click', () => { if (menu.hidden) openMenu($('paste-text')); else closeMenu(); });
+  document.addEventListener('pointerdown', event => { if (!menu.contains(event.target) && !toggle.contains(event.target)) closeMenu(); });
+  menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeMenu(); toggle.focus(); } });
   const valid = text => typeof text === 'string' && text.isWellFormed() && !text.includes('\0') && inspectPaste(text).allowed;
   function prepare(text) {
     if (!valid(text)) { $('notice').textContent = 'The text must be at most 32 KiB of valid Unicode.'; return false; }
@@ -28,7 +43,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     for (const key of [0xffe3, 118]) client().sendKeyEvent(1, key);
     for (const key of [118, 0xffe3]) client().sendKeyEvent(0, key);
     $('paste-text').value = ''; $('paste-preview').textContent = '';
-    $('desktop').focus();
+    closeMenu(); $('desktop').focus();
   }
   async function copy() {
     if (!usable()) return;
@@ -38,7 +53,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
       if (usable() && epoch === generation) $('notice').textContent = 'Text from the remote copied.';
     } catch {
       if (usable() && epoch === generation) {
-        $('remote-text').value = text; $('remote-text').focus(); $('remote-text').select();
+        openMenu(); $('remote-text').value = text; $('remote-text').focus(); $('remote-text').select();
         $('notice').textContent = 'No clipboard permission. Select the text and press Ctrl+C.';
       }
     }
@@ -46,8 +61,8 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   function requestSize() {
     if (!usable()) return;
     const selected = $('resolution').value;
-    let [w, h] = selected === 'fit' ? [$('desktop').clientWidth, window.innerHeight * 0.72] : selected.split('x').map(Number);
-    if (document.fullscreenElement && selected === 'fit') [w, h] = [window.innerWidth, window.innerHeight];
+    // Fit asks the remote for exactly the space the desktop has here.
+    let [w, h] = selected === 'fit' ? [$('desktop').clientWidth, $('desktop').clientHeight] : selected.split('x').map(Number);
     w = Math.max(64, Math.min(1920, Math.floor(w / 2) * 2));
     h = Math.max(64, Math.min(1080, Math.floor(h / 2) * 2));
     if (!Number.isInteger(w) || !Number.isInteger(h)) return;
@@ -70,17 +85,18 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
       if (usable() && epoch === generation && prepare(text)) $('paste-send').focus();
     } catch {
       if (usable() && epoch === generation) {
-        $('paste-text').focus(); $('notice').textContent = 'No clipboard permission. Paste the text into the panel with Ctrl+V.';
+        $('paste-text').focus(); $('notice').textContent = 'No clipboard permission. Paste the text into the box with Ctrl+V.';
       }
     }
   });
+  // Ctrl+V on the desktop: one line goes at once, several wait in the sheet.
   document.addEventListener('paste', event => {
     if (!usable() || document.activeElement !== $('desktop')) return;
     event.preventDefault();
     const text = event.clipboardData?.getData('text/plain');
     if (!prepare(text)) return;
     if (!inspectPaste(text).review) paste();
-    else { $('paste-send').focus(); $('notice').textContent = 'Review the text, then send it. No Enter is added.'; }
+    else { openMenu($('paste-send')); $('notice').textContent = 'Check the text, then paste it. No Enter is added.'; }
   });
   return {
     get enabled() { return enabled; },
@@ -92,7 +108,10 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     },
     receive(args) {
       if (!usable() || args.length !== 1 || !valid(args[0])) return false;
-      remoteText = args[0]; $('remote-text').value = remoteText; return true;
+      remoteText = args[0]; $('remote-text').value = remoteText;
+      // Never written to this computer's clipboard unasked: a dot says it waits.
+      if (menu.hidden && remoteText) toggle.dataset.new = '';
+      return true;
     },
     key(key, modifiers) {
       if (!usable()) return undefined;
@@ -103,6 +122,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     resize,
     end() {
       generation++; enabled = false; remoteText = ''; lastSize = ''; clearTimeout(resizeTimer);
+      closeMenu(); delete toggle.dataset.new;
       for (const id of ['paste-text', 'remote-text']) $(id).value = '';
       $('paste-preview').textContent = '';
       for (const id of buttons) $(id).disabled = true;

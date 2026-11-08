@@ -1,11 +1,12 @@
 import { Guacamole } from './vendor/guacamole.mjs';
 import { workspaceControls } from './desktop-workspace.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
 const encoder = new TextEncoder();
 let sendWorkspace;
+const chrome = sessionChrome();
 const controls = workspaceControls({ $,
   live: () => !stopped, client: () => client,
   send: (...values) => sendWorkspace?.(...values), resetKeyboard: () => keyboard?.reset()
@@ -21,11 +22,13 @@ function end() {
   for (const id of ['disconnect','special','fullscreen']) $(id).disabled = true;
   if (document.fullscreenElement) void document.exitFullscreen().catch(()=>{});
   $('status').textContent = 'Session ended'; $('status').classList.remove('connected');
+  if (!$('notice').textContent) $('notice').textContent = 'Session ended.';
+  chrome.end();
 }
+// The picture fits the space the desktop has, whatever the window or screen.
 function fit() {
   if (!client || stopped) return;
-  const width = $('desktop').clientWidth;
-  const height = document.fullscreenElement ? window.innerHeight : Math.min(window.innerHeight * 0.72, 768);
+  const width = $('desktop').clientWidth, height = $('desktop').clientHeight;
   const display = client.getDisplay();
   display.scale(Math.min(1, width/Math.max(1,display.getWidth()), height/Math.max(1,display.getHeight())));
   controls.resize();
@@ -134,10 +137,10 @@ $('special').addEventListener('click', () => {
 });
 $('fullscreen').addEventListener('click', () => {
   if (document.fullscreenElement) void document.exitFullscreen().catch(()=>{});
-  else if (!stopped) void enterFullscreen($('desktop')).then(() => $('desktop').focus()).catch(()=>{});
+  else if (!stopped) void enterFullscreen(document.querySelector('.session')).then(() => $('desktop').focus()).catch(()=>{});
 });
-watchFullscreen($('fullscreen'), fit);
-window.addEventListener('resize', fit);
+watchFullscreen($('fullscreen'));
+new ResizeObserver(fit).observe($('desktop'));
 window.addEventListener('pagehide', ()=>{retired=true;end();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
-if(ownedRemote){$('login-panel').hidden=true;void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired){stopped=false;begin(proof);}}).catch(error=>{$('notice').textContent=remoteErrorMessage(error);});}
+if(ownedRemote){$('login-panel').hidden=true;void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired){stopped=false;begin(proof);}}).catch(error=>{$('notice').textContent=remoteErrorMessage(error);chrome.end();});}
