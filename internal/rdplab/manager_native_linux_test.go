@@ -159,9 +159,9 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 
 func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Identity, mode string, uid uint32, during ...func()) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=40s") // #nosec G204 -- this exact compiled fixture and fixed selector.
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=70s") // #nosec G204 -- this exact compiled fixture and fixed selector.
 	cmd.Dir = "/tmp"
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGED_SOCKET=" + c.SocketPath, "KEYBASH_MANAGED_ADDRESS=" + address, "KEYBASH_MANAGED_PIN=" + base64.StdEncoding.EncodeToString(pin.der), "KEYBASH_MANAGED_MODE=" + mode}
 	if pin.name == exactLeaf {
@@ -227,7 +227,7 @@ func (o *rdpServiceOutput) snapshot() string { o.mu.Lock(); defer o.mu.Unlock();
 
 func TestNativeRDPManagerAuthenticationRevocationAndRefusal(t *testing.T) {
 	c := nativeManagerFixture(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- ServeRDPManager(ctx, c) }()
@@ -289,7 +289,7 @@ func TestNativeRDPManagerAuthenticationRevocationAndRefusal(t *testing.T) {
 		t.Fatal(e)
 	}
 	address, marker = nativePeerWithInput(t, ctx, nativePrefix(t), windows, "Synthetic-managed-NLA-password")
-	runManagedGateway(t, c, address, exact, "positive", 65533)
+	runManagedGateway(t, c, address, exact, "idle", 65533)
 	select {
 	case <-marker.ready:
 	default:
@@ -314,7 +314,7 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 	if path == "" {
 		t.Skip("fixed unprivileged gateway child")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	p, e := base64.StdEncoding.DecodeString(os.Getenv("KEYBASH_MANAGED_PIN"))
 	if e != nil {
@@ -391,6 +391,31 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("managed native desktop stalled")
+	}
+	if mode == "idle" {
+		// guacd ends a user it hears nothing from for 15 seconds. Nothing
+		// comes from the browser's side for longer than that, as from a hidden
+		// page; the gateway's own keep-alive must hold the desktop open.
+		drained := make(chan error, 1)
+		go func() {
+			b := make([]byte, 8192)
+			for {
+				if _, e := s.Read(b); e != nil {
+					drained <- e
+					return
+				}
+			}
+		}()
+		select {
+		case <-drained:
+			t.Fatalf("an idle desktop ended (fixed classification: %v)", s.(*viewerStream).native.failure.Load())
+		case <-time.After(18 * time.Second):
+		}
+		if _, e := s.Write(encodedInstruction(t, instruction{"mouse", "121", "121", "0"})); e != nil {
+			t.Fatal("idle desktop refused input")
+		}
+		_ = s.Close()
+		<-drained
 	}
 	if mode == "service" {
 		fmt.Fprintln(os.Stdout, "KB_SERVICE_READY")
