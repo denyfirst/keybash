@@ -192,10 +192,14 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 				if sequence == ^uint32(0) {
 					return
 				}
+				if ctx.Err() != nil {
+					return
+				}
 				frame := make([]byte, 4+len(data))
 				binary.BigEndian.PutUint32(frame, sequence)
 				copy(frame[4:], data)
-				writeCtx, stop := context.WithTimeout(ctx, 10*time.Second)
+				// Not ctx: a write whose context ends closes the socket at once.
+				writeCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 				err := conn.Write(writeCtx, websocket.MessageBinary, frame)
 				stop()
 				if err != nil {
@@ -204,10 +208,14 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 			}
 		}
 	})
-	defer func() { cancel(); _ = conn.CloseNow(); _ = stream.Close(); workers.Wait() }()
+	// The caller closes conn once ctx ends (Relay after saying why), which
+	// also ends the read below and any write still waiting on a slow browser.
+	// Reading with ctx itself would close the socket the moment ctx ended.
+	defer func() { cancel(); _ = stream.Close(); workers.Wait() }()
+	reading := context.WithoutCancel(ctx)
 	start, frames, inputBytes := time.Now(), 0, 0
 	for {
-		kind, data, err := conn.Read(ctx)
+		kind, data, err := conn.Read(reading)
 		if err != nil {
 			return
 		}

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
 // The legacy profile has a fixed viewport; the manager workspace adds bounded
@@ -76,6 +78,36 @@ func (s *viewerStream) Close() error {
 	s.syncs = nil
 	s.metaMu.Unlock()
 	return nil
+}
+
+// Reason says, with a fixed word, why the desktop ended by itself. Only guacd's
+// status code is read (guacd 1.6, src/protocols/rdp/error.c), never its
+// message; a failure without a word of its own gives none.
+func (s *viewerStream) Reason() terminalweb.Reason {
+	if s.native == nil {
+		return ""
+	}
+	failure, _ := s.native.failure.Load().(string)
+	switch failure {
+	case "native status 769": // CLIENT_UNAUTHORIZED: wrong user name or password
+		return terminalweb.ReasonCredentials
+	case "native status 771": // CLIENT_FORBIDDEN: locked, disabled, expired or not allowed
+		return terminalweb.ReasonAccount
+	case "native status 521": // SESSION_CONFLICT: another connection took the session
+		return terminalweb.ReasonTakenOver
+	case "native status 522", "native status 523", "disconnect": // SESSION_TIMEOUT, SESSION_CLOSED, or no error at all
+		return terminalweb.ReasonRemoteEnded
+	case "native status 514", "native status 519", "native status 520": // UPSTREAM_TIMEOUT, _NOT_FOUND, _UNAVAILABLE
+		return terminalweb.ReasonUnreachable
+	case "native status 776": // CLIENT_TIMEOUT: guacd heard nothing from the gateway
+		return terminalweb.ReasonNotResponding
+	case "output quota", "unexpected instruction", "unsupported drawing property", "invalid owner notice", "unexpected parameter request", "workspace clipboard schema":
+		return terminalweb.ReasonRefused
+	}
+	if strings.HasPrefix(failure, "viewer drawing ") {
+		return terminalweb.ReasonRefused
+	}
+	return ""
 }
 
 // guacd ends a user it hears nothing from for 15 seconds ("User is not

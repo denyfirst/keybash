@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/denyfirst/keybash/internal/ingress"
+	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
 const cookieName = "__Host-keybash-session"
@@ -56,7 +57,7 @@ type session struct {
 	username      string
 	created, last time.Time
 	ctx           context.Context
-	cancel        context.CancelFunc
+	cancel        context.CancelCauseFunc // the cause is a terminalweb.Reason the page can show
 	owner         string
 	revision      uint64
 	stage         string
@@ -211,7 +212,7 @@ func (l *Lab) Close() error {
 		l.closed = true
 		close(l.stop)
 		for id := range l.sessions {
-			l.forgetLocked(id)
+			l.endLocked(id, nil) // the gateway is stopping: no reason to give
 		}
 	}
 	l.mu.Unlock()
@@ -220,9 +221,13 @@ func (l *Lab) Close() error {
 	return nil
 }
 
-func (l *Lab) forgetLocked(id [32]byte) {
+func (l *Lab) forgetLocked(id [32]byte) { l.endLocked(id, terminalweb.ReasonSignedOut) }
+
+// endLocked ends a sign-in and every remote session in it; cause tells their
+// pages why.
+func (l *Lab) endLocked(id [32]byte, cause error) {
 	if s := l.sessions[id]; s != nil {
-		s.cancel()
+		s.cancel(cause)
 		delete(l.sessions, id)
 	}
 	l.sweepRemotesLocked()
@@ -230,7 +235,12 @@ func (l *Lab) forgetLocked(id [32]byte) {
 func (l *Lab) sweepLocked() {
 	now := l.now()
 	for id, s := range l.sessions {
-		if !now.Before(s.last.Add(idleLife)) || !now.Before(s.created.Add(absoluteLife)) || l.store != nil && s.stage != "ready" && !now.Before(s.challengeEnd) {
+		switch {
+		case !now.Before(s.last.Add(idleLife)):
+			l.endLocked(id, terminalweb.ReasonIdle)
+		case !now.Before(s.created.Add(absoluteLife)):
+			l.endLocked(id, terminalweb.ReasonExpired)
+		case l.store != nil && s.stage != "ready" && !now.Before(s.challengeEnd):
 			l.forgetLocked(id)
 		}
 	}
@@ -405,7 +415,7 @@ func (l *Lab) issueLocked(username, previous string) (string, error) {
 	if oldValid {
 		l.forgetLocked(oldID)
 	}
-	c, cancel := context.WithCancel(context.Background())
+	c, cancel := context.WithCancelCause(context.Background())
 	s := &session{username: username, created: l.now(), last: l.now(), ctx: c, cancel: cancel, owner: a.id, revision: a.revision}
 	if l.store != nil {
 		s.stage = "enroll"

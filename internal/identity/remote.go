@@ -77,7 +77,7 @@ type remoteLease struct {
 	owner, connection, credential, target, approval string // approval: the target's when granted
 	expires                                         time.Time
 	active                                          bool
-	cancel                                          context.CancelFunc
+	cancel                                          context.CancelCauseFunc // the cause is a terminalweb.Reason the page can show
 }
 
 // NewRemoteLab adds ownership authorization to the existing loopback TLS lab.
@@ -169,7 +169,12 @@ func (l *Lab) sweepRemotesLocked() {
 		s := l.sessions[lease.session]
 		if l.closed || s == nil || s.stage != "ready" || !lease.active && !l.now().Before(lease.expires) {
 			if lease.cancel != nil {
-				lease.cancel()
+				// An ended sign-in already gave its own cause, which this keeps.
+				var cause error = terminalweb.ReasonSignedOut
+				if l.closed {
+					cause = nil
+				}
+				lease.cancel(cause)
 			}
 			delete(l.remote.leases, key)
 		}
@@ -182,7 +187,7 @@ func (l *Lab) revokeRemotesLocked(owner, connection, credential string) {
 	for key, lease := range l.remote.leases {
 		if lease.owner == owner && (connection != "" && lease.connection == connection || credential != "" && lease.credential == credential) {
 			if lease.cancel != nil {
-				lease.cancel()
+				lease.cancel(terminalweb.ReasonAccessChanged)
 			}
 			delete(l.remote.leases, key)
 		}
@@ -267,7 +272,7 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 	if e != nil || !compatible(target, credential) {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
-	ctx, cancel := context.WithCancel(s.ctx)
+	ctx, cancel := context.WithCancelCause(s.ctx)
 	lease.active, lease.cancel = true, cancel
 	return lease, target, credential, ctx, nil
 }
@@ -355,8 +360,8 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, _ := tokenID(raw)
-	defer func() { lease.cancel(); l.mu.Lock(); delete(l.remote.leases, key); l.mu.Unlock() }()
-	stopRequest := context.AfterFunc(r.Context(), lease.cancel)
+	defer func() { lease.cancel(nil); l.mu.Lock(); delete(l.remote.leases, key); l.mu.Unlock() }()
+	stopRequest := context.AfterFunc(r.Context(), func() { lease.cancel(nil) })
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
 	defer stopSocket()
@@ -366,7 +371,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		_ = socket.Write(ctx, websocket.MessageText, []byte(`{"type":"identity-changed"}`))
 		return
 	}
-	setupTimer := time.AfterFunc(10*time.Second, lease.cancel)
+	setupTimer := time.AfterFunc(10*time.Second, func() { lease.cancel(nil) })
 	stream, e := l.openRemote(ctx, target, credential)
 	setupTimer.Stop()
 	if e != nil || stream == nil || ctx.Err() != nil {
@@ -379,7 +384,19 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		_ = stream.Close()
 		return
 	}
+	// From here Relay closes the socket when ctx ends, after saying why;
+	// closing it at once here would leave the page with no reason.
+	stopOwner()
+	stopSocket()
 	terminalweb.Relay(ctx, socket, &remoteActivity{Stream: stream, l: l, id: id, ctx: ctx, protocol: target.Protocol})
+}
+
+// Reason passes on why the stream ended by itself, when it can say.
+func (s *remoteActivity) Reason() terminalweb.Reason {
+	if r, ok := s.Stream.(terminalweb.Reasoned); ok {
+		return r.Reason()
+	}
+	return ""
 }
 
 type remoteActivity struct {

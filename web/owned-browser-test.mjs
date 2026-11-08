@@ -49,6 +49,8 @@ try{
  stage='delete asks first';await account.bringToFront();const card=account.locator('.server-card');await card.getByRole('button',{name:'Delete',exact:true}).click();await account.locator('#delete-dialog').waitFor();assert.equal(await account.locator('#delete-title').textContent(),'Delete this connection?');assert.equal(await account.locator('#delete-name').textContent(),'Owned remote');
  await account.locator('#cancel-delete').click();await account.locator('#delete-dialog').waitFor({state:'hidden'});await settle();assert.equal(await card.count(),1,'cancel deleted the connection');
  await card.getByRole('button',{name:'Delete',exact:true}).click();await account.locator('#confirm-delete').click();await account.locator('#notice').filter({hasText:/^Deleted\.$/}).waitFor();await settle();assert.equal(await card.count(),0,'the connection was not deleted');
+ // Deleting it ends the open session, and its page says why in fixed words.
+ stage='session says why it ended';await page.locator('#notice').filter({hasText:/^This server, this connection or your access to it changed, so this session ended\.$/}).waitFor();
  assert.equal(await page.evaluate(()=>localStorage.length+sessionStorage.length),0);
  await account.locator('#logout').click();await account.waitForURL(config.Origin+'/login');if(config.Mode==='ssh'){await page.waitForFunction(()=>document.getElementById('terminal').childElementCount===0);}else{await page.waitForFunction(()=>document.getElementById('display').childElementCount===0);}
  assert.deepEqual(errors,[]);assert.deepEqual(outbound,[]);assert.deepEqual(urls,[]);console.log('Owned remote browser: bootstrap/MFA/vault/connection/input/account logout passed for '+config.Mode);

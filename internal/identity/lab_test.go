@@ -294,7 +294,7 @@ func TestIdentityRateKDFAndSessionQuotas(t *testing.T) {
 	l2.mu.Lock()
 	for i := range 128 {
 		id := sha256.Sum256([]byte(fmt.Sprint(i)))
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancelCause(context.Background())
 		l2.sessions[id] = &session{username: "alice", created: l2.now(), last: l2.now(), ctx: ctx, cancel: cancel}
 	}
 	l2.mu.Unlock()
@@ -424,7 +424,7 @@ func TestIdentityActivityRenewalAndOwnerSessionQuota(t *testing.T) {
 	now = now.Add(time.Second)
 	for i := range 7 {
 		id := sha256.Sum256([]byte(fmt.Sprint("owner-", i)))
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancelCause(context.Background())
 		l.sessions[id] = &session{username: "alice", created: now, last: now, ctx: ctx, cancel: cancel}
 	}
 	l.mu.Unlock()

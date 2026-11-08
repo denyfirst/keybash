@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -136,4 +137,113 @@ func TestRelayRefusesUnsentCredit(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("unsent credit kept the stream")
 	}
+}
+
+// reasonStream reports a word for why it ended; with ends it ends by itself,
+// as a native session does, otherwise it waits like a shell at its prompt.
+type reasonStream struct {
+	*bulkStream
+	reason Reason
+	ends   bool
+}
+
+func (s reasonStream) Read(b []byte) (int, error) {
+	if s.ends {
+		return 0, errors.New("remote ended")
+	}
+	return s.bulkStream.Read(b)
+}
+func (s reasonStream) Reason() Reason { return s.reason }
+
+// relayEnding is relayClient with the session's context in the test's hands.
+func relayEnding(t *testing.T, stream Stream) (*websocket.Conn, func(error)) {
+	t.Helper()
+	ends := make(chan context.CancelCauseFunc, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithCancelCause(r.Context())
+		ends <- cancel
+		Relay(ctx, conn, stream)
+	}))
+	t.Cleanup(server.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	return conn, func(cause error) {
+		select {
+		case end := <-ends:
+			end(cause)
+		case <-time.After(3 * time.Second):
+			t.Fatal("relay did not start")
+		}
+	}
+}
+
+// expectEnding reads what the page would: the fixed reason message, if any,
+// and then the socket closing.
+func expectEnding(t *testing.T, conn *websocket.Conn, stream *bulkStream, want Reason) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	kind, data, err := conn.Read(ctx)
+	if want == "" {
+		if err == nil {
+			t.Fatalf("an ending with no fixed reason said %q", data)
+		}
+		return
+	}
+	if err != nil || kind != websocket.MessageText || string(data) != `{"type":"ended","reason":"`+string(want)+`"}` {
+		t.Fatalf("got %q (%v), want the %q reason", data, err, want)
+	}
+	select {
+	case <-stream.done:
+	default:
+		t.Fatal("the reason was said before the remote side stopped")
+	}
+	if _, _, err := conn.Read(ctx); err == nil {
+		t.Fatal("the socket stayed open after its reason")
+	}
+}
+
+// A session that ends (signed out, idle, access removed) says why on the
+// socket, after its remote side has stopped; nothing else is ever said.
+func TestRelaySaysWhyTheSessionEnded(t *testing.T) {
+	for _, cause := range []error{ReasonIdle, ReasonExpired, ReasonSignedOut, ReasonAccessChanged} {
+		stream := newBulkStream(0)
+		conn, end := relayEnding(t, stream)
+		end(cause)
+		expectEnding(t, conn, stream, cause.(Reason))
+	}
+	for _, cause := range []error{nil, errors.New("internal detail"), Reason(`<b>x</b>`), Reason("")} {
+		stream := newBulkStream(0)
+		conn, end := relayEnding(t, stream)
+		end(cause)
+		expectEnding(t, conn, stream, "")
+	}
+}
+
+// A stream that ends by itself says its own fixed word; the session's cause
+// comes first, since it is why the stream stopped.
+func TestRelaySaysWhyAStreamEnded(t *testing.T) {
+	for _, reason := range []Reason{ReasonCredentials, ReasonAccount, ReasonTakenOver, ReasonRemoteEnded, ReasonUnreachable, ReasonNotResponding, ReasonRefused} {
+		stream := newBulkStream(0)
+		conn := relayClient(t, reasonStream{stream, reason, true})
+		expectEnding(t, conn, stream, reason)
+	}
+	for _, reason := range []Reason{"", "Authentication failure (invalid credentials?)", "credentials "} {
+		stream := newBulkStream(0)
+		conn := relayClient(t, reasonStream{stream, reason, true})
+		expectEnding(t, conn, stream, "")
+	}
+	stream := newBulkStream(0)
+	conn, end := relayEnding(t, reasonStream{stream, ReasonCredentials, false})
+	end(ReasonAccessChanged)
+	expectEnding(t, conn, stream, ReasonAccessChanged)
 }

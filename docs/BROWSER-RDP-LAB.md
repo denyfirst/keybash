@@ -76,6 +76,11 @@ Keyboard forwarding requires desktop focus; blur resets held keys. Mouse moves
 are coalesced per animation frame. Ctrl+Alt+Del is sent by an explicit button;
 the app does not inject that shortcut into the workstation OS. Logout, socket
 closure and expiry cancel the stream/worker and remove the browser display.
+An owned session's page is then told why in one fixed word with its own text:
+Keybash's idle limit, the sign-in's 8-hour life, signing out, a changed server,
+connection or access, or guacd's status code (credentials, account, taken
+over, ended by the remote side, unreachable, not responding), never its
+message; a desktop that sent what the viewer refuses says so too.
 Remote text is not reflected into application HTML. Browser storage and local
 clipboard APIs are unused. RAM erasure is not guaranteed.
 
