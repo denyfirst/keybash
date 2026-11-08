@@ -61,7 +61,13 @@ The application uses the upstream renderer rather than implementing RDP.
   image/render work. They are different credits. No lifetime total remains.
 - Native PNG blob acknowledgements permit validation staging to finish; bounded
   browser image acknowledgements are consumed exactly once and not forwarded
-  twice. Sync replies must match outstanding native timestamps.
+  twice. A sync reply to one of the 128 newest unanswered native timestamps
+  is forwarded once; a reply to an older or already answered one is dropped,
+  and one to a timestamp never sent closes the session.
+- guacd ends a user it hears nothing from for 15 seconds. On the managed path
+  the gateway sends its own nop every 5 seconds while the browser has been
+  heard from within 2 minutes, so a hidden page, whose timers run as rarely as
+  once a minute, keeps its desktop; idle accounting still counts only input.
 - Browser input is one complete <=1 KiB instruction: bounded mouse/buttons,
   supported X11/Unicode keysyms, tracked press/release, matched ack/sync or exact
   nop. Unknown/combined commands and auxiliary streams close the session.

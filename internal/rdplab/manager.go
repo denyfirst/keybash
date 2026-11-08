@@ -83,7 +83,7 @@ func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) 
 		_ = raw.Close()
 		return nil, errNative
 	}
-	return newViewerStream(native), nil
+	return newViewerStream(native).startKeepAlive(), nil
 }
 
 func (ManagerConfig) Format(w fmt.State, _ rune) {

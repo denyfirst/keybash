@@ -37,8 +37,12 @@ type viewerStream struct {
 	writeMu               sync.Mutex
 	metaMu                sync.Mutex
 	acks                  map[string]int
-	syncs                 map[string]bool
+	syncs                 []int // frames sent and not yet answered, oldest first
+	newestSync            int   // the newest frame timestamp sent; -1 before any
 	keys                  map[uint32]bool
+	heard                 atomic.Int64 // when the browser last sent a valid instruction, in Unix nanoseconds
+	done                  chan struct{}
+	closeOnce             sync.Once
 	closed                atomic.Bool
 	width, height         atomic.Int64
 	inputClip, outputClip clipboard
@@ -49,7 +53,8 @@ type viewerStream struct {
 
 func newViewerStream(native *nativeStream) *viewerStream {
 	s := &viewerStream{native: native, layers: map[int]viewerLayer{0: {1024, 768, 0}},
-		images: make(map[string]*viewerImage), acks: make(map[string]int), syncs: make(map[string]bool), keys: make(map[uint32]bool)}
+		images: make(map[string]*viewerImage), acks: make(map[string]int), newestSync: -1, keys: make(map[uint32]bool), done: make(chan struct{})}
+	s.heard.Store(time.Now().UnixNano())
 	s.width.Store(1024)
 	s.height.Store(768)
 	var initial bytes.Buffer
@@ -63,13 +68,14 @@ func newViewerStream(native *nativeStream) *viewerStream {
 }
 func (s *viewerStream) Close() error {
 	s.closed.Store(true)
+	s.closeOnce.Do(func() { close(s.done) })
 	s.native.close()
 	s.inputClip.close()
 	s.outputClip.close()
 	s.metaMu.Lock()
 	clear(s.keys)
 	clear(s.acks)
-	clear(s.syncs)
+	s.syncs = nil
 	s.metaMu.Unlock()
 	return nil
 }
@@ -102,6 +108,49 @@ func (s *viewerStream) Reason() terminalweb.Reason {
 		return terminalweb.ReasonRefused
 	}
 	return ""
+}
+
+// guacd ends a user it hears nothing from for 15 seconds ("User is not
+// responding"). Its user is this gateway, not the browser, and guacd's own
+// keep-alives stop here, so the browser's keep-alive timer was all that kept
+// the link open; a hidden page runs that timer as rarely as once a minute, and
+// a real Windows desktop ended whenever someone switched to another program.
+// The gateway now keeps its own link alive, but only while the browser has
+// been heard from within browserQuiet: a browser silent for longer (a closed
+// laptop, a frozen tab) still lets guacd end the session. Keybash's idle limit
+// counts only keys and mouse, which these never are.
+const (
+	nativeKeepAlive = 5 * time.Second
+	browserQuiet    = 2 * time.Minute
+)
+
+// startKeepAlive runs keepAlive on a real ticker until the stream closes.
+func (s *viewerStream) startKeepAlive() *viewerStream {
+	ticker := time.NewTicker(nativeKeepAlive)
+	go func() {
+		defer ticker.Stop()
+		s.keepAlive(ticker.C)
+	}()
+	return s
+}
+
+// keepAlive sends guacd a nop at each tick while the browser has been heard
+// from within browserQuiet, and returns once the stream closes.
+func (s *viewerStream) keepAlive(ticks <-chan time.Time) {
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticks:
+			if s.now().Sub(time.Unix(0, s.heard.Load())) > browserQuiet {
+				continue
+			}
+			if s.send(instruction{"nop"}) != nil {
+				_ = s.Close()
+				return
+			}
+		}
+	}
 }
 func (s *viewerStream) ReadStderr([]byte) (int, error) { return 0, io.EOF }
 func (s *viewerStream) Resize(uint32, uint32) error    { _ = s.Close(); return errNative }
@@ -166,6 +215,7 @@ const (
 	viewerPixels       = 16 << 20 // every live layer's pixels, rounded up to 64 by 64
 	viewerLowestBuffer = -4096    // past 1024 + viewerLayers
 	viewerHighestLayer = 32
+	viewerSyncs        = 128 // unanswered frames remembered at once
 )
 
 // normalizedPNG re-encodes a decoded image for the browser within limit bytes.
@@ -432,7 +482,8 @@ func (s *viewerStream) drawing(in instruction) bool {
 		if len(in) != 2 && len(in) != 3 {
 			return false
 		}
-		if _, ok := num(1, 0, 1<<53-1); !ok {
+		timestamp, ok := num(1, 0, 1<<53-1)
+		if !ok {
 			return false
 		}
 		if len(in) == 3 {
@@ -440,12 +491,16 @@ func (s *viewerStream) drawing(in instruction) bool {
 				return false
 			}
 		}
+		// A browser may fall behind on frames, as a hidden page does, so the
+		// oldest unanswered frame is forgotten rather than the session ended.
+		// Only answers to frames actually sent ever reach guacd.
 		s.metaMu.Lock()
 		defer s.metaMu.Unlock()
-		if len(s.syncs) >= 128 {
-			return false
+		if len(s.syncs) >= viewerSyncs {
+			s.syncs = append(s.syncs[:0], s.syncs[1:]...)
 		}
-		s.syncs[in[1]] = true
+		s.syncs = append(s.syncs, timestamp)
+		s.newestSync = max(s.newestSync, timestamp)
 		return true
 	}
 	return false // No remote names, arbitrary transforms or auxiliary streams.
@@ -527,6 +582,7 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 		if !s.clipboardInput(in) {
 			return refuse()
 		}
+		s.heard.Store(s.now().UnixNano())
 		return len(data), nil
 	}
 	s.metaMu.Lock()
@@ -556,9 +612,19 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 			valid = true
 		}
 	case "sync":
-		if len(in) == 2 && s.syncs[in[1]] {
-			delete(s.syncs, in[1])
-			valid, forward = true, true
+		// An answer to an unanswered frame goes to guacd. An answer to a frame
+		// already answered or forgotten is dropped; one to a frame never sent
+		// refuses.
+		if len(in) == 2 {
+			timestamp, ok := canonicalNumber(in[1], 0, 1<<53-1)
+			valid = ok && timestamp <= s.newestSync
+			for i, sent := range s.syncs {
+				if valid && sent == timestamp {
+					s.syncs = append(s.syncs[:i], s.syncs[i+1:]...)
+					forward = true
+					break
+				}
+			}
 		}
 	case "mouse":
 		if len(in) == 4 {
@@ -594,6 +660,7 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 	if !valid {
 		return refuse()
 	}
+	s.heard.Store(s.now().UnixNano())
 	if forward && s.send(in) != nil {
 		return refuse()
 	}

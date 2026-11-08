@@ -78,7 +78,11 @@ smaller of both sides' sizes; it keeps the server's large-pointer sizes
 whatever the client asks). The RDP bitmap and offscreen caches never become
 browser buffers and stay on. `TestNativeRDPExactCertificateAuthenticates`
 checks the pointer cache the server settles on, with the sample server
-offering 128. Browser-selected params,
+offering 128. guacd ends a user silent for 15 seconds, and a hidden browser
+page ran Guacamole's keep-alive too rarely: the gateway keeps its own link
+alive while the browser has been heard from within 2 minutes, and the manager
+test holds a desktop open for 18 seconds with nothing from the browser's side.
+Browser-selected params,
 target/gateway selection, drive, file transfer,
 SFTP, arbitrary channels, programs, audio, printing and recording are unavailable.
 Credentials travel on private Unix control IPC, never command arguments, URLs or
