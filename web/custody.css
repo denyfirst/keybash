@@ -697,7 +697,7 @@ body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, #rail-page, .
 /* What a row has to say takes the whole row, under its name and actions. */
 .server-row .server-note { grid-column: 2 / -1; margin: 0; }
 .server-state[data-state=ready] { color: var(--strong); }
-.server-state[data-state=soon] { color: var(--weak); }
+.server-state:is([data-state=soon], [data-state=unchecked]) { color: var(--weak); }
 .server-state:is([data-state=unreachable], [data-state=changed], [data-state=expired]) { color: var(--insecure); }
 /* A server that needs checking says so on every page, once: a mark on the rail
    and one line above the page, in the same red as the row's state. */
@@ -754,8 +754,22 @@ body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, #rail-page, .
 .copy-command { margin: 0.45rem 0 0.2rem; padding: 0.3rem 0.8rem; font-size: 0.82rem; }
 .fingerprint-answer { font-family: var(--mono); font-size: 0.82rem; }
 #server-paste .install-steps, #identity-paste .install-steps { margin-bottom: 0.4rem; }
-#server-paste label, #identity-paste label { display: inline; margin: 0; font-size: inherit; font-weight: inherit; color: inherit; }
-#server-paste > .hint, #identity-paste > .hint { margin-top: 0.5rem; }
+:is(#server-steps, #identity-steps) .install-steps label { display: inline; margin: 0; font-size: inherit; font-weight: inherit; color: inherit; }
+#server-paste > .hint, #identity-paste > .hint, :is(#server-steps, #identity-steps) > .hint { margin-top: 0.5rem; }
+/* Adding or accepting a desktop without the check says what that risks, in
+   the amber of a server that is not checked. */
+.unchecked-warning {
+  margin-top: 0.9rem;
+  padding: 0.65rem 0.85rem;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--weak) 9%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--weak) 45%, var(--rule));
+  border-radius: var(--radius);
+}
+#server-paste > .unchecked-warning, #identity-paste > .unchecked-warning { margin-top: 0.9rem; }
+/* The choice stands apart from the fields above it and the steps below it. */
+#server-paste > .role-option, #identity-paste > .role-option { margin: 1.1rem 0 0.9rem; }
+.unchecked-warning[hidden] { display: none; }
 /* A card's system tile is a button too. */
 @media (max-width: 760px), (pointer: coarse) {
   button.server-icon { width: 2.75rem; height: 2.75rem; }
@@ -778,6 +792,7 @@ body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, #rail-page, .
 }
 .role-option:has(input:checked) { background: color-mix(in srgb, var(--tool) 7%, var(--card)); border-color: var(--tool); }
 dialog .role-option input { width: auto; margin: 0.2rem 0 0; accent-color: var(--tool); }
+.role-option[hidden] { display: none; }
 .role-text { display: grid; gap: 0.15rem; }
 .role-text span { font-size: 0.85rem; color: var(--ink-soft); }
 /* The one-time code is shown once, whole, ready to copy. */

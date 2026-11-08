@@ -246,6 +246,13 @@ A Windows desktop (**Desktop (RDP)**, on an installation built with
    certificate again and adds the server only if they match. If someone is in
    between, they differ and nothing is added. This needs a phone code from the
    last ten minutes.
+
+   The box **Check it on the server's own screen** is ticked for this. If you
+   untick it, Keybash keeps the certificate that answers at that moment and
+   marks the server **Not checked**, for you and for everyone who connects to
+   it. Anyone between Keybash and the server at that moment would then receive
+   the Windows passwords people send. **Check now** on its row compares it
+   later, with the same command.
 3. **Who can use it**, as above.
 
 Each row also has **Rename**, **Check identity** (accept a new host key or
@@ -271,7 +278,9 @@ username or password, and never accepts a new one by itself:
 - **To fix it:** **Check identity** on that server, run the command on the
   server's own screen and paste the line. This takes about half a minute and
   needs that screen: a hypervisor console, or SSH through Keybash if the server
-  has it. Each person then accepts the new identity once on their connection.
+  has it. You can also untick the check there and accept the certificate as it
+  answers; the server is then marked **Not checked**. Each person then accepts
+  the new identity once on their connection.
 
 A server's row also says when its certificate ends, two weeks ahead. If a
 certificate has ended and Windows has not made a new one, restart Remote Desktop

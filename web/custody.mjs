@@ -243,13 +243,14 @@ function updateTrustButtons() {
 }
 function validateTarget(data, id) {
   if (data?.id !== id || typeof data.name !== 'string' || data.name.length > 160 || !['ssh', 'rdp'].includes(data.protocol) || typeof data.hostname !== 'string' || !/^[a-z0-9.:-]{1,253}$/.test(data.hostname) || !Number.isInteger(data.port) || data.port < 1 || data.port > 65535 || !Array.isArray(data.addresses) || !data.addresses.length || data.addresses.length > 16 || !data.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) || typeof data.algorithm !== 'string' || data.algorithm.length > 80 || !fingerprintOK(data.fingerprint) || typeof data.approval !== 'string' || !/^[a-f0-9]{64}$/.test(data.approval) || typeof data.available !== 'boolean') throw new Error('invalid server identity');
-  if (catalog.get(id)?.protocol !== data.protocol || data.protocol === 'ssh' && !/^SHA256:[A-Za-z0-9+/]{43}$/.test(data.fingerprint) || data.protocol === 'rdp' && !/^SHA256:[a-f0-9]{64}$/.test(data.fingerprint)) throw new Error('inconsistent server identity');
+  if (catalog.get(id)?.protocol !== data.protocol || data.protocol === 'ssh' && !/^SHA256:[A-Za-z0-9+/]{43}$/.test(data.fingerprint) || data.protocol === 'rdp' && !/^SHA256:[a-f0-9]{64}$/.test(data.fingerprint) ||
+    data.unchecked !== undefined && (data.unchecked !== true || data.protocol !== 'rdp')) throw new Error('inconsistent server identity');
   return data;
 }
 // An IPv6 address is written in brackets before its port.
 const hostPort = (host, port) => `${host.includes(':') ? `[${host}]` : host}:${port}`;
 function serverText(data) {
-  return `Address: ${hostPort(data.hostname, data.port)} · ${data.protocol.toUpperCase()}\nIP: ${data.addresses.join(', ')}\nIdentity (fingerprint): ${data.fingerprint}${data.available ? '' : '\nThis server identity cannot be used right now.'}`;
+  return `Address: ${hostPort(data.hostname, data.port)} · ${data.protocol.toUpperCase()}\nIP: ${data.addresses.join(', ')}\nIdentity (fingerprint): ${data.fingerprint}${data.unchecked ? '\nNot checked: your administrator added this identity without comparing it on the server’s own screen.' : ''}${data.available ? '' : '\nThis server identity cannot be used right now.'}`;
 }
 async function chooseTarget() {
   const id = $('connection-target').value, generation = ++targetGeneration;
@@ -523,6 +524,7 @@ const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length
   Number.isInteger(s.port) && s.port >= 1 && s.port <= 65535 && Array.isArray(s.addresses) && s.addresses.length >= 1 && s.addresses.length <= 16 && s.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) &&
   fingerprintOK(s.fingerprint) && (s.protocol === 'rdp' || sshPrintOK(s.fingerprint)) && typeof s.available === 'boolean' &&
   (s.certificate === undefined || ['current', 'soon', 'expired', 'changed'].includes(s.certificate)) && (s.expires === undefined || Number.isInteger(s.expires)) &&
+  (s.unchecked === undefined || s.unchecked === true && s.protocol === 'rdp') &&
   Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added);
 const serversOK = data => Array.isArray(data?.networks) && data.networks.length <= 64 && data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) && typeof data.adding === 'boolean' && typeof data.ssh === 'boolean' && typeof data.rdp === 'boolean' &&
   Array.isArray(data.servers) && data.servers.length <= 256 && data.servers.every(serverOK) && typeof data.names === 'object' && data.names !== null &&
@@ -601,20 +603,23 @@ function serverRow(server) {
     expired: `Its certificate ended on ${dayOf(server.expires ?? 0)}. Nobody can connect until ${whoChecks}.`,
     soon: `Its certificate ends on ${dayOf(server.expires ?? 0)}. Windows renews it by itself; Keybash then asks ${role === 'admin' ? 'you' : 'an administrator'} to check the new one.`,
   }[server.certificate] ?? (server.available ? '' : 'Nobody can connect to it now: it is outside the networks this Keybash may reach, or its identity cannot be used.');
-  const stateName = needsChecking(server) ? server.certificate : !server.available ? 'unreachable' : server.certificate === 'soon' ? 'soon' : 'ready';
+  const unchecked = server.unchecked && !needsChecking(server) ? `Added without comparing it on the server’s own screen, so Keybash cannot be sure it is your server. ${role === 'admin' ? 'Check it now to be sure.' : 'An administrator can check it.'}` : '';
+  const stateName = needsChecking(server) ? server.certificate : !server.available ? 'unreachable' : server.unchecked ? 'unchecked' : server.certificate === 'soon' ? 'soon' : 'ready';
   const state = document.createElement('span'); state.className = 'pill server-state'; state.dataset.state = stateName;
-  state.textContent = { changed: 'Identity changed', expired: 'Certificate ended', unreachable: 'Not reachable', soon: 'Ending soon', ready: 'Ready' }[stateName];
+  state.textContent = { changed: 'Identity changed', expired: 'Certificate ended', unreachable: 'Not reachable', unchecked: 'Not checked', soon: 'Ending soon', ready: 'Ready' }[stateName];
   const actions = document.createElement('div'); actions.className = 'record-actions';
   row.append(tile, titles, state, actions);
-  if (said) { const help = document.createElement('p'); help.className = 'server-help server-note'; help.textContent = said; row.append(help); }
+  const note = [said, unchecked].filter(Boolean).join(' ');
+  if (note) { const help = document.createElement('p'); help.className = 'server-help server-note'; help.textContent = note; row.append(help); }
   if (role !== 'admin') return row;
   const button = (text, style, act) => { const b = document.createElement('button'); b.type = 'button'; b.className = style; b.textContent = text; b.addEventListener('click', act); actions.append(b); };
   const check = () => { void run(() => openIdentity(server)); };
   // What needs doing comes first, and looks like it.
   if (needsChecking(server)) button('Check identity', '', check);
+  else if (server.available && server.unchecked) button('Check now', '', check);
   button('Who can use it', 'secondary', () => openAccess(server));
   button('Rename', 'ghost', () => openRename(server));
-  if (server.available && !needsChecking(server)) button('Check identity', 'ghost', check);
+  if (server.available && !needsChecking(server) && !server.unchecked) button('Check identity', 'ghost', check);
   button('Remove', 'ghost destructive', () => askConfirm('server', server));
   return row;
 }
@@ -629,7 +634,22 @@ function serverStep(checking) {
   $('server-check').hidden = !checking || rdp; $('server-paste').hidden = !checking || !rdp;
   $('server-submit').textContent = checking ? 'Add server' : rdp ? 'Continue' : 'Read identity';
   if (!checking) { scanned = null; $('server-print').textContent = ''; $('server-same').checked = false; $('server-answer').value = ''; }
+  else if (rdp) serverVerify();
 }
+// A desktop is checked on its own screen unless the administrator unticks it:
+// then the page says what that risks, and the button says what it does.
+function serverVerify() {
+  const verify = $('server-verify').checked;
+  $('server-steps').hidden = !verify; $('server-unchecked').hidden = verify;
+  $('server-submit').textContent = verify ? 'Add server' : 'Add without checking';
+}
+function identityVerify() {
+  const verify = $('identity-verify').checked, same = scanned?.same === true;
+  $('identity-steps').hidden = !verify; $('identity-unchecked').hidden = verify;
+  $('identity-submit').textContent = same ? 'Compare and mark checked' : verify ? 'Compare and accept' : 'Accept without checking';
+}
+$('server-verify')?.addEventListener('change', () => { serverVerify(); if ($('server-verify').checked) $('server-answer').focus(); });
+$('identity-verify')?.addEventListener('change', () => { identityVerify(); if ($('identity-verify').checked) $('identity-answer').focus(); });
 // SSH or a desktop: the words and the usual port follow the choice, and a port
 // someone typed themselves stays.
 function chooseServerKind(protocol) {
@@ -677,9 +697,17 @@ async function openIdentity(server) {
   if (rdp) {
     // What was just read also settles the mark on the page.
     await loadServers();
-    if (data.same) { $('identity-now').textContent = server.certificate === 'expired' ? 'The same certificate, and it has ended. Restart Remote Desktop Services on the server: Windows then makes a new one.' : 'The same certificate: nothing to do.'; return; }
-    scanned = { id: server.id, rdp: true };
-    $('identity-now').textContent = 'A different certificate.'; $('identity-paste').hidden = false; $('identity-submit').textContent = 'Compare and accept'; $('identity-submit').hidden = false; $('identity-answer').focus();
+    if (data.same && server.certificate === 'expired') { $('identity-now').textContent = 'The same certificate, and it has ended. Restart Remote Desktop Services on the server: Windows then makes a new one.'; return; }
+    if (data.same && !server.unchecked) { $('identity-now').textContent = 'The same certificate: nothing to do.'; return; }
+    // A different certificate is accepted with the check, or without it if the
+    // administrator unticks it; an unchecked one that is the same is only ever
+    // marked checked, so there the check cannot be unticked.
+    scanned = { id: server.id, rdp: true, same: data.same };
+    $('identity-now').textContent = data.same ? 'The same certificate, not checked yet.' : 'A different certificate.';
+    $('identity-why').textContent = data.same ? 'Keybash kept this certificate without comparing it on the server’s own screen. Compare it now to be sure it is your server.' : 'Usually this means Windows renewed its own certificate, but someone in between would look the same. So check it on the server.';
+    $('identity-after').textContent = data.same ? 'If it matches, the server is marked checked. Nothing else changes for anyone.' : 'If it matches, the new identity is pinned. Open sessions to this server end, and each person accepts it on their connection.';
+    $('identity-verify').checked = true; $('identity-verify-choice').hidden = data.same; identityVerify();
+    $('identity-paste').hidden = false; $('identity-submit').hidden = false; $('identity-answer').focus();
     return;
   }
   if (data.fingerprint === server.fingerprint) { $('identity-now').textContent = `${data.fingerprint}\nThe same: nothing to do.`; return; }
@@ -709,15 +737,16 @@ bind('server-form', async () => {
     return;
   }
   let fingerprint = scanned.fingerprint;
-  if (rdp) fingerprint = pastedPrint('server-answer');
+  const unchecked = rdp && !$('server-verify').checked;
+  if (rdp) fingerprint = unchecked ? 'unchecked' : pastedPrint('server-answer');
   else if (!$('server-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick “It is the same”.'); return; }
   let made;
   try { made = await request('/api/servers', 'POST', { protocol, name, address, port, fingerprint }); }
-  catch (error) { if (error.status === 409 && !rdp) serverStep(false); throw serverError(error, true, protocol); }
+  catch (error) { if (error.status === 409 && !rdp) serverStep(false); throw serverError(error, !unchecked, protocol); }
   if (!idOK(made?.id)) throw new Error('invalid server');
   $('server-dialog').close();
   const added = (await loadServers()).find(server => server.id === made.id);
-  notice(`${name} was added. Nobody can use it yet: choose who may.`);
+  notice(`${name} was added${unchecked ? ', not checked' : ''}. Nobody can use it yet: choose who may.`);
   if (added) showAccess(added);
 });
 $('access-cancel')?.addEventListener('click', () => $('access-dialog').close());
@@ -744,11 +773,13 @@ bind('identity-form', async () => {
   const server = pendingServer, next = scanned;
   if (!server || next?.id !== server.id) return;
   let fingerprint = next.fingerprint;
-  if (next.rdp) fingerprint = pastedPrint('identity-answer');
+  const unchecked = next.rdp && !next.same && !$('identity-verify').checked;
+  if (next.rdp) fingerprint = unchecked ? 'unchecked' : pastedPrint('identity-answer');
   else if (!$('identity-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick the box.'); return; }
   try { await request(`/api/servers/${server.id}/key`, 'POST', { fingerprint }); }
   catch (error) { throw serverError(error, true, server.protocol); }
-  $('identity-dialog').close(); await loadServers(); notice(`New identity pinned for ${server.name}. Open sessions to it were closed; each person accepts it on their connection.`);
+  $('identity-dialog').close(); await loadServers();
+  notice(next.same ? `${server.name} is checked now.` : `New identity pinned for ${server.name}${unchecked ? ', not checked' : ''}. Open sessions to it were closed; each person accepts it on their connection.`);
 });
 // What this copy runs and serves comes from the server; the commands on the
 // page are fixed text, the same for every installation.

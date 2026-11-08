@@ -135,8 +135,31 @@ try {
   assert.equal(await row('Desk').locator('.server-state').textContent(), 'Ready');
   assert(await page.locator('#attention').isHidden() && await page.locator('#rail-attention').isHidden(), 'the alarm outlived the check');
 
+  stage = 'desktop: add without checking';
+  await page.locator('#add-server').click(); await page.locator('#server-dialog').waitFor({ state: 'visible' });
+  await page.locator('#server-kind [data-protocol=rdp]').click();
+  await page.locator('#server-name').fill('Side'); await page.locator('#server-address').fill('10.20.0.10'); await page.locator('#server-submit').click();
+  await page.locator('#server-paste').waitFor({ state: 'visible' }); await settled();
+  assert(await page.locator('#server-verify').isChecked(), 'the check was not chosen from the start');
+  assert(await page.locator('#server-unchecked').isHidden(), 'the warning showed with the check chosen');
+  await page.locator('#server-verify').uncheck();
+  assert(await page.locator('#server-steps').isHidden() && await page.locator('#server-unchecked').isVisible(), 'unticking the check did not say what it risks');
+  assert.equal(await page.locator('#server-submit').textContent(), 'Add without checking');
+  await page.locator('#server-submit').click();
+  await page.locator('#access-dialog').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#access-cancel').click(); await page.locator('#access-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await row('Side').locator('.server-state').textContent(), 'Not checked');
+
+  stage = 'desktop: check it later';
+  await row('Side').getByRole('button', { name: 'Check now', exact: true }).click(); await page.locator('#identity-paste').waitFor({ state: 'visible' }); await settled();
+  assert(await page.locator('#identity-verify-choice').isHidden(), 'marking a server checked could skip the check');
+  await page.locator('#identity-answer').fill(config.Side); await page.locator('#identity-submit').click();
+  await page.locator('#identity-dialog').waitFor({ state: 'hidden' }); await settled();
+  await page.locator('#notice').filter({ hasText: /^Side is checked now\.$/ }).waitFor();
+  assert.equal(await row('Side').locator('.server-state').textContent(), 'Ready');
+
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop and renewal passed');
+  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop, renewal and unchecked desktop passed');
 } catch (error) {
   console.log('Servers browser stage:', stage, error.code === 'ERR_ASSERTION' ? error.message : error.name);
   if (process.env.KEYBASH_SERVERS_SCREENSHOT) await page.screenshot({ path: process.env.KEYBASH_SERVERS_SCREENSHOT });

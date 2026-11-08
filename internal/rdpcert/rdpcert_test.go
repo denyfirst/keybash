@@ -129,6 +129,39 @@ func TestReadTakesWhatTheServerProvesAndSendsNothing(t *testing.T) {
 	}
 }
 
+// Windows Server 2025 answers with a flag this code did not know (0x20) beside
+// ones it did. Flags only say what else a server could do and decide nothing
+// here, so every flags byte is taken with HYBRID and none lets less through.
+func TestConfirmationTakesWindowsServer2025sFlags(t *testing.T) {
+	windows := [19]byte{3, 0, 0, 0x13, 0x0e, 0xd0, 0, 0, 0x12, 0x34, 0, 2, 0x2f, 8, 0, 2, 0, 0, 0}
+	if !AcceptConfirmation(windows) {
+		t.Fatal("Windows Server 2025's answer was refused")
+	}
+	for flags := range 256 {
+		p := hybrid
+		p[12] = byte(flags)
+		if !AcceptConfirmation(p) {
+			t.Fatalf("flags %#x refused with HYBRID", flags)
+		}
+		for _, selected := range []byte{0, 1, 3, 8} {
+			p[15] = selected
+			if AcceptConfirmation(p) {
+				t.Fatalf("flags %#x let protocol %d through", flags, selected)
+			}
+		}
+	}
+	key := rsaKey(t)
+	der := sign(t, windowsShaped(nil), key)
+	client, after := serve(t, windows[:], tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, &tls.Config{MinVersion: tls.VersionTLS13})
+	if cert, e := Read(context.Background(), client); e != nil || !bytes.Equal(cert.Raw, der) {
+		t.Fatal("a server answering as Windows Server 2025 does was not read")
+	}
+	_ = client.Close()
+	if sent := <-after; len(sent) != 0 {
+		t.Fatalf("the read sent %d bytes after the handshake", len(sent))
+	}
+}
+
 func TestReadRefusesAnythingElse(t *testing.T) {
 	key := rsaKey(t)
 	der := sign(t, windowsShaped(nil), key)

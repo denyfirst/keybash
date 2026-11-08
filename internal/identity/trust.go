@@ -86,6 +86,9 @@ type targetView struct {
 	Fingerprint string `json:"fingerprint"`
 	Approval    string `json:"approval"`
 	Available   bool   `json:"available"`
+	// Unchecked: an administrator pinned this RDP server's certificate without
+	// comparing it on the server's own screen.
+	Unchecked bool `json:"unchecked,omitempty"`
 }
 
 func describeTarget(t RemoteTarget, now time.Time) targetView {
@@ -93,7 +96,7 @@ func describeTarget(t RemoteTarget, now time.Time) targetView {
 	if t.Protocol == "rdp" {
 		algorithm = "TLS leaf certificate · SHA-256 DER"
 	}
-	return targetView{t.ID, t.Name, t.Protocol, t.Target.Snapshot(), algorithm, identityFingerprint(t), approvalFingerprint(t), usableTarget(t, now)}
+	return targetView{t.ID, t.Name, t.Protocol, t.Target.Snapshot(), algorithm, identityFingerprint(t), approvalFingerprint(t), usableTarget(t, now), false}
 }
 
 type connectionView struct {

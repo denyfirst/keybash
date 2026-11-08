@@ -68,7 +68,8 @@ as an SSH server is by its host key:
 - **Kept:** the exact DER pin, on the worker's own handshake before CredSSP;
   TLS >=1.2 with ECDHE and an AEAD; HYBRID; the validity period; not a CA and no
   certificate signing; no unhandled critical extension; the serverAuth EKU; the
-  key strengths; OpenSSL's auth level 2. No first-use trust and no ignore option.
+  key strengths; OpenSSL's auth level 2. No ignore option, and first-use trust
+  only as an administrator's explicit, marked choice (see the update below).
 - **Dropped for this kind only:** the name check, because there is no name.
 - **Changed for this kind only:** the key usage must allow digital signature or
   key encipherment, which is what TLS itself asks of a server certificate.
@@ -107,6 +108,37 @@ holds no credential; and the certificate it returns is only ever compared with a
 pin or with the line an administrator pasted. Taking the certificate from a
 failed library check instead would avoid the flag, but the server would no
 longer prove it holds the key, so that was not done.
+
+## Update, 2026-11-08: the check is the default, not the only way
+
+The maintainer decided that the comparison above is chosen by default but may
+be left out, for an administrator who prefers speed on a network they trust.
+The add and **Check identity** sheets carry one box, "Check it on the server's
+own screen", ticked when they open:
+
+- **Ticked:** as above; nothing else changes.
+- **Unticked:** the page says what it risks, and the gateway pins the
+  certificate it reads at that moment, after the same rules, networks, fresh
+  factor and limits. The server is marked **Not checked** for administrators
+  and for every person who connects to it, until an administrator compares it
+  with **Check now**. That takes the console line only and asks nobody to
+  accept anything again. Accepting the same certificate without the check
+  never undoes a check.
+- **What it risks:** whoever is between the gateway and the server at that
+  moment is pinned instead of the server, and the Windows passwords people send
+  reach them. Every later change is still caught as with any pin: a renewal is
+  never accepted by itself, it still raises the alarm, and each person still
+  accepts a new pin on their own connection.
+- **Only here:** a server from the operator's file, a server with a DNS name
+  and an SSH server never carry the mark. The API takes `unchecked` only in an
+  RDP server's fingerprint field, where it cannot be taken for a fingerprint.
+
+The worker's own handshake still holds the exact pin either way.
+
+A real Windows Server 2025 also showed that its negotiation answer sets a flag
+(0x20) the original rule refused. Flags only say what else a server could do,
+and nothing acts on them, so any flags are now taken with HYBRID; anything but
+HYBRID is still refused.
 
 ## Next adoption gate
 

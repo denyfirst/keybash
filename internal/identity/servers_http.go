@@ -20,6 +20,10 @@ const (
 	serverAttempts = 20 // server changes and scans per administrator and minute
 	scanAttempts   = 10 // identity scans per administrator and minute
 	maxScans       = 2  // scans running at once in the whole gateway
+	// uncheckedPrint stands in an RDP server's fingerprint field when an
+	// administrator adds or accepts it without the console check. It is never
+	// a fingerprint, so neither can be taken for the other.
+	uncheckedPrint = "unchecked"
 )
 
 // TargetNetworks names the networks root lets the gateway reach (its unit's
@@ -109,16 +113,19 @@ func (l *Lab) reloadServersLocked() error {
 	if e != nil {
 		list = nil
 	}
-	targets, access := make(map[string]RemoteTarget), make(map[string]map[string]bool)
+	targets, access, unchecked := make(map[string]RemoteTarget), make(map[string]map[string]bool), make(map[string]bool)
 	for _, w := range list {
 		if t, ok := l.webTargetLocked(w); ok {
 			targets[w.ID], access[w.ID] = t, make(map[string]bool, len(w.Access))
 			for _, person := range w.Access {
 				access[w.ID][person] = true
 			}
+			if w.Unchecked {
+				unchecked[w.ID] = true
+			}
 		}
 	}
-	l.remote.targets, l.remote.access = targets, access
+	l.remote.targets, l.remote.access, l.remote.unchecked = targets, access, unchecked
 	for id := range l.remote.seen {
 		if _, listed := targets[id]; !listed {
 			delete(l.remote.seen, id)
@@ -166,6 +173,7 @@ type serverView struct {
 	Available   bool     `json:"available"`
 	Certificate string   `json:"certificate,omitempty"` // RDP: see certificateStateLocked
 	Expires     int64    `json:"expires,omitempty"`     // RDP: when the pinned certificate ends
+	Unchecked   bool     `json:"unchecked,omitempty"`   // RDP: pinned without the console check
 	Access      []string `json:"access"`                // who may use it
 	AddedBy     string   `json:"added_by,omitempty"`    // empty when it came from the server file
 	Added       int64    `json:"added"`
@@ -207,7 +215,7 @@ func (l *Lab) serversViewLocked(admin bool) (serversView, error) {
 		_, reachable := l.remote.targets[w.ID]
 		row := serverView{ID: w.ID, Name: w.Name, Protocol: w.Protocol, Hostname: w.Hostname, Port: w.Port, Addresses: slices.Clone(w.Pins),
 			Fingerprint: identityFingerprint(RemoteTarget{Protocol: w.Protocol, Identity: w.identity()}), Available: reachable && usableTarget(l.remote.targets[w.ID], l.now()),
-			Access: append([]string{}, w.Access...), AddedBy: w.AddedBy, Added: w.Added}
+			Unchecked: w.Unchecked, Access: append([]string{}, w.Access...), AddedBy: w.AddedBy, Added: w.Added}
 		row.Certificate, row.Expires = l.certificateStateLocked(w)
 		if w.Hostname == "" {
 			row.Hostname, row.Addresses = w.Address, []string{w.Address}
@@ -442,7 +450,8 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 		return
 	case server == "" && action == "":
 		fields, ok := readFields(w, r, 2048, "protocol", "name", "address", "port", "fingerprint")
-		if !ok || !serverName(fields["name"]) || !validFingerprint(fields["fingerprint"]) {
+		unchecked := fields["protocol"] == "rdp" && fields["fingerprint"] == uncheckedPrint
+		if !ok || !serverName(fields["name"]) || !validFingerprint(fields["fingerprint"]) && !unchecked {
 			status = 400
 			return
 		}
@@ -452,14 +461,16 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			return
 		}
 		var made string
-		// What the server shows now must be what the administrator compared.
+		// What the server shows now must be what the administrator compared,
+		// unless they chose not to compare an RDP server: then it is pinned as
+		// it answers now, and marked unchecked.
 		if fields["protocol"] == "rdp" {
 			cert, refused := l.scanCertificateLocked(r.Context(), id, s, target)
 			if refused != 0 {
 				status = refused
 				return
 			}
-			if certificatePrint(cert) != fields["fingerprint"] {
+			if !unchecked && certificatePrint(cert) != fields["fingerprint"] {
 				status = 409
 				return
 			}
@@ -467,7 +478,7 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 				status = 422
 				return
 			}
-			made, e = l.store.addRDPServer(actor, fields["name"], endpoint.Addr().String(), endpoint.Port(), cert.Raw, l.now())
+			made, e = l.store.addRDPServer(actor, fields["name"], endpoint.Addr().String(), endpoint.Port(), cert.Raw, unchecked, l.now())
 		} else {
 			key, refused := l.scanLocked(r.Context(), id, s, target)
 			if refused != 0 {
@@ -518,7 +529,8 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 		return
 	case action == "key" && r.Method == "POST" && isRDP:
 		fields, ok := readFields(w, r, 1024, "fingerprint")
-		if !ok || !validFingerprint(fields["fingerprint"]) {
+		unchecked := fields["fingerprint"] == uncheckedPrint
+		if !ok || !validFingerprint(fields["fingerprint"]) && !unchecked {
 			status = 400
 			return
 		}
@@ -527,7 +539,7 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = refused
 			return
 		}
-		if certificatePrint(cert) != fields["fingerprint"] {
+		if !unchecked && certificatePrint(cert) != fields["fingerprint"] {
 			status = 409
 			return
 		}
@@ -535,7 +547,7 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 422
 			return
 		}
-		e = l.store.repinCertificate(actor, server, cert.Raw)
+		e = l.store.repinCertificate(actor, server, cert.Raw, unchecked)
 	case action == "key" && r.Method == "POST":
 		fields, ok := readFields(w, r, 1024, "fingerprint")
 		if !ok || !validFingerprint(fields["fingerprint"]) {

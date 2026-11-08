@@ -63,11 +63,13 @@ func Negotiate(conn io.ReadWriter) error {
 }
 
 // AcceptConfirmation is the one confirmation a client accepts: a negotiation
-// response selecting HYBRID.
+// response selecting HYBRID. Its flags byte only says what else the server
+// could do, and nothing here acts on it, so a flag newer than this code is no
+// reason to refuse: Windows Server 2025 sets 0x20.
 func AcceptConfirmation(p [19]byte) bool {
 	return p[0] == 3 && p[1] == 0 && p[2] == 0 && p[3] == 19 &&
 		p[4] == 14 && p[5] == 0xd0 && p[6] == 0 && p[7] == 0 && p[10] == 0 &&
-		p[11] == 2 && p[12]&0xe0 == 0 && p[13] == 8 && p[14] == 0 &&
+		p[11] == 2 && p[13] == 8 && p[14] == 0 &&
 		p[15] == 2 && p[16] == 0 && p[17] == 0 && p[18] == 0
 }
 

@@ -54,7 +54,9 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   Keybash can also make an Ed25519 key whose private half it never shows.
 - Administrators add SSH and Windows RDP servers on the Servers page, inside the
   target networks only. Keybash reads the host key or certificate, they check it
-  on the server's own console, and it is read again and pinned when added. Nobody
+  on the server's own console, and it is read again and pinned when added. For a
+  Windows desktop they may leave the check out; the server is then marked Not
+  checked, for them and for the people who use it, until they check it. Nobody
   can use a new server until an administrator chooses who may; taking someone
   off, a new key or removing the server ends open sessions at once.
 - When Windows renews its RDP certificate, nothing accepts it by itself. Keybash

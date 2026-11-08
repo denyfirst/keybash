@@ -25,8 +25,8 @@ import (
 // server after comparing its fingerprint, choose who may use it, see it in
 // the connection form, and remove it. Then a desktop: add it with the line from
 // its console, see Windows renew its certificate, and accept the new one the
-// same way. Reads are answered by tables, as in the store tests; nothing is
-// dialled.
+// same way. Last, a desktop added without the check, and checked later. Reads
+// are answered by tables, as in the store tests; nothing is dialled.
 func TestBrowserServersPage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 140*time.Second)
 	defer cancel()
@@ -43,8 +43,9 @@ func TestBrowserServersPage(t *testing.T) {
 	key := hostKeyFixture(t)
 	scans.set("10.20.0.7:22", key)
 	reads := newFixtureCertificates()
-	first, renewed := windowsLeaf(t, nil), windowsLeaf(t, nil)
+	first, renewed, side := windowsLeaf(t, nil), windowsLeaf(t, nil), windowsLeaf(t, nil)
 	reads.set("10.20.0.8:3389", first)
+	reads.set("10.20.0.10:3389", side)
 	l.mu.Lock()
 	l.remote.scan = scans.scan
 	l.remote.scanRDP = reads.scan
@@ -53,7 +54,7 @@ func TestBrowserServersPage(t *testing.T) {
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	server.StartTLS()
 	defer server.Close()
-	config, _ := json.Marshal(struct{ Origin, Code, Password, Catalog, Fingerprint, Desktop, Renewed string }{origin, code, alicePassword, catalog.ID, ssh.FingerprintSHA256(key), certificatePrint(first), certificatePrint(renewed)})
+	config, _ := json.Marshal(struct{ Origin, Code, Password, Catalog, Fingerprint, Desktop, Renewed, Side string }{origin, code, alicePassword, catalog.ID, ssh.FingerprintSHA256(key), certificatePrint(first), certificatePrint(renewed), certificatePrint(side)})
 	command := exec.CommandContext(ctx, "node", filepath.Join("..", "..", "web", "servers-browser-test.mjs")) // #nosec G204 -- fixed synthetic browser driver and stdin-only fixture data.
 	command.Stdin = bytes.NewReader(config)
 	command.Stderr = os.Stderr

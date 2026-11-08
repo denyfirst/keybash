@@ -426,7 +426,7 @@ func TestRDPRenewalNeedsTheConsoleFingerprintAndEachPerson(t *testing.T) {
 	if e != nil {
 		t.Fatal("fixture server failed")
 	}
-	if f.store.repinCertificate(alice.ID, ssh, next.Raw) == nil || f.store.repinCertificate(alice.ID, id, []byte("not a certificate")) == nil || f.store.repinServer(alice.ID, id, hostKeyFixture(t).Marshal()) == nil {
+	if f.store.repinCertificate(alice.ID, ssh, next.Raw, false) == nil || f.store.repinCertificate(alice.ID, ssh, next.Raw, true) == nil || f.store.repinCertificate(alice.ID, id, []byte("not a certificate"), false) == nil || f.store.repinServer(alice.ID, id, hostKeyFixture(t).Marshal()) == nil {
 		t.Fatal("a server took another kind's identity")
 	}
 }
@@ -701,11 +701,15 @@ func TestBackupCarriesRDPServers(t *testing.T) {
 	now := time.Now()
 	alice := mustLookup(t, s, "alice")
 	cert := windowsLeaf(t, nil)
-	id, e := s.addRDPServer(alice.ID, "Backup canary desk", "10.20.0.8", 3389, cert.Raw, now)
+	id, e := s.addRDPServer(alice.ID, "Backup canary desk", "10.20.0.8", 3389, cert.Raw, false, now)
 	if e != nil {
 		t.Fatal("fixture server failed")
 	}
-	if _, e = s.addRDPServer(alice.ID, "Same place", "10.20.0.8", 3389, windowsLeaf(t, nil).Raw, now); e != errDuplicate {
+	unchecked, e := s.addRDPServer(alice.ID, "Backup canary unchecked", "10.20.0.10", 3389, windowsLeaf(t, nil).Raw, true, now)
+	if e != nil {
+		t.Fatal("fixture unchecked server failed")
+	}
+	if _, e = s.addRDPServer(alice.ID, "Same place", "10.20.0.8", 3389, windowsLeaf(t, nil).Raw, false, now); e != errDuplicate {
 		t.Fatal("a second server at the same address and port was stored")
 	}
 	bob, e := s.CreateAccount("bob", bobPassword)
@@ -713,21 +717,175 @@ func TestBackupCarriesRDPServers(t *testing.T) {
 		t.Fatal("fixture account failed")
 	}
 	_ = bob
-	if _, e = s.addRDPServer(mustLookup(t, s, "bob").ID, "Bob's", "10.20.0.9", 3389, cert.Raw, now); e == nil {
+	if _, e = s.addRDPServer(mustLookup(t, s, "bob").ID, "Bob's", "10.20.0.9", 3389, cert.Raw, false, now); e == nil {
 		t.Fatal("a user added a server")
 	}
 	for _, bad := range [][]byte{nil, []byte("not a certificate"), windowsLeaf(t, func(c *x509.Certificate) { c.KeyUsage = 0 }).Raw} {
-		if _, e = s.addRDPServer(alice.ID, "Bad", "10.20.0.9", 3389, bad, now); e == nil {
-			t.Fatal("an unfit certificate was stored")
+		for _, without := range []bool{false, true} {
+			if _, e = s.addRDPServer(alice.ID, "Bad", "10.20.0.9", 3389, bad, without, now); e == nil {
+				t.Fatal("an unfit certificate was stored")
+			}
 		}
 	}
 	restored, _, summary, e := restoreStore(emptyDataDir(t), key, backupOf(t, s, now), now)
-	if e != nil || summary.Servers != 1 {
-		t.Fatalf("backup with an RDP server not restored: %+v", summary)
+	if e != nil || summary.Servers != 2 {
+		t.Fatalf("backup with RDP servers not restored: %+v", summary)
 	}
 	defer restored.Close()
 	list, e := restored.listServers()
-	if e != nil || len(list) != 1 || list[0].ID != id || string(list[0].Certificate) != string(cert.Raw) || list[0].Protocol != "rdp" {
-		t.Fatal("restored RDP server differs")
+	if e != nil || len(list) != 2 {
+		t.Fatal("restored RDP servers differ")
+	}
+	for _, w := range list {
+		if w.Protocol != "rdp" || w.ID == id && (string(w.Certificate) != string(cert.Raw) || w.Unchecked) || w.ID == unchecked && !w.Unchecked || w.ID != id && w.ID != unchecked {
+			t.Fatal("restored RDP server differs")
+		}
+	}
+}
+
+// An administrator may choose not to compare a desktop on its own screen. It
+// is then pinned as it answers, marked unchecked for the administrators and the
+// people who use it, until someone compares it; and the choice exists for
+// nothing else.
+func TestRDPServersCanBeAddedUncheckedAndCheckedLater(t *testing.T) {
+	f, reads, worker := desktopFixture(t)
+	cert := windowsLeaf(t, nil)
+	reads.set("10.20.0.8:3389", cert)
+	add := func(protocol, address, fingerprint string, status int) *httptest.ResponseRecorder {
+		t.Helper()
+		return f.alice.expect("POST", "/api/servers", inputJSON(map[string]string{"protocol": protocol, "name": "Desk", "address": address, "port": "3389", "fingerprint": fingerprint}), status)
+	}
+	// Not for an SSH server, not in another spelling, and never a shortcut past
+	// the rules: outside the networks, unanswered or unfit is refused as before.
+	add("ssh", "10.20.0.7", uncheckedPrint, 400)
+	add("rdp", "10.20.0.8", "Unchecked", 400)
+	add("rdp", "10.20.0.8", "", 400)
+	before := reads.count()
+	add("rdp", "10.21.0.8", uncheckedPrint, 403)
+	if reads.count() != before {
+		t.Fatal("an address outside the networks was read")
+	}
+	add("rdp", "10.20.0.9", uncheckedPrint, 502)
+	unfit := windowsLeaf(t, func(c *x509.Certificate) { c.ExtKeyUsage = nil })
+	reads.set("10.20.0.9:3389", unfit)
+	add("rdp", "10.20.0.9", uncheckedPrint, 422)
+	if list, _ := f.store.listServers(); len(list) != 1 {
+		t.Fatal("a refused server was stored")
+	}
+	// Added as it answers now, and the answer still holds no fingerprint.
+	reply := add("rdp", "10.20.0.8", uncheckedPrint, 200).Body.String()
+	if strings.Contains(reply, strings.TrimPrefix(certificatePrint(cert), "SHA256:")) {
+		t.Fatal("adding handed out the fingerprint")
+	}
+	var made struct{ ID string }
+	if json.Unmarshal([]byte(reply), &made) != nil || !validID(made.ID) {
+		t.Fatal("unchecked server was not added")
+	}
+	id := made.ID
+	row, _ := serverRow(listServersView(t, f.alice), id)
+	if !row.Unchecked || row.Fingerprint != certificatePrint(cert) || row.Certificate != "current" || !row.Available {
+		t.Fatalf("an unchecked server row %+v", row)
+	}
+	// A person sees it too, and connects as to any server.
+	bob, b := f.person("bob", roleUser)
+	record := desktopConnection(t, f, bob, b, id)
+	var target struct {
+		Unchecked bool
+		Approval  string
+	}
+	if json.Unmarshal(bob.expect("GET", "/api/targets/"+id, "", 200).Body.Bytes(), &target) != nil || !target.Unchecked {
+		t.Fatal("a person is not told the server is unchecked")
+	}
+	if connectionTrust(t, bob) != "verified" {
+		t.Fatal("a person's connection to an unchecked server is not usable")
+	}
+	key := func(fingerprint string, status int) {
+		t.Helper()
+		f.alice.expect("POST", "/api/servers/"+id+"/key", inputJSON(map[string]string{"fingerprint": fingerprint}), status)
+	}
+	unchecked := func() bool {
+		t.Helper()
+		row, ok := serverRow(listServersView(t, f.alice), id)
+		if !ok {
+			t.Fatal("server not listed")
+		}
+		return row.Unchecked
+	}
+	// Checking it later: only the console's line marks it checked, and the
+	// same certificate asks nobody to accept anything again.
+	key(certificatePrint(windowsLeaf(t, nil)), 409)
+	key("Unchecked", 400)
+	if !unchecked() {
+		t.Fatal("a wrong line marked the server checked")
+	}
+	// Accepting the same certificate unchecked again leaves it unchecked.
+	key(uncheckedPrint, 204)
+	if !unchecked() {
+		t.Fatal("accepting unchecked marked the server checked")
+	}
+	key(certificatePrint(cert), 204)
+	if unchecked() || connectionTrust(t, bob) != "verified" {
+		t.Fatal("checking the same certificate did not mark it checked, or asked people again")
+	}
+	var checked struct{ Unchecked bool }
+	if json.Unmarshal(bob.expect("GET", "/api/targets/"+id, "", 200).Body.Bytes(), &checked) != nil || checked.Unchecked {
+		t.Fatal("a checked server is still unchecked for a person")
+	}
+	// The same certificate accepted unchecked does not undo a check.
+	key(uncheckedPrint, 204)
+	if unchecked() {
+		t.Fatal("accepting the same certificate unchecked undid the check")
+	}
+	// A renewal accepted without the check is pinned unchecked, and each
+	// person still decides for their own connection.
+	next := windowsLeaf(t, nil)
+	reads.set("10.20.0.8:3389", next)
+	key(uncheckedPrint, 204)
+	if row, _ = serverRow(listServersView(t, f.alice), id); !row.Unchecked || row.Fingerprint != certificatePrint(next) {
+		t.Fatalf("a renewal accepted unchecked %+v", row)
+	}
+	if connectionTrust(t, bob) != "changed" {
+		t.Fatal("a renewal accepted unchecked moved a person's connection by itself")
+	}
+	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
+	// Even unchecked, an unfit certificate is never pinned, and nobody else can
+	// choose it.
+	reads.set("10.20.0.8:3389", unfit)
+	key(uncheckedPrint, 422)
+	bob.expect("POST", "/api/servers/"+id+"/key", inputJSON(map[string]string{"fingerprint": uncheckedPrint}), 403)
+	if row, _ = serverRow(listServersView(t, f.alice), id); row.Fingerprint != certificatePrint(next) {
+		t.Fatal("an unfit certificate was pinned unchecked")
+	}
+	// An SSH server never takes the choice.
+	alice := mustLookup(t, f.store, "alice")
+	ssh, e := f.store.addServer(alice.ID, "Terminal", "10.20.0.30", 22, hostKeyFixture(t).Marshal(), f.now)
+	if e != nil {
+		t.Fatal("fixture server failed")
+	}
+	f.l.mu.Lock()
+	_ = f.l.reloadServersLocked()
+	f.l.mu.Unlock()
+	f.alice.expect("POST", "/api/servers/"+ssh+"/key", inputJSON(map[string]string{"fingerprint": uncheckedPrint}), 400)
+	if worker.calls.Load() != 0 {
+		t.Fatal("something opened a desktop while checking identities")
+	}
+	// The mark is the administrator's alone: never from the file, never with a
+	// name, never on SSH. Each record is valid without it.
+	named := windowsLeaf(t, func(c *x509.Certificate) { c.DNSNames = []string{"desk.invalid"} })
+	for name, w := range map[string]webServer{
+		"ssh":       {ID: strings.Repeat("e", 32), Name: "X", Protocol: "ssh", Address: "10.20.0.31", Port: 22, HostKey: hostKeyFixture(t).Marshal(), AddedBy: alice.ID, Added: 1},
+		"from file": {ID: strings.Repeat("e", 32), Name: "X", Protocol: "rdp", Address: "10.20.0.31", Port: 3389, Certificate: cert.Raw, FromFile: true, Added: 1},
+		"named":     {ID: strings.Repeat("e", 32), Name: "X", Protocol: "rdp", Hostname: "desk.invalid", Pins: []string{"10.20.0.31"}, Port: 3389, Certificate: named.Raw, AddedBy: alice.ID, Added: 1},
+	} {
+		if !w.valid() {
+			t.Fatalf("the %s fixture is not valid", name)
+		}
+		w.Unchecked = true
+		if w.valid() {
+			t.Fatalf("an unchecked %s server is valid", name)
+		}
+	}
+	if w := (webServer{ID: strings.Repeat("e", 32), Name: "X", Protocol: "rdp", Address: "10.20.0.31", Port: 3389, Certificate: cert.Raw, AddedBy: alice.ID, Added: 1, Unchecked: true}); !w.valid() {
+		t.Fatal("an administrator's unchecked desktop is not valid")
 	}
 }

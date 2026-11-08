@@ -62,7 +62,8 @@ type remoteConfig struct {
 	// each change (reloadServersLocked); access lists who may use each.
 	targets             map[string]RemoteTarget
 	access              map[string]map[string]bool
-	networks, protected []netip.Prefix // see TargetNetworks
+	unchecked           map[string]bool // RDP servers pinned without the console check
+	networks, protected []netip.Prefix  // see TargetNetworks
 	scan                func(context.Context, *targetguard.NamedTarget) (ssh.PublicKey, error)
 	scanRDP             func(context.Context, *targetguard.NamedTarget) (*x509.Certificate, error)
 	scans               int               // running now
@@ -472,7 +473,9 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 404
 			return
 		}
-		result = describeTarget(target, l.now())
+		view := describeTarget(target, l.now())
+		view.Unchecked = l.remote.unchecked[target.ID]
+		result = view
 		return
 	}
 	if r.Method == "GET" && r.URL.Path == "/api/connections" {

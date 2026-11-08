@@ -47,6 +47,7 @@ type webServer struct {
 	Port        uint16   `json:"port"`
 	HostKey     []byte   `json:"host_key,omitempty"`    // SSH: wire format, Ed25519 only
 	Certificate []byte   `json:"certificate,omitempty"` // RDP: the pinned leaf, DER
+	Unchecked   bool     `json:"unchecked,omitempty"`   // RDP at an address: pinned without the console check
 	Access      []string `json:"access,omitempty"`      // account IDs, sorted
 	AddedBy     string   `json:"added_by,omitempty"`    // empty when moved from the file
 	Added       int64    `json:"added"`
@@ -105,9 +106,11 @@ func (w webServer) valid() bool {
 	switch w.Protocol {
 	case "ssh":
 		_, ok := ed25519HostKey(w.HostKey)
-		return ok && len(w.Certificate) == 0
+		return ok && len(w.Certificate) == 0 && !w.Unchecked
 	case "rdp":
-		if len(w.HostKey) != 0 || len(w.Certificate) == 0 || len(w.Certificate) > rdpcert.MaxCertificate {
+		// Only an administrator's own choice leaves a server unchecked: never a
+		// server from the file, and never one with a name to verify.
+		if len(w.HostKey) != 0 || len(w.Certificate) == 0 || len(w.Certificate) > rdpcert.MaxCertificate || w.Unchecked && (w.FromFile || w.Hostname != "") {
 			return false
 		}
 		cert, e := x509.ParseCertificate(w.Certificate)
@@ -233,9 +236,10 @@ func (s *Store) addServer(actor, name, address string, port uint16, hostKey []by
 }
 
 // addRDPServer stores a new RDP server at a literal address, identified by its
-// exact certificate, with nobody on its access list.
-func (s *Store) addRDPServer(actor, name, address string, port uint16, certificate []byte, now time.Time) (string, error) {
-	return s.addWebServer(actor, webServer{Name: name, Protocol: "rdp", Address: address, Port: port, Certificate: bytes.Clone(certificate)}, now)
+// exact certificate, with nobody on its access list. Unchecked records that the
+// administrator chose not to compare it on the server's own screen.
+func (s *Store) addRDPServer(actor, name, address string, port uint16, certificate []byte, unchecked bool, now time.Time) (string, error) {
+	return s.addWebServer(actor, webServer{Name: name, Protocol: "rdp", Address: address, Port: port, Certificate: bytes.Clone(certificate), Unchecked: unchecked}, now)
 }
 
 func (s *Store) addWebServer(actor string, w webServer, now time.Time) (string, error) {
@@ -303,12 +307,15 @@ func (s *Store) repinServer(actor, id string, hostKey []byte) error {
 }
 
 // repinCertificate replaces an RDP server's pinned certificate. Connections to
-// it then show it as changed until each owner accepts the new one.
-func (s *Store) repinCertificate(actor, id string, certificate []byte) error {
+// it then show it as changed until each owner accepts the new one. Checked on
+// the console, the server is checked from then on; pinned without that check,
+// a new certificate leaves it unchecked, and the same one leaves it as it was.
+func (s *Store) repinCertificate(actor, id string, certificate []byte, unchecked bool) error {
 	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error {
 		if w.Protocol != "rdp" {
 			return errRefused
 		}
+		w.Unchecked = unchecked && (w.Unchecked || !bytes.Equal(w.Certificate, certificate))
 		w.Certificate = bytes.Clone(certificate)
 		return nil
 	})
