@@ -187,6 +187,15 @@ type nativeMarker struct {
 	keysOnce, mouseOnce        sync.Once
 	clipboard, resized         chan struct{}
 	clipboardOnce, resizedOnce sync.Once
+	pointers                   string // the settled pointer capabilities, digits only
+}
+
+// clientPointers is the pointer cache and large-pointer support the sample
+// server settled on with the client, as it printed them before authenticating.
+func (m *nativeMarker) clientPointers() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pointers
 }
 
 func (m *nativeMarker) Write(p []byte) (int, error) {
@@ -194,6 +203,9 @@ func (m *nativeMarker) Write(p []byte) (int, error) {
 	defer m.mu.Unlock()
 	for _, b := range p {
 		if b == '\n' {
+			if values, ok := strings.CutPrefix(m.tail, "KB_CLIENT_POINTERS_"); ok && len(values) <= 32 && strings.Trim(values, "0123456789_") == "" {
+				m.pointers = values
+			}
 			switch m.tail {
 			case "KB_AUTHENTICATED":
 				m.once.Do(func() { close(m.ready) })
@@ -755,7 +767,7 @@ func TestNativeRDPExactCertificateAuthenticates(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	address, authenticated := nativePeer(t, ctx, prefix, cert, "Synthetic-NLA-password")
+	address, marker := nativePeerWithInput(t, ctx, prefix, cert, "Synthetic-NLA-password")
 	control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
 		fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
 		return (&net.Dialer{}).DialContext(c, "tcp", address)
@@ -770,9 +782,15 @@ func TestNativeRDPExactCertificateAuthenticates(t *testing.T) {
 	}
 	defer stream.close()
 	select {
-	case <-authenticated:
+	case <-marker.ready:
 	case <-ctx.Done():
 		t.Fatal("native account did not authenticate")
+	}
+	// The client asked for 32 pointers of at most 96 by 96 pixels: FreeRDP's
+	// defaults (128 entries, 384 by 384) would outgrow the viewer's bounds.
+	// The server settles on the smaller cache and the flags both support.
+	if got := marker.clientPointers(); got != "32_32_1" {
+		t.Fatalf("pointer cache and large pointers settled as %q, want 32_32_1", got)
 	}
 }
 

@@ -47,6 +47,12 @@ func TestNativePlanEnforcesNLAChannelsAndRedactsCredentials(t *testing.T) {
 	if values["resize-method"] != "" || values["enable-touch"] != "false" || values["disable-gfx"] != "true" {
 		t.Fatal("unverified dynamic display channels enabled")
 	}
+	// The RDP caches stay on: in guacd 1.6 they never become browser buffers
+	// (only pointers do, bounded in native/prepare.py), and turning them off
+	// only made a real Windows desktop slower.
+	if values["disable-bitmap-caching"] != "" || values["disable-offscreen-caching"] != "" {
+		t.Fatal("an RDP cache was turned off")
+	}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
 		formatted := fmt.Sprintf(verb, p)
 		if strings.Contains(formatted, p.user) || strings.Contains(formatted, p.password) {

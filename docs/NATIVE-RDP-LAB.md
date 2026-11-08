@@ -64,7 +64,18 @@ are sent. Native clipboard, touch and dynamic display channels stay disabled. Th
 uses a fixed 1024x768 viewport and classic NSCodec bitmap updates; PNG is the
 only advertised image format. Image evidence bounds eight concurrent streams,
 256 KiB each/1 MiB aggregate, dimensions and layer count before decoding. It is
-not a general browser drawing-instruction validator. Browser-selected params,
+not a general browser drawing-instruction validator.
+
+A real Windows Server 2025 desktop (2026-11-08) showed what the synthetic peer
+never did. guacd 1.6 numbers buffers from a pool that reuses a number only
+after 1024 have been used, so the viewer bounds live layers (256) and pixels
+(4 Mi), not numbers. Its browser client never acknowledges image blobs, so the
+viewer requires no such ack. Its only browser buffers besides the cursor are
+pointers, one per pointer FreeRDP holds, and FreeRDP's defaults (128 entries of
+up to 384 by 384) would outgrow those bounds, so the build caps the cache at 32
+pointers of at most 96 by 96; the RDP bitmap and offscreen caches never become
+browser buffers and stay on. `TestNativeRDPExactCertificateAuthenticates`
+checks the pointer capabilities the server settles on. Browser-selected params,
 target/gateway selection, drive, file transfer,
 SFTP, arbitrary channels, programs, audio, printing and recording are unavailable.
 Credentials travel on private Unix control IPC, never command arguments, URLs or

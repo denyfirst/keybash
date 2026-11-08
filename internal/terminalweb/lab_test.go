@@ -396,10 +396,12 @@ func TestLabExpiryAndRateCloseOwnedStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.CloseNow()
+	var arrived atomic.Int32
 	go func() {
 		for {
 			select {
 			case <-f.stream.input:
+				arrived.Add(1)
 			case <-f.stream.done:
 				return
 			}
@@ -407,18 +409,90 @@ func TestLabExpiryAndRateCloseOwnedStream(t *testing.T) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	for i := 0; i < 129; i++ {
-		if conn.Write(ctx, websocket.MessageBinary, []byte("x")) != nil {
-			break
+	// In bursts the stream takes before the next, so only the rate can end it.
+	start := time.Now()
+	for sent := 0; sent <= inputFramesPerSecond; {
+		for i := 0; i < 16 && sent <= inputFramesPerSecond; i++ {
+			if conn.Write(ctx, websocket.MessageBinary, []byte("x")) != nil {
+				break
+			}
+			sent++
 		}
+		for int(arrived.Load()) < min(sent, inputFramesPerSecond) && ctx.Err() == nil {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if time.Since(start) >= time.Second {
+		t.Skip("this machine could not send a second's input within a second")
 	}
 	if _, _, err := conn.Read(ctx); err == nil {
 		t.Fatal("input rate limit was ignored")
+	}
+	if int(arrived.Load()) != inputFramesPerSecond {
+		t.Fatalf("%d frames arrived; the session should end at the %dth", arrived.Load(), inputFramesPerSecond+1)
 	}
 	select {
 	case <-f.stream.done:
 	case <-ctx.Done():
 		t.Fatal("rate refusal leaked stream")
+	}
+}
+
+// A desktop being dragged sends a mouse move per display frame and a sync reply
+// per drawn frame, hundreds a second, spread over that second rather than at
+// once: up to the bound, it all arrives and the session stays open. Frames go in
+// small bursts that the stream takes before the next, as a browser's would.
+// The need is fixed here, not taken from the bound, so lowering the bound fails.
+const dragFramesPerSecond = 400 // a move per frame at 144 Hz, a sync per drawn frame, and room
+
+func TestLabInputRateTakesADrag(t *testing.T) {
+	f := newLab(t)
+	f.grant(t)
+	conn, _, err := f.dial(t, f.server.URL, f.cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var arrived atomic.Int32
+	go func() {
+		for {
+			select {
+			case <-f.stream.input:
+				arrived.Add(1)
+			case <-f.stream.done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	start := time.Now()
+	for sent := 0; sent < dragFramesPerSecond; {
+		for i := 0; i < 16; i++ {
+			if conn.Write(ctx, websocket.MessageBinary, []byte("x")) != nil {
+				t.Fatal("the session closed during a drag's worth of input")
+			}
+			sent++
+		}
+		for int(arrived.Load()) < sent {
+			select {
+			case <-f.stream.done:
+				t.Fatalf("%d of %d input frames arrived before the session ended", arrived.Load(), sent)
+			case <-ctx.Done():
+				t.Fatal("input stopped arriving")
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}
+	if time.Since(start) >= time.Second {
+		t.Skip("this machine could not send a second's input within a second")
+	}
+	select {
+	case <-f.stream.done:
+		t.Fatal("a drag's worth of input ended the session")
+	default:
 	}
 }
 

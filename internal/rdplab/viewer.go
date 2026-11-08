@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"image"
 	"image/png"
 	"io"
 	"strconv"
@@ -115,13 +116,45 @@ func (w viewerBoundedWriter) Write(data []byte) (int, error) {
 	}
 	return w.buffer.Write(data)
 }
+
+// guacd numbers buffers from libguac's pool, which hands out new numbers until
+// 1024 have been used and only then reuses freed ones, so a buffer's number
+// says nothing about how many are live: a real Windows desktop reached -33 with
+// 30 live, and 46 live with its caches off. What bounds the browser's memory is
+// the pixel budget in fit (4 Mi pixels, each layer rounded up to 64 by 64),
+// which alone holds fewer than 600 small buffers beside a full-HD display; the
+// live count only caps per-canvas overhead below that. A number only has to
+// stay within what guacd can reach under that count.
+const (
+	viewerLayers       = 256   // live layers and buffers at once, the display included
+	viewerLowestBuffer = -4096 // well past 1024 + viewerLayers
+	viewerHighestLayer = 32
+)
+
+// normalizedPNG re-encodes a decoded image for the browser within limit bytes.
+// The fastest level first: re-encoding cost several times decoding on a real
+// desktop, and a few more bytes are cheap next to that delay. When that does
+// not fit, the default level, so speed never refuses an image that fitted.
+func normalizedPNG(decoded image.Image, limit int) ([]byte, bool) {
+	var out bytes.Buffer
+	fast := png.Encoder{CompressionLevel: png.BestSpeed}
+	if fast.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
+		return out.Bytes(), true
+	}
+	out.Reset()
+	if png.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
+		return out.Bytes(), true
+	}
+	return nil, false
+}
+
 func (s *viewerStream) layer(raw string) (int, bool) {
-	id, ok := canonicalNumber(raw, -32, 32)
+	id, ok := canonicalNumber(raw, viewerLowestBuffer, viewerHighestLayer)
 	if !ok {
 		return 0, false
 	}
 	if _, exists := s.layers[id]; !exists {
-		if len(s.layers) >= 32 {
+		if len(s.layers) >= viewerLayers {
 			return 0, false
 		}
 		s.layers[id] = viewerLayer{}
@@ -236,19 +269,23 @@ func (s *viewerStream) drawing(in instruction) bool {
 		}
 		// Re-encode only the decoded static image. Ancillary metadata, APNG
 		// frames and trailing/polyglot bytes never reach the browser decoder.
-		var normalized bytes.Buffer
-		if png.Encode(viewerBoundedWriter{&normalized, 256 * 1024}, decoded) != nil {
+		normalized, ok := normalizedPNG(decoded, 256*1024)
+		if !ok {
 			return false
 		}
-		chunks := (normalized.Len() + 12*1024 - 1) / (12 * 1024)
+		chunks := (len(normalized) + 12*1024 - 1) / (12 * 1024)
+		// The browser's Guacamole client never acknowledges image blobs: neither
+		// of its image readers sends an ack. So nothing here waits for one; a
+		// count that refused at 128 unacknowledged chunks ended real Windows
+		// sessions. Flow to the browser is the relay's credit window. The count
+		// only lets a browser ack chunks it was sent, should one ever do so, and
+		// it stays bounded: 128 streams, 128 chunks each.
 		s.metaMu.Lock()
-		if len(s.acks) >= 128 && s.acks[in[1]] == 0 || chunks > 128-s.acks[in[1]] {
-			s.metaMu.Unlock()
-			return false
+		if _, known := s.acks[in[1]]; known || len(s.acks) < 128 {
+			s.acks[in[1]] = min(s.acks[in[1]]+chunks, 128)
 		}
-		s.acks[in[1]] += chunks
 		s.metaMu.Unlock()
-		for data := normalized.Bytes(); len(data) > 0; {
+		for data := normalized; len(data) > 0; {
 			n := min(len(data), 12*1024)
 			if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, instruction{"blob", in[1], base64.StdEncoding.EncodeToString(data[:n])}) != nil {
 				return false
@@ -337,7 +374,7 @@ func (s *viewerStream) drawing(in instruction) bool {
 		if len(in) != 2 {
 			return false
 		}
-		id, ok := canonicalNumber(in[1], -32, 32)
+		id, ok := canonicalNumber(in[1], viewerLowestBuffer, viewerHighestLayer)
 		if !ok || id == 0 {
 			return false
 		}

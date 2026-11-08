@@ -38,6 +38,10 @@ replace_once(sample, "instance->Open(instance, nullptr, (UINT16)port)", 'instanc
 replace_once(sample, "if (!freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, TRUE))",
              'if (!freerdp_settings_set_string(settings, FreeRDP_NtlmSamFile, "/run/fixture/SAM") ||\n\t    !freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, TRUE))')
 replace_once(sample, "static BOOL tf_peer_post_connect(freerdp_peer* client)\n{", "static BOOL tf_peer_post_connect(freerdp_peer* client)\n{\n\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);")
+# After the client's capabilities: the pointer cache and large-pointer support
+# both sides settled on, so a test sees what the client asked for.
+replace_once(sample, "\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);",
+             "\tprintf(\"KB_CLIENT_POINTERS_%u_%u_%u\\n\", freerdp_settings_get_uint32(client->context->settings, FreeRDP_PointerCacheSize), freerdp_settings_get_uint32(client->context->settings, FreeRDP_ColorPointerCacheSize), freerdp_settings_get_uint32(client->context->settings, FreeRDP_LargePointerFlag)); fflush(stdout);\n\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);")
 replace_once(sample, "static BOOL tf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT8 code)\n{",
              "static BOOL tf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT8 code)\n{\n\tif (code == RDP_SCANCODE_KEY_A && !(flags & KBD_FLAGS_RELEASE)) { puts(\"KB_INPUT_A\"); fflush(stdout); }")
 replace_once(sample, "static BOOL tf_peer_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y)\n{",
@@ -156,6 +160,17 @@ replace_once(settings, anchor, '''freerdp_settings_set_bool(rdp_settings, FreeRD
     freerdp_settings_set_uint16(rdp_settings, FreeRDP_TLSMinVersion, 0x0303);
     freerdp_settings_set_string(rdp_settings, FreeRDP_AllowedTlsCiphers, "ECDHE+AESGCM:ECDHE+CHACHA20");''')
 replace_once(settings, "freerdp_settings_set_bool(rdp_settings, FreeRDP_AutoAcceptCertificate, guac_settings->certificate_tofu);", "/* Automatic certificate trust is forbidden by the Keybash lab. */")
+# In guacd 1.6 the only browser buffers besides its cursor are pointers: one
+# per pointer FreeRDP holds (pointer.c), freed with a dispose when the cache
+# drops it. guacd leaves the cache at FreeRDP's 128 entries and allows pointers
+# of 384 by 384 pixels, which together would outgrow the viewer's live-layer
+# and pixel bounds over a long session. 32 entries of at most 96 by 96 keep
+# every session far inside them; the server only resends a pointer more often.
+offscreen = "freerdp_settings_set_uint32(rdp_settings, FreeRDP_OffscreenSupportLevel, !guac_settings->disable_offscreen_caching);"
+replace_once(settings, offscreen, offscreen + '''
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_PointerCacheSize, 32);
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_ColorPointerCacheSize, 32);
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_LargePointerFlag, 0x00000001); /* LARGE_POINTER_FLAG_96x96 only */''')
 replace_once(settings, "if (guac_settings->certificate_fingerprints != NULL)\n        freerdp_settings_set_string(rdp_settings, FreeRDP_CertificateAcceptedFingerprints, \n                guac_strdup(guac_settings->certificate_fingerprints));", "/* The mandatory exact pin is checked in the native X509 callback. */")
 
 # Guacamole 1.6's common UTF-16 reader/writer handles only individual 16-bit
