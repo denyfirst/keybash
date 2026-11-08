@@ -1,5 +1,5 @@
 import { inspectPaste, decodeOutput, MAX_INPUT } from './paste.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, offerNewSession, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, endedMessage, offerNewSession, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const encoder = new TextEncoder();
@@ -109,10 +109,12 @@ function connect(proof=null) {
   socket.binaryType = 'arraybuffer';
   const activate = () => { term.reset(); updateState(true); resize(); term.focus(); notice(''); };
   const timer=setTimeout(()=>socket.close(),15000);
+  let why = null;
   socket.onopen = () => {if(proof){socket.send(JSON.stringify(proof));proof=null;}else{clearTimeout(timer);activate();}};
   socket.onmessage = event => {
     if(ownedRemote&&!connected){if(event.data!=='{"type":"ready"}'){socket.close();return;}clearTimeout(timer);activate();return;}
     if (!connected || retired) return;
+    if (typeof event.data === 'string') { why = endedMessage(event.data); socket.close(); return; }
     try {
       // Each frame is acknowledged after xterm has parsed it; the server keeps
       // at most a small window unacknowledged, so long output stays bounded.
@@ -127,7 +129,7 @@ function connect(proof=null) {
     updateState(false); clearPaste();
     retireTerminal();
     for (const id of ['paste-review', 'clipboard-panel']) if ($(id).open) $(id).close();
-    $('clipboard-text').value = ''; notice('Session closed.');
+    $('clipboard-text').value = ''; notice(why ?? 'Session closed.');
   };
   socket.onerror = () => notice('The connection could not be opened.');
 }

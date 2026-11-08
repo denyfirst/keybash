@@ -13,6 +13,7 @@ import (
 
 	"github.com/denyfirst/keybash/internal/rdpcert"
 	"github.com/denyfirst/keybash/internal/targetguard"
+	"github.com/denyfirst/keybash/internal/terminalweb"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -134,7 +135,7 @@ func (l *Lab) reloadServersLocked() error {
 	for key, lease := range l.remote.leases {
 		if t, ok := l.mayUseLocked(lease.owner, lease.target); !ok || approvalFingerprint(t) != lease.approval {
 			if lease.cancel != nil {
-				lease.cancel()
+				lease.cancel(terminalweb.ReasonAccessChanged)
 			}
 			delete(l.remote.leases, key)
 		}

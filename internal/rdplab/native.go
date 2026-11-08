@@ -235,6 +235,13 @@ func (s *nativeStream) next() (instruction, error) {
 				(len(in) == 4 && in[1] == "1" && in[3] == "" || len(in) == 3 && in[1] == "2") {
 			continue
 		}
+		// guacd's end of a session nobody failed: the remote side signed out or
+		// disconnected. An error, when there is one, arrives first and ends here.
+		if len(in) == 1 && in[0] == "disconnect" {
+			s.failure.Store("disconnect")
+			s.close()
+			return nil, errNative
+		}
 		if len(in) == 4 && in[0] == "set" && in[2] == "multi-touch" && in[3] == "0" {
 			if layer, err := strconv.ParseUint(in[1], 10, 16); err == nil && layer <= 32767 {
 				continue // fixed disabled-touch metadata; no arbitrary property setter

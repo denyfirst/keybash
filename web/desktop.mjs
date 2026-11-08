@@ -1,6 +1,6 @@
 import { Guacamole } from './vendor/guacamole.mjs';
 import { workspaceControls } from './desktop-workspace.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
@@ -51,6 +51,7 @@ function begin(proof=null) {
     socket.onmessage = event => {
       if(!ready){if(event.data==='{"type":"identity-changed"}'){$('notice').textContent=identityChangedMessage;end();return;}if(event.data!=='{"type":"ready"}'){end();return;}ready=true;clearTimeout(timer);if(!stopped)tunnel.setState(Guacamole.Tunnel.State.OPEN);return;}
       if (stopped) return;
+      if (typeof event.data === 'string') { const why = endedMessage(event.data); if (why) $('notice').textContent = why; end(); return; }
       try {
         if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 5 || event.data.byteLength > 8196) throw new Error('frame');
         const number = new DataView(event.data).getUint32(0);

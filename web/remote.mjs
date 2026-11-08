@@ -10,6 +10,25 @@ async function json(path, method='GET', body, csrf='') {
   return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
 }
 export const identityChangedMessage='This server now shows a different certificate, so Keybash did not connect and sent it no password. Your administrator can see this and has to check it.';
+// Why a session ended, as the gateway names it with one fixed word. Only these
+// words are shown, each as its own text; anything else says nothing.
+const endings={
+ idle:'Keybash signed you out after 15 minutes without use, so this session ended. Sign in again to reconnect.',
+ expired:'Your sign-in reached its 8-hour limit, so this session ended. Sign in again to reconnect.',
+ 'signed-out':'You were signed out of Keybash, so this session ended.',
+ 'access-changed':'This server, this connection or your access to it changed, so this session ended.',
+ credentials:'The server did not accept the user name or password saved for this connection.',
+ account:'The server refused this account. It may be locked, disabled or expired, or not allowed to sign in remotely.',
+ 'taken-over':'The same account was opened from another connection, which took this session over.',
+ 'remote-ended':'The remote computer ended the session: it was signed out or disconnected, or reached its own time limit.',
+ unreachable:'The server could not be reached, or it refused the connection.',
+ 'not-responding':'The remote side stopped responding, so this session ended.',
+ refused:'Keybash ended this session because the server sent something it does not accept.'
+};
+export function endedMessage(data){
+ const match=typeof data==='string'&&data.length<=64?/^\{"type":"ended","reason":"([a-z-]{1,16})"\}$/.exec(data):null;
+ return match&&Object.hasOwn(endings,match[1])?endings[match[1]]:null;
+}
 export function remoteErrorMessage(error){if(error?.code==='capacity')return 'The server is at its session limit. Close an open session, or try again in a moment.';if(error?.code==='rate')return 'Too many connection attempts. Wait a moment and try again.';return 'The connection was refused. If your session ended, sign in again.';}
 // Another session to the same server opens in its own tab, as Connect does,
 // so each tab stays one session that closing it ends. SSH only: a second RDP

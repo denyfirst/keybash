@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
 func viewerFixture(t *testing.T) (*viewerStream, net.Conn, <-chan instruction) {
@@ -494,5 +496,54 @@ func TestViewerRevocationEndsAPacedWait(t *testing.T) {
 	s.sleep = func(time.Duration) { s.closed.Store(true) }
 	if s.drawing(instruction{"copy", "0", "0", "0", "1", "1", "14", "0", "0", "0"}) {
 		t.Fatal("revoked viewer kept drawing after its pause")
+	}
+}
+
+// Why a desktop ended by itself reaches the page as one fixed word, read from
+// guacd's status code alone; its message never counts, and a failure with no
+// word of its own gives none.
+func TestViewerSaysWhyTheDesktopEnded(t *testing.T) {
+	for _, c := range []struct {
+		from []instruction
+		want terminalweb.Reason
+	}{
+		{[]instruction{{"error", "Authentication failure (invalid credentials?)", "769"}}, terminalweb.ReasonCredentials},
+		{[]instruction{{"error", "<b>any text</b>", "769"}}, terminalweb.ReasonCredentials},
+		{[]instruction{{"error", "Access denied by server (account locked/disabled?)", "771"}}, terminalweb.ReasonAccount},
+		{[]instruction{{"error", "Disconnected by other connection.", "521"}}, terminalweb.ReasonTakenOver},
+		{[]instruction{{"error", "Idle session time limit exceeded.", "522"}}, terminalweb.ReasonRemoteEnded},
+		{[]instruction{{"error", "Logged off.", "523"}}, terminalweb.ReasonRemoteEnded},
+		{[]instruction{{"disconnect"}}, terminalweb.ReasonRemoteEnded},
+		{[]instruction{{"error", "Connection failed (server unreachable?)", "519"}}, terminalweb.ReasonUnreachable},
+		{[]instruction{{"error", "Server refused connection.", "520"}}, terminalweb.ReasonUnreachable},
+		{[]instruction{{"error", "User is not responding.", "776"}}, terminalweb.ReasonNotResponding},
+		{[]instruction{{"error", "Upstream error.", "515"}}, ""},
+		{[]instruction{{"error", "Authentication failure", "x769"}}, terminalweb.ReasonRefused},
+		{[]instruction{{"argv", "0", "text/plain", "password"}}, terminalweb.ReasonRefused},
+		{[]instruction{{"rect", "0", "0", "0", "99999", "1"}}, terminalweb.ReasonRefused},
+		{[]instruction{{"disconnect", "now"}}, terminalweb.ReasonRefused},
+		{nil, ""}, // guacd's connection just closed
+	} {
+		s, remote, _ := viewerFixture(t)
+		_, _ = s.Read(make([]byte, 128))
+		go func() {
+			for _, in := range c.from {
+				if writeInstruction(remote, in) != nil {
+					return
+				}
+			}
+			if c.from == nil {
+				_ = remote.Close()
+			}
+		}()
+		if n, err := s.Read(make([]byte, 4096)); n != 0 || err != errNative {
+			t.Fatalf("%q did not end the desktop", c.from)
+		}
+		if got := s.Reason(); got != c.want {
+			t.Fatalf("%q gave %q, want %q", c.from, got, c.want)
+		}
+	}
+	if newViewerStream(nil).Reason() != "" {
+		t.Fatal("a viewer with no native side gave a reason")
 	}
 }

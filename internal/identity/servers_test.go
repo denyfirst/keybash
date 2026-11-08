@@ -560,6 +560,9 @@ func TestServerAccessListDecidesWhoConnects(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("%s did not end the open terminal", what)
 		}
+		if context.Cause(ctx) != terminalweb.ReasonAccessChanged {
+			t.Fatalf("%s ended the terminal without saying the access changed: %v", what, context.Cause(ctx))
+		}
 	}
 	// Taking bob off ends his terminal and his pending leases.
 	ctx := open()

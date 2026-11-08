@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -258,6 +259,13 @@ func TestOwnedRemoteSocketEchoLogoutAndLateSetup(t *testing.T) {
 					t.Fatal("authorized stream did not echo exact bytes")
 				}
 				c.expect("DELETE", "/api/session", "{}", 204)
+				// The page is told why; the relay stops the stream before saying
+				// it (TestRelaySaysWhyTheSessionEnded), and the worker is waited
+				// for below.
+				_, data, e = socket.Read(ctx)
+				if e != nil || string(data) != `{"type":"ended","reason":"signed-out"}` {
+					t.Fatalf("signed-out reason missing: %q", data)
+				}
 			}
 			if _, _, e = socket.Read(ctx); e == nil {
 				t.Fatal("revoked socket remained readable")
@@ -329,7 +337,7 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 		l.mu.Unlock()
 		t.Fatal("a ready session without fresh proof could not open its own connection")
 	}
-	staleLease.cancel()
+	staleLease.cancel(nil)
 	staleKey, _ := tokenID(staleRaw)
 	delete(l.remote.leases, staleKey)
 	l.mu.Unlock()
@@ -586,4 +594,78 @@ func TestExpiredRDPCertificateDisablesOnlyItsServer(t *testing.T) {
 		_ = other.Close()
 		t.Fatal("a malformed RDP certificate loaded")
 	}
+}
+
+// Each way Keybash ends an open remote session gives the page its own reason:
+// the idle limit, the sign-in's absolute life, signing out, and the access
+// changing. The relay says only these fixed words.
+func TestOwnedRemoteSessionsEndWithTheirReason(t *testing.T) {
+	open := func(t *testing.T) (*Lab, *custodyClient, string, *time.Time, context.Context) {
+		t.Helper()
+		l, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+		now := time.Now()
+		l.mu.Lock()
+		l.now = func() time.Time { return now }
+		l.mu.Unlock()
+		raw := grantFixture(t, c, record)
+		id, _ := tokenID(c.cookie.Value)
+		l.mu.Lock()
+		_, _, _, ctx, e := l.redeemRemoteLocked(id, raw)
+		l.mu.Unlock()
+		if e != nil {
+			t.Fatal("valid lease refused")
+		}
+		return l, c, record, &now, ctx
+	}
+	ended := func(t *testing.T, ctx context.Context, want terminalweb.Reason) {
+		t.Helper()
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not end the remote session", want)
+		}
+		if context.Cause(ctx) != want {
+			t.Fatalf("got cause %v, want %s", context.Cause(ctx), want)
+		}
+	}
+	t.Run("idle", func(t *testing.T) {
+		l, _, _, now, ctx := open(t)
+		advance(l, now, idleLife)
+		l.mu.Lock()
+		l.sweepLocked()
+		l.mu.Unlock()
+		ended(t, ctx, terminalweb.ReasonIdle)
+	})
+	t.Run("expired", func(t *testing.T) {
+		l, c, _, now, ctx := open(t)
+		id, _ := tokenID(c.cookie.Value)
+		l.mu.Lock()
+		l.sessions[id].created = now.Add(-absoluteLife)
+		l.sweepLocked()
+		l.mu.Unlock()
+		ended(t, ctx, terminalweb.ReasonExpired)
+	})
+	t.Run("signed-out", func(t *testing.T) {
+		_, c, _, _, ctx := open(t)
+		c.expect("DELETE", "/api/session", "{}", 204)
+		ended(t, ctx, terminalweb.ReasonSignedOut)
+	})
+	t.Run("access-changed", func(t *testing.T) {
+		_, c, record, _, ctx := open(t)
+		c.expect("DELETE", "/api/connections/"+record, "{}", 204)
+		ended(t, ctx, terminalweb.ReasonAccessChanged)
+	})
+	t.Run("stopping", func(t *testing.T) {
+		l, _, _, _, ctx := open(t)
+		_ = l.Close()
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Second):
+			t.Fatal("stopping the gateway did not end the remote session")
+		}
+		var reason terminalweb.Reason
+		if errors.As(context.Cause(ctx), &reason) {
+			t.Fatalf("stopping the gateway gave a reason: %s", reason)
+		}
+	})
 }
