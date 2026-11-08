@@ -19,7 +19,7 @@ type nativeBroker struct {
 }
 
 func newNativeBroker(target *targetguard.NamedTarget, identity *Identity) (*nativeBroker, error) {
-	if target == nil || identity == nil || identity.name == "" || identity.name != target.Hostname() || len(identity.der) == 0 || identity.pin == [sha256.Size]byte{} {
+	if !identity.boundTo(target) || len(identity.der) == 0 || identity.pin == [sha256.Size]byte{} {
 		return nil, errNative
 	}
 	return &nativeBroker{dial: target.DialContext}, nil

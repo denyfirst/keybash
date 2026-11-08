@@ -93,24 +93,24 @@ separate Ed25519 user key for the test account; never bring a production
 private key here. For SSH servers, the Servers page reads the host key itself
 and asks you to compare the fingerprint (`INSTALL.md`).
 
-For RDP, keep NLA on. The certificate needs:
-- a SHA-256 or stronger signature;
-- at least RSA 2048 or ECDSA P-256;
-- a DNS SAN, the DigitalSignature key usage and the serverAuth EKU;
-- valid dates.
+For RDP, keep NLA on. The Servers page takes Windows' own automatic certificate
+at the server's IP address, with nothing to bind or export: it needs valid dates,
+at least RSA 2048 or ECDSA P-256, the serverAuth EKU, and a key usage that allows
+digital signature or key encipherment (`INSTALL.md`). Windows renews it about
+every six months, and Keybash then asks an administrator to check the new one.
 
-Windows' usual automatic certificate may not meet this profile.
+Only a server in `targets.json`, reached by DNS name, still needs a certificate
+with a DNS SAN and the DigitalSignature key usage:
 - Choose the certificate on the test Windows console and bind it to the RDP
   listener.
 - Export only its public DER from there; the private key or PFX is never given
   to Keybash.
 - Give the listener read access to the private key as Microsoft describes.
 
-The Windows configuration follows the
+That configuration follows the
 [official listener guide](https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/remote-desktop-listener-certificate-configurations)
 and the
 [certificate creation parameters](https://learn.microsoft.com/en-us/powershell/module/pki/new-selfsignedcertificate?view=windowsserver2025-ps).
-This Windows step is not yet an actual VM acceptance result.
 
 Give the Windows test user RDP rights to that VM only. In the firewall, accept
 3389 from the Keybash test VM only. The username can be a local account name;

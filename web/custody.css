@@ -96,6 +96,7 @@ body.workspace:not([data-stage="ready"]) .rail-nav { display: none; }
   border-radius: 10px;
 }
 .server-card[data-trust=changed] .server-icon,
+.server-card[data-trust=stopped] .server-icon,
 .server-card[data-trust=unavailable] .server-icon { color: var(--insecure); background: color-mix(in srgb, var(--insecure) 12%, var(--card)); }
 .server-card[data-trust=unverified] .server-icon { color: var(--weak); background: color-mix(in srgb, var(--weak) 14%, var(--card)); }
 .server-glyph { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -257,6 +258,7 @@ dialog.sheet .hint { margin-bottom: 0; }
 .trust-state[data-trust=verified] { color: var(--strong); }
 .trust-state[data-trust=unverified] { color: var(--weak); }
 .trust-state[data-trust=changed],
+.trust-state[data-trust=stopped],
 .trust-state[data-trust=unavailable] { color: var(--insecure); }
 
 /* MFA setup: three numbered steps joined by a thread, the QR code as the
@@ -546,7 +548,7 @@ button.server-icon:hover:not(:disabled) { box-shadow: 0 0 0 3px color-mix(in srg
 dialog.systems { width: min(40rem, 94vw); }
 
 /* ── Adding a key or password: one sheet, three kinds ────────────────────── */
-#record-dialog .segmented {
+:is(#record-dialog, #server-dialog) .segmented {
   display: flex;
   gap: 0.25rem;
   margin: 1.1rem 0 0.2rem;
@@ -555,7 +557,8 @@ dialog.systems { width: min(40rem, 94vw); }
   border: 1px solid var(--rule);
   border-radius: calc(var(--radius) + 2px);
 }
-#record-dialog .segment {
+:is(#record-dialog, #server-dialog) .segmented[hidden] { display: none; }
+:is(#record-dialog, #server-dialog) .segment {
   flex: 1;
   margin: 0;
   padding: 0.5rem 0.6rem;
@@ -566,8 +569,8 @@ dialog.systems { width: min(40rem, 94vw); }
   border-color: transparent;
   box-shadow: none;
 }
-#record-dialog .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
-#record-dialog .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
+:is(#record-dialog, #server-dialog) .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
+:is(#record-dialog, #server-dialog) .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
 .generate-lead { margin-top: 1rem; }
 /* What a sheet says back stays in the sheet. */
 .dialog-notice { min-height: 0; margin: 0.8rem 0 0; font-size: 0.88rem; font-weight: 500; color: var(--ink); text-align: right; }
@@ -691,18 +694,82 @@ body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, #rail-page, .
 .server-row .server-state { justify-self: start; }
 .server-row .record-actions { flex-wrap: wrap; min-width: 0; }
 .server-access, .server-row .server-help { flex-basis: 100%; margin: 0.3rem 0 0; font-size: 0.86rem; color: var(--ink-soft); }
+/* What a row has to say takes the whole row, under its name and actions. */
+.server-row .server-note { grid-column: 2 / -1; margin: 0; }
 .server-state[data-state=ready] { color: var(--strong); }
-.server-state[data-state=unreachable] { color: var(--insecure); }
+.server-state:is([data-state=soon], [data-state=unchecked]) { color: var(--weak); }
+.server-state:is([data-state=unreachable], [data-state=changed], [data-state=expired]) { color: var(--insecure); }
+/* A server that needs checking says so on every page, once: a mark on the rail
+   and one line above the page, in the same red as the row's state. */
+.rail-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  margin-left: auto;
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #ffffff;
+  background: #b3202e; /* the red of a delete button, the same in both schemes */
+  border-radius: 999px;
+}
+.rail-badge[hidden] { display: none; }
+.attention {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0 0 1.4rem;
+  padding: 0.75rem 1rem;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--insecure) 8%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--insecure) 40%, var(--rule));
+  border-radius: var(--radius);
+}
+.attention[hidden] { display: none; }
+.attention p { flex: 1; margin: 0; font-size: 0.92rem; }
+.attention-glyph { flex: none; width: 1.3rem; height: 1.3rem; fill: none; stroke: var(--insecure); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.attention-open { flex: none; font-size: 0.88rem; font-weight: 600; white-space: nowrap; }
+.attention-open[hidden] { display: none; }
+@media (max-width: 640px) {
+  .attention { flex-wrap: wrap; }
+  .attention p { flex-basis: calc(100% - 2rem); }
+  .attention-open { margin-left: 2rem; }
+}
 .networks-note { max-width: var(--measure); margin: 0 0 1rem; }
 .networks-note code { white-space: nowrap; }
 @media (max-width: 760px) {
   .server-row { grid-template-columns: auto minmax(0, 1fr); }
   .server-row .server-state { grid-column: 1 / -1; }
-  .server-row .record-actions button.secondary { flex: 1 0 100%; }
+  .server-row .server-note { grid-column: 1 / -1; }
+  .server-row .record-actions button:not(.ghost) { flex: 1 0 100%; }
 }
 /* Compared by eye, then ticked: the box reads as a choice, like a role. */
 .same-check { margin-top: 0.9rem; }
 .console-command { white-space: pre; overflow-x: auto; overflow-wrap: normal; font-size: 0.8rem; }
+/* The Windows command is one long line, copied with its button: it wraps in the
+   box, in a smaller size, so the sheet stays one screen on a laptop. */
+.windows-command { max-height: 10rem; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.72rem; line-height: 1.45; }
+.copy-command { margin: 0.45rem 0 0.2rem; padding: 0.3rem 0.8rem; font-size: 0.82rem; }
+.fingerprint-answer { font-family: var(--mono); font-size: 0.82rem; }
+#server-paste .install-steps, #identity-paste .install-steps { margin-bottom: 0.4rem; }
+:is(#server-steps, #identity-steps) .install-steps label { display: inline; margin: 0; font-size: inherit; font-weight: inherit; color: inherit; }
+#server-paste > .hint, #identity-paste > .hint, :is(#server-steps, #identity-steps) > .hint { margin-top: 0.5rem; }
+/* Adding or accepting a desktop without the check says what that risks, in
+   the amber of a server that is not checked. */
+.unchecked-warning {
+  margin-top: 0.9rem;
+  padding: 0.65rem 0.85rem;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--weak) 9%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--weak) 45%, var(--rule));
+  border-radius: var(--radius);
+}
+#server-paste > .unchecked-warning, #identity-paste > .unchecked-warning { margin-top: 0.9rem; }
+/* The choice stands apart from the fields above it and the steps below it. */
+#server-paste > .role-option, #identity-paste > .role-option { margin: 1.1rem 0 0.9rem; }
+.unchecked-warning[hidden] { display: none; }
 /* A card's system tile is a button too. */
 @media (max-width: 760px), (pointer: coarse) {
   button.server-icon { width: 2.75rem; height: 2.75rem; }
@@ -725,6 +792,7 @@ body.workspace:not([data-loaded]) :is(.work-heading, #topbar-page, #rail-page, .
 }
 .role-option:has(input:checked) { background: color-mix(in srgb, var(--tool) 7%, var(--card)); border-color: var(--tool); }
 dialog .role-option input { width: auto; margin: 0.2rem 0 0; accent-color: var(--tool); }
+.role-option[hidden] { display: none; }
 .role-text { display: grid; gap: 0.15rem; }
 .role-text span { font-size: 0.85rem; color: var(--ink-soft); }
 /* The one-time code is shown once, whole, ready to copy. */

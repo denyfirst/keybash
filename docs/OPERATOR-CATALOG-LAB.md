@@ -66,8 +66,11 @@ address alone: `"hostname": "192.168.10.20"` with no `addresses` field. Nothing
 is resolved for it, so there is no name to rebind or poison, and the dial still
 passes the target's own policy and the protected networks. A second list beside
 the address is refused rather than reconciled. The SSH host key remains the
-server's identity; the address is only where to reach it. RDP keeps a name,
-because both the import and the native worker check its certificate against one.
+server's identity; the address is only where to reach it. An RDP entry in this
+file keeps a name, because both the import and the native worker check its
+certificate against one. An RDP server at a literal address is added on the
+Servers page instead, where an administrator compares its exact certificate on
+its own screen (ADR 0003).
 
 `protected_networks` is mandatory and nonempty to require an explicit deployment
 decision. The operator must actually list database/control/host infrastructure

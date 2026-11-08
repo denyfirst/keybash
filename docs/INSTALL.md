@@ -217,7 +217,8 @@ prints a setup code when the account has no factor.
 
 ## Adding a server later
 
-Administrators add SSH servers on the **Servers** page, with no restart:
+Administrators add servers on the **Servers** page, with no restart. For an SSH
+server:
 
 1. **Add server:** a name, the server's IP address and its SSH port. The
    gateway reads the server's Ed25519 host key, through the target guard and
@@ -225,22 +226,65 @@ Administrators add SSH servers on the **Servers** page, with no restart:
    authenticates.
 2. Compare the fingerprint it shows with
    `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on that server's own
-   console, tick "It is the same" and add it. Keybash reads the key again and
-   adds the server only if it is still the one compared. This needs a phone
-   code from the last ten minutes.
+   console (on Windows,
+   `ssh-keygen -lf C:\ProgramData\ssh\ssh_host_ed25519_key.pub`), tick "It is
+   the same" and add it. Keybash reads the key again and adds the server only if
+   it is still the one compared. This needs a phone code from the last ten
+   minutes.
 3. **Who can use it:** nobody, administrators included, until you choose.
    Taking someone off ends their open sessions to that server at once.
 
-Each row also has **Rename**, **Check identity** (accept a new host key, for
-example after a reinstall, once compared on the console; open sessions end and
-each person accepts it again on their connection) and **Remove** (open
+A Windows desktop (**Desktop (RDP)**, on an installation built with
+`--with-rdp`) uses the certificate Windows makes for itself:
+
+1. **Add server:** a name, the server's IP address and its RDP port. The gateway
+   checks that it requires Network Level Authentication and shows a usable
+   certificate. It sends no username or password, and it does not tell you the
+   fingerprint.
+2. On the server's own screen, open PowerShell as administrator, run the command
+   the page gives you, and paste the line it prints. Keybash reads the
+   certificate again and adds the server only if they match. If someone is in
+   between, they differ and nothing is added. This needs a phone code from the
+   last ten minutes.
+
+   The box **Check it on the server's own screen** is ticked for this. If you
+   untick it, Keybash keeps the certificate that answers at that moment and
+   marks the server **Not checked**, for you and for everyone who connects to
+   it. Anyone between Keybash and the server at that moment would then receive
+   the Windows passwords people send. **Check now** on its row compares it
+   later, with the same command.
+3. **Who can use it**, as above.
+
+Each row also has **Rename**, **Check identity** (accept a new host key or
+certificate, for example after a reinstall, in the same way; open sessions end
+and each person accepts it again on their connection) and **Remove** (open
 sessions end; connections to it show as unavailable).
 
 The page adds servers only inside the gateway's target networks
 (`--target-networks`, set at install or with `upgrade.sh`); a server added
 earlier that is outside them now stays listed but unreachable. Auditors see
-the page read-only. RDP servers cannot be added on the page yet; one in an
-existing `targets.json` moves in like the others.
+the page read-only.
+
+### When Windows renews its certificate
+
+Windows renews its own RDP certificate about every six months. Keybash reads
+each desktop's certificate every hour and just before each session, with no
+username or password, and never accepts a new one by itself:
+
+- **The person connecting** sees that the server changed and that no password
+  was sent.
+- **An administrator** sees a mark on the rail and a line above every page, at
+  their next sign-in. There is no mail yet.
+- **To fix it:** **Check identity** on that server, run the command on the
+  server's own screen and paste the line. This takes about half a minute and
+  needs that screen: a hypervisor console, or SSH through Keybash if the server
+  has it. You can also untick the check there and accept the certificate as it
+  answers; the server is then marked **Not checked**. Each person then accepts
+  the new identity once on their connection.
+
+A server's row also says when its certificate ends, two weeks ahead. If a
+certificate has ended and Windows has not made a new one, restart Remote Desktop
+Services on the server; Windows then makes one.
 
 ### Servers from `targets.json`
 

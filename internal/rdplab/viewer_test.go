@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -212,11 +213,12 @@ func TestViewerRefusesMalformedAndExcessDrawing(t *testing.T) {
 		}
 	}
 	s, _, _ := viewerFixture(t)
-	for i := 1; i <= 5; i++ {
-		in := instruction{"size", string(rune('0' + i)), "1024", "768"}
-		if s.drawing(in) != (i < 5) {
-			t.Fatal("aggregate canvas quota failed")
-		}
+	accepted := 0
+	for i := 1; i <= 32 && s.drawing(instruction{"size", strconv.Itoa(i), "1024", "768"}); i++ {
+		accepted++
+	}
+	if want := viewerPixels/(1024*768) - 1; accepted != want {
+		t.Fatalf("aggregate canvas quota took %d full layers beside the display, want %d", accepted, want)
 	}
 	for i := 0; i < 9; i++ {
 		if s.drawing(instruction{"push", "0"}) != (i < 8) {
@@ -224,6 +226,156 @@ func TestViewerRefusesMalformedAndExcessDrawing(t *testing.T) {
 		}
 	}
 }
+
+// Re-encoding takes the fastest level, and falls back to the default when the
+// fastest does not fit, so speed never refuses an image the default would take.
+func TestViewerNormalizesFastAndFallsBack(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 320, 200))
+	for y := range 200 {
+		for x := range 320 {
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 7 % 251), G: uint8(y*13 + x/9), B: uint8((x ^ y) % 17 * 15), A: 255})
+		}
+	}
+	var def, fast bytes.Buffer
+	if png.Encode(&def, img) != nil || (&png.Encoder{CompressionLevel: png.BestSpeed}).Encode(&fast, img) != nil {
+		t.Fatal("fixture encoding failed")
+	}
+	if fast.Len() <= def.Len() {
+		t.Fatalf("fixture does not separate the levels: fastest %d, default %d bytes", fast.Len(), def.Len())
+	}
+	for _, tc := range []struct {
+		name  string
+		limit int
+		want  int
+	}{{"room for the fastest", fast.Len(), fast.Len()}, {"room for the default only", def.Len(), def.Len()}, {"room for neither", def.Len() - 1, 0}} {
+		out, ok := normalizedPNG(img, tc.limit)
+		if ok != (tc.want != 0) || len(out) != tc.want {
+			t.Fatalf("%s: got %d bytes (%v), want %d", tc.name, len(out), ok, tc.want)
+		}
+		if ok {
+			assertViewerPixels(t, def.Bytes(), out)
+		}
+	}
+}
+
+// The browser's Guacamole client never acknowledges image blobs, so a desktop's
+// images must flow with no browser ack at all: a real Windows session ended
+// after 128 chunks on one stream. guacd reuses a few stream numbers and opens
+// fresh ones; the bookkeeping stays bounded, and still takes only acks for
+// chunks that were sent.
+func TestViewerImagesNeedNoBrowserAck(t *testing.T) {
+	s, remote, input := viewerFixture(t)
+	go func() {
+		for range input { // the native side: the viewer's own acks to guacd
+		}
+	}()
+	if _, err := s.Read(make([]byte, 128)); err != nil {
+		t.Fatal("fixed viewport missing")
+	}
+	data := base64.StdEncoding.EncodeToString(fixturePNG(t))
+	const images = 500
+	go func() {
+		for i := range images {
+			stream := strconv.Itoa(i % 2)
+			if i >= 200 {
+				stream = strconv.Itoa(1000 + i)
+			}
+			for _, in := range []instruction{{"img", stream, "14", "0", "image/png", "0", "0"}, {"blob", stream, data}, {"end", stream}} {
+				if writeInstruction(remote, in) != nil {
+					return
+				}
+			}
+		}
+	}()
+	got := bufio.NewReader(s)
+	for ends := 0; ends < images; {
+		in, err := readInstruction(got)
+		if err != nil {
+			t.Fatalf("the desktop ended after %d images with no browser ack", ends)
+		}
+		if in[0] == "end" {
+			ends++
+		}
+	}
+	s.metaMu.Lock()
+	streams, most := len(s.acks), 0
+	for _, n := range s.acks {
+		most = max(most, n)
+	}
+	s.metaMu.Unlock()
+	if streams > 128 || most > 128 || streams == 0 {
+		t.Fatalf("ack bookkeeping: %d streams, %d chunks at most", streams, most)
+	}
+	if _, err := s.Write(encodedInstruction(t, instruction{"ack", "0", "OK", "0"})); err != nil {
+		t.Fatal("an ack for chunks that were sent was refused")
+	}
+	if _, err := s.Write(encodedInstruction(t, instruction{"ack", "77", "OK", "0"})); err != errNative {
+		t.Fatal("an ack for a stream never sent was accepted")
+	}
+}
+
+// What a real Windows Server 2025 desktop needs at full HD fits: the display, the
+// copy of it guacd keeps in a buffer the same size (which ended every session
+// at the old budget), and every pointer FreeRDP may hold at the native cap, at
+// the largest size it allows. Past that the budget still refuses.
+func TestViewerHoldsAFullHDWindowsDesktop(t *testing.T) {
+	a, _ := net.Pipe()
+	defer a.Close()
+	s := newViewerStream(&nativeStream{raw: a, reader: bufio.NewReader(a), stop: func() bool { return true }, workspace: true})
+	for _, in := range []instruction{{"size", "0", "1920", "1080"}, {"copy", "0", "0", "0", "1920", "1080", "14", "-1", "0", "0"}} {
+		if !s.drawing(in) {
+			t.Fatalf("a full-HD desktop was refused at %v", in)
+		}
+	}
+	for i := range 33 { // 32 cached pointers and the one in use
+		if !s.drawing(instruction{"size", strconv.Itoa(-2 - i), "384", "384"}) {
+			t.Fatalf("pointer %d of 384 by 384 was refused", i+1)
+		}
+	}
+	for i := range 64 { // and small buffers besides
+		if !s.drawing(instruction{"size", strconv.Itoa(-100 - i), "96", "96"}) {
+			t.Fatalf("small buffer %d was refused", i+1)
+		}
+	}
+	refused := false
+	for i := range 8 {
+		if !s.drawing(instruction{"copy", "0", "0", "0", "1920", "1080", "14", strconv.Itoa(-200 - i), "0", "0"}) {
+			refused = true
+			break
+		}
+	}
+	if !refused {
+		t.Fatal("eight more full-HD buffers fitted: the pixel budget is not bounding")
+	}
+}
+
+// guacd numbers buffers past -32 while few are live, as a real Windows desktop
+// showed (-33 with 30 live); the live count and the pixels are what bound them.
+func TestViewerTakesGuacdBufferNumbersAndBoundsLiveLayers(t *testing.T) {
+	s, _, _ := viewerFixture(t)
+	if !s.drawing(instruction{"rect", "-33", "8", "8", "26", "24"}) || !s.drawing(instruction{"size", "-1100", "64", "64"}) || !s.drawing(instruction{"dispose", "-1100"}) {
+		t.Fatal("a buffer number guacd uses was refused")
+	}
+	for _, in := range []instruction{{"size", "-4097", "64", "64"}, {"rect", "-99999", "0", "0", "1", "1"}, {"dispose", "-4097"}, {"size", "33", "64", "64"}, {"size", "-0064", "64", "64"}} {
+		if s.drawing(in) {
+			t.Fatalf("a layer number outside the range was accepted: %v", in)
+		}
+	}
+	// Up to the bound, the display included; disposing one frees its place.
+	s, _, _ = viewerFixture(t)
+	for i := 1; len(s.layers) < viewerLayers; i++ {
+		if !s.drawing(instruction{"size", strconv.Itoa(-i), "64", "64"}) {
+			t.Fatalf("live layer %d refused", len(s.layers)+1)
+		}
+	}
+	if s.drawing(instruction{"size", "-2000", "64", "64"}) || len(s.layers) != viewerLayers {
+		t.Fatal("a layer past the live bound was accepted")
+	}
+	if !s.drawing(instruction{"dispose", "-1"}) || !s.drawing(instruction{"size", "-2000", "64", "64"}) {
+		t.Fatal("a disposed layer did not free its place")
+	}
+}
+
 func TestViewerInvalidPNGIsNeverForwarded(t *testing.T) {
 	for _, payload := range [][]byte{[]byte("bad png"), fixturePNG(t)[:33]} {
 		s, remote, _ := viewerFixture(t)
@@ -258,7 +410,7 @@ func FuzzViewerDrawingSchemas(f *testing.F) {
 		// start, so this schema pass performs no transport I/O or native launch.
 		viewer := newViewerStream(nil)
 		_ = viewer.drawing(in)
-		if len(viewer.layers) > 32 || len(viewer.images) > 8 {
+		if len(viewer.layers) > viewerLayers || len(viewer.images) > 8 {
 			t.Fatal("viewer state quota escaped")
 		}
 	})

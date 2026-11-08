@@ -75,7 +75,11 @@ also refuses a mismatched decision before serving its workspace. An RDP
 certificate outside its validity period makes only that target unavailable for
 new approval and launch; the gateway still starts and other targets work.
 
-The interface shows verified, changed, unverified or unavailable. Changed and
+An RDP server that now shows another certificate than its pin stops a connection
+marked as accepted: the interface shows it as stopped, the session ends before
+any worker starts, and only an administrator can settle it (`INSTALL.md`).
+
+The interface shows verified, stopped, changed, unverified or unavailable. Changed and
 unverified rows have no Connect link. The review dialog shows the previous
 fingerprint and the full current target; Cancel leaves authority unchanged.
 Lost/uncertain responses do not display successful confirmation. The input clears

@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/denyfirst/keybash/internal/rdpcert"
 )
 
 var hybridConfirmation = [19]byte{3, 0, 0, 19, 14, 0xd0, 0, 0, 0, 1, 0, 2, 0, 8, 0, 2, 0, 0, 0}
@@ -308,14 +310,14 @@ func TestRDPNegotiationRejectsDowngradeMalformedAndOversized(t *testing.T) {
 	for _, i := range []int{0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 13, 14, 15, 16, 17, 18} {
 		p := hybridConfirmation
 		p[i] ^= 1
-		if acceptConfirmation(p) {
+		if rdpcert.AcceptConfirmation(p) {
 			t.Fatalf("changed byte %d accepted", i)
 		}
 	}
 	for _, protocol := range []byte{0, 1, 3, 4, 8, 16, 255} {
 		p := hybridConfirmation
 		p[15] = protocol
-		if acceptConfirmation(p) {
+		if rdpcert.AcceptConfirmation(p) {
 			t.Fatalf("downgrade/mode %d accepted", protocol)
 		}
 	}
@@ -487,7 +489,7 @@ func FuzzRDPConfirmation(f *testing.F) {
 		}
 		var p [19]byte
 		copy(p[:], b)
-		if acceptConfirmation(p) && (b[15] != 2 || b[11] != 2 || b[3] != 19) {
+		if rdpcert.AcceptConfirmation(p) && (b[15] != 2 || b[11] != 2 || b[3] != 19) {
 			t.Fatal("invalid NLA selection")
 		}
 	})

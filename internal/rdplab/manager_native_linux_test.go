@@ -164,6 +164,9 @@ func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Ident
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=40s") // #nosec G204 -- this exact compiled fixture and fixed selector.
 	cmd.Dir = "/tmp"
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGED_SOCKET=" + c.SocketPath, "KEYBASH_MANAGED_ADDRESS=" + address, "KEYBASH_MANAGED_PIN=" + base64.StdEncoding.EncodeToString(pin.der), "KEYBASH_MANAGED_MODE=" + mode}
+	if pin.name == exactLeaf {
+		cmd.Env = append(cmd.Env, "KEYBASH_MANAGED_EXACT=1")
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: c.GatewayGID, Groups: []uint32{c.GatewayGID}}}
 	if len(during) > 0 {
 		output := &rdpServiceOutput{ready: make(chan struct{})}
@@ -224,7 +227,7 @@ func (o *rdpServiceOutput) snapshot() string { o.mu.Lock(); defer o.mu.Unlock();
 
 func TestNativeRDPManagerAuthenticationRevocationAndRefusal(t *testing.T) {
 	c := nativeManagerFixture(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- ServeRDPManager(ctx, c) }()
@@ -278,6 +281,31 @@ func TestNativeRDPManagerAuthenticationRevocationAndRefusal(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("managed TLS refusal lacked evidence")
 	}
+	// The exact mark crosses the manager in its sealed file like a name does:
+	// Windows' own certificate authenticates, and a renewed one is refused.
+	windows := windowsCertificate(t, key, nil)
+	exact, e := NewExactIdentity(windows.Certificate[0])
+	if e != nil {
+		t.Fatal(e)
+	}
+	address, marker = nativePeerWithInput(t, ctx, nativePrefix(t), windows, "Synthetic-managed-NLA-password")
+	runManagedGateway(t, c, address, exact, "positive", 65533)
+	select {
+	case <-marker.ready:
+	default:
+		t.Fatal("manager success did not authenticate native NLA with an exact certificate")
+	}
+	renewed := windowsCertificate(t, key, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(779) })
+	refusal, noCredentials = nativeTLSRefusalPeer(t, renewed, tls.VersionTLS12, 2)
+	runManagedGateway(t, c, refusal, exact, "refusal", 65533)
+	select {
+	case e := <-noCredentials:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-ctx.Done():
+		t.Fatal("managed exact refusal lacked evidence")
+	}
 	t.Log("Actual isolated RDP manager: dedicated identity, minimal runtime, NLA, pin-before-CredSSP, wrong peer and revoked I/O passed")
 }
 
@@ -293,6 +321,9 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 		t.Fatal("fixture pin failed")
 	}
 	pin, e := NewIdentity("synthetic-rdp.invalid", p)
+	if os.Getenv("KEYBASH_MANAGED_EXACT") == "1" {
+		pin, e = NewExactIdentity(p)
+	}
 	if e != nil {
 		t.Fatal("fixture identity failed")
 	}

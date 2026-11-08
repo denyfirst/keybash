@@ -50,6 +50,96 @@ host filesystem visibility is not sandboxed, guacd is not running, and even
 approved destinations are denied. It does not prove a usable approved-only
 worker or offline operation of the complete product.
 
+## Update, 2026-11-06: Windows' own certificate at a literal address
+
+The maintainer decided that a Windows server added on the Servers page uses
+the certificate Windows makes for itself, checked by its fingerprint.
+
+The rule above (a matching DNS SAN, digital-signature usage) cannot take that
+certificate. A real one from Windows Server 2025 is self-signed, names the
+computer as its common name, has no alternative names, carries key encipherment
+and data encipherment without digital signature, and lasts six months. A small
+office network also has no DNS name for it, and giving it one would mean
+editing the Keybash host.
+
+So a server at a **literal address** is identified by its exact certificate,
+as an SSH server is by its host key:
+
+- **Kept:** the exact DER pin, on the worker's own handshake before CredSSP;
+  TLS >=1.2 with ECDHE and an AEAD; HYBRID; the validity period; not a CA and no
+  certificate signing; no unhandled critical extension; the serverAuth EKU; the
+  key strengths; OpenSSL's auth level 2. No ignore option, and first-use trust
+  only as an administrator's explicit, marked choice (see the update below).
+- **Dropped for this kind only:** the name check, because there is no name.
+- **Changed for this kind only:** the key usage must allow digital signature or
+  key encipherment, which is what TLS itself asks of a server certificate.
+- **A server with a DNS name keeps every rule above,** name and digital
+  signature included. The rules come from the target, never from the
+  certificate: `identityFor` and `Identity.boundTo` keep the two kinds apart.
+
+The worker learns the kind from its sealed name file, which then holds exactly
+`@exact-leaf`. `@` is in no DNS name, so a missing, empty or cut file refuses and
+never relaxes the check.
+
+What this rests on is the comparison, so it cannot be skipped. The administrator
+runs a fixed command on the server's own screen and pastes the line it prints;
+the gateway reads the certificate again and compares. The API never hands out
+the fingerprint of a certificate it read, so no page or script can accept what
+the server shows without someone looking at the server. An attacker between the
+gateway and the server shows a different certificate, and it does not match.
+
+A renewal changes the pin. On the Windows Server 2025 test machine a certificate
+made after removing the old one had a new key, so accepting a renewal because
+the key stayed the same was not built: every change takes this comparison. The
+real six-month renewal has not been seen yet.
+
+The gateway reads each RDP server's certificate hourly and just before a session
+opens. These reads hold no credential and authorize nothing, as the section above
+requires: they only tell an administrator and the person connecting, earlier and
+more clearly, that the pin no longer matches. A read that fails decides nothing,
+and the worker checks its own handshake whatever a read saw.
+
+Each read is a complete TLS handshake, so the server proves it holds the key of
+the certificate it shows. Go's TLS library finishes a handshake with a
+certificate nobody has trusted yet only with `InsecureSkipVerify`, so
+`rdpcert.Read` sets it, and code scanners report it. It is safe there because
+nothing is sent over that connection, which never leaves the function; the read
+holds no credential; and the certificate it returns is only ever compared with a
+pin or with the line an administrator pasted. Taking the certificate from a
+failed library check instead would avoid the flag, but the server would no
+longer prove it holds the key, so that was not done.
+
+## Update, 2026-11-08: the check is the default, not the only way
+
+The maintainer decided that the comparison above is chosen by default but may
+be left out, for an administrator who prefers speed on a network they trust.
+The add and **Check identity** sheets carry one box, "Check it on the server's
+own screen", ticked when they open:
+
+- **Ticked:** as above; nothing else changes.
+- **Unticked:** the page says what it risks, and the gateway pins the
+  certificate it reads at that moment, after the same rules, networks, fresh
+  factor and limits. The server is marked **Not checked** for administrators
+  and for every person who connects to it, until an administrator compares it
+  with **Check now**. That takes the console line only and asks nobody to
+  accept anything again. Accepting the same certificate without the check
+  never undoes a check.
+- **What it risks:** whoever is between the gateway and the server at that
+  moment is pinned instead of the server, and the Windows passwords people send
+  reach them. Every later change is still caught as with any pin: a renewal is
+  never accepted by itself, it still raises the alarm, and each person still
+  accepts a new pin on their own connection.
+- **Only here:** a server from the operator's file, a server with a DNS name
+  and an SSH server never carry the mark. The API takes `unchecked` only in an
+  RDP server's fingerprint field, where it cannot be taken for a fingerprint.
+
+The worker's own handshake still holds the exact pin either way.
+
+A real Windows Server 2025 also showed that its negotiation answer sets a flag
+(0x20) the original rule refused. Flags only say what else a server could do,
+and nothing acts on them, so any flags are now taken with HYBRID; anything but
+HYBRID is still refused.
+
 ## Next adoption gate
 
 guacd/FreeRDP are native candidates, not shipped dependencies. Capture exact

@@ -62,9 +62,13 @@ type remoteConfig struct {
 	// each change (reloadServersLocked); access lists who may use each.
 	targets             map[string]RemoteTarget
 	access              map[string]map[string]bool
-	networks, protected []netip.Prefix // see TargetNetworks
+	unchecked           map[string]bool // RDP servers pinned without the console check
+	networks, protected []netip.Prefix  // see TargetNetworks
 	scan                func(context.Context, *targetguard.NamedTarget) (ssh.PublicKey, error)
-	scans               int // running now
+	scanRDP             func(context.Context, *targetguard.NamedTarget) (*x509.Certificate, error)
+	scans               int               // running now
+	watching            bool              // see WatchCertificates
+	seen                map[string]string // fingerprint each RDP server last showed
 	rdp                 RDPWorker
 	leases              map[[32]byte]*remoteLease
 }
@@ -93,7 +97,7 @@ func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget,
 	if !limits.Valid() || len(targets) > 256 {
 		return nil, errRefused
 	}
-	config := &remoteConfig{limits: limits, targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease), scan: scanHostKey}
+	config := &remoteConfig{limits: limits, targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease), scan: scanHostKey, scanRDP: scanCertificate, seen: make(map[string]string)}
 	seen := make(map[string]bool, len(targets))
 	var addresses []netip.Addr
 	for _, t := range targets {
@@ -149,6 +153,11 @@ func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget,
 	l.remote = config
 	// A store whose servers cannot be read starts with none.
 	_ = l.reloadServersLocked()
+	config.watching = l.watchEvery > 0 && rdp != nil
+	if config.watching {
+		l.background.Add(1)
+		go l.certificateWatch(l.watchEvery)
+	}
 	l.mu.Unlock()
 	return l, nil
 }
@@ -351,6 +360,12 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
 	defer stopSocket()
+	// Told before any worker exists or a password goes anywhere; the worker
+	// would refuse this certificate on its own handshake anyway.
+	if l.serverShowsAnother(ctx, target) {
+		_ = socket.Write(ctx, websocket.MessageText, []byte(`{"type":"identity-changed"}`))
+		return
+	}
 	setupTimer := time.AfterFunc(10*time.Second, lease.cancel)
 	stream, e := l.openRemote(ctx, target, credential)
 	setupTimer.Stop()
@@ -458,7 +473,9 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			status = 404
 			return
 		}
-		result = describeTarget(target, l.now())
+		view := describeTarget(target, l.now())
+		view.Unchecked = l.remote.unchecked[target.ID]
+		result = view
 		return
 	}
 	if r.Method == "GET" && r.URL.Path == "/api/connections" {
@@ -471,7 +488,13 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		for _, item := range items {
 			// A server this account may no longer use shows as unavailable.
 			target, _ := l.targetLocked(s, item.Target)
-			rows = append(rows, describeConnection(item, target, l.now()))
+			row := describeConnection(item, target, l.now())
+			// Only an administrator can settle this one: the server shows another
+			// certificate than the pin this person accepted.
+			if row.Trust == "verified" && l.certificateChangedLocked(target) {
+				row.Trust = "stopped"
+			}
+			rows = append(rows, row)
 		}
 		result = rows
 		return

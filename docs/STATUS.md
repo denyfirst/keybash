@@ -52,11 +52,17 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   key is kept in a separate file.
 - SSH keys (Ed25519, ECDSA, RSA 2048 and up) with passphrases, and passwords.
   Keybash can also make an Ed25519 key whose private half it never shows.
-- Administrators add SSH servers on the Servers page, inside the target
-  networks only. Keybash reads the host key, they compare its fingerprint on
-  the server's console, and it is read again and pinned when added. Nobody
+- Administrators add SSH and Windows RDP servers on the Servers page, inside the
+  target networks only. Keybash reads the host key or certificate, they check it
+  on the server's own console, and it is read again and pinned when added. For a
+  Windows desktop they may leave the check out; the server is then marked Not
+  checked, for them and for the people who use it, until they check it. Nobody
   can use a new server until an administrator chooses who may; taking someone
   off, a new key or removing the server ends open sessions at once.
+- When Windows renews its RDP certificate, nothing accepts it by itself. Keybash
+  reads each desktop's certificate hourly and before each session: the person
+  connecting is told no password was sent, an administrator sees a mark and a
+  line on every page, and a fingerprint from the server's own screen settles it.
 - Every server has an access list, auditors read the page, and nothing is
   open to everyone. Servers in an older `targets.json` move into the page once
   at the first start, open to exactly the people who already connect to them.
@@ -98,8 +104,12 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   maintainer's own review do not count as one.
 - **The audit record** for auditors: administrator actions, who connected where
   and when, and a readable log of typed command lines.
-- **Adding RDP servers on the Servers page**, and shared keys a user connects
-  with without seeing them.
+- **Shared keys** a user connects with without seeing them.
+- **Mail or other notice outside Keybash:** an administrator learns of a renewed
+  certificate only at their next sign-in. A certificate renewed with the same key
+  is treated like any other: it has not been seen, and each one is checked.
+- **Adding RDP to an installation built without it:** `upgrade.sh` keeps the mode
+  it finds, so this needs a reinstall.
 - **SFTP**, an SSH bastion or jump host, and an RDP domain field.
 - **Online or scheduled backups**, a passphrase on the backup file, and instance
   key rotation.

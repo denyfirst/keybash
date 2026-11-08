@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/rdpcert"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/ssh"
@@ -28,13 +29,14 @@ const maxServers = 256
 
 var errDuplicate = errors.New("server already listed")
 
-// webServer is one server: at one literal address, or at a DNS name that
-// resolves only to its pinned addresses (RDP needs the name for its
-// certificate). It is reachable only inside the target networks root set for
-// the gateway, and only by the accounts on its access list: none when an
-// administrator adds it. A server moved in from the file keeps its ID, so
-// connections to it keep their approval; one removed on the page stays as a
-// marker so the file never brings it back.
+// webServer is one server: at one literal address, where its pinned key or
+// exact certificate is the whole identity, or at a DNS name that resolves only
+// to its pinned addresses and that its certificate also names. It is reachable
+// only inside the target networks root set for the gateway, and only by the
+// accounts on its access list: none when an administrator adds it. A server
+// moved in from the file keeps its ID, so connections to it keep their
+// approval; one removed on the page stays as a marker so the file never brings
+// it back.
 type webServer struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -45,6 +47,7 @@ type webServer struct {
 	Port        uint16   `json:"port"`
 	HostKey     []byte   `json:"host_key,omitempty"`    // SSH: wire format, Ed25519 only
 	Certificate []byte   `json:"certificate,omitempty"` // RDP: the pinned leaf, DER
+	Unchecked   bool     `json:"unchecked,omitempty"`   // RDP at an address: pinned without the console check
 	Access      []string `json:"access,omitempty"`      // account IDs, sorted
 	AddedBy     string   `json:"added_by,omitempty"`    // empty when moved from the file
 	Added       int64    `json:"added"`
@@ -103,13 +106,23 @@ func (w webServer) valid() bool {
 	switch w.Protocol {
 	case "ssh":
 		_, ok := ed25519HostKey(w.HostKey)
-		return ok && len(w.Certificate) == 0
+		return ok && len(w.Certificate) == 0 && !w.Unchecked
 	case "rdp":
-		if w.Hostname == "" || len(w.HostKey) != 0 || len(w.Certificate) == 0 || len(w.Certificate) > 32*1024 {
+		// Only an administrator's own choice leaves a server unchecked: never a
+		// server from the file, and never one with a name to verify.
+		if len(w.HostKey) != 0 || len(w.Certificate) == 0 || len(w.Certificate) > rdpcert.MaxCertificate || w.Unchecked && (w.FromFile || w.Hostname != "") {
 			return false
 		}
 		cert, e := x509.ParseCertificate(w.Certificate)
-		return e == nil && cert.VerifyHostname(w.Hostname) == nil
+		if e != nil {
+			return false
+		}
+		// At a literal address the exact certificate is the identity; with a
+		// DNS name the certificate must also name the server.
+		if w.Hostname == "" {
+			return rdpcert.Check(cert) == nil
+		}
+		return cert.VerifyHostname(w.Hostname) == nil
 	}
 	return false
 }
@@ -219,11 +232,22 @@ func overlaps(list []webServer, w webServer) bool {
 // addServer stores a new SSH server at a literal address with nobody on its
 // access list. A listed server at the same address and port is refused.
 func (s *Store) addServer(actor, name, address string, port uint16, hostKey []byte, now time.Time) (string, error) {
+	return s.addWebServer(actor, webServer{Name: name, Protocol: "ssh", Address: address, Port: port, HostKey: bytes.Clone(hostKey)}, now)
+}
+
+// addRDPServer stores a new RDP server at a literal address, identified by its
+// exact certificate, with nobody on its access list. Unchecked records that the
+// administrator chose not to compare it on the server's own screen.
+func (s *Store) addRDPServer(actor, name, address string, port uint16, certificate []byte, unchecked bool, now time.Time) (string, error) {
+	return s.addWebServer(actor, webServer{Name: name, Protocol: "rdp", Address: address, Port: port, Certificate: bytes.Clone(certificate), Unchecked: unchecked}, now)
+}
+
+func (s *Store) addWebServer(actor string, w webServer, now time.Time) (string, error) {
 	id, e := randomID()
 	if e != nil {
 		return "", e
 	}
-	w := webServer{ID: id, Name: name, Protocol: "ssh", Address: address, Port: port, HostKey: bytes.Clone(hostKey), AddedBy: actor, Added: now.Unix()}
+	w.ID, w.AddedBy, w.Added = id, actor, now.Unix()
 	if !w.valid() {
 		return "", errRefused
 	}
@@ -278,6 +302,21 @@ func (s *Store) repinServer(actor, id string, hostKey []byte) error {
 			return errRefused
 		}
 		w.HostKey = bytes.Clone(hostKey)
+		return nil
+	})
+}
+
+// repinCertificate replaces an RDP server's pinned certificate. Connections to
+// it then show it as changed until each owner accepts the new one. Checked on
+// the console, the server is checked from then on; pinned without that check,
+// a new certificate leaves it unchecked, and the same one leaves it as it was.
+func (s *Store) repinCertificate(actor, id string, certificate []byte, unchecked bool) error {
+	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error {
+		if w.Protocol != "rdp" {
+			return errRefused
+		}
+		w.Unchecked = unchecked && (w.Unchecked || !bytes.Equal(w.Certificate, certificate))
+		w.Certificate = bytes.Clone(certificate)
 		return nil
 	})
 }

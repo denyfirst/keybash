@@ -96,6 +96,15 @@ func (f *flow) reserve() (uint32, bool) {
 	return f.sent, true
 }
 
+// Input a browser may send each second, besides output credit. A desktop being
+// dragged on a fast display sends a mouse move per display frame plus a sync
+// reply per drawn frame, which went past 128 against a real Windows server; the
+// byte budget is what bounds the data.
+const (
+	inputFramesPerSecond = 512
+	inputBytesPerSecond  = 256 * 1024
+)
+
 // outputLimit <= 0 means no lifetime ceiling; the window, the bounded queues
 // and the session's idle/absolute lifetime bound an owned stream instead.
 func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, stream Stream, outputLimit int, wait time.Duration) {
@@ -222,7 +231,7 @@ func run(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, s
 		}
 		frames++
 		inputBytes += len(data)
-		if frames > 128 || inputBytes > 256*1024 {
+		if frames > inputFramesPerSecond || inputBytes > inputBytesPerSecond {
 			return
 		}
 		next := inputFrame{columns: command.Columns, rows: command.Rows}

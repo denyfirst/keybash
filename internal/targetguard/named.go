@@ -26,8 +26,8 @@ type NamedTarget struct {
 // NewAddressTarget approves one literal address and port for a server that has
 // no DNS name, which is common on a small office network. Nothing is ever
 // resolved, so there is no name to rebind or poison; the policy still decides
-// at the dial. Hostname returns the canonical address, a label only: an SSH
-// connection's identity remains its approved host key.
+// at the dial. Hostname returns the canonical address, a label only: the
+// connection's identity remains its approved host key or exact certificate.
 func NewAddressTarget(policy *Policy, address netip.Addr, port uint16) (*NamedTarget, error) {
 	if port == 0 || !address.IsValid() || address.Zone() != "" {
 		return nil, ErrInvalidPolicy
@@ -40,8 +40,8 @@ func NewAddressTarget(policy *Policy, address netip.Addr, port uint16) (*NamedTa
 		pins: map[netip.Addr]struct{}{endpoint.Addr(): {}}, literal: endpoint}, nil
 }
 
-// Literal reports whether the target is a bare address with no DNS name.
-// Protocols whose identity check needs a name (RDP certificates) refuse it.
+// Literal reports whether the target is a bare address with no DNS name, so no
+// identity check may rely on a name.
 func (t *NamedTarget) Literal() bool { return t != nil && t.literal.IsValid() }
 
 // NewNamedTarget validates every pin against the installation policy and copies
