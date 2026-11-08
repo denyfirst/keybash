@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -494,5 +495,110 @@ func TestViewerRevocationEndsAPacedWait(t *testing.T) {
 	s.sleep = func(time.Duration) { s.closed.Store(true) }
 	if s.drawing(instruction{"copy", "0", "0", "0", "1", "1", "14", "0", "0", "0"}) {
 		t.Fatal("revoked viewer kept drawing after its pause")
+	}
+}
+
+// guacd ends a user it hears nothing from for 15 seconds, and a hidden page
+// runs Guacamole's keep-alive as rarely as once a minute: the gateway keeps its
+// own link to guacd alive while the browser has been heard from recently.
+func TestViewerKeepsGuacdAliveWhileTheBrowserIsHeard(t *testing.T) {
+	s, _, input := viewerFixture(t)
+	var clock atomic.Int64
+	clock.Store(time.Unix(1_000_000, 0).UnixNano())
+	s.clock = func() time.Time { return time.Unix(0, clock.Load()) }
+	s.heard.Store(clock.Load())
+	ticks := make(chan time.Time)
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); s.keepAlive(ticks) }()
+	next := func(want instruction) {
+		t.Helper()
+		select {
+		case in := <-input:
+			if !bytes.Equal(encodedInstruction(t, in), encodedInstruction(t, want)) {
+				t.Fatalf("guacd got %q, want %q", in, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("guacd did not get %q", want)
+		}
+	}
+	ticks <- time.Time{}
+	next(instruction{"nop"})
+	clock.Add(int64(browserQuiet))
+	ticks <- time.Time{}
+	next(instruction{"nop"})
+	// Silent for longer than browserQuiet: guacd is left to end the session.
+	// The second tick returns only once the first has been handled.
+	clock.Add(int64(time.Second))
+	ticks <- time.Time{}
+	ticks <- time.Time{}
+	mouse := instruction{"mouse", "40", "50", "0"}
+	if _, err := s.Write(encodedInstruction(t, mouse)); err != nil {
+		t.Fatal("valid browser input refused")
+	}
+	next(mouse)
+	// That input was the browser being heard again.
+	ticks <- time.Time{}
+	next(instruction{"nop"})
+	_ = s.Close()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("keep-alive outlived its stream")
+	}
+}
+
+// A browser that falls behind on frames, as a hidden page does, is not ended:
+// the oldest unanswered frame is forgotten and a late answer to it dropped.
+// Only answers to frames actually sent reach guacd.
+func TestViewerForgetsOldFramesAndDropsTheirAnswers(t *testing.T) {
+	s, remote, input := viewerFixture(t)
+	_, _ = s.Read(make([]byte, 128))
+	const first, count = 1000, viewerSyncs + 2
+	go func() {
+		for i := range count {
+			if writeInstruction(remote, instruction{"sync", strconv.Itoa(first + i)}) != nil {
+				return
+			}
+		}
+	}()
+	r := bufio.NewReader(s)
+	for i := range count {
+		in, err := readInstruction(r)
+		if err != nil || len(in) != 2 || in[0] != "sync" || in[1] != strconv.Itoa(first+i) {
+			t.Fatal("a frame past the remembered ones ended the session")
+		}
+	}
+	if len(s.syncs) != viewerSyncs {
+		t.Fatalf("remembered %d unanswered frames, want %d", len(s.syncs), viewerSyncs)
+	}
+	newest, oldest := strconv.Itoa(first+count-1), strconv.Itoa(first+2)
+	for _, answer := range []string{strconv.Itoa(first), newest, newest, oldest, strconv.Itoa(first + 1)} {
+		if _, err := s.Write(encodedInstruction(t, instruction{"sync", answer})); err != nil {
+			t.Fatalf("answer to frame %s ended the session", answer)
+		}
+	}
+	if _, err := s.Write(encodedInstruction(t, instruction{"nop"})); err != nil {
+		t.Fatal("valid browser input refused")
+	}
+	for _, want := range []instruction{{"sync", newest}, {"sync", oldest}, {"nop"}} {
+		select {
+		case in := <-input:
+			if !bytes.Equal(encodedInstruction(t, in), encodedInstruction(t, want)) {
+				t.Fatalf("guacd got %q, want %q", in, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("guacd did not get %q", want)
+		}
+	}
+	for _, answer := range []string{strconv.Itoa(first + count), "0" + newest, "-1", ""} {
+		s, remote, _ := viewerFixture(t)
+		_, _ = s.Read(make([]byte, 128))
+		go func() { _ = writeInstruction(remote, instruction{"sync", newest}) }()
+		if in, err := readInstruction(bufio.NewReader(s)); err != nil || in[0] != "sync" {
+			t.Fatal("valid frame refused")
+		}
+		if _, err := s.Write(encodedInstruction(t, instruction{"sync", answer})); err != errNative {
+			t.Fatalf("answer to a frame never sent (%q) accepted", answer)
+		}
 	}
 }
