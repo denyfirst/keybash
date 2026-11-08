@@ -98,6 +98,16 @@ requires: they only tell an administrator and the person connecting, earlier and
 more clearly, that the pin no longer matches. A read that fails decides nothing,
 and the worker checks its own handshake whatever a read saw.
 
+Each read is a complete TLS handshake, so the server proves it holds the key of
+the certificate it shows. Go's TLS library finishes a handshake with a
+certificate nobody has trusted yet only with `InsecureSkipVerify`, so
+`rdpcert.Read` sets it, and code scanners report it. It is safe there because
+nothing is sent over that connection, which never leaves the function; the read
+holds no credential; and the certificate it returns is only ever compared with a
+pin or with the line an administrator pasted. Taking the certificate from a
+failed library check instead would avoid the flag, but the server would no
+longer prove it holds the key, so that was not done.
+
 ## Next adoption gate
 
 guacd/FreeRDP are native candidates, not shipped dependencies. Capture exact

@@ -66,6 +66,11 @@ func TestBrowserServersPage(t *testing.T) {
 	lines := bufio.NewScanner(output)
 	for lines.Scan() {
 		if lines.Text() == "KB_RENEW" {
+			// Windows renews months after the adding, not within the same
+			// minute of reads, so this one's limit does not reach the check.
+			l.mu.Lock()
+			delete(l.attempts, "scan:alice")
+			l.mu.Unlock()
 			reads.set("10.20.0.8:3389", renewed)
 			l.readCertificates(ctx)
 			continue

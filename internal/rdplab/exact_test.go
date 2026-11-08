@@ -9,10 +9,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
-	"net"
 	"net/netip"
-	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -88,6 +87,18 @@ func TestExactIdentityTakesWindowsOwnCertificate(t *testing.T) {
 	}
 }
 
+// openingContext notes that opening a session got as far as looking at it, the
+// first thing it does after its identity check.
+type openingContext struct {
+	context.Context
+	reached *atomic.Bool
+}
+
+func (c openingContext) Err() error {
+	c.reached.Store(true)
+	return c.Context.Err()
+}
+
 // An exact identity goes only with a literal address, and a named identity only
 // with a name: neither can stand in for the other at any layer.
 func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
@@ -145,35 +156,22 @@ func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
 	if _, e := newNativeBroker(literal, byName); e != errNative {
 		t.Fatal("a named identity was brokered to a literal address")
 	}
-	// A mismatch is refused before the manager is even asked.
-	socket := filepath.Join(t.TempDir(), "manager.sock")
-	listener, e := net.Listen("unix", socket)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer listener.Close()
-	asked := make(chan struct{}, 8)
-	go func() {
-		for {
-			conn, e := listener.Accept()
-			if e != nil {
-				return
-			}
-			_ = conn.Close()
-			asked <- struct{}{}
-		}
-	}()
-	worker := ManagerWorker{SocketPath: socket}
-	if s, e := worker.open(context.Background(), named, exact, "synthetic-user", "synthetic-password"); s != nil || e != errNative {
+	// A mismatch stops at the check, before anything else happens; the match
+	// after it shows that the check is what stopped it.
+	var reached atomic.Bool
+	opening := openingContext{context.Background(), &reached}
+	worker := ManagerWorker{SocketPath: "/synthetic/rdp-manager.sock"}
+	if s, e := worker.open(opening, named, exact, "synthetic-user", "synthetic-password"); s != nil || e != errNative {
 		t.Fatal("a session opened with an exact identity at a name")
 	}
-	if s, e := worker.open(context.Background(), literal, byName, "synthetic-user", "synthetic-password"); s != nil || e != errNative {
+	if s, e := worker.open(opening, literal, byName, "synthetic-user", "synthetic-password"); s != nil || e != errNative {
 		t.Fatal("a session opened with a named identity at an address")
 	}
-	select {
-	case <-asked:
-		t.Fatal("the manager was asked for a mismatched identity")
-	case <-time.After(50 * time.Millisecond):
+	if reached.Load() {
+		t.Fatal("a mismatched identity went past the check")
+	}
+	if s, e := worker.open(opening, literal, exact, "synthetic-user", "synthetic-password"); s != nil || e != errNative || !reached.Load() {
+		t.Fatal("a matching identity did not go on towards the manager")
 	}
 	// The rules come from the target, never from the certificate.
 	windows := windowsCertificate(t, nil, nil).Certificate[0]
