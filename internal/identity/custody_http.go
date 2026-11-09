@@ -14,21 +14,35 @@ import (
 )
 
 // workspaceBody is the workspace document's body tag, which names the
-// session's stage when the page is served.
-const workspaceBody = `<body class="workspace" data-screen="account">`
+// session's stage when the page is served; workspaceRoot is its root tag,
+// which carries how the account chose its pages to look.
+const (
+	workspaceBody = `<body class="workspace" data-screen="account">`
+	workspaceRoot = `<html lang="en">`
+)
 
 // serveWorkspace sends the workspace already in the layout of the session's
 // stage, so moving between pages never shows the second-factor layout for a
-// moment. The stage only picks a layout: every API call checks it again.
-func serveWorkspace(w http.ResponseWriter, stage string) {
+// moment, and in the account's chosen look, so it never flashes the other
+// scheme. The stage only picks a layout: every API call checks it again. The
+// look is written only from its few fixed words.
+func serveWorkspace(w http.ResponseWriter, stage string, look preferences) {
 	data, err := web.Assets.ReadFile("custody-workspace.html")
-	if err != nil || bytes.Count(data, []byte(workspaceBody)) != 1 || stage != "enroll" && stage != "challenge" && stage != "ready" {
+	if err != nil || bytes.Count(data, []byte(workspaceBody)) != 1 || bytes.Count(data, []byte(workspaceRoot)) != 1 || stage != "enroll" && stage != "challenge" && stage != "ready" || !look.valid() {
 		refuse(w, http.StatusInternalServerError)
 		return
 	}
 	tag := strings.TrimSuffix(workspaceBody, ">") + ` data-stage="` + stage + `">`
+	root := strings.TrimSuffix(workspaceRoot, ">")
+	if look.Theme != "" {
+		root += ` data-theme="` + look.Theme + `"`
+	}
+	if look.Menu != "" {
+		root += ` data-menu="` + look.Menu + `"`
+	}
+	data = bytes.Replace(data, []byte(workspaceBody), []byte(tag), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(bytes.Replace(data, []byte(workspaceBody), []byte(tag), 1))
+	_, _ = w.Write(bytes.Replace(data, []byte(workspaceRoot), []byte(root+">"), 1))
 }
 
 func readFields(w http.ResponseWriter, r *http.Request, limit int, names ...string) (map[string]string, bool) {
@@ -245,9 +259,9 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if page {
-		stage := s.stage
+		stage, owner := s.stage, s.owner
 		l.mu.Unlock()
-		serveWorkspace(w, stage)
+		serveWorkspace(w, stage, l.store.preferencesOf(owner))
 		return
 	}
 	if r.URL.Path == "/api/session" && r.Method == "GET" {
@@ -372,6 +386,25 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 401)
 			return
 		}
+	}
+	if r.URL.Path == "/api/preferences" && r.Method == "POST" {
+		// How this account's pages look, for every role: it reaches no server
+		// and changes no security, so a ready session is enough, as for a
+		// card's mark. Both choices come together, as exact words.
+		owner := s.owner
+		l.mu.Unlock()
+		fields, ok := readFields(w, r, 256, "theme", "menu")
+		p, valid := preferenceInput(fields["theme"], fields["menu"])
+		if !ok || !valid {
+			refuse(w, 400)
+			return
+		}
+		if l.store.setPreferences(owner, p) != nil {
+			refuse(w, 503)
+			return
+		}
+		w.WriteHeader(204)
+		return
 	}
 	if r.URL.Path == "/api/users" || strings.HasPrefix(r.URL.Path, "/api/users/") {
 		l.usersHTTP(w, r, id, s)

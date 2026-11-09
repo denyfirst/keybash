@@ -224,10 +224,11 @@ func (s *Store) deleteAccount(actor, target string) error {
 	})
 }
 
-// deleteOwned removes every key, password and connection an account owns.
+// deleteOwned removes every key, password and connection an account owns,
+// and how its pages look.
 func (s *Store) deleteOwned(tx *bolt.Tx, owner string) error {
 	prefix := []byte(owner + "/")
-	for _, name := range [][]byte{credentialBucket, connectionBucket} {
+	for _, name := range [][]byte{credentialBucket, connectionBucket, preferenceBucket} {
 		b := tx.Bucket(name)
 		if b == nil {
 			continue

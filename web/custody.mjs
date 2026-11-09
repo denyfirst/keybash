@@ -912,6 +912,34 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && $('menu-toggle')?.getAttribute('aria-expanded') === 'true') { setMenu(false); $('menu-toggle').focus(); }
 });
 document.addEventListener('click', event => { if (!event.target.closest?.('.rail')) setMenu(false); });
+// How this account's pages look: light or dark, and the menu open or
+// collapsed. The page arrives in the saved look; a change shows at once and is
+// kept with the account on the server, never in the browser. Saves go one
+// after another, each with the look as it is when it goes.
+const root = document.documentElement, systemDark = matchMedia('(prefers-color-scheme: dark)');
+const looksDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : systemDark.matches;
+let saving = Promise.resolve();
+function showLook() {
+  for (const button of document.querySelectorAll('.theme-toggle')) button.setAttribute('aria-label', looksDark() ? 'Switch to the light colour scheme' : 'Switch to the dark colour scheme');
+  const collapse = $('rail-collapse'), collapsed = root.dataset.menu === 'collapsed';
+  collapse?.setAttribute('aria-expanded', String(!collapsed));
+  collapse?.setAttribute('aria-label', collapsed ? 'Expand the menu' : 'Collapse the menu');
+}
+function changeLook(change) {
+  change(); showLook();
+  saving = saving.then(() => request('/api/preferences', 'POST', { theme: root.dataset.theme ?? 'system', menu: root.dataset.menu ?? 'open' }))
+    .catch(() => notice('The look was not saved: it lasts until you leave this page.'));
+}
+for (const button of document.querySelectorAll('.theme-toggle')) {
+  button.addEventListener('click', () => {
+    const next = looksDark() ? 'light' : 'dark';
+    button.dataset.turning = ''; setTimeout(() => { delete button.dataset.turning; }, 500);
+    changeLook(() => { root.dataset.theme = next; });
+  });
+}
+$('rail-collapse')?.addEventListener('click', () => changeLook(() => { if (root.dataset.menu === 'collapsed') delete root.dataset.menu; else root.dataset.menu = 'collapsed'; }));
+systemDark.addEventListener('change', showLook);
+showLook();
 $('show-claim')?.addEventListener('click', () => showForm('claim'));
 $('show-recover')?.addEventListener('click', () => showForm('recover'));
 $('show-signin')?.addEventListener('click', () => showForm('signin'));
