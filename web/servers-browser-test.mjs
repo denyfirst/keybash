@@ -6,6 +6,8 @@ const config = JSON.parse(readFileSync(0, 'utf8'));
 assert.equal(new URL(config.Origin).hostname, '127.0.0.1');
 const browser = await chromium.launch({ headless: true, ...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
 const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 1000 } });
+// What the page copies is recorded here, never written to the workstation's clipboard.
+await context.addInitScript(() => { globalThis.copiedText = []; Object.defineProperty(navigator, 'clipboard', { value: { writeText(text) { copiedText.push(text); return Promise.resolve(); } } }); });
 const page = await context.newPage(); const errors = [], external = [];
 page.on('pageerror', error => errors.push(error.name));
 page.on('request', request => { if (!request.url().startsWith(config.Origin + '/')) external.push('external request'); });
@@ -97,6 +99,11 @@ try {
   await page.locator('#server-paste').waitFor({ state: 'visible' }); await settled();
   assert(await page.locator('#server-check').isHidden(), 'a desktop showed the SSH comparison');
   assert.match(await page.locator('#server-command').textContent(), /Win32_TSGeneralSetting.*SHA256/s);
+  // The command's own Copy copies it whole and says so on itself, not under the sheet.
+  await page.locator('#server-copy').click(); await page.waitForFunction(() => copiedText.length === 1); await settled();
+  assert.equal(await page.evaluate(() => copiedText[0]), await page.locator('#server-command').textContent(), 'Copy took other text than its command');
+  assert.equal(await page.locator('#server-copy .copy-label').textContent(), 'Copied'); assert.equal(await sheetNotice('server-dialog').textContent(), '', 'the copy was said under the sheet');
+  await page.waitForFunction(() => document.querySelector('#server-copy .copy-label').textContent === 'Copy', undefined, { timeout: 5000 });
   assert.doesNotMatch(await page.locator('#server-dialog').textContent(), /SHA256:[a-f0-9]{64}/, 'the page showed the fingerprint it asks for');
   await page.locator('#server-submit').click(); await sheetNotice('server-dialog').filter({ hasText: /Paste the whole line/ }).waitFor(); await settled();
   await page.locator('#server-answer').fill(config.Renewed); await page.locator('#server-submit').click();

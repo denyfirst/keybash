@@ -135,10 +135,11 @@ resize is) and its screen size is the bar's own menu; text goes both ways with
 Copy and Paste as in a terminal. Copy is marked by a dot when the remote copied
 text, which is never written to the local clipboard unasked; a paste of several
 lines or hidden characters is shown for review first, and a remote copy over
-32 KiB is dropped with a notice instead of ending the desktop. On an SSH page, "+"
-opens another session to the same server in a tab of its own; an RDP page
-offers none, since a second sign-in as the same user takes over the first
-desktop. "Full screen" (the whole session, for both) asks the browser for
+32 KiB is dropped with a notice instead of ending the desktop. A session page
+offers no second session: another one, to the same server or another, comes
+from Connect on the workspace, in a tab of its own (a second RDP sign-in as
+the same user takes over the first desktop). "Full screen" (the whole session,
+for both) asks the browser for
 full screen and, where it allows (Chromium), Keyboard Lock, so Esc, the
 Windows key and Alt+Tab reach the remote and holding Esc leaves. There the bar
 steps aside and comes back at the top edge or from its handle. Both need a

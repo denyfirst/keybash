@@ -82,20 +82,6 @@ body.session-page main { padding: 0; }
 #status::before { content: ""; width: 0.45rem; height: 0.45rem; background: currentColor; border-radius: 50%; }
 #status.connected { color: var(--term-live); }
 #status.connected::before { box-shadow: 0 0 0 3px color-mix(in srgb, var(--term-live) 22%, transparent); }
-/* Another session to the same server, in a tab of its own. */
-.new-session {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  color: var(--term-faint);
-  border: 1px solid var(--term-rule);
-  border-radius: 6px;
-}
-.new-session:hover { color: var(--term-ink); background: var(--term-rule); }
-.new-session[hidden] { display: none; }
-
 .tools { display: flex; flex: none; align-items: center; gap: 0.2rem; }
 /* As specific as the base rule that gives a form's main button its sheen. */
 .session :is(.tools, .menu-anchor) > button:not(.secondary):not(.ghost) {

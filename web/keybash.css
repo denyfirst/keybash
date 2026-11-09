@@ -180,6 +180,9 @@ p { margin: 0 0 0.9rem; }
 .wordmark-stop { color: var(--brand); }
 /* Keybash's own mark ends in its colour; the denyfirst credit keeps the red. */
 .wordmark .wordmark-stop { color: var(--tool); }
+/* Pointed at, the mark's stop blinks like a cursor. */
+a.wordmark:hover .wordmark-stop { animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { visibility: hidden; } }
 
 /* ── Fields and buttons ────────────────────────────────────────────────── */
 label {
@@ -429,6 +432,13 @@ body.workspace {
   color: var(--ink-faint);
 }
 .rail-item[aria-current="page"] .rail-glyph { color: var(--tool); }
+/* Icons have two tones: a soft body in their own colour, and solid marks. */
+svg .g-soft { fill: color-mix(in srgb, currentColor 16%, transparent); }
+svg .g-dot { fill: currentColor; stroke: none; }
+.rail-item[aria-current="page"] .g-soft { fill: color-mix(in srgb, currentColor 26%, transparent); }
+/* Pointed at, a page's icon leans toward it in Keybash's colour. */
+.rail-glyph { transition: transform 0.2s ease, color 0.2s ease; }
+.rail-item:hover .rail-glyph { color: var(--tool); transform: translateX(2px) scale(1.08); }
 .rail-foot {
   margin-top: auto;
   padding: 1.2rem 0.75rem 0;
@@ -447,17 +457,22 @@ body.workspace {
   padding: 0 2rem;
   border-bottom: 1px solid var(--rule);
 }
-.topbar-path { margin: 0; font-size: 0.82rem; color: var(--ink-faint); }
+.topbar-path { display: flex; align-items: center; margin: 0; font-family: var(--mono); font-size: 0.8rem; color: var(--ink-faint); }
 .topbar-path strong { font-weight: 500; color: var(--ink); }
 .topbar-slash { margin: 0 0.35rem; }
-/* Rows stay short enough to read across on a wide screen: about 976 px of
-   content beside the menu. */
+/* The place, read like a prompt. */
+.topbar-path::before { content: "❯" / ""; margin-right: 0.55rem; font-weight: 700; color: var(--tool); }
+/* The page uses the width a wide screen has, up to about 1500 px, in the
+   middle of the space beside the menu; the bar above and the line below line
+   up with it. Running text keeps its own shorter measure. */
 body.workspace main {
   flex: 1;
   width: 100%;
-  max-width: 65rem;
+  max-width: 96rem;
+  margin-inline: auto;
   padding: 2rem 2rem 3rem;
 }
+body.workspace :is(.topbar, .colophon) { padding-inline: max(2rem, calc((100% - 96rem) / 2 + 2rem)); }
 .work-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.8rem; }
 .work-heading p { margin: 0; color: var(--ink-soft); }
 .page-actions { display: flex; gap: 0.6rem; }
@@ -545,11 +560,24 @@ button.link-button:hover:not(:disabled) { color: var(--link); background: none; 
 }
 
 /* ── Signal: the few places Keybash's colour shows itself ──────────────── */
-/* A soft light of the product colour behind the top of every workspace page. */
+/* A soft light of the product colour behind the top of every workspace page,
+   over a fine grid of points that fades out as the page goes down. */
 .workspace-main {
+  position: relative;
+  isolation: isolate;
   background:
     radial-gradient(56rem 22rem at 78% -6rem, color-mix(in srgb, var(--tool) 9%, transparent), transparent 70%),
     var(--paper);
+}
+.workspace-main::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: -1;
+  height: 20rem;
+  pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--ink-faint) 30%, transparent) 1px, transparent 1.5px) 0 0 / 22px 22px;
+  mask-image: linear-gradient(to bottom, #000000, transparent);
 }
 /* The current page in the menu: tinted, with a bar of the colour beside it. */
 .rail-item { position: relative; }
@@ -570,6 +598,9 @@ a.connect {
 }
 button:not(.secondary):not(.ghost):not(.link-button):not(:disabled):hover,
 a.connect:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); }
+/* A press gives a little, like a key. */
+button, a.connect { transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s; }
+button:active:not(:disabled), a.connect:active { transform: translateY(1px); }
 /* Sign-in: the same light behind the card, and what Keybash keeps under it. */
 body.signin-page {
   background:

@@ -30,14 +30,6 @@ export function endedMessage(data){
  return match&&Object.hasOwn(endings,match[1])?endings[match[1]]:null;
 }
 export function remoteErrorMessage(error){if(error?.code==='capacity')return 'The server is at its session limit. Close an open session, or try again in a moment.';if(error?.code==='rate')return 'Too many connection attempts. Wait a moment and try again.';return 'The connection was refused. If your session ended, sign in again.';}
-// Another session to the same server opens in its own tab, as Connect does,
-// so each tab stays one session that closing it ends. SSH only: a second RDP
-// sign-in as the same user takes over the first desktop instead.
-export function offerNewSession(){
- const record=document.body.dataset.connection,link=document.getElementById('new-session');
- if(!link||document.body.dataset.ownedRemote!=='ssh'||!/^[a-f0-9]{32}$/.test(record??''))return;
- link.href=`/remote/ssh/${record}`;link.hidden=false;
-}
 // Full screen also asks the browser for the keyboard where it can (Chrome,
 // Edge), so Esc, the Windows key and Alt+Tab reach the remote; the browser
 // then says to hold Esc to leave. Elsewhere Esc leaves as usual.
