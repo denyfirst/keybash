@@ -7,8 +7,11 @@
   amber and green already say whether a server's identity is verified, changed
   or not yet checked, and no control is drawn in a colour that means a verdict.
 
-  The scheme follows the system. There is no switch: a switch remembers its
-  choice in browser storage, and Keybash pages store nothing in the browser.
+  The scheme follows the system until a person chooses light or dark. The
+  choice is kept with their account on this server, never in the browser,
+  and arrives as data-theme on the page's root, so the page is right from its
+  first paint. Every dark rule is written twice, for the system's dark unless
+  light was chosen and for a chosen dark, the same (web/assets_test.go).
 
   Every colour text is set in is checked for contrast against every surface in
   both schemes (web/assets_test.go), so a token below is a promise, not a taste.
@@ -80,7 +83,30 @@
 }
 
 @media screen and (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    --paper:        #0b0d11;
+    --paper-sunk:   #141821;
+    --card:         #11141b;
+    --ink:          #eef1f6;
+    --ink-soft:     #b3bac7;
+    --ink-faint:    #949cad;
+    --rule:         #242a35;
+    --brand:        #ed4552;
+    --tool:         #22d3ee;
+    --link:         #22d3ee;
+    --accent:       #0e7490;
+    --accent-hover: #0b6680;
+    --strong:       #6fbf92;
+    --weak:         #d9a23c;
+    --insecure:     #ff7c86;
+    --edge:         rgba(0, 0, 0, 0.45);
+    --shadow:       0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.3);
+    --shadow-lg:    0 24px 60px rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+@media screen {
+  :root[data-theme="dark"] {
     --paper:        #0b0d11;
     --paper-sunk:   #141821;
     --card:         #11141b;
@@ -633,10 +659,18 @@ body.signin-page {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+/* On dark surfaces the sheen greys the colour out; the plain face is brighter. */
 @media screen and (prefers-color-scheme: dark) {
-  /* On dark surfaces the sheen greys the colour out; the plain face is brighter. */
-  button:not(.secondary):not(.ghost):not(:disabled), a.connect { background-image: none; }
-  .workspace-main {
+  :root:not([data-theme="light"]) :is(button:not(.secondary):not(.ghost):not(:disabled), a.connect) { background-image: none; }
+  :root:not([data-theme="light"]) .workspace-main {
+    background:
+      radial-gradient(56rem 24rem at 78% -6rem, color-mix(in srgb, var(--tool) 13%, transparent), transparent 70%),
+      var(--paper);
+  }
+}
+@media screen {
+  :root[data-theme="dark"] :is(button:not(.secondary):not(.ghost):not(:disabled), a.connect) { background-image: none; }
+  :root[data-theme="dark"] .workspace-main {
     background:
       radial-gradient(56rem 24rem at 78% -6rem, color-mix(in srgb, var(--tool) 13%, transparent), transparent 70%),
       var(--paper);
@@ -645,3 +679,81 @@ body.signin-page {
 
 /* Waiting on a request: the pointer says so; the buttons keep their faces. */
 body[data-busy] button:disabled { cursor: progress; }
+
+/* ── The look: light or dark, and the menu open or collapsed ──────────── */
+/* Both are kept with the account and arrive on the page's root (data-theme,
+   data-menu). Their buttons are quiet squares in the bar: the menu's before
+   the place, the scheme's at the far end; on a phone the scheme's sits by
+   Sign out in the menu. */
+.topbar { justify-content: flex-start; gap: 0.7rem; }
+.topbar .theme-toggle { margin-left: auto; }
+button.rail-collapse, button.theme-toggle { flex: none; width: 2.25rem; height: 2.25rem; min-height: 0; margin: 0; padding: 0; color: var(--ink-soft); }
+button.rail-collapse .button-glyph { width: 1.15rem; height: 1.15rem; transition: transform 0.25s ease; }
+.theme-glyph { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.3s ease; }
+/* The scheme's button shows where it goes: a moon on light, a sun on dark. */
+.theme-toggle .theme-sun { display: none; }
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-toggle .theme-sun { display: inline; }
+  :root:not([data-theme="light"]) .theme-toggle .theme-moon { display: none; }
+}
+@media screen {
+  :root[data-theme="dark"] .theme-toggle .theme-sun { display: inline; }
+  :root[data-theme="dark"] .theme-toggle .theme-moon { display: none; }
+}
+.theme-toggle:hover .theme-glyph { transform: rotate(18deg); }
+.theme-toggle[data-turning] .theme-glyph { animation: turn 0.5s ease; }
+@keyframes turn { from { transform: rotate(-120deg) scale(0.5); } }
+.rail-foot .theme-toggle { display: none; }
+#logout .button-glyph { width: 1.05rem; height: 1.05rem; }
+@media (max-width: 760px) {
+  .rail-foot { gap: 0.5rem; }
+  .rail-foot .theme-toggle { display: inline-flex; margin-left: auto; }
+}
+/* A finger needs 44 px, as everywhere else. */
+@media (max-width: 760px), (pointer: coarse) {
+  button.rail-collapse, button.theme-toggle { width: 2.75rem; height: 2.75rem; }
+}
+
+/* Collapsed, the menu keeps its icons: each page's name, still read aloud,
+   shows beside its icon when pointed at or focused. */
+@media (min-width: 761px) {
+  body.workspace { transition: grid-template-columns 0.25s ease; }
+  :root[data-menu="collapsed"] body.workspace { grid-template-columns: 4.6rem minmax(0, 1fr); }
+  :root[data-menu="collapsed"] .rail { padding: 1.6rem 0.7rem; /* above the page, so a name shown beside an icon is not drawn under it */ z-index: 3; }
+  :root[data-menu="collapsed"] .rail-identity { justify-content: center; margin: 0 0 2.2rem; }
+  :root[data-menu="collapsed"] :is(.rail-identity .tag, .wordmark-rest, .rail-caption) { display: none; }
+  :root[data-menu="collapsed"] .rail-item { justify-content: center; padding: 0.55rem 0; }
+  :root[data-menu="collapsed"] .rail-item[aria-current="page"]::before { left: -0.45rem; }
+  :root[data-menu="collapsed"] :is(.rail-label, .rail-user-name) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  :root[data-menu="collapsed"] :is(.rail-item, #logout):is(:hover, :focus-visible) .rail-label {
+    top: 50%;
+    left: calc(100% + 0.7rem);
+    z-index: 20;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    padding: 0.3rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--paper);
+    background: var(--ink);
+    border-radius: 6px;
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-50%);
+    animation: peek 0.15s ease;
+  }
+  @keyframes peek { from { transform: translate(-0.4rem, -50%); } }
+  :root[data-menu="collapsed"] .rail-badge { position: absolute; top: 0.15rem; right: 0.2rem; margin: 0; }
+  :root[data-menu="collapsed"] .rail-foot { padding: 1rem 0 0; }
+  :root[data-menu="collapsed"] .rail-user { justify-content: center; }
+  :root[data-menu="collapsed"] #logout { position: relative; padding: 0.6rem 0; }
+  :root[data-menu="collapsed"] .rail-collapse .button-glyph { transform: scaleX(-1); }
+}

@@ -544,9 +544,14 @@ button.server-icon:hover:not(:disabled) { box-shadow: 0 0 0 3px color-mix(in srg
    the ink; a black mark on a dark page is drawn in ink. */
 .server-icon[data-tone=light] .system-mark { fill: color-mix(in srgb, var(--mark) 50%, #000000); }
 @media screen and (prefers-color-scheme: dark) {
-  .server-icon[data-tone=light] .system-mark { fill: var(--mark); }
-  .server-icon[data-tone=dim] .system-mark { fill: color-mix(in srgb, var(--mark) 55%, #ffffff); }
-  .server-icon[data-tone=dark] .system-mark { fill: var(--ink); }
+  :root:not([data-theme="light"]) .server-icon[data-tone=light] .system-mark { fill: var(--mark); }
+  :root:not([data-theme="light"]) .server-icon[data-tone=dim] .system-mark { fill: color-mix(in srgb, var(--mark) 55%, #ffffff); }
+  :root:not([data-theme="light"]) .server-icon[data-tone=dark] .system-mark { fill: var(--ink); }
+}
+@media screen {
+  :root[data-theme="dark"] .server-icon[data-tone=light] .system-mark { fill: var(--mark); }
+  :root[data-theme="dark"] .server-icon[data-tone=dim] .system-mark { fill: color-mix(in srgb, var(--mark) 55%, #ffffff); }
+  :root[data-theme="dark"] .server-icon[data-tone=dark] .system-mark { fill: var(--ink); }
 }
 .field-label { margin: 1.1rem 0 0.4rem; font-size: 0.86rem; font-weight: 600; color: var(--ink-soft); }
 .field-label .optional { font-weight: 400; color: var(--ink-faint); }

@@ -47,14 +47,14 @@ const (
 
 // backupBuckets is every namespace a backup carries, in file order. A store
 // holding anything else is refused rather than copied in part. The
-// connections and servers namespaces are optional, as on open.
+// connections, servers and preferences namespaces are optional, as on open.
 type backupBucket struct {
 	id       uint8
 	name     []byte
 	optional bool
 }
 
-var backupBuckets = []backupBucket{{1, metaBucket, false}, {2, accountBucket, false}, {3, nameBucket, false}, {4, credentialBucket, false}, {5, connectionBucket, true}, {6, serverBucket, true}}
+var backupBuckets = []backupBucket{{1, metaBucket, false}, {2, accountBucket, false}, {3, nameBucket, false}, {4, credentialBucket, false}, {5, connectionBucket, true}, {6, serverBucket, true}, {7, preferenceBucket, true}}
 
 type backupFile struct {
 	Header, Sealed []byte // Header is also the sealed body's associated data
@@ -242,6 +242,16 @@ func (s *Store) verifyAll(tx *bolt.Tx) (BackupSummary, error) {
 		return BackupSummary{}, errRefused
 	}
 	if summary.Connections, e = owned(connectionBucket, 128, 2048, func(owner, id string) error { _, e := s.connection(tx, owner, id); return e }); e != nil {
+		return BackupSummary{}, errRefused
+	}
+	// At most one look per account, kept under the account's own name.
+	if _, e = owned(preferenceBucket, 1, 256, func(owner, id string) error {
+		if id != owner {
+			return errRefused
+		}
+		_, _, e := s.preference(tx, owner)
+		return e
+	}); e != nil {
 		return BackupSummary{}, errRefused
 	}
 	// Each server record names itself, within the quota, and lists only
