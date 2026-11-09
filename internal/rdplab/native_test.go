@@ -53,6 +53,14 @@ func TestNativePlanEnforcesNLAChannelsAndRedactsCredentials(t *testing.T) {
 	if values["disable-bitmap-caching"] != "" || values["disable-offscreen-caching"] != "" {
 		t.Fatal("an RDP cache was turned off")
 	}
+	// Text is drawn as Windows draws it for its own client, in its theme; the
+	// costly effects stay at guacd's defaults.
+	if values["enable-font-smoothing"] != "true" || values["enable-theming"] != "true" {
+		t.Fatal("the desktop is drawn without ClearType or its theme")
+	}
+	if values["enable-wallpaper"] != "" || values["enable-full-window-drag"] != "" || values["enable-menu-animations"] != "" || values["enable-desktop-composition"] != "" {
+		t.Fatal("a costly desktop effect was turned on")
+	}
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
 		formatted := fmt.Sprintf(verb, p)
 		if strings.Contains(formatted, p.user) || strings.Contains(formatted, p.password) {
