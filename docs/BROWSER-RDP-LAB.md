@@ -46,6 +46,11 @@ The application uses the upstream renderer rather than implementing RDP.
   Canonical base64, dimension bounds and complete PNG decoding precede forwarding.
   Decoded pixels are re-encoded as a static PNG (also at most 256 KiB); remote
   metadata, APNG control/frames and trailing/polyglot data are not forwarded.
+  Keybash's own minimal encoder writes it: IHDR, one IDAT and IEND, 8-bit RGB
+  or RGBA, every row Sub-filtered, a large image compressed in bands at once
+  that join into one zlib stream. It is about three times faster than the
+  standard encoder on a desktop-like 1080p frame (`BenchmarkNormalizeDesktop`,
+  `BenchmarkFastNormalizeDesktop`); other layouts fall back to the standard one.
   Image starts, ends and drawing operations retain their original order;
   normalized blob bodies are inserted immediately before their image end.
   Groups wait until all active images complete, with a 2 MiB staging ceiling.

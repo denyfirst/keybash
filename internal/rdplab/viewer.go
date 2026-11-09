@@ -227,10 +227,14 @@ const (
 )
 
 // normalizedPNG re-encodes a decoded image for the browser within limit bytes.
-// The fastest level first: re-encoding cost several times decoding on a real
-// desktop, and a few more bytes are cheap next to that delay. When that does
-// not fit, the default level, so speed never refuses an image that fitted.
+// Our own minimal encoder first (fastpng.go): re-encoding cost several times
+// decoding on a real desktop, and that delay is what a person sees. Then the
+// standard encoder, fastest level and default, so speed never refuses an
+// image that fitted.
 func normalizedPNG(decoded image.Image, limit int) ([]byte, bool) {
+	if out, ok := fastPNG(decoded, limit); ok {
+		return out, true
+	}
 	var out bytes.Buffer
 	fast := png.Encoder{CompressionLevel: png.BestSpeed}
 	if fast.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {

@@ -78,7 +78,10 @@ of the same size, and each pointer FreeRDP holds is a buffer of up to 384 by
 no such ack. The build caps FreeRDP's pointer cache at 32 (FreeRDP takes the
 smaller of both sides' sizes; it keeps the server's large-pointer sizes
 whatever the client asks). The RDP bitmap and offscreen caches never become
-browser buffers and stay on. `TestNativeRDPExactCertificateAuthenticates`
+browser buffers and stay on. Text is drawn with ClearType and windows in their
+theme (`enable-font-smoothing`, `enable-theming`), as Windows' own client
+shows them; wallpaper, menu animations, live window dragging and desktop
+composition stay off, as guacd's defaults (`TestNativePlanEnforcesNLAChannelsAndRedactsCredentials`). `TestNativeRDPExactCertificateAuthenticates`
 checks the pointer cache the server settles on, with the sample server
 offering 128. guacd ends a user silent for 15 seconds, and a hidden browser
 page ran Guacamole's keep-alive too rarely: the gateway keeps its own link

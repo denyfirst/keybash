@@ -86,6 +86,10 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 		// Fixed lab viewport. Dynamic display channels need their own native
 		// callback/resize evidence before enabling them in a browser workspace.
 		"resize-method": "", "client-name": "Keybash-lab", "disable-gfx": "true", "force-lossless": "true",
+		// How the desktop looks: ClearType text and the window theme, as Windows'
+		// own client shows them. Only what the server draws changes; wallpaper,
+		// animations and live window dragging stay off, as guacd's defaults.
+		"enable-font-smoothing": "true", "enable-theming": "true",
 	}
 	if p.workspace {
 		values["disable-copy"] = "false"
