@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/png"
 	"io"
@@ -52,17 +53,24 @@ type viewerStream struct {
 }
 
 func newViewerStream(native *nativeStream) *viewerStream {
-	s := &viewerStream{native: native, layers: map[int]viewerLayer{0: {1024, 768, 0}},
+	// A workspace starts at the size its desktop was opened at; the lab and
+	// anything else at its fixed 1024 by 768.
+	w, h := 1024, 768
+	if native != nil && native.workspace && desktopSize(native.width, native.height) {
+		w, h = native.width, native.height
+	}
+	s := &viewerStream{native: native, layers: map[int]viewerLayer{0: {w, h, 0}},
 		images: make(map[string]*viewerImage), acks: make(map[string]int), newestSync: -1, keys: make(map[uint32]bool), done: make(chan struct{})}
+	s.outputClip.dropOversize = true
 	s.heard.Store(time.Now().UnixNano())
-	s.width.Store(1024)
-	s.height.Store(768)
+	s.width.Store(int64(w))
+	s.height.Store(int64(h))
 	var initial bytes.Buffer
 	s.workspace = native != nil && native.workspace
 	if s.workspace {
 		_ = writeInstruction(&initial, instruction{"keybash", "1", "text", "display-update"})
 	}
-	_ = writeInstruction(&initial, instruction{"size", "0", "1024", "768"})
+	_ = writeInstruction(&initial, instruction{"size", "0", strconv.Itoa(w), strconv.Itoa(h)})
 	s.ready.Reset(initial.Bytes())
 	return s
 }
@@ -689,14 +697,21 @@ func (s *viewerStream) clipboardOutput(in instruction) (bool, bool) {
 		return true, false
 	}
 	text, complete, e := s.outputClip.accept(in)
-	if e != nil {
+	// A copy larger than a page takes is dropped and the page told, in fixed
+	// words; ending the desktop over it bounded nothing.
+	tooLarge := errors.Is(e, ErrClipboardTooLarge)
+	if e != nil && !tooLarge {
 		return true, false
 	}
 	if complete {
 		if !s.copies.allow(1, clipboardBurst, clipboardPerSecond, s.now()) || strings.ContainsRune(text, 0) {
 			return true, false
 		}
-		if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, instruction{"keybash-clipboard", text}) != nil {
+		told := instruction{"keybash-clipboard", text}
+		if tooLarge {
+			told = instruction{"keybash-clipboard-large"}
+		}
+		if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, told) != nil {
 			return true, false
 		}
 	}

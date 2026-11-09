@@ -48,6 +48,22 @@ type RDPRequest struct {
 	Target             *targetguard.NamedTarget
 	Certificate        []byte
 	Username, Password string
+	Width, Height      int // the page's desktop size (see desktopSize); 0 for the worker's default
+}
+
+// desktopSize reads the size a desktop page asks to start at: "1600x900",
+// canonical digits, even, 200 to 1920 wide and 200 to 1080 high, the same
+// bounds the page could ask for once connected.
+func desktopSize(raw string) (int, int, bool) {
+	ws, hs, found := strings.Cut(raw, "x")
+	w, e1 := strconv.Atoi(ws)
+	h, e2 := strconv.Atoi(hs)
+	ok := found && e1 == nil && e2 == nil && strconv.Itoa(w) == ws && strconv.Itoa(h) == hs &&
+		w >= 200 && w <= 1920 && h >= 200 && h <= 1080 && w%2 == 0 && h%2 == 0
+	if !ok {
+		return 0, 0, false
+	}
+	return w, h, true
 }
 
 func (RDPRequest) Format(w fmt.State, _ rune) {
@@ -276,7 +292,7 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 	lease.active, lease.cancel = true, cancel
 	return lease, target, credential, ctx, nil
 }
-func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential) (terminalweb.Stream, error) {
+func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential, width, height int) (terminalweb.Stream, error) {
 	if ctx.Err() != nil || !l.slot(ctx) {
 		return nil, errRefused
 	}
@@ -299,7 +315,7 @@ func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential) (ter
 	if t.Protocol == "ssh" {
 		return l.remote.ssh.OpenSSH(ctx, t.Target, t.Identity, c.Username, auth)
 	}
-	return l.remote.rdp.OpenRDP(ctx, RDPRequest{t.Target, append([]byte(nil), t.Identity...), c.Username, c.Secret})
+	return l.remote.rdp.OpenRDP(ctx, RDPRequest{t.Target, append([]byte(nil), t.Identity...), c.Username, c.Secret, width, height})
 }
 func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" || r.Header.Get("Origin") != l.origin || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
@@ -343,9 +359,20 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, ok := parseFields(data, 1024, "csrf", "lease")
+	if !ok {
+		// A desktop page also says the size its desktop starts at.
+		fields, ok = parseFields(data, 1024, "csrf", "lease", "size")
+	}
 	clear(data)
 	if !ok {
 		return
+	}
+	width, height := 0, 0
+	if size, sized := fields["size"]; sized {
+		var valid bool
+		if width, height, valid = desktopSize(size); !valid {
+			return
+		}
 	}
 	l.mu.Lock()
 	if subtle.ConstantTimeCompare([]byte(fields["csrf"]), []byte(l.csrf(id))) != 1 {
@@ -360,6 +387,13 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, _ := tokenID(raw)
+	if width != 0 && target.Protocol != "rdp" {
+		lease.cancel(nil)
+		l.mu.Lock()
+		delete(l.remote.leases, key)
+		l.mu.Unlock()
+		return // a size belongs to a desktop only
+	}
 	defer func() { lease.cancel(nil); l.mu.Lock(); delete(l.remote.leases, key); l.mu.Unlock() }()
 	stopRequest := context.AfterFunc(r.Context(), func() { lease.cancel(nil) })
 	defer stopRequest()
@@ -372,7 +406,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setupTimer := time.AfterFunc(10*time.Second, func() { lease.cancel(nil) })
-	stream, e := l.openRemote(ctx, target, credential)
+	stream, e := l.openRemote(ctx, target, credential, width, height)
 	setupTimer.Stop()
 	if e != nil || stream == nil || ctx.Err() != nil {
 		if stream != nil {
