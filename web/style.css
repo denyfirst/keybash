@@ -98,7 +98,7 @@ body.session-page main { padding: 0; }
 
 .tools { display: flex; flex: none; align-items: center; gap: 0.2rem; }
 /* As specific as the base rule that gives a form's main button its sheen. */
-.session :is(.tools, .menu-anchor) > button:not(.secondary):not(.ghost), .screen {
+.session :is(.tools, .menu-anchor) > button:not(.secondary):not(.ghost) {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -116,13 +116,12 @@ body.session-page main { padding: 0; }
   box-shadow: none;
 }
 .session :is(.tools, .menu-anchor) > button:not(.secondary):not(.ghost):hover:not(:disabled),
-.screen:hover:has(select:enabled),
 .session .menu-anchor > button[aria-expanded="true"] {
   background: color-mix(in srgb, var(--term-ink) 10%, transparent);
   border-color: transparent;
   box-shadow: none;
 }
-:is(.tools, .menu-anchor) > button:focus-visible, .screen:focus-within { outline: 2px solid var(--term-tool); outline-offset: -2px; }
+:is(.tools, .menu-anchor) > button:focus-visible { outline: 2px solid var(--term-tool); outline-offset: -2px; }
 .session :is(.tools, .menu-anchor) > button:not(.secondary):not(.ghost):disabled { color: var(--term-faint); background: transparent; border-color: transparent; }
 .session .tools > button.end:not(.secondary):not(.ghost):hover:not(:disabled) { color: #ffffff; background: color-mix(in srgb, var(--term-brand) 82%, #000000); }
 .size { font-family: var(--mono); font-size: 0.72rem; font-weight: 400; white-space: nowrap; color: var(--term-faint); }

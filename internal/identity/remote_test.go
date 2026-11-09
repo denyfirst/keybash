@@ -34,6 +34,8 @@ import (
 
 type fixtureRDPWorker struct {
 	calls    atomic.Int32
+	width    atomic.Int64 // the size the last desktop was asked to start at
+	height   atomic.Int64
 	started  chan struct{}
 	release  chan struct{}
 	closed   chan struct{}
@@ -45,6 +47,8 @@ func (f *fixtureRDPWorker) OpenRDP(ctx context.Context, r RDPRequest) (terminalw
 		return nil, errRefused
 	}
 	f.calls.Add(1)
+	f.width.Store(int64(r.Width))
+	f.height.Store(int64(r.Height))
 	if f.started != nil {
 		close(f.started)
 	}
@@ -247,6 +251,9 @@ func TestOwnedRemoteSocketEchoLogoutAndLateSetup(t *testing.T) {
 				_, data, e := socket.Read(ctx)
 				if e != nil || string(data) != `{"type":"ready"}` {
 					t.Fatal("worker ready missing")
+				}
+				if worker.width.Load() != 0 || worker.height.Load() != 0 {
+					t.Fatal("a proof with no size asked for one")
 				}
 				if socket.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","columns":130,"rows":27}`)) != nil {
 					t.Fatal("resize write failed")
@@ -583,7 +590,7 @@ func TestExpiredRDPCertificateDisablesOnlyItsServer(t *testing.T) {
 	if !future.UsableAt(now.Add(90 * time.Minute)) {
 		t.Fatal("a future certificate did not become usable in its period")
 	}
-	_, _ = l.openRemote(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"})
+	_, _ = l.openRemote(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"}, 0, 0)
 	if _, ok := worker.got.(*sshkey.Password); !ok {
 		t.Fatal("the SSH server stopped working beside an expired RDP certificate")
 	}
@@ -668,4 +675,134 @@ func TestOwnedRemoteSessionsEndWithTheirReason(t *testing.T) {
 			t.Fatalf("stopping the gateway gave a reason: %s", reason)
 		}
 	})
+}
+
+// A desktop starts at the size its page asks for, within the bounds the page
+// could ask for once connected; any other size, or a size for a terminal,
+// opens nothing.
+func TestOwnedRemoteDesktopStartsAtThePageSize(t *testing.T) {
+	for raw, want := range map[string][2]int{"1600x900": {1600, 900}, "200x200": {200, 200}, "1920x1080": {1920, 1080}} {
+		if w, h, ok := desktopSize(raw); !ok || w != want[0] || h != want[1] {
+			t.Fatalf("%q refused", raw)
+		}
+	}
+	bad := []string{"", "1601x900", "1600x901", "198x900", "1922x900", "1600x198", "1600x1082", "01600x900", "1600x0900", "1600X900", "1600x", "x900", "1600x900x2", " 1600x900", "1600x900 ", "+1600x900", "-1600x900", "1600×900"}
+	for _, raw := range bad {
+		if _, _, ok := desktopSize(raw); ok {
+			t.Fatalf("%q accepted", raw)
+		}
+	}
+	server := httptest.NewUnstartedServer(nil)
+	origin := "https://" + server.Listener.Addr().String()
+	l, _, c, record, worker := remoteFixtureWithLimits(t, origin, sessionlimits.Limits{Total: 16, PerOwner: 8})
+	server.Config.Handler = l
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	server.StartTLS()
+	defer server.Close()
+	open := func(size string) string {
+		t.Helper()
+		raw := grantFixture(t, c, record)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		header := http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}
+		socket, _, e := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: header})
+		if e != nil {
+			t.Fatal("valid socket refused")
+		}
+		defer socket.CloseNow()
+		if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(map[string]string{"csrf": c.csrf, "lease": raw, "size": size}))) != nil {
+			t.Fatal("proof write failed")
+		}
+		_, data, e := socket.Read(ctx)
+		if e != nil {
+			return ""
+		}
+		return string(data)
+	}
+	for _, raw := range []string{"1601x900", "1922x1080", "01600x900", "1600x900x2"} {
+		if got := open(raw); got != "" || worker.calls.Load() != 0 {
+			t.Fatalf("a desktop opened at %q (%q)", raw, got)
+		}
+	}
+	if got := open("1600x900"); got != `{"type":"ready"}` || worker.width.Load() != 1600 || worker.height.Load() != 900 {
+		t.Fatalf("the page's size did not reach the desktop: %q %dx%d", got, worker.width.Load(), worker.height.Load())
+	}
+}
+
+// countingSSHWorker opens nothing and counts how often it was asked to.
+type countingSSHWorker struct{ calls atomic.Int32 }
+
+func (w *countingSSHWorker) OpenSSH(context.Context, *targetguard.NamedTarget, []byte, string, sshkey.Credential) (terminalweb.Stream, error) {
+	w.calls.Add(1)
+	return nil, errRefused
+}
+
+// A size belongs to a desktop: a terminal's socket that names one opens nothing.
+func TestOwnedRemoteTerminalTakesNoDesktopSize(t *testing.T) {
+	store, _, _ := bootstrapped(t)
+	_, _, codes := enrollFixture(t, store, "alice", time.Now())
+	_, hostKey, _ := ed25519.GenerateKey(rand.Reader)
+	hostSigner, _ := ssh.NewSignerFromKey(hostKey)
+	ip := netip.MustParseAddr("10.34.0.9")
+	policy, e := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(ip, 22)}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	named, e := targetguard.NewNamedTarget(policy, "ssh.invalid", 22, []netip.Addr{ip})
+	if e != nil {
+		t.Fatal(e)
+	}
+	target := RemoteTarget{strings.Repeat("c", 32), "Synthetic SSH", "ssh", named, hostSigner.PublicKey().Marshal()}
+	worker := &countingSSHWorker{}
+	server := httptest.NewUnstartedServer(nil)
+	origin := "https://" + server.Listener.Addr().String()
+	l, e := NewRemoteLab(origin, store, []RemoteTarget{target}, worker, nil)
+	if e != nil {
+		t.Fatal("remote constructor refused")
+	}
+	defer l.Close()
+	server.Config.Handler = l
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	server.StartTLS()
+	defer server.Close()
+	openTo(t, l, mustLookup(t, store, "alice").ID)
+	c := &custodyClient{t: t, l: l}
+	c.login()
+	c.session("challenge")
+	c.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
+	c.session("ready")
+	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
+	a, _ := store.lookup("alice")
+	credential, e := store.putCredential(a.ID, Credential{Name: "Synthetic login", Kind: "password", Username: "deploy", Secret: "Synthetic remote password"})
+	if e != nil {
+		t.Fatal("fixture credential failed")
+	}
+	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic terminal", "target": target.ID, "credential": credential, "approval": approvalFingerprint(target)}), 200)
+	var record struct{ ID string }
+	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
+		t.Fatal("connection creation failed")
+	}
+	raw := grantFixture(t, c, record.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	header := http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}
+	socket, _, e := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: header})
+	if e != nil {
+		t.Fatal("valid socket refused")
+	}
+	defer socket.CloseNow()
+	if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(map[string]string{"csrf": c.csrf, "lease": raw, "size": "1600x900"}))) != nil {
+		t.Fatal("proof write failed")
+	}
+	if _, data, e := socket.Read(ctx); e == nil {
+		t.Fatalf("a terminal took a desktop size: %q", data)
+	}
+	if worker.calls.Load() != 0 {
+		t.Fatal("a terminal with a desktop size reached its worker")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.remote.leases) != 0 {
+		t.Fatal("the refused lease stayed")
+	}
 }

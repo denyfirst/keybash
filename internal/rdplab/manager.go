@@ -45,7 +45,7 @@ func (w ManagerWorker) OpenRDP(ctx context.Context, request identity.RDPRequest)
 	if err != nil {
 		return nil, errNative
 	}
-	return w.open(ctx, request.Target, pin, request.Username, request.Password)
+	return w.open(ctx, request.Target, pin, request.Username, request.Password, request.Width, request.Height)
 }
 
 // identityFor takes the rules from the target, never from the certificate: a
@@ -58,20 +58,31 @@ func identityFor(target *targetguard.NamedTarget, certificate []byte) (*Identity
 	return NewIdentity(target.Hostname(), certificate)
 }
 
-func (w ManagerWorker) open(ctx context.Context, target *targetguard.NamedTarget, pin *Identity, user, password string) (terminalweb.Stream, error) {
+func (w ManagerWorker) open(ctx context.Context, target *targetguard.NamedTarget, pin *Identity, user, password string, width, height int) (terminalweb.Stream, error) {
 	if !pin.boundTo(target) {
 		return nil, errNative
 	}
-	return w.openDial(ctx, target.DialContext, pin, user, password)
+	return w.openDial(ctx, target.DialContext, pin, user, password, width, height)
+}
+
+// managedPlan is what a managed desktop runs: the workspace profile at the
+// page's size (0 for the lab's 1024 by 768), refused outside the bounds.
+func managedPlan(pin *Identity, user, password string, width, height int) (nativePlan, error) {
+	plan, err := newNativePlan(pin, user, password)
+	if err != nil || (width != 0 || height != 0) && !desktopSize(width, height) {
+		return nativePlan{}, errNative
+	}
+	plan.workspace = true
+	plan.width, plan.height = width, height
+	return plan, nil
 }
 
 // Only package _test.go callers can replace this guarded dial for a fixture.
-func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) (net.Conn, error), pin *Identity, user, password string) (terminalweb.Stream, error) {
-	plan, err := newNativePlan(pin, user, password)
+func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) (net.Conn, error), pin *Identity, user, password string, width, height int) (terminalweb.Stream, error) {
+	plan, err := managedPlan(pin, user, password, width, height)
 	if ctx == nil || ctx.Err() != nil || dial == nil || err != nil {
 		return nil, errNative
 	}
-	plan.workspace = true
 	setup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	raw, err := connectRDPManager(ctx, setup, w.SocketPath, dial, pin)

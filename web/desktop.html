@@ -21,24 +21,18 @@
       <header class="bar">
         <div class="bar-start"><span class="wordmark session-mark">keybash<span class="wordmark-stop">.</span></span><span id="status" role="status">Not connected</span><span id="tab-name" class="session-name">rdp</span><span class="session-kind">RDP</span></div>
         <div class="tools">
-          <label class="screen" title="Screen size · sizes depend on the server"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><span class="select"><select id="resolution" aria-label="Screen size" disabled><option value="fit">Fit to window</option><option value="1024x768">1024 × 768</option><option value="1280x720">1280 × 720</option><option value="1600x900">1600 × 900</option><option value="1920x1080">1920 × 1080</option></select></span><span id="size" class="size">1024 × 768</span></label>
           <div class="menu-anchor">
-            <button id="clipboard" disabled aria-expanded="false" aria-controls="clipboard-menu" title="Text to and from the remote"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/></svg><span class="label">Clipboard</span></button>
-            <div id="clipboard-menu" class="menu" role="group" aria-label="Clipboard" hidden>
-              <section>
-                <label for="paste-text">Paste on the remote</label>
-                <textarea id="paste-text" rows="3" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="Type or paste text · at most 32 KiB"></textarea>
-                <pre id="paste-preview" aria-label="Paste preview"></pre>
-                <div class="menu-actions"><button id="paste-local" class="secondary" disabled>Read my clipboard</button><button id="paste-send" disabled>Paste on remote</button></div>
-              </section>
-              <section>
-                <label for="remote-text">Copied on the remote</label>
-                <textarea id="remote-text" rows="3" readonly autocomplete="off" spellcheck="false" placeholder="Text copied on the remote shows here"></textarea>
-                <div class="menu-actions"><button id="copy-remote" class="secondary" disabled>Copy here · Ctrl+Shift+C</button></div>
-              </section>
-              <p class="menu-help">Only text. Ctrl+V on the desktop pastes one line at once; several lines wait here for review. No Enter is added.</p>
+            <button id="screen" disabled aria-haspopup="menu" aria-expanded="false" aria-controls="screen-menu" title="Screen size · sizes depend on the server"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><span class="label" id="screen-choice">Fit to window</span><span id="size" class="size">1024 × 768</span><svg class="chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"/></svg></button>
+            <div id="screen-menu" class="menu menu-list" role="menu" aria-label="Screen size" hidden>
+              <button type="button" role="menuitemradio" aria-checked="true" data-size="fit"><span>Fit to window</span><small>Follows this window</small></button>
+              <button type="button" role="menuitemradio" aria-checked="false" data-size="1280x720"><span>1280 × 720</span><small>HD</small></button>
+              <button type="button" role="menuitemradio" aria-checked="false" data-size="1600x900"><span>1600 × 900</span><small>HD+</small></button>
+              <button type="button" role="menuitemradio" aria-checked="false" data-size="1920x1080"><span>1920 × 1080</span><small>Full HD</small></button>
+              <button type="button" role="menuitemradio" aria-checked="false" data-size="1024x768"><span>1024 × 768</span><small>Classic</small></button>
             </div>
           </div>
+          <button id="copy" disabled title="Copy what the remote copied · Ctrl+Shift+C"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg><span class="label">Copy</span></button>
+          <button id="paste" disabled title="Paste on the remote · Ctrl+V"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/></svg><span class="label">Paste</span></button>
           <button id="special" disabled title="Send Ctrl+Alt+Del to the remote"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M7 14h10"/></svg><span class="label">Ctrl+Alt+Del</span></button>
           <button id="fullscreen" disabled title="Full screen"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span class="label">Full screen</span></button>
           <button id="disconnect" class="end" disabled title="Disconnect"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v8M6.4 6.6a8 8 0 1 0 11.2 0"/></svg><span class="label">Disconnect</span></button>
@@ -51,5 +45,7 @@
       </div>
     </section>
   </main>
+  <dialog id="paste-review"><form method="dialog"><p class="eyebrow">Paste on the remote</p><h2>Check the text before it is sent.</h2><p class="hint">Several lines and hidden characters are shown here first. No Enter is added.</p><textarea id="paste-text" aria-label="Text to paste" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="Paste the text here with Ctrl+V"></textarea><pre id="paste-preview" aria-label="Paste preview"></pre><div class="dialog-actions"><button value="cancel" id="cancel-paste" class="secondary">Cancel</button><button type="button" id="paste-send">Paste on remote</button></div></form></dialog>
+  <dialog id="copy-panel"><form method="dialog"><h2>Copied on the remote</h2><p class="hint">The browser did not let Keybash write your clipboard. Select the text and press Ctrl+C.</p><textarea id="remote-text" aria-label="Text copied on the remote" readonly autocomplete="off" spellcheck="false"></textarea><div class="dialog-actions"><button value="close" class="secondary">Close</button></div></form></dialog>
 </body>
 </html>

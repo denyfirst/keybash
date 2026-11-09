@@ -129,10 +129,13 @@ both pages are same-origin with COOP `same-origin`), and the tab is titled
 with the connection's name, read from `/api/connections` and set as text.
 A session page is the session alone, filling the window under one slim bar:
 it has no menu and no link away, because leaving the page ends its session.
-The bar says the connection's state and name and holds the tools; on a desktop
-the screen size is a select in it and the text exchange a small sheet under
-its Clipboard button, which a dot marks when the remote copied text (never
-written to the local clipboard unasked). On an SSH page, "+"
+The bar says the connection's state and name and holds the tools. A desktop
+opens at the size its page has (sent with the socket's proof, bounded as a
+resize is) and its screen size is the bar's own menu; text goes both ways with
+Copy and Paste as in a terminal. Copy is marked by a dot when the remote copied
+text, which is never written to the local clipboard unasked; a paste of several
+lines or hidden characters is shown for review first, and a remote copy over
+32 KiB is dropped with a notice instead of ending the desktop. On an SSH page, "+"
 opens another session to the same server in a tab of its own; an RDP page
 offers none, since a second sign-in as the same user takes over the first
 desktop. "Full screen" (the whole session, for both) asks the browser for
