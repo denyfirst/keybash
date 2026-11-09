@@ -4,7 +4,7 @@ import { inspectPaste } from './paste.mjs';
 // and text the remote copied reaches this computer's clipboard only on a click.
 export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   const encoder = new TextEncoder();
-  let enabled = false, remoteText = '', generation = 0, resizeTimer, lastSize = '', screen = 'fit';
+  let enabled = false, remoteText = '', generation = 0, resizeTimer, lastSize = '', screen = 'fit', copyAsked = 0;
   const buttons = ['screen', 'copy', 'paste'];
   const usable = () => enabled && live();
   const valid = text => typeof text === 'string' && text.isWellFormed() && !text.includes('\0') && inspectPaste(text).allowed;
@@ -40,13 +40,16 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     if (inspectPaste(text).review) review(text);
     else deliver(text);
   }
-  async function copy() {
+  // asked: the person's own Ctrl+C on the desktop, not a click. If the browser
+  // does not let that write the clipboard, the dot on Copy says the text waits.
+  async function copy(asked = false) {
     if (!usable() || !remoteText) return;
     const epoch = generation, text = remoteText;
     try {
       await navigator.clipboard.writeText(text);
-      if (usable() && epoch === generation) { delete $('copy').dataset.new; $('notice').textContent = 'Copied from the remote.'; }
+      if (usable() && epoch === generation) { delete $('copy').dataset.new; $('notice').textContent = asked ? 'Copied to this computer too.' : 'Copied from the remote.'; }
     } catch {
+      if (asked) return;
       if (usable() && epoch === generation) {
         delete $('copy').dataset.new;
         $('remote-text').value = text; $('copy-panel').showModal(); $('remote-text').focus(); $('remote-text').select();
@@ -133,9 +136,12 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     receive(args) {
       if (!usable() || args.length !== 1 || !valid(args[0])) return false;
       remoteText = args[0];
-      // Never written to this computer's clipboard unasked: a dot says it waits.
+      // Never written to this computer's clipboard unasked: a dot says it
+      // waits. A copy that follows the person's own Ctrl+C on the desktop is
+      // what they asked for, so it comes here as on any computer.
       $('copy').disabled = !remoteText;
       if (remoteText) $('copy').dataset.new = ''; else delete $('copy').dataset.new;
+      if (remoteText && Date.now() - copyAsked < 5000) { copyAsked = 0; void copy(true); }
       return true;
     },
     tooLarge(args) {
@@ -146,6 +152,9 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     key(key, modifiers) {
       if (!usable()) return undefined;
       if (modifiers.ctrl && modifiers.shift && (key === 67 || key === 99)) { void copy(); return false; }
+      // Ctrl+C still goes to the remote; it also lets the next copy, within
+      // five seconds, come to this computer.
+      if (modifiers.ctrl && !modifiers.alt && (key === 67 || key === 99)) copyAsked = Date.now();
       if (modifiers.ctrl && key === 118) return true; // browser paste event
       return undefined;
     },
@@ -158,7 +167,7 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     },
     resize,
     end() {
-      generation++; enabled = false; remoteText = ''; lastSize = ''; clearTimeout(resizeTimer);
+      generation++; enabled = false; remoteText = ''; lastSize = ''; copyAsked = 0; clearTimeout(resizeTimer);
       closeMenu(); close('paste-review'); close('copy-panel'); delete $('copy').dataset.new;
       for (const id of ['paste-text', 'remote-text']) $(id).value = '';
       $('paste-preview').textContent = '';

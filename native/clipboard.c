@@ -8,26 +8,33 @@
 
 #define KEYBASH_CLIPBOARD_LIMIT 32768
 
+/* Windows' text ends at its first NUL and often has more NULs after it, the
+ * padding of the memory it was copied from; only the text before that NUL
+ * counts, as in Guacamole's own reader. A buffer with no NUL at all, a text
+ * over the limit or a broken surrogate still refuses. */
 static int keybash_clipboard_to_utf8(const BYTE* input, size_t length,
         char* output, size_t capacity, size_t* written) {
     WCHAR wide[KEYBASH_CLIPBOARD_LIMIT + 1];
     *written = 0;
-    if (!input || !output || length < 2 || length % 2 ||
-        length > sizeof(wide) || capacity < 1) return 0;
-    size_t units = length / 2;
-    for (size_t i = 0; i < units; i++) wide[i] = (WCHAR)(input[2*i] | ((UINT16)input[2*i+1] << 8));
-    if (wide[units-1] != 0) return 0;
-    for (size_t i = 0; i + 1 < units; i++) {
+    if (!input || !output || length < 2 || length % 2 || capacity < 1) return 0;
+    size_t units = length / 2, end = 0;
+    while (end < units && (input[2*end] | input[2*end+1])) {
+        if (end >= KEYBASH_CLIPBOARD_LIMIT) return 0;
+        wide[end] = (WCHAR)(input[2*end] | ((UINT16)input[2*end+1] << 8));
+        end++;
+    }
+    if (end == units) return 0;
+    wide[end] = 0;
+    for (size_t i = 0; i < end; i++) {
         UINT16 c = wide[i];
-        if (!c) return 0;
         if (c >= 0xd800 && c <= 0xdbff) {
-            if (i + 2 >= units || wide[i+1] < 0xdc00 || wide[i+1] > 0xdfff) return 0;
+            if (i + 1 >= end || wide[i+1] < 0xdc00 || wide[i+1] > 0xdfff) return 0;
             i++;
         } else if (c >= 0xdc00 && c <= 0xdfff) return 0;
     }
-    SSIZE_T size = ConvertWCharNToUtf8(wide, units, NULL, 0);
+    SSIZE_T size = ConvertWCharNToUtf8(wide, end + 1, NULL, 0);
     if (size < 0 || size > KEYBASH_CLIPBOARD_LIMIT || (size_t)size >= capacity) return 0;
-    if (ConvertWCharNToUtf8(wide, units, output, (size_t)size+1) != size || output[size] != 0) return 0;
+    if (ConvertWCharNToUtf8(wide, end + 1, output, (size_t)size+1) != size || output[size] != 0) return 0;
     *written = (size_t)size;
     return 1;
 }
