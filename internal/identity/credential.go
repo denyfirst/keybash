@@ -30,6 +30,9 @@ type Credential struct {
 	// private half is never revealed or exported and leaves only as signatures.
 	Public    string `json:"public,omitempty"`
 	Generated bool   `json:"generated,omitempty"`
+	// Used says a Generated key has opened a session on a server, so it is on
+	// one: its row stops asking to be added. Set once, never by a request.
+	Used bool `json:"used,omitempty"`
 }
 
 func (Credential) Format(w fmt.State, _ rune) { _, _ = io.WriteString(w, "[credential redacted]") }
@@ -42,10 +45,11 @@ type credentialSummary struct {
 	Fingerprint string `json:"fingerprint"`
 	Public      string `json:"public,omitempty"`
 	Generated   bool   `json:"generated,omitempty"`
+	Used        bool   `json:"used,omitempty"`
 }
 
 func (c Credential) summary() credentialSummary {
-	return credentialSummary{c.ID, c.Name, c.Kind, c.Username, c.Fingerprint, c.Public, c.Generated}
+	return credentialSummary{c.ID, c.Name, c.Kind, c.Username, c.Fingerprint, c.Public, c.Generated, c.Used}
 }
 func label(value string, maxBytes int, empty bool) bool {
 	if !utf8.ValidString(value) || len(value) > maxBytes || !empty && len(value) == 0 {
@@ -186,7 +190,7 @@ func (s *Store) credential(tx *bolt.Tx, owner, id string) (Credential, error) {
 		return c, e
 	}
 	defer clear(plain)
-	if decodeRecord(plain, &c, 96*1024) != nil || c.ID != id || !label(c.Name, 160, false) || (c.Kind != "password" && c.Kind != "ssh-key") || c.Generated && c.Kind != "ssh-key" || len(c.Secret) > 64*1024 || len(c.Passphrase) > 1024 {
+	if decodeRecord(plain, &c, 96*1024) != nil || c.ID != id || !label(c.Name, 160, false) || (c.Kind != "password" && c.Kind != "ssh-key") || c.Generated && c.Kind != "ssh-key" || c.Used && !c.Generated || len(c.Secret) > 64*1024 || len(c.Passphrase) > 1024 {
 		return Credential{}, errRefused
 	}
 	return c, nil
@@ -256,6 +260,38 @@ func (s *Store) listCredentials(owner string) ([]credentialSummary, error) {
 		return nil
 	})
 	return result, e
+}
+
+// markKeyUsed records, once, that a key made here has opened a session on a
+// server. Only a Generated key carries the mark; nothing else in the record
+// changes, and it is resealed at the next revision.
+func (s *Store) markKeyUsed(owner, id string) error {
+	return s.update(func(tx *bolt.Tx) error {
+		c, e := s.credential(tx, owner, id)
+		if e != nil || !c.Generated {
+			return errRefused
+		}
+		if c.Used {
+			return nil
+		}
+		// Only the revision is needed; the plaintext holds the secret.
+		previous, revision, e := s.unseal("credential", owner, id, tx.Bucket(credentialBucket).Get(credentialKey(owner, id)))
+		clear(previous)
+		if e != nil || revision >= 1<<31 {
+			return errRefused
+		}
+		c.Used = true
+		plain, e := json.Marshal(c) // #nosec G117 -- intentional bounded secret serialization solely into the authenticated encrypted envelope; no logs or metadata response.
+		if e != nil {
+			return errRefused
+		}
+		defer clear(plain)
+		sealed, e := s.seal(tx, "credential", owner, id, revision+1, plain)
+		if e != nil {
+			return errRefused
+		}
+		return tx.Bucket(credentialBucket).Put(credentialKey(owner, id), sealed)
+	})
 }
 func (s *Store) readCredential(owner, id string) (Credential, error) {
 	var c Credential

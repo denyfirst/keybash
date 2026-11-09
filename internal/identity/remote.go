@@ -414,6 +414,11 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// An SSH stream exists only after the server took the key and opened a
+	// terminal, so a key made here is now known to be on a server.
+	if target.Protocol == "ssh" && credential.Generated && !credential.Used {
+		_ = l.store.markKeyUsed(lease.owner, lease.credential)
+	}
 	if socket.Write(ctx, websocket.MessageText, []byte(`{"type":"ready"}`)) != nil {
 		_ = stream.Close()
 		return
