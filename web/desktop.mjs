@@ -42,13 +42,19 @@ function begin(proof=null) {
     if (stopped) return;
     if (op === 'keybash') { if (!controls.feature(args)) end(); return; }
     if (op === 'keybash-clipboard') { if (!controls.receive(args)) end(); return; }
+    if (op === 'keybash-clipboard-large') { if (!controls.tooLarge(args)) end(); return; }
     tunnel.oninstruction?.(op,args);
   };
   tunnel.connect = () => {
     socket = new WebSocket(`${location.origin.replace('https:', 'wss:')}${ownedRemote?'/api/remote/socket':'/lab/socket'}`);
     socket.binaryType = 'arraybuffer';
     let ready=!ownedRemote;const timer=setTimeout(end,15000);
-    socket.onopen = () => { if (!stopped) {if(proof){socket.send(JSON.stringify(proof));proof=null;}else{clearTimeout(timer);tunnel.setState(Guacamole.Tunnel.State.OPEN);}} };
+    socket.onopen = () => {
+      if (stopped) return;
+      // The desktop opens at the space it has, not at a fixed 1024 by 768.
+      if (proof) { socket.send(JSON.stringify({ ...proof, size: controls.startSize() })); proof = null; }
+      else { clearTimeout(timer); tunnel.setState(Guacamole.Tunnel.State.OPEN); }
+    };
     socket.addEventListener('close',()=>clearTimeout(timer));
     socket.onerror = end; socket.onclose = end;
     socket.onmessage = event => {

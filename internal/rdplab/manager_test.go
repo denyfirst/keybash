@@ -26,7 +26,7 @@ func TestRDPManagerConfigurationAndIdentityRefusal(t *testing.T) {
 	if id, e := ParseWorkerID("1002"); e != nil || id != 1002 {
 		t.Fatal("valid worker identity refused")
 	}
-	if s, e := (ManagerWorker{}).openDial(context.Background(), nil, nil, "user", "password"); s != nil || e == nil {
+	if s, e := (ManagerWorker{}).openDial(context.Background(), nil, nil, "user", "password", 0, 0); s != nil || e == nil {
 		t.Fatal("unconfigured RDP launcher opened a session")
 	}
 }

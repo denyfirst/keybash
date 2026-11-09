@@ -1,36 +1,19 @@
 import { inspectPaste } from './paste.mjs';
 
-// One instance belongs to one desktop. No timers/polling read the OS clipboard.
+// One instance belongs to one desktop. No timers/polling read the OS clipboard,
+// and text the remote copied reaches this computer's clipboard only on a click.
 export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   const encoder = new TextEncoder();
-  let enabled = false, remoteText = '', generation = 0, resizeTimer, lastSize = '';
-  const buttons = ['clipboard', 'copy-remote', 'paste-local', 'paste-send', 'resolution'];
+  let enabled = false, remoteText = '', generation = 0, resizeTimer, lastSize = '', screen = 'fit', copyAsked = 0;
+  const buttons = ['screen', 'copy', 'paste'];
   const usable = () => enabled && live();
-  // The clipboard sheet opens from its button and closes on a press outside
-  // it, on Esc, and once a paste is sent.
-  const menu = $('clipboard-menu'), toggle = $('clipboard');
-  function openMenu(focus) {
-    if (!usable()) return;
-    menu.hidden = false; toggle.setAttribute('aria-expanded', 'true'); delete toggle.dataset.new;
-    focus?.focus();
-  }
-  function closeMenu() {
-    if (menu.hidden) return;
-    menu.hidden = true; toggle.setAttribute('aria-expanded', 'false');
-  }
-  toggle.addEventListener('click', () => { if (menu.hidden) openMenu($('paste-text')); else closeMenu(); });
-  document.addEventListener('pointerdown', event => { if (!menu.contains(event.target) && !toggle.contains(event.target)) closeMenu(); });
-  menu.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeMenu(); toggle.focus(); } });
   const valid = text => typeof text === 'string' && text.isWellFormed() && !text.includes('\0') && inspectPaste(text).allowed;
-  function prepare(text) {
-    if (!valid(text)) { $('notice').textContent = 'The text must be at most 32 KiB of valid Unicode.'; return false; }
-    $('paste-text').value = text;
-    $('paste-preview').textContent = inspectPaste(text).preview;
-    return true;
-  }
-  function paste() {
+  const close = id => { if ($(id).open) $(id).close(); };
+
+  // Paste: one line goes at once; several lines, or hidden characters, are
+  // shown first, as in a terminal. Nothing is sent before the person says so.
+  function deliver(text) {
     if (!usable()) return;
-    const text = $('paste-text').value;
     if (!valid(text)) { $('notice').textContent = 'The text was not sent: too large or not valid Unicode.'; return; }
     resetKeyboard();
     send('clipboard', '0', 'text/plain');
@@ -42,61 +25,104 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     // Ordinary remote paste after the complete text, never an appended Enter.
     for (const key of [0xffe3, 118]) client().sendKeyEvent(1, key);
     for (const key of [118, 0xffe3]) client().sendKeyEvent(0, key);
-    $('paste-text').value = ''; $('paste-preview').textContent = '';
-    closeMenu(); $('desktop').focus();
+    $('desktop').focus();
   }
-  async function copy() {
+  function review(text) {
     if (!usable()) return;
+    $('paste-text').value = text;
+    $('paste-preview').textContent = text ? inspectPaste(text).preview : '';
+    if (!$('paste-review').open) $('paste-review').showModal();
+    (text ? $('paste-send') : $('paste-text')).focus();
+  }
+  function paste(text) {
+    if (!usable()) return;
+    if (!valid(text)) { $('notice').textContent = 'The text must be at most 32 KiB of valid Unicode.'; return; }
+    if (inspectPaste(text).review) review(text);
+    else deliver(text);
+  }
+  // asked: the person's own Ctrl+C on the desktop, not a click. If the browser
+  // does not let that write the clipboard, the dot on Copy says the text waits.
+  async function copy(asked = false) {
+    if (!usable() || !remoteText) return;
     const epoch = generation, text = remoteText;
     try {
       await navigator.clipboard.writeText(text);
-      if (usable() && epoch === generation) $('notice').textContent = 'Text from the remote copied.';
+      if (usable() && epoch === generation) { delete $('copy').dataset.new; $('notice').textContent = asked ? 'Copied to this computer too.' : 'Copied from the remote.'; }
     } catch {
+      if (asked) return;
       if (usable() && epoch === generation) {
-        openMenu(); $('remote-text').value = text; $('remote-text').focus(); $('remote-text').select();
+        delete $('copy').dataset.new;
+        $('remote-text').value = text; $('copy-panel').showModal(); $('remote-text').focus(); $('remote-text').select();
         $('notice').textContent = 'No clipboard permission. Select the text and press Ctrl+C.';
       }
     }
   }
+
+  // Screen size: Fit follows the space the desktop has; a fixed size stays.
+  const menu = $('screen-menu'), toggle = $('screen');
+  function closeMenu() { if (!menu.hidden) { menu.hidden = true; toggle.setAttribute('aria-expanded', 'false'); } }
+  function choose(size) {
+    screen = size;
+    for (const item of menu.querySelectorAll('[data-size]')) item.setAttribute('aria-checked', String(item.dataset.size === size));
+    $('screen-choice').textContent = size === 'fit' ? 'Fit to window' : size.replace('x', ' × ');
+    // A fixed size is its own label; Fit shows the size it has now.
+    $('size').hidden = size !== 'fit';
+    closeMenu(); resize(); $('desktop').focus();
+  }
   function requestSize() {
     if (!usable()) return;
-    const selected = $('resolution').value;
     // Fit asks the remote for exactly the space the desktop has here.
-    let [w, h] = selected === 'fit' ? [$('desktop').clientWidth, $('desktop').clientHeight] : selected.split('x').map(Number);
-    w = Math.max(64, Math.min(1920, Math.floor(w / 2) * 2));
-    h = Math.max(64, Math.min(1080, Math.floor(h / 2) * 2));
+    let [w, h] = screen === 'fit' ? [$('desktop').clientWidth, $('desktop').clientHeight] : screen.split('x').map(Number);
+    w = Math.max(200, Math.min(1920, Math.floor(w / 2) * 2));
+    h = Math.max(200, Math.min(1080, Math.floor(h / 2) * 2));
     if (!Number.isInteger(w) || !Number.isInteger(h)) return;
     const size = `${w}x${h}`;
     if (size !== lastSize) { lastSize = size; send('size', w, h); }
   }
   function resize() { clearTimeout(resizeTimer); if (usable()) resizeTimer = setTimeout(requestSize, 350); }
-  $('paste-text').addEventListener('input', () => {
-    const check = inspectPaste($('paste-text').value);
-    $('paste-preview').textContent = check.allowed ? check.preview : 'The text is over 32 KiB.';
+
+  toggle.addEventListener('click', () => {
+    if (!usable()) return;
+    if (!menu.hidden) { closeMenu(); return; }
+    menu.hidden = false; toggle.setAttribute('aria-expanded', 'true');
+    (menu.querySelector('[aria-checked="true"]') ?? menu.querySelector('[data-size]')).focus();
   });
-  $('paste-send').addEventListener('click', paste);
-  $('copy-remote').addEventListener('click', () => void copy());
-  $('resolution').addEventListener('change', resize);
-  $('paste-local').addEventListener('click', async () => {
+  menu.addEventListener('click', event => { const item = event.target.closest('[data-size]'); if (item && usable()) choose(item.dataset.size); });
+  menu.addEventListener('keydown', event => {
+    const items = [...menu.querySelectorAll('[data-size]')], at = items.indexOf(document.activeElement);
+    if (event.key === 'Escape') { event.preventDefault(); closeMenu(); toggle.focus(); }
+    else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+  });
+  document.addEventListener('pointerdown', event => { if (!menu.contains(event.target) && !toggle.contains(event.target)) closeMenu(); });
+  $('copy').addEventListener('click', () => void copy());
+  $('paste').addEventListener('click', async () => {
     if (!usable()) return;
     const epoch = generation;
     try {
       const text = await navigator.clipboard.readText();
-      if (usable() && epoch === generation && prepare(text)) $('paste-send').focus();
+      if (usable() && epoch === generation) paste(text);
     } catch {
-      if (usable() && epoch === generation) {
-        $('paste-text').focus(); $('notice').textContent = 'No clipboard permission. Paste the text into the box with Ctrl+V.';
-      }
+      if (usable() && epoch === generation) { review(''); $('notice').textContent = 'No clipboard permission. Paste the text into the box with Ctrl+V.'; }
     }
   });
-  // Ctrl+V on the desktop: one line goes at once, several wait in the sheet.
+  $('paste-text').addEventListener('input', () => {
+    const check = inspectPaste($('paste-text').value);
+    $('paste-preview').textContent = check.allowed ? check.preview : 'The text is over 32 KiB.';
+  });
+  $('paste-send').addEventListener('click', () => {
+    const text = $('paste-text').value;
+    if (!valid(text)) { $('notice').textContent = 'The text was not sent: too large or not valid Unicode.'; return; }
+    // Cleared now: the dialog's close event comes later, as a task of its own.
+    $('paste-text').value = ''; $('paste-preview').textContent = '';
+    close('paste-review'); deliver(text);
+  });
+  $('paste-review').addEventListener('close', () => { if (!$('paste-review').open) { $('paste-text').value = ''; $('paste-preview').textContent = ''; } });
+  $('copy-panel').addEventListener('close', () => { if (!$('copy-panel').open) $('remote-text').value = ''; });
+  // Ctrl+V on the desktop.
   document.addEventListener('paste', event => {
     if (!usable() || document.activeElement !== $('desktop')) return;
     event.preventDefault();
-    const text = event.clipboardData?.getData('text/plain');
-    if (!prepare(text)) return;
-    if (!inspectPaste(text).review) paste();
-    else { openMenu($('paste-send')); $('notice').textContent = 'Check the text, then paste it. No Enter is added.'; }
+    paste(event.clipboardData?.getData('text/plain') ?? '');
   });
   return {
     get enabled() { return enabled; },
@@ -104,25 +130,45 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
       if (enabled || args.length !== 3 || args.join('|') !== '1|text|display-update') return false;
       enabled = true;
       for (const id of buttons) $(id).disabled = !live();
+      $('copy').disabled = !remoteText;
       resize(); return true;
     },
     receive(args) {
       if (!usable() || args.length !== 1 || !valid(args[0])) return false;
-      remoteText = args[0]; $('remote-text').value = remoteText;
-      // Never written to this computer's clipboard unasked: a dot says it waits.
-      if (menu.hidden && remoteText) toggle.dataset.new = '';
+      remoteText = args[0];
+      // Never written to this computer's clipboard unasked: a dot says it
+      // waits. A copy that follows the person's own Ctrl+C on the desktop is
+      // what they asked for, so it comes here as on any computer.
+      $('copy').disabled = !remoteText;
+      if (remoteText) $('copy').dataset.new = ''; else delete $('copy').dataset.new;
+      if (remoteText && Date.now() - copyAsked < 5000) { copyAsked = 0; void copy(true); }
+      return true;
+    },
+    tooLarge(args) {
+      if (!usable() || args.length !== 0) return false;
+      $('notice').textContent = 'Text copied on the remote is over 32 KiB, so it was not passed here.';
       return true;
     },
     key(key, modifiers) {
       if (!usable()) return undefined;
       if (modifiers.ctrl && modifiers.shift && (key === 67 || key === 99)) { void copy(); return false; }
+      // Ctrl+C still goes to the remote; it also lets the next copy, within
+      // five seconds, come to this computer.
+      if (modifiers.ctrl && !modifiers.alt && (key === 67 || key === 99)) copyAsked = Date.now();
       if (modifiers.ctrl && key === 118) return true; // browser paste event
       return undefined;
     },
+    // The size the desktop opens at: the space it has, before anything connects.
+    startSize() {
+      const w = Math.max(200, Math.min(1920, Math.floor($('desktop').clientWidth / 2) * 2));
+      const h = Math.max(200, Math.min(1080, Math.floor($('desktop').clientHeight / 2) * 2));
+      lastSize = `${w}x${h}`;
+      return lastSize;
+    },
     resize,
     end() {
-      generation++; enabled = false; remoteText = ''; lastSize = ''; clearTimeout(resizeTimer);
-      closeMenu(); delete toggle.dataset.new;
+      generation++; enabled = false; remoteText = ''; lastSize = ''; copyAsked = 0; clearTimeout(resizeTimer);
+      closeMenu(); close('paste-review'); close('copy-panel'); delete $('copy').dataset.new;
       for (const id of ['paste-text', 'remote-text']) $(id).value = '';
       $('paste-preview').textContent = '';
       for (const id of buttons) $(id).disabled = true;

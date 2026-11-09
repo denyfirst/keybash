@@ -22,6 +22,22 @@ type nativePlan struct {
 	identity       *Identity
 	workspace      bool
 	user, password string
+	width, height  int // a workspace's starting size; 0 means the lab's 1024 by 768
+}
+
+// A desktop starts at the size its page has, within what the viewer draws and
+// guacd accepts: even, 200 to 1920 wide and 200 to 1080 high. The page could
+// already ask for any of these sizes once connected; starting there only spares
+// Windows a resize, which it did not always make.
+func desktopSize(width, height int) bool {
+	return width >= 200 && width <= 1920 && height >= 200 && height <= 1080 && width%2 == 0 && height%2 == 0
+}
+
+func (p nativePlan) size() (int, int) {
+	if p.workspace && desktopSize(p.width, p.height) {
+		return p.width, p.height
+	}
+	return 1024, 768
 }
 
 func (p nativePlan) Format(w fmt.State, _ rune) { _, _ = io.WriteString(w, "[RDP lab plan redacted]") }
@@ -55,9 +71,10 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 	for _, name := range expected {
 		known[name] = true
 	}
+	width, height := p.size()
 	values := map[string]string{
 		"hostname": "127.0.0.1", "port": "3390", "timeout": "10", "username": p.user, "password": p.password,
-		"width": "1024", "height": "768", "dpi": "96", "color-depth": "32", "security": "nla",
+		"width": strconv.Itoa(width), "height": strconv.Itoa(height), "dpi": "96", "color-depth": "32", "security": "nla",
 		"ignore-cert": "false", "cert-tofu": "false", "disable-auth": "false", "disable-audio": "true",
 		"enable-printing": "false", "enable-drive": "false", "create-drive-path": "false",
 		"disable-download": "true", "disable-upload": "true", "console": "false", "console-audio": "false",
@@ -92,6 +109,8 @@ type nativeStream struct {
 	ctx       context.Context
 	closed    atomic.Bool
 	workspace bool
+	width     int // the size the desktop was opened at
+	height    int
 	reader    *bufio.Reader
 	stop      func() bool
 	once      sync.Once
@@ -135,7 +154,8 @@ func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeS
 	if _, err := newNativePlan(plan.identity, plan.user, plan.password); err != nil {
 		return nil, errNative
 	}
-	stream := &nativeStream{ctx: ctx, workspace: plan.workspace, raw: raw, reader: bufio.NewReader(raw)}
+	width, height := plan.size()
+	stream := &nativeStream{ctx: ctx, workspace: plan.workspace, width: width, height: height, raw: raw, reader: bufio.NewReader(raw)}
 	stream.stop = context.AfterFunc(ctx, func() { _ = raw.Close() })
 	defer func() {
 		if !ok {
@@ -157,7 +177,7 @@ func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeS
 	if err != nil {
 		return nil, errNative
 	}
-	for _, in := range []instruction{{"size", "1024", "768", "96"}, {"audio"}, {"video"}, {"image", "image/png"}, {"timezone", "UTC"}} {
+	for _, in := range []instruction{{"size", strconv.Itoa(width), strconv.Itoa(height), "96"}, {"audio"}, {"video"}, {"image", "image/png"}, {"timezone", "UTC"}} {
 		if writeInstruction(raw, in) != nil {
 			return nil, errNative
 		}
