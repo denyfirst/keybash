@@ -7,6 +7,17 @@ const term = new globalThis.Terminal({ cols: 100, rows: 30, scrollback: 1500, fo
   fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', allowProposedApi: false,
   linkHandler: { activate() {} }, theme: { background: '#0e1013', foreground: '#cdd1de', cursor: '#e5e7eb', selectionBackground: '#444753' } });
 term.open($('terminal'));
+// Drawn on the GPU where the browser offers WebGL 2: about twice as fast as
+// the page's own text at full screen. Without it, or once the GPU drops the
+// drawing, the page's text draws it as before; the session goes on.
+if (globalThis.WebglAddon) {
+  try {
+    const gpu = new globalThis.WebglAddon.WebglAddon();
+    gpu.onContextLoss(() => { gpu.dispose(); delete document.body.dataset.renderer; });
+    term.loadAddon(gpu);
+    document.body.dataset.renderer = 'gpu';
+  } catch { /* no WebGL 2 here: the page's text draws the terminal */ }
+}
 term.parser.registerOscHandler(52, () => true); // Remote output never writes the local clipboard.
 term.parser.registerOscHandler(8, () => true);  // No remotely supplied clickable hyperlinks.
 term.write(ownedRemote ? '\x1b[2mConnecting…\x1b[0m\r\n' : '\x1b[2mKeybash terminal lab\r\nEnter the one-time sign-in code to open a session.\x1b[0m\r\n');

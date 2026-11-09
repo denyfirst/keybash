@@ -4,6 +4,11 @@
   "files": {
     "xterm.js": "14903579ff54664cd72f8e8699e6961a6272c21863ec1c3b118cdc8af5d4a972",
     "xterm.css": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6",
-    "xterm-LICENSE.txt": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+    "xterm-LICENSE.txt": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+    "xterm-addon-webgl.js": "b85f8d4b3e9756bebb757e3fe47134d70f03ea3d6b187624426d2e2b65dec06c",
+    "xterm-addon-webgl-LICENSE.txt": "21b975c39532001d431dc3b2c29fbff691d83f370833a66b54698bda290fde0e"
+  },
+  "addons": {
+    "@xterm/addon-webgl": "0.19.0"
   }
 }

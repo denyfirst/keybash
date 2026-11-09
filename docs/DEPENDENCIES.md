@@ -252,6 +252,18 @@ No forwarding handlers, local process or raw SSH client is exposed to callers.
   is locked in `web/pnpm-lock.yaml`; JS/CSS/license are served locally and their
   SHA-256 inventory is in `web/vendor/manifest.json`. `vendor.mjs` reconstructs
   them from the locked package; CI refuses differences. No CDN or attach addon.
+- `@xterm/addon-webgl 0.19.0`: MIT, released with xterm 6.0.0, no dependencies
+  or peer dependencies. Its registry integrity is locked beside xterm's (and
+  matched the downloaded tarball); `vendor.mjs` copies `lib/addon-webgl.js` and
+  its licence and records their SHA-256 in the manifest. Reviewed: no network,
+  storage, workers, `eval`/`Function` or HTML insertion. Its bundled VS Code
+  helpers post a numeric id to the page's own window to schedule work, and hold
+  an unused cookie reader (the session cookie is HttpOnly). It draws the
+  terminal through WebGL 2, about twice as fast as the DOM renderer on a
+  full-HD terminal (3.6 MB of coloured output: 0.9–1.0 s against 1.4–2.1 s,
+  56–71 against 28–44 frames a second, Edge on an Intel GPU). Without WebGL 2,
+  or once the GPU drops the context, the DOM renderer draws, in the same session
+  (`TestBrowserTerminalOnTheGPU`).
 - Playwright/core `1.64.0`: Apache-2.0, browser-test tooling only. Node `24.19.0`
   and pnpm `11.25.0` are CI tools; Node's official Linux archive SHA-256 is pinned
   before extraction. Install scripts are disabled; browser installation is an

@@ -11,7 +11,9 @@ assert.equal(origin.protocol, 'https:');
 assert.equal(origin.hostname, '127.0.0.1');
 assert.equal(origin.pathname, '/');
 assert.equal(origin.search + origin.hash + origin.username + origin.password, '');
-const browser = await chromium.launch({headless: !config.Interactive, ...(process.env.KEYBASH_BROWSER_CHANNEL ? {channel: process.env.KEYBASH_BROWSER_CHANNEL} : {})});
+// WebGL off: these steps read the text the page draws, the GPU renderer's
+// fallback; terminal-gpu-browser-test.mjs covers the GPU itself.
+const browser = await chromium.launch({headless:!config.Interactive,args:['--disable-3d-apis'],...(process.env.KEYBASH_BROWSER_CHANNEL ? {channel: process.env.KEYBASH_BROWSER_CHANNEL} : {})});
 const context = await browser.newContext({ignoreHTTPSErrors: true, acceptDownloads: false, serviceWorkers: 'block', viewport: {width: 1440, height: 1000}});
 // Self-signed acceptance is confined to this disposable test context. Block
 // external page/worker traffic; never change OS trust or normal browser flags.

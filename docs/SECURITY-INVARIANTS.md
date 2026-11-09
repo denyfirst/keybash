@@ -172,7 +172,9 @@ no external server dials and load no real credentials.
 | Browser login/change/logout preserve password clearing, protected navigation and truthful failure state | local fixed assets, bounded response/deadline, no storage or secret URLs | `TestBrowserPasswordLogin` |
 
 Browser evidence is additionally enforced by `web/paste.test.mjs` and the
-`browserlab` tagged `TestBrowserTerminalLab`: paste review/cancel/approve, byte
+`browserlab` tagged `TestBrowserTerminalLab` (the DOM renderer, WebGL off) and
+`TestBrowserTerminalOnTheGPU` (WebGL 2 drawing, output reaching the terminal,
+the DOM renderer after a lost context): paste review/cancel/approve, byte
 limits, invisible/bidi preview, copy/fallback, HTML/OSC clipboard isolation,
 no persistent browser storage, same-origin page requests and renderer removal
 after logout. Linux adds native headless clipboard, bracketed Bash paste and
