@@ -109,6 +109,8 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   $('paste-send').addEventListener('click', () => {
     const text = $('paste-text').value;
     if (!valid(text)) { $('notice').textContent = 'The text was not sent: too large or not valid Unicode.'; return; }
+    // Cleared now: the dialog's close event comes later, as a task of its own.
+    $('paste-text').value = ''; $('paste-preview').textContent = '';
     close('paste-review'); deliver(text);
   });
   $('paste-review').addEventListener('close', () => { if (!$('paste-review').open) { $('paste-text').value = ''; $('paste-preview').textContent = ''; } });
