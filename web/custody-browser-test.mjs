@@ -145,6 +145,8 @@ try {
   const made = page.locator('.record', { hasText: 'Made here' });
   assert.equal(await made.getByRole('button', { name: 'Show', exact: true }).count(), 0, 'a key made here offered Show');
   assert.equal(await made.getByRole('button', { name: 'Add to server', exact: true }).count(), 1);
+  // Until it opens a session on a server, it says it is not on one yet.
+  assert.equal(await made.locator('.record-badge').textContent(), 'Made in Keybash · not on a server yet');
   assert(!(await page.content()).includes('b3BlbnNzaC1rZXktdjE'), 'the page holds a private key'); // every OpenSSH private key body starts so
   // The administrator invites someone, who chooses their own password with the
   // one-time code and lands where their role allows: an auditor sees Account alone.
