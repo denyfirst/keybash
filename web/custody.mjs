@@ -170,13 +170,14 @@ function showCodes(data) {
 // done with it. The secret itself is never part of the row.
 function recordRow(record) {
   const row = document.createElement('article'); row.className = 'record'; row.dataset.kind = record.generated ? 'generated' : record.kind;
-  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.append(glyph(record.generated ? 'made' : record.kind, 'server-glyph'));
+  // A key made here looks like any key once it has opened a session on a server.
+  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.append(glyph(record.generated && !record.used ? 'made' : record.kind, 'server-glyph'));
   const titles = document.createElement('div'); titles.className = 'record-titles';
   const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = record.name;
   const meta = document.createElement('p'); meta.className = 'record-meta';
   meta.textContent = `${record.kind === 'ssh-key' ? 'SSH key' : 'Password'} · ${record.username ? `user ${record.username}` : 'no user'}`;
   titles.append(name, meta);
-  if (record.generated) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'Made in Keybash'; titles.append(badge); }
+  if (record.generated) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = record.used ? 'Made in Keybash · in use' : 'Made in Keybash · not on a server yet'; titles.append(badge); }
   if (record.fingerprint) {
     const line = document.createElement('p'); line.className = 'record-print';
     const print = document.createElement('code'); print.className = 'fingerprint'; print.textContent = record.fingerprint; print.title = 'Key fingerprint';
@@ -207,13 +208,14 @@ async function loadRecords() {
   if (!Array.isArray(records) || records.length > 256) throw new Error('invalid records');
   $('records').replaceChildren();
   for (const record of records) {
-    if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public))) throw new Error('invalid record');
+    if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public)) || record.used !== undefined && (record.used !== true || record.generated !== true)) throw new Error('invalid record');
     const { row, actions } = recordRow(record);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost destructive'; remove.textContent = 'Delete';
     remove.addEventListener('click', () => askConfirm('credential', record));
-    // A key made here is never shown; its row offers the install command instead.
+    // A key made here is never shown; its row offers the install command instead,
+    // quietly once the key has opened a session on a server.
     if (record.generated) {
-      const install = document.createElement('button'); install.type = 'button'; install.className = 'secondary'; install.textContent = 'Add to server';
+      const install = document.createElement('button'); install.type = 'button'; install.className = record.used ? 'ghost' : 'secondary'; install.textContent = record.used ? 'Add to another server' : 'Add to server';
       install.addEventListener('click', () => showInstall(record.public));
       actions.append(install, remove); $('records').append(row); continue;
     }
