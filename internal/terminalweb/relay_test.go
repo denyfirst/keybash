@@ -247,3 +247,46 @@ func TestRelaySaysWhyAStreamEnded(t *testing.T) {
 	end(ReasonAccessChanged)
 	expectEnding(t, conn, stream, ReasonAccessChanged)
 }
+
+// A stream that stops the moment its session ends can end the relay's own
+// context before the session's cause reaches it: a session cancels its many
+// watchers one after another. The page is still told the session's reason.
+func TestRelaySaysWhyEvenWhenTheStreamStopsFirst(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		stream := newBulkStream(0)
+		ends := make(chan context.CancelCauseFunc, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				return
+			}
+			ctx, cancel := context.WithCancelCause(r.Context())
+			// Other watchers of the same session, as a busy server has, so
+			// its cancellation takes a while to reach the relay's context.
+			watchers := make([]context.CancelFunc, 0, 20000)
+			for range 20000 {
+				_, stop := context.WithCancel(ctx)
+				watchers = append(watchers, stop)
+			}
+			defer func() {
+				for _, stop := range watchers {
+					stop()
+				}
+			}()
+			// The worker stops its stream as soon as the session ends.
+			go func() { <-ctx.Done(); _ = stream.Close() }()
+			ends <- cancel
+			Relay(ctx, conn, stream)
+		}))
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		(<-ends)(ReasonSignedOut)
+		expectEnding(t, conn, stream, ReasonSignedOut)
+		_ = conn.CloseNow()
+		server.Close()
+	}
+}
