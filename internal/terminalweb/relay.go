@@ -63,6 +63,10 @@ func Relay(ctx context.Context, conn *websocket.Conn, stream Stream) {
 		}
 		return
 	}
+	// The reason is read from the caller's context, never from the relay's
+	// own: a stream that stops the moment its session ends can make run end
+	// the relay's context before the session's cause reaches it.
+	session := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer conn.CloseNow()
@@ -75,7 +79,7 @@ func Relay(ctx context.Context, conn *websocket.Conn, stream Stream) {
 	context.AfterFunc(ctx, func() {
 		defer close(closed)
 		_ = stream.Close()
-		if reason := endReason(ctx, stream); reason != "" {
+		if reason := endReason(session, stream); reason != "" {
 			say, done := context.WithTimeout(context.Background(), time.Second)
 			_ = conn.Write(say, websocket.MessageText, []byte(`{"type":"ended","reason":"`+string(reason)+`"}`))
 			done()
