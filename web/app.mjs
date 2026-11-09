@@ -1,5 +1,5 @@
 import { inspectPaste, decodeOutput, MAX_INPUT } from './paste.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, endedMessage, offerNewSession, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const encoder = new TextEncoder();
@@ -167,4 +167,4 @@ $('fullscreen').addEventListener('click', () => {
 });
 window.addEventListener('pagehide',()=>{socket?.close();retireTerminal();clearPaste();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
-if(ownedRemote){$('login-panel').hidden=true;offerNewSession();void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(error=>{notice(remoteErrorMessage(error));chrome.end();});}
+if(ownedRemote){$('login-panel').hidden=true;void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(error=>{notice(remoteErrorMessage(error));chrome.end();});}
