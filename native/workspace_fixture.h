@@ -7,7 +7,12 @@
 #include <winpr/clipboard.h>
 
 
-static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,0};
+/* Like Windows, the remote text is followed by padding NULs. */
+static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,0,0,0,0};
+/* A first answer the client cannot pass: a lone surrogate. It must be dropped
+ * without ending the session, after which the text is offered again. */
+static const WCHAR kb_malformed_text[] = {'x',0xd83d,0};
+static atomic_int kb_clip_answers;
 static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,10,'l','i','n','e',0};
 
 static BOOL kb_disp_assigned(DispServerContext* ctx, UINT32 id) {
@@ -55,6 +60,13 @@ static UINT kb_clip_request(CliprdrServerContext* ctx, const CLIPRDR_FORMAT_DATA
     CLIPRDR_FORMAT_DATA_RESPONSE response = {0};
     if (request->requestedFormatId != CF_UNICODETEXT) return ERROR_INVALID_DATA;
     response.common.msgFlags = CB_RESPONSE_OK;
+    if (atomic_fetch_add(&kb_clip_answers,1) == 0) {
+        response.common.dataLen = sizeof(kb_malformed_text);
+        response.requestedFormatData = (const BYTE*)kb_malformed_text;
+        UINT rc = ctx->ServerFormatDataResponse(ctx,&response);
+        if (rc) return rc;
+        return kb_clip_capabilities(ctx,NULL);
+    }
     response.common.dataLen = sizeof(kb_remote_text);
     response.requestedFormatData = (const BYTE*)kb_remote_text;
     return ctx->ServerFormatDataResponse(ctx,&response);
