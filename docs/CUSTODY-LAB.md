@@ -224,6 +224,17 @@ recovery codes) the page is its card alone in the middle, with no menu, and
 Sign out under it. Deleting a key, a password or a connection first asks in a
 sheet.
 
+Each account chooses its look: light or dark (the system's until chosen),
+and the menu open or collapsed to its icons. The choice is kept with the
+account, not in the browser: a ready session of any role sends
+`POST /api/preferences {"theme","menu"}` with exactly the words `system`,
+`light` or `dark` and `open` or `collapsed`. It is sealed like every record,
+under the account's own name in the optional `preferences-v1` namespace,
+deleted with the account and carried by a backup. Every page arrives with it
+on its root tag (`data-theme`, `data-menu`), written only from those words, so
+it is right from the first paint. A look reaches no server and changes no
+security. Limit: an older binary's backup refuses a store that holds a look.
+
 All assets are local; no CDN, external authentication, telemetry, QR image URL,
 browser persistent storage or automatic clipboard read/write. The enrollment
 reply carries the seed twice: as text and as QR modules of the standard key

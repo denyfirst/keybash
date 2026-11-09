@@ -69,6 +69,20 @@ try {
   assert(await page.locator('#records .empty-state').isVisible(), 'empty keys page did not say what to do'); assert(await page.locator('#add-record').isVisible()); assert(!(await page.locator('#new-connection').isVisible()));
   await page.locator('.rail-item[data-page=account]').click(); await page.waitForURL(config.Origin + '/account'); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
   assert(!(await page.locator('#records-panel').isVisible())); assert.equal(await page.locator('h1').textContent(), 'Account'); assert.equal(await page.title(), 'Keybash · Account'); assert(!(await page.locator('#add-record').isVisible()));
+  // The look is the account's: a chosen scheme and a collapsed menu come back
+  // with the page from the server, and nothing is kept in the browser.
+  assert.equal(await page.evaluate(() => document.documentElement.outerHTML.match(/^<html[^>]*>/)[0]), '<html lang="en">');
+  const lookSaved = () => page.waitForResponse(r => r.url() === config.Origin + '/api/preferences' && r.request().method() === 'POST' && r.status() === 204);
+  let looked = lookSaved(); await page.locator('.topbar .theme-toggle').click(); await looked;
+  const chosen = await page.evaluate(() => document.documentElement.dataset.theme); assert(['light', 'dark'].includes(chosen), 'the scheme button chose nothing');
+  looked = lookSaved(); await page.locator('#rail-collapse').click(); await looked;
+  await page.reload(); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
+  assert.deepEqual(await page.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.menu]), [chosen, 'collapsed'], 'the look did not come back with the page');
+  assert.equal(await page.locator('#rail-collapse').getAttribute('aria-expanded'), 'false');
+  assert(await page.locator('.rail-item[data-page=account]').isVisible(), 'the collapsed menu lost its pages'); assert.equal(await page.locator('.rail-item[data-page=account]').textContent(), 'Account');
+  assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0, 'the look was kept in the browser');
+  looked = lookSaved(); await page.locator('#rail-collapse').click(); await looked;
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.menu ?? null), null);
   // Installation says what this copy is, and how to add a server and update it.
   await page.locator('.rail-item[data-page=installation]').click(); await page.waitForURL(config.Origin + '/installation'); await page.locator('#installation-panel').waitFor({ state: 'visible' }); await settled();
   await page.locator('#install-serves').filter({ hasText: /^Keys and passwords only/ }).waitFor();

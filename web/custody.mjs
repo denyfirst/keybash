@@ -153,12 +153,27 @@ function bind(id, action) {
   $(id)?.addEventListener('submit', event => { event.preventDefault(); void run(action); });
 }
 function click(id, action) { $(id)?.addEventListener('click', () => { void run(action); }); }
-async function copy(id) {
-  const element = $(id), value = element.value ?? element.textContent;
+// A copy says so on the button that made it, for a moment, where the person is
+// looking; only a refusal is said in words under the page or the sheet.
+const copyWords = new WeakMap(), copyTimers = new WeakMap();
+function sayCopied(button) {
+  const label = button.querySelector('.copy-label') ?? button;
+  if (!copyWords.has(button)) copyWords.set(button, label.textContent);
+  clearTimeout(copyTimers.get(button));
+  label.textContent = 'Copied'; button.dataset.copied = '';
+  copyTimers.set(button, setTimeout(() => { label.textContent = copyWords.get(button); delete button.dataset.copied; }, 1800));
+}
+async function copy(target, button) {
+  const element = typeof target === 'string' ? $(target) : target, value = element?.value ?? element?.textContent;
   if (!value) return;
-  try { await navigator.clipboard.writeText(value); notice('Copied.'); }
+  try { await navigator.clipboard.writeText(value); if (button) sayCopied(button); else notice('Copied.'); }
   catch { if (element.select) element.select(); notice('The browser did not allow copying. Select the text and copy it yourself.'); }
 }
+// A command's own Copy, in the head of its box, copies that box's command.
+document.addEventListener('click', event => {
+  const chip = event.target.closest?.('.copy-chip'), command = chip?.closest('.command-box')?.querySelector('output');
+  if (command) void run(() => copy(command, chip));
+});
 function showCodes(data) {
   if (!Array.isArray(data?.codes) || data.codes.length !== 10 || !data.codes.every(code => typeof code === 'string' && /^[A-Za-z0-9_-]{22}$/.test(code))) throw new Error('invalid codes');
   clearInputs(); hideSecret(); hideSeed();
@@ -280,19 +295,27 @@ async function openReview(record) {
 }
 // Icons are drawn with DOM calls, like everything else the page builds.
 const svgNS = 'http://www.w3.org/2000/svg';
+// Two tones, as on the menu: a soft body ('soft:'), solid marks ('dot:') and lines.
+const keyIcon = ['soft:M8 11.4a4.6 4.6 0 1 1 0 9.2a4.6 4.6 0 1 1 0-9.2z', 'dot:M8 14.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'M11.3 12.7L20 4', 'M16.6 7.4l2.4 2.4', 'M14.3 9.7l1.8 1.8'];
 const icons = {
-  ssh: ['M4 5.5h16v13H4z', 'M7.5 10l2.5 2-2.5 2', 'M12 14h4'],
-  rdp: ['M3.5 5h17v11h-17z', 'M9 19.5h6', 'M12 16v3.5'],
-  play: ['M8.5 6.5v11l9-5.5z'],
-  password: ['M5.5 7.5h13a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2z', 'M8 12h.01', 'M12 12h.01', 'M16 12h.01'],
-  'ssh-key': ['M4.5 12a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0', 'M11.5 12h9', 'M17 12v3', 'M20 12v2'],
-  made: ['M3.5 14a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0', 'M10.5 14h8', 'M15.5 14v2.5', 'M18.5 14v2', 'M17.5 3.5v4', 'M15.5 5.5h4'],
-  key: ['M4.5 12a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0', 'M11.5 12h9', 'M17 12v3', 'M20 12v2'],
+  ssh: ['soft:M5.6 4.5h12.8a2.6 2.6 0 0 1 2.6 2.6v9.8a2.6 2.6 0 0 1-2.6 2.6H5.6A2.6 2.6 0 0 1 3 16.9V7.1a2.6 2.6 0 0 1 2.6-2.6z', 'M3 8.6h18', 'M7 12.2l2.4 2-2.4 2', 'dot:M12.2 15.2h3.4a.6.6 0 0 1 .6.6v.7a.6.6 0 0 1-.6.6h-3.4a.6.6 0 0 1-.6-.6v-.7a.6.6 0 0 1 .6-.6z'],
+  rdp: ['soft:M5.4 4h13.2A2.4 2.4 0 0 1 21 6.4v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 14.6V6.4A2.4 2.4 0 0 1 5.4 4z', 'M9 20.5h6', 'M12 17v3.5', 'dot:M9.8 7.4l5.6 2.3-2.4.9-.9 2.4z'],
+  play: ['dot:M8 6.3v11.4a1.2 1.2 0 0 0 1.8 1l9-5.7a1.2 1.2 0 0 0 0-2L9.8 5.3A1.2 1.2 0 0 0 8 6.3z'],
+  password: ['soft:M5 7h14a2.5 2.5 0 0 1 2.5 2.5v5A2.5 2.5 0 0 1 19 17H5a2.5 2.5 0 0 1-2.5-2.5v-5A2.5 2.5 0 0 1 5 7z', 'dot:M7.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M12 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M16.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z'],
+  'ssh-key': keyIcon,
+  // A key made here, with a spark: it waits to be added to a server.
+  made: [...keyIcon, 'dot:M6 2.4l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z'],
+  key: keyIcon,
 };
 function glyph(name, className) {
   const svg = document.createElementNS(svgNS, 'svg');
   for (const [key, value] of [['viewBox', '0 0 24 24'], ['aria-hidden', 'true'], ['focusable', 'false'], ['class', className]]) svg.setAttribute(key, value);
-  for (const d of icons[name]) { const path = document.createElementNS(svgNS, 'path'); path.setAttribute('d', d); svg.append(path); }
+  for (const part of icons[name]) {
+    const [, tone, d] = part.match(/^(?:(soft|dot):)?(.*)$/);
+    const path = document.createElementNS(svgNS, 'path'); path.setAttribute('d', d);
+    if (tone) path.setAttribute('class', `g-${tone}`);
+    svg.append(path);
+  }
   return svg;
 }
 // A system's mark: its own path in its own colour, or one of ours in line art.
@@ -363,11 +386,19 @@ function serverCard(record, target) {
   tile.addEventListener('click', () => openSystemPicker(record));
   const titles = document.createElement('div'); titles.className = 'server-titles';
   const name = document.createElement('h3'); name.className = 'server-name'; name.textContent = record.name;
-  const login = owned.get(record.credential);
-  const meta = document.createElement('p'); meta.className = 'server-meta'; meta.textContent = `${login ? login.username : 'removed key'} @ ${target ? target.name : 'removed server'}`;
-  titles.append(name, meta);
+  const kind = document.createElement('p'); kind.className = 'server-kind';
+  kind.textContent = [target ? (target.protocol === 'rdp' ? 'Desktop (RDP)' : 'Terminal (SSH)') : 'Removed server', systems[record.system]?.title].filter(Boolean).join(' · ');
+  titles.append(name, kind);
   const state = document.createElement('span'); state.className = 'trust-state pill'; state.dataset.trust = record.trust; state.textContent = trustWords[record.trust];
   head.append(tile, titles, state); card.append(head);
+  // Who signs in where, as the prompt it opens to: a terminal's, or a desktop's.
+  const login = owned.get(record.credential);
+  const screen = document.createElement('p'); screen.className = 'server-screen';
+  const part = (className, text, hidden) => { const span = document.createElement('span'); span.className = className; span.textContent = text; if (hidden) span.setAttribute('aria-hidden', 'true'); return span; };
+  screen.append(part('who', login ? login.username : 'removed key'), part('at', '@'), part('where', target ? target.name : 'removed server'));
+  if (target?.protocol === 'rdp') screen.append(part('tail', ' · desktop', true));
+  else screen.append(part('tail', ' ~ $ ', true), part('cursor', '▍', true));
+  card.append(screen);
   if (trustHelp[record.trust]) { const help = document.createElement('p'); help.className = 'server-help'; help.textContent = trustHelp[record.trust]; card.append(help); }
   const actions = document.createElement('div'); actions.className = 'server-actions';
   if (target && record.trust === 'verified') {
@@ -535,8 +566,6 @@ const serversOK = data => Array.isArray(data?.networks) && data.networks.length 
 // certificate Remote Desktop uses now. Fixed text, the same for every server.
 const windowsCommand = `$t = (Get-CimInstance -Namespace root/cimv2/TerminalServices -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-Tcp'").SSLCertificateSHA1Hash; $c = Get-ChildItem Cert:\\LocalMachine -Recurse | Where-Object Thumbprint -eq $t | Select-Object -First 1; 'SHA256:' + -join ([Security.Cryptography.SHA256]::Create().ComputeHash($c.RawData) | ForEach-Object { $_.ToString('x2') })`;
 for (const id of ['server-command', 'identity-command']) if ($(id)) $(id).textContent = windowsCommand;
-click('server-copy', () => copy('server-command'));
-click('identity-copy', () => copy('identity-command'));
 // The line that command prints, as pasted: the spaces and breaks a terminal may
 // add are dropped. Keybash, not the person, compares it with what the server
 // shows, and the page is never told that value.
@@ -883,6 +912,34 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && $('menu-toggle')?.getAttribute('aria-expanded') === 'true') { setMenu(false); $('menu-toggle').focus(); }
 });
 document.addEventListener('click', event => { if (!event.target.closest?.('.rail')) setMenu(false); });
+// How this account's pages look: light or dark, and the menu open or
+// collapsed. The page arrives in the saved look; a change shows at once and is
+// kept with the account on the server, never in the browser. Saves go one
+// after another, each with the look as it is when it goes.
+const root = document.documentElement, systemDark = matchMedia('(prefers-color-scheme: dark)');
+const looksDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : systemDark.matches;
+let saving = Promise.resolve();
+function showLook() {
+  for (const button of document.querySelectorAll('.theme-toggle')) button.setAttribute('aria-label', looksDark() ? 'Switch to the light colour scheme' : 'Switch to the dark colour scheme');
+  const collapse = $('rail-collapse'), collapsed = root.dataset.menu === 'collapsed';
+  collapse?.setAttribute('aria-expanded', String(!collapsed));
+  collapse?.setAttribute('aria-label', collapsed ? 'Expand the menu' : 'Collapse the menu');
+}
+function changeLook(change) {
+  change(); showLook();
+  saving = saving.then(() => request('/api/preferences', 'POST', { theme: root.dataset.theme ?? 'system', menu: root.dataset.menu ?? 'open' }))
+    .catch(() => notice('The look was not saved: it lasts until you leave this page.'));
+}
+for (const button of document.querySelectorAll('.theme-toggle')) {
+  button.addEventListener('click', () => {
+    const next = looksDark() ? 'light' : 'dark';
+    button.dataset.turning = ''; setTimeout(() => { delete button.dataset.turning; }, 500);
+    changeLook(() => { root.dataset.theme = next; });
+  });
+}
+$('rail-collapse')?.addEventListener('click', () => changeLook(() => { if (root.dataset.menu === 'collapsed') delete root.dataset.menu; else root.dataset.menu = 'collapsed'; }));
+systemDark.addEventListener('change', showLook);
+showLook();
 $('show-claim')?.addEventListener('click', () => showForm('claim'));
 $('show-recover')?.addEventListener('click', () => showForm('recover'));
 $('show-signin')?.addEventListener('click', () => showForm('signin'));
@@ -923,7 +980,7 @@ bind('role-form', async () => {
   $('role-dialog').close(); await loadUsers();
   if (chosen !== person.role) notice(`${person.username} is now ${chosen === 'admin' ? 'an administrator' : chosen === 'auditor' ? 'an auditor' : 'a user'}, from their next sign-in.`);
 });
-click('copy-code', () => copy('person-code'));
+click('copy-code', () => copy('person-code', $('copy-code')));
 $('close-code')?.addEventListener('click', () => $('code-dialog').close());
 $('code-dialog')?.addEventListener('close', () => { $('person-code').textContent = ''; });
 click('begin-enroll', async () => {
@@ -973,7 +1030,7 @@ $('record-dialog')?.addEventListener('close', () => { clearInputs(); dialogNotic
 $('change-password')?.addEventListener('click', () => { if (busy) return; clearInputs(); dialogNotice(''); $('password-dialog').showModal(); $('current-password').focus(); });
 $('password-cancel')?.addEventListener('click', () => $('password-dialog').close());
 $('password-dialog')?.addEventListener('close', clearInputs);
-click('copy-install', () => copy('install-command'));
+click('copy-install', () => copy('install-command', $('copy-install')));
 $('new-connection')?.addEventListener('click', () => {
   if (busy) return;
   pickedSystem = ''; const choose = name => { pickedSystem = name; systemGrid($('connection-system'), pickedSystem, choose); };
@@ -1023,9 +1080,8 @@ click('regenerate-recovery', async () => { showCodes(await request('/api/mfa/rec
 click('saved-recovery', async () => { $('recovery-codes').value = ''; await loadAccount(); });
 const signOut = async () => { hideSecret(); clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); };
 click('logout', signOut); click('focus-logout', signOut);
-click('copy-seed', () => copy('seed')); click('copy-recovery', () => copy('recovery-codes'));
-for (const name of ['build', 'upgrade']) click(`copy-${name}`, () => copy(`command-${name}`));
-click('copy-secret', () => copy('revealed-secret')); click('copy-passphrase', () => copy('revealed-passphrase'));
+click('copy-seed', () => copy('seed', $('copy-seed'))); click('copy-recovery', () => copy('recovery-codes', $('copy-recovery')));
+click('copy-secret', () => copy('revealed-secret', $('copy-secret'))); click('copy-passphrase', () => copy('revealed-passphrase', $('copy-passphrase')));
 $('hide-secret')?.addEventListener('click', hideSecret);
 $('secret-dialog')?.addEventListener('close', hideSecret);
 click('confirm-delete', async () => {

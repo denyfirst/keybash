@@ -51,9 +51,17 @@ func TestWorkspaceArrivesInTheSessionStage(t *testing.T) {
 	// Only the three stages are ever written into the page.
 	for _, stage := range []string{"", "admin", "Ready", `ready" hidden="`, "ready "} {
 		w := httptest.NewRecorder()
-		serveWorkspace(w, stage)
+		serveWorkspace(w, stage, preferences{})
 		if w.Code != 500 || strings.Contains(w.Body.String(), "data-stage") {
 			t.Fatalf("stage %q was written into the page (%d)", stage, w.Code)
+		}
+	}
+	// Nor is any look but the few fixed words.
+	for _, look := range []preferences{{Theme: `dark" onload="x`}, {Theme: "Dark"}, {Theme: "system"}, {Menu: "open"}, {Menu: `collapsed"`}} {
+		w := httptest.NewRecorder()
+		serveWorkspace(w, "ready", look)
+		if w.Code != 500 || strings.Contains(w.Body.String(), "data-theme") || strings.Contains(w.Body.String(), "data-menu") {
+			t.Fatalf("look %+v was written into the page (%d)", look, w.Code)
 		}
 	}
 }

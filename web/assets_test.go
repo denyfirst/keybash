@@ -267,3 +267,122 @@ func TestTheContrastArithmeticIsRight(t *testing.T) {
 		}
 	}
 }
+
+// A person may choose light or dark; the page's root then says so. Every rule
+// for the system's dark must leave a chosen light alone, and must have a twin,
+// identical but for its first selector, for a chosen dark. A dark rule written
+// once would show the wrong scheme to one of the two.
+func TestEveryDarkRuleAlsoFollowsTheChoice(t *testing.T) {
+	const (
+		system = `:root:not([data-theme="light"])`
+		chosen = `:root[data-theme="dark"]`
+		media  = "@media screen and (prefers-color-scheme: dark)"
+	)
+	comment := regexp.MustCompile(`(?s)/\*.*?\*/`)
+	space := regexp.MustCompile(`\s+`)
+	flat := func(s string) string {
+		return strings.TrimSpace(space.ReplaceAllString(comment.ReplaceAllString(s, ""), " "))
+	}
+	// block returns what is between the brace after at and its match.
+	block := func(text string, at int) (string, int) {
+		open := strings.IndexByte(text[at:], '{')
+		if open < 0 {
+			t.Fatal("a block has no opening brace")
+		}
+		depth := 0
+		for i := at + open; i < len(text); i++ {
+			switch text[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return text[at+open+1 : i], i + 1
+				}
+			}
+		}
+		t.Fatal("a block is not closed")
+		return "", 0
+	}
+	rules := func(body string) [][2]string {
+		var out [][2]string
+		body = comment.ReplaceAllString(body, "")
+		for {
+			open := strings.IndexByte(body, '{')
+			if open < 0 {
+				if strings.TrimSpace(body) != "" {
+					t.Fatalf("text outside a rule: %q", body)
+				}
+				return out
+			}
+			inner, end := block(body, 0)
+			out = append(out, [2]string{flat(body[:open]), flat(inner)})
+			body = body[end:]
+		}
+	}
+	found := 0
+	for _, name := range sheets {
+		text := sheet(t, name)
+		chosenRules := map[string]bool{}
+		for at := 0; ; {
+			i := strings.Index(text[at:], "@media screen {")
+			if i < 0 {
+				break
+			}
+			inner, end := block(text, at+i)
+			for _, r := range rules(inner) {
+				chosenRules[r[0]+" { "+r[1]+" }"] = true
+			}
+			at = end
+		}
+		if strings.Contains(text, "prefers-color-scheme: light") || strings.Count(text, "prefers-color-scheme") != strings.Count(text, media) {
+			t.Errorf("%s asks for a scheme other than as %q", name, media)
+		}
+		for at := 0; ; {
+			i := strings.Index(text[at:], media)
+			if i < 0 {
+				break
+			}
+			inner, end := block(text, at+i)
+			for _, r := range rules(inner) {
+				found++
+				for _, selector := range topLevel(r[0]) {
+					if !strings.HasPrefix(selector, system) {
+						t.Errorf("%s: the dark rule %q does not leave a chosen light alone", name, selector)
+					}
+				}
+				twin := strings.ReplaceAll(r[0], system, chosen) + " { " + r[1] + " }"
+				if !chosenRules[twin] {
+					t.Errorf("%s: the dark rule %q has no identical twin for a chosen dark", name, r[0])
+				}
+			}
+			at = end
+		}
+		if strings.Count(text, chosen) != strings.Count(text, system) {
+			t.Errorf("%s: %d rules for a chosen dark, %d for the system's", name, strings.Count(text, chosen), strings.Count(text, system))
+		}
+	}
+	if found < 6 {
+		t.Fatalf("only %d dark rules were found, which is too few to be right", found)
+	}
+}
+
+// topLevel splits a selector list at its own commas, not those inside :is().
+func topLevel(list string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i, c := range list {
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				out = append(out, strings.TrimSpace(list[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	return append(out, strings.TrimSpace(list[start:]))
+}
