@@ -8,7 +8,9 @@ assert.equal(url.protocol, 'https:');
 assert.equal(url.hostname, '127.0.0.1');
 if (typeof config.Code!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(config.Code)) throw new Error('invalid lab input');
 // Isolated synthetic fixture certificate only; no user/system trust changes.
-const browser = await chromium.launch({ headless: true, ...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
+// WebGL off: these steps read the text the page draws, the GPU renderer's
+// fallback; terminal-gpu-browser-test.mjs covers the GPU itself.
+const browser = await chromium.launch({headless:true,args:['--disable-3d-apis'],...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
 const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 850 } });
 const page = await context.newPage();
 const outbound = [], errors = [];
@@ -53,6 +55,8 @@ try {
   await page.getByRole('button', { name: 'Open session' }).click();
   await page.locator('#status').filter({ hasText: /^Connected$/ }).waitFor();
   await visible(config.Mode === 'linux' ? 'keybash-lab>' : '');
+  // Without WebGL the page's own text draws the terminal, and says so.
+  assert.equal(await page.evaluate(() => document.body.dataset.renderer ?? null), null, 'the GPU renderer claimed a browser without WebGL');
   assert.equal(await page.locator('#code').inputValue(), '');
   const cookies = await context.cookies();
   assert(cookies.some(cookie => cookie.name === '__Host-keybash-lab' && cookie.httpOnly && cookie.secure && cookie.sameSite === 'Strict'));

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createHmac} from 'node:crypto';
 const config=JSON.parse(readFileSync(0,'utf8'));assert.equal(new URL(config.Origin).hostname,'127.0.0.1');
-const browser=await chromium.launch({headless:true,...(process.env.KEYBASH_BROWSER_CHANNEL?{channel:process.env.KEYBASH_BROWSER_CHANNEL}:{})});
+// WebGL off: these steps read the text the page draws, the GPU renderer's
+// fallback; terminal-gpu-browser-test.mjs covers the GPU itself.
+const browser=await chromium.launch({headless:true,args:['--disable-3d-apis'],...(process.env.KEYBASH_BROWSER_CHANNEL?{channel:process.env.KEYBASH_BROWSER_CHANNEL}:{})});
 const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1400,height:1000}});const page=await context.newPage(),account=await context.newPage();const errors=[],outbound=[],urls=[];
 context.on('page',p=>p.on('pageerror',e=>errors.push(e.name)));page.on('pageerror',e=>errors.push(e.name));account.on('pageerror',e=>errors.push(e.name));
 context.on('request',r=>{if(!r.url().startsWith(config.Origin+'/'))outbound.push('external');if([config.Password,config.Secret,config.Code].some(s=>r.url().includes(s)||r.url().includes(encodeURIComponent(s))))urls.push('secret URL');});

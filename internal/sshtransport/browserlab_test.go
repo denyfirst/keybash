@@ -19,7 +19,14 @@ import (
 	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
-func TestBrowserTerminalLab(t *testing.T) {
+func TestBrowserTerminalLab(t *testing.T) { runTerminalLabScript(t, "browser-test.mjs") }
+
+// The same lab, with the terminal drawn on the GPU and then without it.
+func TestBrowserTerminalOnTheGPU(t *testing.T) {
+	runTerminalLabScript(t, "terminal-gpu-browser-test.mjs")
+}
+
+func runTerminalLabScript(t *testing.T, script string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	server := httptest.NewUnstartedServer(nil)
@@ -39,7 +46,7 @@ func TestBrowserTerminalLab(t *testing.T) {
 	server.Config.Handler = lab
 	server.StartTLS()
 	defer server.Close()
-	command := exec.CommandContext(ctx, "node", filepath.Join("..", "..", "web", "browser-test.mjs"))
+	command := exec.CommandContext(ctx, "node", filepath.Join("..", "..", "web", script)) // #nosec G204 -- one of the two fixed scripts above
 	input, _ := json.Marshal(struct{ Origin, Code, Mode string }{server.URL, code, runtime.GOOS})
 	command.Stdin = bytes.NewReader(input)
 	command.Stdout = os.Stdout

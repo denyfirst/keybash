@@ -137,7 +137,7 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request refused", http.StatusMethodNotAllowed)
 		return
 	}
-	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm.css": "vendor/xterm.css"}
+	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css"}
 	if l.desktop {
 		assets = map[string]string{"/": "desktop.html", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/paste.mjs": "paste.mjs", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
 	}
