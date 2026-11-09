@@ -1,17 +1,18 @@
 import { inspectPaste, decodeOutput, MAX_INPUT } from './paste.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, endedMessage, offerNewSession, enterFullscreen, watchFullscreen, nameSession } from './remote.mjs';
+import { ownedRemote, remoteProof, remoteErrorMessage, endedMessage, offerNewSession, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const encoder = new TextEncoder();
 const term = new globalThis.Terminal({ cols: 100, rows: 30, scrollback: 1500, fontSize: 13,
   fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', allowProposedApi: false,
-  linkHandler: { activate() {} }, theme: { background: '#0c0d0f', foreground: '#cdd1de', cursor: '#e5e7eb', selectionBackground: '#444753' } });
+  linkHandler: { activate() {} }, theme: { background: '#0e1013', foreground: '#cdd1de', cursor: '#e5e7eb', selectionBackground: '#444753' } });
 term.open($('terminal'));
 term.parser.registerOscHandler(52, () => true); // Remote output never writes the local clipboard.
 term.parser.registerOscHandler(8, () => true);  // No remotely supplied clickable hyperlinks.
 term.write(ownedRemote ? '\x1b[2mConnecting…\x1b[0m\r\n' : '\x1b[2mKeybash terminal lab\r\nEnter the one-time sign-in code to open a session.\x1b[0m\r\n');
 let socket = null, expected = 1, pendingPaste = '', connected = false;
 let retired = false;
+const chrome = sessionChrome();
 function retireTerminal() {
   if (retired) return;
   retired = true; term.dispose(); $('terminal').replaceChildren();
@@ -93,10 +94,20 @@ term.attachCustomKeyEventHandler(event => {
   }
   return true; // Plain Ctrl+C retains remote interrupt behavior.
 });
+// The terminal takes every whole cell its area holds, measured from xterm's
+// own screen and scroll bar rather than assumed, so it fills a full screen.
 function resize() {
   if (!connected || socket?.readyState !== WebSocket.OPEN) return;
-  const columns = Math.max(20, Math.min(500, Math.floor(($('terminal').clientWidth - 46) / 7.83)));
-  const rows = Math.max(5, Math.min(200, Math.floor(($('terminal').clientHeight - 46) / 15)));
+  const area = $('terminal'), style = getComputedStyle(area);
+  const screen = term.element?.querySelector('.xterm-screen')?.getBoundingClientRect();
+  const viewport = term.element?.querySelector('.xterm-viewport');
+  const cellWidth = screen?.width && term.cols ? screen.width / term.cols : 7.83;
+  const cellHeight = screen?.height && term.rows ? screen.height / term.rows : 15;
+  const scrollBar = viewport ? viewport.offsetWidth - viewport.clientWidth : 0;
+  const width = area.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - scrollBar;
+  const height = area.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  const columns = Math.max(20, Math.min(500, Math.floor(width / cellWidth)));
+  const rows = Math.max(5, Math.min(200, Math.floor(height / cellHeight)));
   term.resize(columns, rows);
   $('size').textContent = `${columns} × ${rows}`;
   socket.send(JSON.stringify({ type: 'resize', columns, rows }));
@@ -130,6 +141,7 @@ function connect(proof=null) {
     retireTerminal();
     for (const id of ['paste-review', 'clipboard-panel']) if ($(id).open) $(id).close();
     $('clipboard-text').value = ''; notice(why ?? 'Session closed.');
+    chrome.end();
   };
   socket.onerror = () => notice('The connection could not be opened.');
 }
@@ -155,4 +167,4 @@ $('fullscreen').addEventListener('click', () => {
 });
 window.addEventListener('pagehide',()=>{socket?.close();retireTerminal();clearPaste();});
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
-if(ownedRemote){$('login-panel').hidden=true;offerNewSession();void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(error=>notice(remoteErrorMessage(error)));}
+if(ownedRemote){$('login-panel').hidden=true;offerNewSession();void nameSession('Keybash');void remoteProof().then(proof=>{if(!retired)connect(proof);}).catch(error=>{notice(remoteErrorMessage(error));chrome.end();});}

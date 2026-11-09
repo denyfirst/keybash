@@ -1,34 +1,120 @@
-/* The desktop canvas and the text exchange beside it. */
+/* The desktop fills the session; its picture is scaled to fit, never cut. */
 #desktop {
   display: flex;
-  justify-content: center;
+  flex: 1;
   align-items: center;
-  min-height: 200px;
-  max-height: 75vh;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
   outline: none;
   background: var(--term-bg);
 }
-#desktop:focus-visible { outline: 2px solid var(--tool); outline-offset: -2px; }
+#desktop:focus-visible { outline: 2px solid var(--term-tool); outline-offset: -2px; }
 #display { line-height: 0; }
-#desktop:fullscreen { width: 100vw; height: 100vh; max-height: none; }
 
-.clipboard-panel {
-  display: grid;
-  grid-template-columns: 1fr 2fr 2fr;
-  gap: 1rem;
-  margin-top: 1.2rem;
+/* Screen size: a quiet select with its own chevron, and the size it is now. */
+.screen { cursor: default; }
+.screen .select { position: relative; display: inline-flex; align-items: center; }
+.screen .select::after {
+  content: "";
+  position: absolute;
+  right: 0.15rem;
+  width: 0.36rem;
+  height: 0.36rem;
+  margin-top: -0.2rem;
+  pointer-events: none;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
 }
-.clipboard-panel label { margin-top: 0; }
-.clipboard-panel textarea { min-height: 5rem; }
-.clipboard-panel pre {
-  max-height: 6rem;
+.screen select {
+  width: auto;
+  margin: 0;
+  padding: 0 1rem 0 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+}
+.screen select:disabled { cursor: default; }
+.screen:has(select:disabled) { color: var(--term-faint); }
+.screen select option { color: var(--term-ink); background: var(--term-bar); }
+
+/* The clipboard menu: text both ways, in one small sheet under its button. */
+.menu-anchor { position: relative; }
+.menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 5;
+  display: grid;
+  gap: 0.9rem;
+  width: min(26rem, calc(100vw - 1rem));
+  padding: 0.9rem;
+  color: var(--term-ink);
+  background: var(--term-bar);
+  border: 1px solid var(--term-rule);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.menu[hidden] { display: none; }
+.menu section { display: grid; }
+.menu label { margin: 0 0 0.35rem; font-size: 0.74rem; font-weight: 600; letter-spacing: 0.03em; color: var(--term-faint); }
+.menu textarea {
+  width: 100%;
+  min-height: 4.2rem;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--term-ink);
+  background: var(--term-bg);
+  border: 1px solid var(--term-rule);
+  border-radius: 6px;
+  resize: vertical;
+}
+.menu textarea:focus { border-color: var(--term-tool); box-shadow: none; outline: none; }
+.menu textarea::placeholder { color: var(--term-faint); }
+.menu pre {
+  max-height: 5rem;
+  margin: 0.4rem 0 0;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--ink-soft);
+  font-size: 0.76rem;
+  color: var(--term-faint);
 }
-.clipboard-panel button { margin: 0.6rem 0.4rem 0 0; }
-@media (max-width: 900px) { .clipboard-panel { grid-template-columns: 1fr; } }
+.menu pre:empty { display: none; }
+.menu-actions { display: flex; justify-content: flex-end; gap: 0.4rem; margin-top: 0.5rem; }
+.menu-actions button { height: auto; margin: 0; padding: 0.42rem 0.8rem; font-size: 0.8rem; }
+.menu-actions button.secondary { color: var(--term-ink); background: transparent; border-color: var(--term-rule); box-shadow: none; }
+.menu-actions button.secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--term-ink) 10%, transparent); }
+.menu-actions button.secondary:disabled { color: var(--term-faint); background: transparent; border-color: var(--term-rule); }
+.menu-help { margin: 0; font-size: 0.74rem; line-height: 1.45; color: var(--term-faint); }
+/* Text copied on the remote waits behind the button: a dot says so. */
+#clipboard { position: relative; }
+#clipboard[data-new]::after {
+  content: "";
+  position: absolute;
+  top: 0.32rem;
+  right: 0.32rem;
+  width: 0.42rem;
+  height: 0.42rem;
+  background: var(--term-tool);
+  border-radius: 50%;
+}
+
+/* A phone shows the screen size as its icon; the select lies over it, so a
+   tap opens the phone's own picker. */
+@media (max-width: 760px) {
+  .menu { position: fixed; top: 3.1rem; right: 0.5rem; left: 0.5rem; width: auto; }
+  .screen { position: relative; padding: 0 0.5rem; }
+  .screen .size, .screen .select::after { display: none; }
+  .screen .select { position: absolute; inset: 0; }
+  .screen select { width: 100%; height: 100%; padding: 0; color: transparent; }
+}

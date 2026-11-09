@@ -127,16 +127,21 @@ the terminal document. No external service, CDN or runtime dependency is added.
 "Connect" opens each session in its own tab (`target=_blank`, `rel=noopener`;
 both pages are same-origin with COOP `same-origin`), and the tab is titled
 with the connection's name, read from `/api/connections` and set as text.
-A session page is the session alone, at full width: it has no menu and no
-link away, because leaving the page ends its session. On an SSH page, "+"
+A session page is the session alone, filling the window under one slim bar:
+it has no menu and no link away, because leaving the page ends its session.
+The bar says the connection's state and name and holds the tools; on a desktop
+the screen size is a select in it and the text exchange a small sheet under
+its Clipboard button, which a dot marks when the remote copied text (never
+written to the local clipboard unasked). On an SSH page, "+"
 opens another session to the same server in a tab of its own; an RDP page
 offers none, since a second sign-in as the same user takes over the first
-desktop. The status line under the panel says the connection's state.
-"Full screen"
-(terminal: the whole session panel; desktop: the canvas) asks the browser for
+desktop. "Full screen" (the whole session, for both) asks the browser for
 full screen and, where it allows (Chromium), Keyboard Lock, so Esc, the
-Windows key and Alt+Tab reach the remote and holding Esc leaves. Both need a
-click on the page, and closing the session leaves full screen.
+Windows key and Alt+Tab reach the remote and holding Esc leaves. There the bar
+steps aside and comes back at the top edge or from its handle. Both need a
+click on the page, and closing the session leaves full screen. An ended
+session keeps its reason on the page, with Connect again, which only reloads
+the page and so asks for a new one-use lease.
 
 `cmd/keybash serve-lab` deliberately remains custody-only: operator catalog
 configuration, an installed isolated launcher, target trust/approval UI and

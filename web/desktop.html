@@ -18,17 +18,38 @@
       <form id="login"><label for="code">One-time lab sign-in code</label><div class="login-row"><input id="code" type="password" autocomplete="off" maxlength="64" required><button type="submit">Open session</button></div></form>
     </section>
     <section class="session" aria-label="RDP workspace">
-      <div class="toolbar"><div class="toolbar-start"><span class="wordmark session-mark">keybash<span class="wordmark-stop">.</span></span><div class="tab"><span class="tab-dot"></span><span id="tab-name">rdp</span> <span class="tab-type">RDP</span></div></div><div class="tools"><button id="special" disabled>Ctrl+Alt+Del</button><button id="fullscreen" disabled>Full screen</button><button id="disconnect" disabled>Disconnect</button></div></div>
-      <div id="desktop" tabindex="0" role="application" aria-label="RDP desktop"><div id="display"></div></div>
-      <footer class="session-foot"><span id="status" role="status">Not connected</span><span class="session-keys">The keyboard works while the desktop has focus</span><span class="session-end"><span id="size">1024 × 768</span><i>·</i><span>by <span class="org"><span class="org-deny">deny</span>first<span class="wordmark-stop">.</span></span></span></span></footer>
+      <header class="bar">
+        <div class="bar-start"><span class="wordmark session-mark">keybash<span class="wordmark-stop">.</span></span><span id="status" role="status">Not connected</span><span id="tab-name" class="session-name">rdp</span><span class="session-kind">RDP</span></div>
+        <div class="tools">
+          <label class="screen" title="Screen size · sizes depend on the server"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><span class="select"><select id="resolution" aria-label="Screen size" disabled><option value="fit">Fit to window</option><option value="1024x768">1024 × 768</option><option value="1280x720">1280 × 720</option><option value="1600x900">1600 × 900</option><option value="1920x1080">1920 × 1080</option></select></span><span id="size" class="size">1024 × 768</span></label>
+          <div class="menu-anchor">
+            <button id="clipboard" disabled aria-expanded="false" aria-controls="clipboard-menu" title="Text to and from the remote"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 12h6M9 16h4"/></svg><span class="label">Clipboard</span></button>
+            <div id="clipboard-menu" class="menu" role="group" aria-label="Clipboard" hidden>
+              <section>
+                <label for="paste-text">Paste on the remote</label>
+                <textarea id="paste-text" rows="3" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="Type or paste text · at most 32 KiB"></textarea>
+                <pre id="paste-preview" aria-label="Paste preview"></pre>
+                <div class="menu-actions"><button id="paste-local" class="secondary" disabled>Read my clipboard</button><button id="paste-send" disabled>Paste on remote</button></div>
+              </section>
+              <section>
+                <label for="remote-text">Copied on the remote</label>
+                <textarea id="remote-text" rows="3" readonly autocomplete="off" spellcheck="false" placeholder="Text copied on the remote shows here"></textarea>
+                <div class="menu-actions"><button id="copy-remote" class="secondary" disabled>Copy here · Ctrl+Shift+C</button></div>
+              </section>
+              <p class="menu-help">Only text. Ctrl+V on the desktop pastes one line at once; several lines wait here for review. No Enter is added.</p>
+            </div>
+          </div>
+          <button id="special" disabled title="Send Ctrl+Alt+Del to the remote"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M7 14h10"/></svg><span class="label">Ctrl+Alt+Del</span></button>
+          <button id="fullscreen" disabled title="Full screen"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span class="label">Full screen</span></button>
+          <button id="disconnect" class="end" disabled title="Disconnect"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v8M6.4 6.6a8 8 0 1 0 11.2 0"/></svg><span class="label">Disconnect</span></button>
+        </div>
+      </header>
+      <div class="work">
+        <button class="bar-handle" type="button" aria-label="Show the session bar"></button>
+        <div id="desktop" tabindex="0" role="application" aria-label="RDP desktop" title="The keyboard works while the desktop has focus"><div id="display"></div></div>
+        <div class="ended-card"><p id="notice" role="status" class="notice"></p><button id="reconnect" type="button" hidden>Connect again</button></div>
+      </div>
     </section>
-    <section class="clipboard-panel panel" aria-label="Text exchange">
-      <div><label for="resolution">Screen size</label><select id="resolution" disabled><option value="fit">Fit to window</option><option value="1024x768">1024 × 768</option><option value="1280x720">1280 × 720</option><option value="1600x900">1600 × 900</option><option value="1920x1080">1920 × 1080</option></select></div>
-      <div><label for="paste-text">Text to paste on the remote · at most 32 KiB</label><textarea id="paste-text" rows="3" maxlength="32768" autocomplete="off" spellcheck="false"></textarea><pre id="paste-preview" aria-label="Paste preview"></pre><button id="paste-local" class="secondary" disabled>Read local clipboard</button><button id="paste-send" disabled>Reviewed · paste</button></div>
-      <div><label for="remote-text">Text from the remote</label><textarea id="remote-text" rows="3" readonly autocomplete="off" spellcheck="false"></textarea><button id="copy-remote" class="secondary" disabled>Copy · Ctrl+Shift+C</button></div>
-    </section>
-    <p class="help">Only text is exchanged. Copy works with the button; a paste with several lines is shown for review first. The panel is cleared when the session closes. Screen sizes depend on the server.</p>
-    <p id="notice" role="status" class="notice"></p>
   </main>
 </body>
 </html>
