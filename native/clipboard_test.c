@@ -15,7 +15,7 @@ int main(void) {
     assert(keybash_clipboard_from_terminated_utf8("", 0, encoded, sizeof(encoded), &n) && n==2);
     assert(keybash_clipboard_to_utf8(golden, sizeof(golden), decoded, sizeof(decoded), &m));
     assert(m == sizeof(text)-1 && !memcmp(text, decoded, sizeof(text)));
-    const BYTE bad[][6] = {{0x3d,0xd8,0,0,0,0}, {0x11,0xdd,0,0,0,0}, {'a',0,0,0,'b',0}, {'a',0,'b',0,'c',0}};
+    const BYTE bad[][6] = {{0x3d,0xd8,0,0,0,0}, {0x11,0xdd,0,0,0,0}, {0x3d,0xd8,0x3d,0xd8,0,0}, {'a',0,'b',0,'c',0}};
     for (size_t i=0;i<sizeof(bad)/sizeof(bad[0]);i++) assert(!keybash_clipboard_to_utf8(bad[i], sizeof(bad[i]), decoded, sizeof(decoded), &m) && m==0);
     assert(!keybash_clipboard_to_utf8(golden, sizeof(golden)-1, decoded, sizeof(decoded), &m));
     assert(!keybash_clipboard_to_utf8(golden, sizeof(golden), decoded, 2, &m));
@@ -32,5 +32,16 @@ int main(void) {
     free(maximum);
     assert(keybash_clipboard_from_utf8("",0,encoded,sizeof(encoded),&n) && n==2);
     assert(keybash_clipboard_to_utf8(encoded,n,decoded,sizeof(decoded),&m) && m==0);
+    /* Windows pads its text with more NULs; only the text before the first counts. */
+    static const BYTE padded[] = {'a',0,'b',0,0,0,0,0,0,0,'z',0};
+    assert(keybash_clipboard_to_utf8(padded,sizeof(padded),decoded,sizeof(decoded),&m) && m==2 && !memcmp(decoded,"ab",3));
+    BYTE golden_padded[sizeof(golden)+6]; memcpy(golden_padded,golden,sizeof(golden)); memset(golden_padded+sizeof(golden),0,6);
+    assert(keybash_clipboard_to_utf8(golden_padded,sizeof(golden_padded),decoded,sizeof(decoded),&m) && m==sizeof(text)-1 && !memcmp(text,decoded,sizeof(text)));
+    BYTE* large = calloc(32770*2+16,1); assert(large);
+    for (size_t i=0;i<32768;i++) large[2*i]='a';
+    assert(keybash_clipboard_to_utf8(large,32769*2+16,decoded,sizeof(decoded),&m) && m==32768);
+    large[2*32768]='a';
+    assert(!keybash_clipboard_to_utf8(large,32770*2+16,decoded,sizeof(decoded),&m) && m==0);
+    free(large);
     return 0;
 }
