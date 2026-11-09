@@ -32,6 +32,15 @@ try{
   await page.waitForFunction(()=>clipState.writes===1);
   assert.equal(await page.evaluate(()=>testClipboardRead()),remote);
   assert.equal(await page.locator('#copy').getAttribute('data-new'),null,'copying kept the mark');
+  // Ctrl+C on the desktop: the copy that follows comes here too, with no click.
+  const latest=config.Native?remote:'Copied after Ctrl+C 🔑';
+  if(!config.Native){
+    const before=await page.evaluate(()=>clipState.writes);
+    await page.locator('#desktop').focus();await page.keyboard.press('Control+c');
+    await page.waitForFunction(w=>clipState.writes===w+1,before,{timeout:10000});
+    assert.equal(await page.evaluate(()=>testClipboardRead()),latest);
+    assert.equal(await page.locator('#copy').getAttribute('data-new'),null,'a copy after Ctrl+C kept the mark');
+  }
   // Paste: several lines are shown first, and go only when sent.
   const local='Local Azərbaycan 🔑\nline';
   await page.evaluate(text=>testClipboardWrite(text),local);
@@ -56,7 +65,7 @@ try{
   await page.locator('#copy').click();
   await page.locator('#notice').filter({hasText:'No clipboard permission'}).waitFor();
   await page.locator('#copy-panel').waitFor();
-  assert.equal(await page.locator('#remote-text').inputValue(),remote);
+  assert.equal(await page.locator('#remote-text').inputValue(),latest);
   await page.locator('#copy-panel button[value=close]').click();await page.locator('#copy-panel').waitFor({state:'hidden'});
   await page.locator('#paste').click();
   await page.locator('#paste-review').waitFor();

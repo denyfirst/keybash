@@ -184,6 +184,30 @@ replace_once(settings, "if (guac_settings->certificate_fingerprints != NULL)\n  
 clip = guac / "src/protocols/rdp/channels/cliprdr.c"
 (clip.parent / "keybash_clipboard.c").write_bytes((identity_source.parent / "clipboard.c").read_bytes())
 replace_once(clip, '#include "common/clipboard.h"', '#include "common/clipboard.h"\n#include "keybash_clipboard.c"')
+# A clipboard request this client cannot answer gets the protocol's own failure
+# response. Returning an error from a CLIPRDR callback makes FreeRDP close the
+# channel and the whole connection, which ended desktops over one copy.
+replace_once(clip, 'static UINT guac_rdp_cliprdr_format_data_request(CliprdrClientContext* cliprdr,', '''static UINT keybash_cliprdr_refuse(CliprdrClientContext* cliprdr, guac_rdp_client* rdp_client) {
+    CLIPRDR_FORMAT_DATA_RESPONSE data_response = {
+        .requestedFormatData = NULL,
+#ifdef HAVE_CLIPRDR_HEADER
+        .common = {
+            .msgType = CB_FORMAT_DATA_RESPONSE,
+            .msgFlags = CB_RESPONSE_FAIL,
+            .dataLen = 0,
+        }
+#else
+        .dataLen = 0,
+        .msgFlags = CB_RESPONSE_FAIL
+#endif
+    };
+    pthread_mutex_lock(&(rdp_client->message_lock));
+    UINT result = cliprdr->ClientFormatDataResponse(cliprdr, &data_response);
+    pthread_mutex_unlock(&(rdp_client->message_lock));
+    return result;
+}
+
+static UINT guac_rdp_cliprdr_format_data_request(CliprdrClientContext* cliprdr,''')
 replace_once(clip, '    const char* input = clipboard->clipboard->buffer;', '''    /* Native input and RDP callbacks can update this shared clipboard.
      * Convert an immutable bounded snapshot, never a changing buffer between
      * the required-size query and conversion. No content is logged. */
@@ -192,7 +216,7 @@ replace_once(clip, '    const char* input = clipboard->clipboard->buffer;', ''' 
     int keybash_input_length = clipboard->clipboard->length;
     if (keybash_input_length < 0 || keybash_input_length > KEYBASH_CLIPBOARD_LIMIT + 1) {
         pthread_mutex_unlock(&(clipboard->clipboard->lock));
-        return ERROR_INVALID_DATA;
+        return keybash_cliprdr_refuse(cliprdr, rdp_client);
     }
     if (keybash_input_length) memcpy(keybash_input, clipboard->clipboard->buffer, (size_t)keybash_input_length);
     else keybash_input[0] = 0;
@@ -210,7 +234,7 @@ replace_once(clip, '''    /* Use Windows' CP-1252 if Unicode unavailable */
     '    /* Only Unicode text is supported; no lossy codepage fallback. */')
 replace_once(clip, '    /* Map requested clipboard format to a guac_iconv writer */', '''    if (format_data_request->requestedFormatId != CF_UNICODETEXT) {
         guac_mem_free(output);
-        return ERROR_INVALID_DATA;
+        return keybash_cliprdr_refuse(cliprdr, rdp_client);
     }
     /* Map requested clipboard format to a guac_iconv writer */''')
 local = '''    guac_iconv(local_reader, &input, clipboard->clipboard->length,
@@ -220,7 +244,7 @@ replace_once(clip, local, '''    if (format_data_request->requestedFormatId == C
         if (!keybash_clipboard_from_terminated_utf8(input, (size_t)keybash_input_length,
                 start, GUAC_COMMON_CLIPBOARD_MAX_LENGTH, &length)) {
             guac_mem_free(start);
-            return ERROR_INVALID_DATA;
+            return keybash_cliprdr_refuse(cliprdr, rdp_client);
         }
         output = (char*)start + length;
     } else {
@@ -231,8 +255,12 @@ remote = '''    if (guac_iconv(remote_reader, &input, data_len,
 replace_once(clip, remote, '''    if (clipboard->requested_format == CF_UNICODETEXT) {
         size_t length = 0;
         if (data_len < 0 || !keybash_clipboard_to_utf8((const BYTE*)input,
-                (size_t)data_len, received_data, sizeof(received_data), &length))
-            return ERROR_INVALID_DATA;
+                (size_t)data_len, received_data, sizeof(received_data), &length)) {
+            /* Text that cannot be passed is dropped. An error here would end
+             * the whole desktop, which bounds nothing. No content is logged. */
+            guac_client_log(client, GUAC_LOG_DEBUG, "Dropped remote clipboard text that could not be converted.");
+            return CHANNEL_RC_OK;
+        }
         guac_common_clipboard_reset(clipboard->clipboard, "text/plain");
         guac_common_clipboard_append(clipboard->clipboard, received_data, (int)length);
         guac_common_clipboard_send(clipboard->clipboard, client);

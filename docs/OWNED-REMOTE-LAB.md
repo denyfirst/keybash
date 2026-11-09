@@ -132,8 +132,11 @@ it has no menu and no link away, because leaving the page ends its session.
 The bar says the connection's state and name and holds the tools. A desktop
 opens at the size its page has (sent with the socket's proof, bounded as a
 resize is) and its screen size is the bar's own menu; text goes both ways with
-Copy and Paste as in a terminal. Copy is marked by a dot when the remote copied
-text, which is never written to the local clipboard unasked; a paste of several
+Copy and Paste as in a terminal, and Ctrl+C and Ctrl+V on the desktop work as
+on any computer. Text the remote copies is written to the local clipboard only
+when asked: by Copy, or by the person's own Ctrl+C on the desktop, which lets
+the one copy that follows within five seconds through. Any other remote copy
+only marks Copy with a dot. A paste of several
 lines or hidden characters is shown for review first, and a remote copy over
 32 KiB is dropped with a notice instead of ending the desktop. A session page
 offers no second session: another one, to the same server or another, comes

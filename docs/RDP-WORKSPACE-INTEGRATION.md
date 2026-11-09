@@ -41,7 +41,13 @@ Implemented source and its required acceptance boundaries:
 `native/clipboard.c` uses the already pinned WinPR conversion API after querying
 capacities. It validates surrogate pairs and termination, refuses lossy UTF-8
 roundtrips, snapshots input under the native clipboard lock and handles
-Guacamole's initial empty state or one final NUL as framing. Native
+Guacamole's initial empty state or one final NUL as framing. Remote text ends
+at its first NUL, as Windows sends it padded with more (a real Windows Server
+2025 copy ended the desktop until 2026-11-09). Text the codec refuses is
+dropped, and a request it cannot answer gets the protocol's failure response:
+an error from a CLIPRDR callback makes FreeRDP close the whole connection. The
+synthetic server sends padded text after a first malformed answer, so the
+native workspace test fails if either ends the session. Native
 ASan/UBSan tests compare Unicode golden wire bytes, malformed text, exact bounds
 and empty clipboard. Both accept-all/refuse-all conversions must fail their
 intended assertions, followed by the normal unchanged sanitized test. Both

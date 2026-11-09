@@ -43,6 +43,14 @@ func TestBrowserRDPWorkspacePortable(t *testing.T) {
 					_ = writeInstruction(remote, instruction{"size", "0", in[1], in[2]})
 					_ = writeInstruction(remote, instruction{"sync", strconv.Itoa(sequence), "1"})
 					sequence++
+				case "key":
+					// Like Windows, a C pressed on the desktop copies what is
+					// selected there, which then comes back as a new copy.
+					if len(in) == 3 && in[1] == "99" && in[2] == "1" {
+						for _, out := range []instruction{{"clipboard", "10", "text/plain"}, {"blob", "10", base64.StdEncoding.EncodeToString([]byte("Copied after Ctrl+C 🔑"))}, {"end", "10"}} {
+							_ = writeInstruction(remote, out)
+						}
+					}
 				}
 			}
 		}()
