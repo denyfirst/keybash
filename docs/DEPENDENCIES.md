@@ -34,9 +34,17 @@ server with an exact `font/woff2` type and `nosniff`, every page policy limits
 fonts to `font-src 'self'`, and no stylesheet loads any other URL or import.
 It adds no Go or JavaScript dependency and nothing at runtime outside the page.
 
+## Toolchain security update (2026-11-11)
+
+The current pin is Go 1.26.11. The live vulnerability gate reported
+GO-2026-6859 on 1.26.10: an HTTP/1 server can crash through a race on a
+request body bounded by `MaxBytesReader`, which Keybash uses for every JSON
+body. 1.26.11 contains the upstream correction. See the
+[Go release history](https://go.dev/doc/devel/release#go1.26.11).
+
 ## Toolchain security update (2026-10-21)
 
-The current pin is Go 1.26.10. The live vulnerability gate reported
+The pin was then Go 1.26.10. The live vulnerability gate reported
 GO-2026-6809 in crypto/x509 on 1.26.9; 1.26.10 contains the upstream certificate
 verification correction. See the [Go release history](https://go.dev/doc/devel/release#go1.26.10).
 Historical adoption notes below describe the toolchain at adoption time.
