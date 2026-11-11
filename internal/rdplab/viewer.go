@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,17 +25,79 @@ type viewerImage struct {
 	layer, x, y int
 	pixels      []byte
 }
+
+// imageWorkers bounds the images rebuilt at once across every desktop: one per
+// processor, so a busy desktop uses the machine without starving it.
+var imageWorkers = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)))
+
+// maxImageJobs bounds the images one desktop has waiting to be rebuilt: at most
+// 16 PNGs of 256 KiB in memory besides those being decoded.
+const maxImageJobs = 16
+
+// imageJob is one image decoded and written again off the reader, while the
+// images after it are read; its blobs take its place in the output.
+type imageJob struct {
+	stream string
+	done   chan struct{}
+	blobs  []byte
+	chunks int
+	ok     bool
+}
+
+// viewerPart is output held in order: bytes ready to go, or an image's job.
+type viewerPart struct {
+	data []byte
+	job  *imageJob
+}
+
+// rebuild decodes the PNG and writes it again as the browser's blobs. Nothing
+// of the sender's file survives: only its pixels, through normalizedPNG.
+func (j *imageJob) rebuild(stream string, data []byte, revoked func() bool) {
+	defer close(j.done)
+	imageWorkers <- struct{}{}
+	defer func() { <-imageWorkers }()
+	defer clear(data)
+	if revoked() {
+		return
+	}
+	decoded, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return
+	}
+	// Re-encode only the decoded static image. Ancillary metadata, APNG
+	// frames and trailing/polyglot bytes never reach the browser decoder.
+	normalized, ok := normalizedPNG(decoded, 256*1024)
+	if !ok {
+		return
+	}
+	var out bytes.Buffer
+	for rest := normalized; len(rest) > 0; {
+		n := min(len(rest), 12*1024)
+		if writeInstruction(&out, instruction{"blob", stream, base64.StdEncoding.EncodeToString(rest[:n])}) != nil {
+			return
+		}
+		rest = rest[n:]
+		j.chunks++
+	}
+	j.blobs, j.ok = out.Bytes(), true
+}
+
 type viewerStream struct {
-	native                *nativeStream
-	workspace             bool
-	layers                map[int]viewerLayer // owned by the single output reader
-	images                map[string]*viewerImage
-	imageBytes            int
-	decode, render        pacer               // owned by the single output reader
-	clock                 func() time.Time    // nil means time.Now; tests supply a fake
-	sleep                 func(time.Duration) // nil means time.Sleep
-	pending               bytes.Buffer
-	ready                 bytes.Reader
+	native         *nativeStream
+	workspace      bool
+	layers         map[int]viewerLayer // owned by the single output reader
+	images         map[string]*viewerImage
+	imageBytes     int
+	decode, render pacer               // owned by the single output reader
+	clock          func() time.Time    // nil means time.Now; tests supply a fake
+	sleep          func(time.Duration) // nil means time.Sleep
+	pending        bytes.Buffer
+	ready          bytes.Reader
+	// Images being rebuilt off the reader, with the output held behind each in
+	// order, and what is ready for the browser (owned by the single reader).
+	parts                 []viewerPart
+	jobs, held            int // images being rebuilt; bytes held behind them
+	out                   []byte
 	writeMu               sync.Mutex
 	metaMu                sync.Mutex
 	acks                  map[string]int
@@ -362,37 +425,21 @@ func (s *viewerStream) drawing(in instruction) bool {
 		if !s.spend(&s.decode, pixels, decodeBurst, decodePerSecond) || !s.renderWork(pixels) {
 			return false
 		}
-		decoded, err := png.Decode(bytes.NewReader(image.pixels))
-		if err != nil {
+		// Decoding and writing it again happen off the reader, at the same time
+		// as the images after it; its blobs take its place in the output
+		// (settle), so the browser receives everything in guacd's order.
+		// At most 16 images wait, and 2 MiB besides the pending output, as the
+		// pending output alone was bounded before.
+		if (s.jobs >= maxImageJobs || s.held+s.pending.Len() > 2*1024*1024) && !s.settle(true) {
 			return false
 		}
-		// Re-encode only the decoded static image. Ancillary metadata, APNG
-		// frames and trailing/polyglot bytes never reach the browser decoder.
-		normalized, ok := normalizedPNG(decoded, 256*1024)
-		if !ok {
-			return false
-		}
-		chunks := (len(normalized) + 12*1024 - 1) / (12 * 1024)
-		// The browser's Guacamole client never acknowledges image blobs: neither
-		// of its image readers sends an ack. So nothing here waits for one; a
-		// count that refused at 128 unacknowledged chunks ended real Windows
-		// sessions. Flow to the browser is the relay's credit window. The count
-		// only lets a browser ack chunks it was sent, should one ever do so, and
-		// it stays bounded: 128 streams, 128 chunks each.
-		s.metaMu.Lock()
-		if _, known := s.acks[in[1]]; known || len(s.acks) < 128 {
-			s.acks[in[1]] = min(s.acks[in[1]]+chunks, 128)
-		}
-		s.metaMu.Unlock()
-		for data := normalized; len(data) > 0; {
-			n := min(len(data), 12*1024)
-			if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, instruction{"blob", in[1], base64.StdEncoding.EncodeToString(data[:n])}) != nil {
-				return false
-			}
-			data = data[n:]
-		}
+		job := &imageJob{stream: in[1], done: make(chan struct{})}
+		s.parts = append(s.parts, viewerPart{data: bytes.Clone(s.pending.Bytes())}, viewerPart{job: job})
+		s.held += s.pending.Len()
+		s.pending.Reset()
+		s.jobs++
 		s.imageBytes -= len(image.pixels)
-		clear(image.pixels)
+		go job.rebuild(in[1], image.pixels, s.revoked)
 		delete(s.images, in[1])
 		return true
 	case "copy", "transfer":
@@ -524,6 +571,11 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 		return 0, errNative
 	}
 	for s.ready.Len() == 0 {
+		if len(s.out) > 0 {
+			s.ready.Reset(s.out)
+			s.out = nil
+			break
+		}
 		in, err := s.native.next()
 		if err != nil || s.revoked() {
 			_ = s.Close()
@@ -539,9 +591,10 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 				_ = s.Close()
 				return 0, errNative
 			}
-			if s.pending.Len() > 0 && len(s.images) == 0 {
-				s.ready.Reset(append([]byte(nil), s.pending.Bytes()...))
-				s.pending.Reset()
+			if !s.release(in[0]) {
+				s.native.failure.Store("viewer image")
+				_ = s.Close()
+				return 0, errNative
 			}
 			continue
 		}
@@ -554,9 +607,10 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 			_ = s.Close()
 			return 0, errNative
 		}
-		if len(s.images) == 0 {
-			s.ready.Reset(append([]byte(nil), s.pending.Bytes()...))
-			s.pending.Reset()
+		if !s.release(in[0]) {
+			s.native.failure.Store("viewer image")
+			_ = s.Close()
+			return 0, errNative
 		}
 	}
 	if s.revoked() {
@@ -569,6 +623,69 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 	}
 	return n, err
 }
+
+// release moves out what may go to the browser. While images are being
+// rebuilt it waits for them only when the frame ends or guacd has nothing more
+// already waiting; otherwise it reads on, so the next images are rebuilt at
+// the same time. Output never passes an image still open or being rebuilt.
+func (s *viewerStream) release(op string) bool {
+	wait := s.jobs > 0 && len(s.images) == 0 && (op == "sync" || s.native.reader == nil || s.native.reader.Buffered() == 0)
+	if !s.settle(wait) {
+		return false
+	}
+	if len(s.parts) == 0 && len(s.images) == 0 && s.pending.Len() > 0 {
+		s.out = append(s.out, s.pending.Bytes()...)
+		s.pending.Reset()
+	}
+	return true
+}
+
+// settle moves out, in order, the output held behind rebuilt images: all of it
+// once every image is rebuilt (wait), or up to the first image still being
+// rebuilt. An image that failed ends the desktop, as it did on the reader.
+func (s *viewerStream) settle(wait bool) bool {
+	for len(s.parts) > 0 {
+		part := s.parts[0]
+		if job := part.job; job != nil {
+			if wait {
+				select {
+				case <-job.done:
+				case <-s.done:
+					return false
+				}
+			} else {
+				select {
+				case <-job.done:
+				default:
+					return true
+				}
+			}
+			s.jobs--
+			if !job.ok {
+				return false
+			}
+			// The browser's Guacamole client never acknowledges image blobs:
+			// neither of its image readers sends an ack. So nothing here waits for
+			// one; a count that refused at 128 unacknowledged chunks ended real
+			// Windows sessions. Flow to the browser is the relay's credit window.
+			// The count only lets a browser ack chunks it was sent, should one ever
+			// do so, and it stays bounded: 128 streams, 128 chunks each.
+			s.metaMu.Lock()
+			if _, known := s.acks[job.stream]; known || len(s.acks) < 128 {
+				s.acks[job.stream] = min(s.acks[job.stream]+job.chunks, 128)
+			}
+			s.metaMu.Unlock()
+			part.data = job.blobs
+		} else {
+			s.held -= len(part.data)
+		}
+		s.out = append(s.out, part.data...)
+		s.parts[0] = viewerPart{}
+		s.parts = s.parts[1:]
+	}
+	return true
+}
+
 func (s *viewerStream) send(in instruction) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()

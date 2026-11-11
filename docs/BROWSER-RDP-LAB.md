@@ -54,6 +54,14 @@ The application uses the upstream renderer rather than implementing RDP.
   Image starts, ends and drawing operations retain their original order;
   normalized blob bodies are inserted immediately before their image end.
   Groups wait until all active images complete, with a 2 MiB staging ceiling.
+  The checks and work budgets run on the reader; decoding and writing an image
+  again run off it, while the images after it are read, at most one per
+  processor across every desktop and 16 waiting per desktop, with 2 MiB held
+  behind them besides the staging. The output waits for an image only at the
+  frame's sync or when guacd has nothing more already read ahead (64 KiB), so
+  a quiet desktop's image goes at once. An image that fails still ends the desktop,
+  and nothing after it is forwarded. A 64-tile frame took 150 ms on the reader
+  alone and takes 50 ms on seven processors (`BenchmarkViewerFrameOfTiles`).
 - Continuous work budgets: 32 million decoded image pixels and 64 million
   rendering pixels per second (bursts of 64M/128M), charged conservatively for
   image/copy/transfer/fill/resize operations. Work beyond the rate pauses the
