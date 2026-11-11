@@ -129,7 +129,8 @@ both pages are same-origin with COOP `same-origin`), and the tab is titled
 with the connection's name, read from `/api/connections` and set as text.
 A session page is the session alone, filling the window under one slim bar:
 it has no menu and no link away, because leaving the page ends its session.
-The bar says the connection's state and name and holds the tools. A desktop
+The bar says the connection's state and name and holds the tools. A terminal
+keeps its last 10,000 lines to scroll back to, in its page only. A desktop
 opens at the size its page has (sent with the socket's proof, bounded as a
 resize is) and its screen size is the bar's own menu; text goes both ways with
 Copy and Paste as in a terminal, and Ctrl+C and Ctrl+V on the desktop work as

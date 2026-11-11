@@ -63,6 +63,13 @@ try {
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
 
   if (config.Mode === 'linux') {
+    // History: the first of 3,000 lines is still there to scroll back to.
+    await command("seq -f 'kb-history-%05g' 1 3000");
+    await visible('kb-history-03000');
+    await page.locator('.xterm-screen').hover();
+    for (let i = 0; i < 200 && !(await page.locator('.xterm-rows').innerText()).includes('kb-history-00001'); i++) await page.mouse.wheel(0, -3000);
+    assert((await page.locator('.xterm-rows').innerText()).includes('kb-history-00001'), 'the first of 3,000 lines was not kept to scroll back to');
+    await command('clear');
     await command("printf '\\u0259\\u0131\\u00f6\\u00fc\\u00e7\\u015f\\u011f\\n'");
     await visible('əıöüçşğ');
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
