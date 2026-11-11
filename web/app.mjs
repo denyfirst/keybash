@@ -3,7 +3,9 @@ import { ownedRemote, remoteProof, remoteErrorMessage, endedMessage, enterFullsc
 
 const $ = id => document.getElementById(id);
 const encoder = new TextEncoder();
-const term = new globalThis.Terminal({ cols: 100, rows: 30, scrollback: 1500, fontSize: 13,
+// The last 10,000 lines stay to scroll back to, as in Windows Terminal; they
+// live only in this page and go with it.
+const term = new globalThis.Terminal({ cols: 100, rows: 30, scrollback: 10000, fontSize: 13,
   fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', allowProposedApi: false,
   linkHandler: { activate() {} }, theme: { background: '#0e1013', foreground: '#cdd1de', cursor: '#e5e7eb', selectionBackground: '#444753' } });
 term.open($('terminal'));
