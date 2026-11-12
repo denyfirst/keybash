@@ -159,7 +159,9 @@ func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeS
 		return nil, errNative
 	}
 	width, height := plan.size()
-	stream := &nativeStream{ctx: ctx, workspace: plan.workspace, width: width, height: height, raw: raw, reader: bufio.NewReader(raw)}
+	// 64 KiB: a burst of guacd's instructions sits read ahead, which is how the
+	// viewer knows more is waiting and rebuilds the next images meanwhile.
+	stream := &nativeStream{ctx: ctx, workspace: plan.workspace, width: width, height: height, raw: raw, reader: bufio.NewReaderSize(raw, 64*1024)}
 	stream.stop = context.AfterFunc(ctx, func() { _ = raw.Close() })
 	defer func() {
 		if !ok {
