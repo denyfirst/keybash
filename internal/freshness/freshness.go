@@ -98,7 +98,7 @@ var (
 	guacamole   = regexp.MustCompile(`/guacamole/([^/\s]+)/source/guacamole-server-`)
 	nodeURL     = regexp.MustCompile(`nodejs\.org/dist/v([^/\s]+)/`)
 	pnpmURL     = regexp.MustCompile(`(?:/pnpm|exe\.linux-x64)-([^/\s]+)\.tgz`)
-	goInstall   = regexp.MustCompile(`go install (\S+)@(v\S+)`)
+	goInstall   = regexp.MustCompile(`(?m)^[ \t]*go install (\S+)@(v\S+)[ \t]*$`) // commands, not comments
 )
 
 // Pins reads every pinned version from the repository at root. A pin that

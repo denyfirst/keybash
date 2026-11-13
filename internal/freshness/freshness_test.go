@@ -44,7 +44,8 @@ func repo() fstest.MapFS {
 			"https://downloads.apache.org/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz\n")},
 		".github/workflows/ci.yml": {Data: []byte("https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.xz\n" +
 			"https://registry.npmjs.org/@pnpm/exe.linux-x64/-/exe.linux-x64-12.18.0.tgz\n" +
-			"go install honnef.co/go/tools/cmd/staticcheck@v0.8.2\n")},
+			"          # `go install tool@version` reads the tool's go.mod\n" +
+			"          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2\n")},
 		"web/package.json": {Data: []byte(`{"devDependencies": {"playwright": "1.65.0"}}`)},
 	}
 }

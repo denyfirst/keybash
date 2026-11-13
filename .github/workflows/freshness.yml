@@ -47,6 +47,10 @@ jobs:
           set -eu
           export GOBIN="${RUNNER_TEMP}/keybash-tools"
           mkdir -p "${GOBIN}"
+          # Build the scanner with the pinned Go version: `go install tool@version`
+          # would take it from the tool's own go.mod.
+          GOTOOLCHAIN="$(awk '$1 == "go" {print "go" $2}' go.mod)"
+          export GOTOOLCHAIN
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           report="${RUNNER_TEMP}/keybash-vulnerabilities.md"
           status=0
