@@ -101,6 +101,8 @@ In order:
    before pinning, and the native CI lab built and passed with it.
 2. **Toolchain:** Go 1.27, golang.org/x/sys 0.50, the Node 24 LTS patch,
    Playwright 1.65 and pnpm 12 (its lockfile checked in CI).
+   Done in PR 73, with Node 26 instead: it became the active LTS line in
+   October. pnpm 12's native binary is pinned by hash and run without npm.
 3. **Staying current:** Dependabot for Go modules, the web lockfile and GitHub
    Actions; a weekly workflow that compares the pinned native sources and
    tools (FreeRDP, guacamole-server, Go, Node, pnpm) with their upstream
