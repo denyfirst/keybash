@@ -97,6 +97,8 @@ In order:
    in client GDI OpaqueRect clipping (high), a use-after-free in the brush
    cache drawing orders, and heap corruption in the Progressive codec (high,
    graphics pipeline). This comes before anything turns the pipeline on.
+   Done in PR 72: the archive's checksum and release signature were verified
+   before pinning, and the native CI lab built and passed with it.
 2. **Toolchain:** Go 1.27, golang.org/x/sys 0.50, the Node 24 LTS patch,
    Playwright 1.65 and pnpm 12 (its lockfile checked in CI).
 3. **Staying current:** Dependabot for Go modules, the web lockfile and GitHub
