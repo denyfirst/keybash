@@ -45,7 +45,7 @@ func (w ManagerWorker) OpenRDP(ctx context.Context, request identity.RDPRequest)
 	if err != nil {
 		return nil, errNative
 	}
-	return w.open(ctx, request.Target, pin, request.Username, request.Password, request.Width, request.Height)
+	return w.open(ctx, request.Target, pin, request.Username, request.Password, request.Width, request.Height, request.DPI)
 }
 
 // identityFor takes the rules from the target, never from the certificate: a
@@ -58,28 +58,29 @@ func identityFor(target *targetguard.NamedTarget, certificate []byte) (*Identity
 	return NewIdentity(target.Hostname(), certificate)
 }
 
-func (w ManagerWorker) open(ctx context.Context, target *targetguard.NamedTarget, pin *Identity, user, password string, width, height int) (terminalweb.Stream, error) {
+func (w ManagerWorker) open(ctx context.Context, target *targetguard.NamedTarget, pin *Identity, user, password string, width, height, dpi int) (terminalweb.Stream, error) {
 	if !pin.boundTo(target) {
 		return nil, errNative
 	}
-	return w.openDial(ctx, target.DialContext, pin, user, password, width, height)
+	return w.openDial(ctx, target.DialContext, pin, user, password, width, height, dpi)
 }
 
 // managedPlan is what a managed desktop runs: the workspace profile at the
-// page's size (0 for the lab's 1024 by 768), refused outside the bounds.
-func managedPlan(pin *Identity, user, password string, width, height int) (nativePlan, error) {
+// page's size and DPI (0 for the lab's 1024 by 768 at 96), refused outside
+// the bounds; a DPI without a size is refused too.
+func managedPlan(pin *Identity, user, password string, width, height, dpi int) (nativePlan, error) {
 	plan, err := newNativePlan(pin, user, password)
-	if err != nil || (width != 0 || height != 0) && !desktopSize(width, height) {
+	if err != nil || (width != 0 || height != 0 || dpi != 0) && !desktopSize(width, height, dpi) {
 		return nativePlan{}, errNative
 	}
 	plan.workspace = true
-	plan.width, plan.height = width, height
+	plan.width, plan.height, plan.dpi = width, height, dpi
 	return plan, nil
 }
 
 // Only package _test.go callers can replace this guarded dial for a fixture.
-func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) (net.Conn, error), pin *Identity, user, password string, width, height int) (terminalweb.Stream, error) {
-	plan, err := managedPlan(pin, user, password, width, height)
+func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) (net.Conn, error), pin *Identity, user, password string, width, height, dpi int) (terminalweb.Stream, error) {
+	plan, err := managedPlan(pin, user, password, width, height, dpi)
 	if ctx == nil || ctx.Err() != nil || dial == nil || err != nil {
 		return nil, errNative
 	}

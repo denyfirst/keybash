@@ -344,7 +344,7 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 		}
 		return
 	}
-	s, e := (ManagerWorker{SocketPath: path}).openDial(ctx, dial, pin, "synthetic-user", "Synthetic-managed-NLA-password", 0, 0)
+	s, e := (ManagerWorker{SocketPath: path}).openDial(ctx, dial, pin, "synthetic-user", "Synthetic-managed-NLA-password", 0, 0, 0)
 	mode := os.Getenv("KEYBASH_MANAGED_MODE")
 	if mode == "wrong-peer" {
 		if s != nil || e == nil || dialed {

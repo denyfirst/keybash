@@ -453,7 +453,7 @@ func TestOwnedSSHCredentialKinds(t *testing.T) {
 			t.Fatalf("%s credential is not compatible with SSH", c.Kind)
 		}
 		worker.got = nil
-		_, _ = l.openRemote(context.Background(), target, c, 0, 0)
+		_, _ = l.openRemote(context.Background(), target, c, 0, 0, 0)
 		switch got := worker.got.(type) {
 		case *sshkey.Key:
 			if c.Kind != "ssh-key" {

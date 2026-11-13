@@ -109,6 +109,8 @@ In order:
 4. **A sharp desktop on high-DPI screens:** the page asks for the screen's
    device pixels and the matching remote DPI, within raised size bounds that
    keep their tests and budgets.
+   Done in PR 76: Windows' scales 100 to 200%, bounds and budgets times the
+   area at most (`BROWSER-RDP-LAB.md`, Scaled screens).
 5. **Graphics pipeline experiment** (after 1): RemoteFX Progressive on the
    test VM, measured with the same instrumented build.
 6. **ADR 0007 (to propose): H.264 to the browser through WebCodecs.** The

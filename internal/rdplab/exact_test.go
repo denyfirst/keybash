@@ -161,16 +161,16 @@ func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
 	var reached atomic.Bool
 	opening := openingContext{context.Background(), &reached}
 	worker := ManagerWorker{SocketPath: "/synthetic/rdp-manager.sock"}
-	if s, e := worker.open(opening, named, exact, "synthetic-user", "synthetic-password", 0, 0); s != nil || e != errNative {
+	if s, e := worker.open(opening, named, exact, "synthetic-user", "synthetic-password", 0, 0, 0); s != nil || e != errNative {
 		t.Fatal("a session opened with an exact identity at a name")
 	}
-	if s, e := worker.open(opening, literal, byName, "synthetic-user", "synthetic-password", 0, 0); s != nil || e != errNative {
+	if s, e := worker.open(opening, literal, byName, "synthetic-user", "synthetic-password", 0, 0, 0); s != nil || e != errNative {
 		t.Fatal("a session opened with a named identity at an address")
 	}
 	if reached.Load() {
 		t.Fatal("a mismatched identity went past the check")
 	}
-	if s, e := worker.open(opening, literal, exact, "synthetic-user", "synthetic-password", 0, 0); s != nil || e != errNative || !reached.Load() {
+	if s, e := worker.open(opening, literal, exact, "synthetic-user", "synthetic-password", 0, 0, 0); s != nil || e != errNative || !reached.Load() {
 		t.Fatal("a matching identity did not go on towards the manager")
 	}
 	// The rules come from the target, never from the certificate.

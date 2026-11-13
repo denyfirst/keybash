@@ -49,21 +49,54 @@ type RDPRequest struct {
 	Certificate        []byte
 	Username, Password string
 	Width, Height      int // the page's desktop size (see desktopSize); 0 for the worker's default
+	DPI                int // the page's display scale as a DPI (see DesktopBounds); 0 means 96
 }
 
-// desktopSize reads the size a desktop page asks to start at: "1600x900",
-// canonical digits, even, 200 to 1920 wide and 200 to 1080 high, the same
-// bounds the page could ask for once connected.
-func desktopSize(raw string) (int, int, bool) {
-	ws, hs, found := strings.Cut(raw, "x")
-	w, e1 := strconv.Atoi(ws)
-	h, e2 := strconv.Atoi(hs)
-	ok := found && e1 == nil && e2 == nil && strconv.Itoa(w) == ws && strconv.Itoa(h) == hs &&
-		w >= 200 && w <= 1920 && h >= 200 && h <= 1080 && w%2 == 0 && h%2 == 0
-	if !ok {
+// desktopDPIs are Windows' own display scales as the DPI a desktop reports:
+// 100% (96, the default), 125, 150, 175 and 200%. A page on a scaled screen
+// asks for its device pixels at the matching DPI, so the desktop is drawn one
+// remote pixel per screen pixel instead of being stretched, and Windows draws
+// text and controls at the size a person expects.
+var desktopDPIs = []int{96, 120, 144, 168, 192}
+
+// DesktopBounds is the largest desktop a page may ask for at dpi: full HD at
+// 96, full HD times the scale above it, so a scaled screen gets its own pixels
+// and never more. ok is false for any DPI but Windows' scales.
+func DesktopBounds(dpi int) (width, height int, ok bool) {
+	if !slices.Contains(desktopDPIs, dpi) {
 		return 0, 0, false
 	}
-	return w, h, true
+	return 1920 * dpi / 96, 1080 * dpi / 96, true
+}
+
+// DesktopSize reports whether a desktop may open at, or resize to, width by
+// height at dpi: even, at least 200 by 200, within DesktopBounds.
+func DesktopSize(width, height, dpi int) bool {
+	mw, mh, ok := DesktopBounds(dpi)
+	return ok && width >= 200 && width <= mw && height >= 200 && height <= mh && width%2 == 0 && height%2 == 0
+}
+
+// desktopSize reads the size a desktop page asks to start at: "1600x900" at
+// 96 DPI, or "2880x1800@192" on a screen scaled to 200%. Digits are canonical
+// and 96 is never written out, so each size has one spelling; it must pass
+// DesktopSize, the same rule the page's later resizes meet.
+func desktopSize(raw string) (int, int, int, bool) {
+	size, scale, scaled := strings.Cut(raw, "@")
+	dpi := 96
+	if scaled {
+		d, e := strconv.Atoi(scale)
+		if e != nil || strconv.Itoa(d) != scale || d == 96 {
+			return 0, 0, 0, false
+		}
+		dpi = d
+	}
+	ws, hs, found := strings.Cut(size, "x")
+	w, e1 := strconv.Atoi(ws)
+	h, e2 := strconv.Atoi(hs)
+	if !found || e1 != nil || e2 != nil || strconv.Itoa(w) != ws || strconv.Itoa(h) != hs || !DesktopSize(w, h, dpi) {
+		return 0, 0, 0, false
+	}
+	return w, h, dpi, true
 }
 
 func (RDPRequest) Format(w fmt.State, _ rune) {
@@ -292,7 +325,7 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 	lease.active, lease.cancel = true, cancel
 	return lease, target, credential, ctx, nil
 }
-func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential, width, height int) (terminalweb.Stream, error) {
+func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential, width, height, dpi int) (terminalweb.Stream, error) {
 	if ctx.Err() != nil || !l.slot(ctx) {
 		return nil, errRefused
 	}
@@ -315,7 +348,8 @@ func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential, widt
 	if t.Protocol == "ssh" {
 		return l.remote.ssh.OpenSSH(ctx, t.Target, t.Identity, c.Username, auth)
 	}
-	return l.remote.rdp.OpenRDP(ctx, RDPRequest{t.Target, append([]byte(nil), t.Identity...), c.Username, c.Secret, width, height})
+	return l.remote.rdp.OpenRDP(ctx, RDPRequest{Target: t.Target, Certificate: append([]byte(nil), t.Identity...),
+		Username: c.Username, Password: c.Secret, Width: width, Height: height, DPI: dpi})
 }
 func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" || r.Header.Get("Origin") != l.origin || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
@@ -367,10 +401,10 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	width, height := 0, 0
+	width, height, dpi := 0, 0, 0
 	if size, sized := fields["size"]; sized {
 		var valid bool
-		if width, height, valid = desktopSize(size); !valid {
+		if width, height, dpi, valid = desktopSize(size); !valid {
 			return
 		}
 	}
@@ -406,7 +440,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setupTimer := time.AfterFunc(10*time.Second, func() { lease.cancel(nil) })
-	stream, e := l.openRemote(ctx, target, credential, width, height)
+	stream, e := l.openRemote(ctx, target, credential, width, height, dpi)
 	setupTimer.Stop()
 	if e != nil || stream == nil || ctx.Err() != nil {
 		if stream != nil {
