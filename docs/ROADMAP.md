@@ -116,9 +116,10 @@ In order:
    remote server: guacd and FreeRDP decode the stream inside the sandbox, and
    Keybash's own encoder writes the stream the browser decodes, with lossless
    pictures kept for still text. A strictly validated passthrough of Windows'
-   own H.264 is the faster alternative to measure against it. Codec choices
-   wait for the project licence: OpenH264 (BSD-2-Clause) or FFmpeg (LGPL),
-   never a GPL encoder.
+   own H.264 is the faster alternative to measure against it. Keybash is
+   AGPL-3.0 since 13 November, which admits OpenH264 (BSD-2-Clause), FFmpeg
+   (LGPL) and x264 (GPL-2.0-or-later); the fastest and best encoder is chosen
+   by measurement, since an encoder reads only Keybash's own pixels.
 7. **Watch:** IronRDP as a memory-safe replacement for FreeRDP once its client
    graphics pipeline is ready for production.
 
