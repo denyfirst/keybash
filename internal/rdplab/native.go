@@ -205,7 +205,10 @@ func nativeConnect(ctx context.Context, raw net.Conn, plan nativePlan) (*nativeS
 	if err != nil {
 		return nil, errNative
 	}
-	for _, in := range []instruction{{"size", strconv.Itoa(width), strconv.Itoa(height), "96"}, {"audio"}, {"video"}, {"image", "image/png"}, {"timezone", "UTC"}} {
+	// The handshake's DPI is the session's: guacd turns a later resize from
+	// the page into remote pixels by session DPI over this one, so any other
+	// value would scale every resize (at 192 against 96, past the bounds).
+	for _, in := range []instruction{{"size", strconv.Itoa(width), strconv.Itoa(height), strconv.Itoa(dpi)}, {"audio"}, {"video"}, {"image", "image/png"}, {"timezone", "UTC"}} {
 		if writeInstruction(raw, in) != nil {
 			return nil, errNative
 		}

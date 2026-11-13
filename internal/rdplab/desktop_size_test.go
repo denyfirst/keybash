@@ -98,6 +98,13 @@ func TestDesktopStartsAtThePageSize(t *testing.T) {
 	if got := strings.Join(<-heard, ","); got != "size,1600,900,96" {
 		t.Fatalf("guacd's handshake said %q", got)
 	}
+	// A scaled desktop tells guacd its own DPI as the page's, so guacd scales
+	// none of the page's later resizes (192 against 96 doubled each one).
+	scaled := plan
+	scaled.width, scaled.height, scaled.dpi = 2880, 1800, 192
+	if got := handshakeSize(t, scaled); got != "size,2880,1800,192" {
+		t.Fatalf("a scaled desktop's handshake said %q", got)
+	}
 	// The viewer starts there, and the pointer may reach its far corner.
 	viewer := newViewerStream(stream)
 	initial := make([]byte, 256)
@@ -273,4 +280,53 @@ func TestScaledDesktopHoldsItsPixelsAndNoMore(t *testing.T) {
 	if odd.width.Load() != 1024 || odd.height.Load() != 768 || odd.dpi != 96 || odd.area != 1 {
 		t.Fatal("an unknown DPI reached the viewer")
 	}
+}
+
+// handshakeSize connects plan to a fake guacd and returns the size
+// instruction guacd heard in the handshake.
+func handshakeSize(t *testing.T, plan nativePlan) string {
+	t.Helper()
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	heard := make(chan instruction, 1)
+	go func() {
+		reader := bufio.NewReader(server)
+		if _, err := readInstruction(reader); err != nil {
+			return
+		}
+		if writeBoundedInstruction(server, nativeArgumentNames(), 128) != nil {
+			return
+		}
+		size, err := readInstruction(reader)
+		if err != nil {
+			return
+		}
+		heard <- size
+		for range 4 {
+			if _, err := readInstruction(reader); err != nil {
+				return
+			}
+		}
+		if _, err := readBoundedInstruction(reader, 128); err != nil {
+			return
+		}
+		if writeInstruction(server, instruction{"ready", "private-session-id"}) != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, reader)
+	}()
+	stream, err := nativeConnect(ctx, client, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.close()
+	select {
+	case in := <-heard:
+		return strings.Join(in, ",")
+	case <-ctx.Done():
+		t.Fatal("guacd heard no size")
+	}
+	return ""
 }

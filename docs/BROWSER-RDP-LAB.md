@@ -107,7 +107,11 @@ page now picks the Windows scale nearest the screen's (100, 125, 150, 175 or
 and Windows draws text and controls at the size a person expects. The start
 size reads `2880x1800@192`; plain `1600x900` is 96. Windows keeps its DPI for
 a session, so the scale is chosen when the desktop opens and later resizes
-stay at it.
+stay at it. guacd hears the same DPI in its handshake as in its
+parameters: it turns each resize from the page into remote pixels by the
+session's DPI over the handshake's, so any other value would scale every
+resize (the first test on a 200% screen asked for 2880 by 1800 and guacd
+made 5760 by 3600, which the viewer refused).
 
 Bounds and budgets grow with the scale and with nothing else
 (`identity.DesktopBounds`, `areaScale`):
