@@ -187,6 +187,11 @@ jobs:
           set -eu
           export GOBIN="${RUNNER_TEMP}/keybash-tools"
           mkdir -p "${GOBIN}"
+          # `go install tool@version` takes its Go version from the tool's own
+          # go.mod, not this one. An analyser must be built by at least the
+          # Go version it reads, so build every tool with the pinned one.
+          GOTOOLCHAIN="$(awk '$1 == "go" {print "go" $2}' go.mod)"
+          export GOTOOLCHAIN
           go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
           go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
