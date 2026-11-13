@@ -97,7 +97,9 @@ jobs:
           set -eu
           report="${RUNNER_TEMP}/keybash-versions.md"
           status=0
-          go run ./cmd/keybash-freshness > "${report}" || status=$?
+          # Built first: `go run` reports any non-zero exit as 1, which would hide 3.
+          go build -o "${RUNNER_TEMP}/keybash-freshness" ./cmd/keybash-freshness
+          "${RUNNER_TEMP}/keybash-freshness" > "${report}" || status=$?
           cat "${report}"
           case "${status}" in
             0) sh scripts/freshness-issue.sh close 'Pinned versions behind upstream' ;;
