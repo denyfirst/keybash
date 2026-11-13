@@ -3,12 +3,12 @@
 14 October 2026. Synthetic lab with a required Linux CI gate; not a release
 or production entry point. No real remote account or credential is used.
 
-The lab builds Guacamole server 1.6.0 and FreeRDP 3.32.2 from upstream release
+The lab builds Guacamole server 1.6.0 and FreeRDP 3.33.1 from upstream release
 archives, verified before extraction:
 
 | Source | SHA-256 |
 |---|---|
-| FreeRDP 3.32.2 tar.gz | `e95a505c0057e4d06a3b120477c421028769deba4db9c639ef3465d050f0955c` |
+| FreeRDP 3.33.1 tar.gz | `4431bbf04d370545cfe2924b9d9f116b95c90c64ff156b2550bbaf82d34e7124` |
 | Guacamole server 1.6.0 tar.gz | `8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b` |
 
 Both upstream projects use Apache-2.0. The builder preserves upstream license/
@@ -18,8 +18,11 @@ complete production license/SBOM bundle. OS libraries come from Ubuntu 24.04's
 package repositories; they are not claimed immutable or universally CVE-free.
 No container image, Java web application or Guacamole JS client is adopted here.
 
-Upstream FreeRDP advisories and latest releases were checked on 14 October 2026.
-3.32.2 is the current upstream security/bugfix release. Published advisories
+Upstream FreeRDP advisories and latest releases were checked again on
+12 November 2026. 3.33.1 is the current upstream release. Its archive matched
+the release's published checksum and its detached signature verified with the
+FreeRDP release key before the digest above was pinned; the advisories it fixes
+are reviewed in `DEPENDENCIES.md` (FreeRDP security update). Published advisories
 include legacy ranges and items without machine-readable patched versions;
 the release choice is not a blanket absence-of-vulnerabilities claim. Guacamole
 security reports list 1.6.0 as the current fixed release. Review/update ownership
@@ -135,7 +138,7 @@ Actual native allow-all and deny-all callback mutations must fail the changed-
 certificate and valid-account assertions respectively; original bytes are then
 restored and the full native matrix reruns. A refusal timeout alone fails.
 
-Primary references: [FreeRDP release](https://github.com/FreeRDP/FreeRDP/releases/tag/3.32.2),
+Primary references: [FreeRDP release](https://github.com/FreeRDP/FreeRDP/releases/tag/3.33.1),
 [FreeRDP advisories](https://github.com/FreeRDP/FreeRDP/security/advisories),
 [Guacamole source/checksums](https://guacamole.apache.org/releases/1.6.0/),
 [Guacamole security](https://guacamole.apache.org/security/),
