@@ -1,0 +1,102 @@
+name: Freshness
+
+# Scheduled checks on main. Nightly, govulncheck scans the Go module; weekly,
+# every pinned version is compared with its newest upstream release. Each job
+# owns one issue: it is opened, or updated, while a run finds something, and
+# closed once a run finds nothing. Neither job changes code or pushes.
+on:
+  schedule:
+    - cron: '23 3 * * *'
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.schedule }}
+  cancel-in-progress: false
+
+jobs:
+  vulnerabilities:
+    name: Nightly vulnerability scan
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 3 * * *'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the exact event commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            fetch -q --depth 1 origin "${GITHUB_SHA}"
+          unset auth
+          git checkout -q FETCH_HEAD
+
+      - name: Scan with the pinned govulncheck
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          export GOBIN="${RUNNER_TEMP}/keybash-tools"
+          mkdir -p "${GOBIN}"
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          report="${RUNNER_TEMP}/keybash-vulnerabilities.md"
+          status=0
+          "${GOBIN}/govulncheck" ./... > "${RUNNER_TEMP}/keybash-govulncheck.txt" 2>&1 || status=$?
+          cat "${RUNNER_TEMP}/keybash-govulncheck.txt"
+          {
+            printf '~~~~text\n'
+            head -c 50000 "${RUNNER_TEMP}/keybash-govulncheck.txt"
+            printf '\n~~~~\n'
+          } > "${report}"
+          case "${status}" in
+            0) sh scripts/freshness-issue.sh close 'Nightly vulnerability scan found something' ;;
+            3) sh scripts/freshness-issue.sh open 'Nightly vulnerability scan found something' "${report}" ;;
+            *) exit "${status}" ;;
+          esac
+
+  versions:
+    name: Weekly version check
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '41 4 * * 1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the exact event commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            fetch -q --depth 1 origin "${GITHUB_SHA}"
+          unset auth
+          git checkout -q FETCH_HEAD
+
+      - name: Compare every pin with its newest upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          report="${RUNNER_TEMP}/keybash-versions.md"
+          status=0
+          go run ./cmd/keybash-freshness > "${report}" || status=$?
+          cat "${report}"
+          case "${status}" in
+            0) sh scripts/freshness-issue.sh close 'Pinned versions behind upstream' ;;
+            3) sh scripts/freshness-issue.sh open 'Pinned versions behind upstream' "${report}" ;;
+            *) exit "${status}" ;;
+          esac
