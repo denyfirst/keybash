@@ -34,6 +34,38 @@ server with an exact `font/woff2` type and `nosniff`, every page policy limits
 fonts to `font-src 'self'`, and no stylesheet loads any other URL or import.
 It adds no Go or JavaScript dependency and nothing at runtime outside the page.
 
+## FreeRDP security update (2026-11-12)
+
+The native pin moves from FreeRDP 3.32.2 to 3.33.1, released 10 November.
+The 3.33.0 and 3.33.1 releases name 24 security advisories; 13 are published
+and 11 are still private. The archive's SHA-256 (`4431bbf0…4e7124`) matches
+the release's published checksum and GitHub's asset digest, and its detached
+signature verifies with the release key
+`7703 B333 420E 0AEF 995E B4B3 A494 54A3 FC90 9FD5`, the same key that signed
+3.32.2 and 3.33.0. The build itself trusts only the pinned digest.
+
+guacamole-server 1.6.0 draws classic RDP orders through FreeRDP's own GDI, so
+two published fixes reach the path Keybash uses today: an out-of-bounds write
+in OpaqueRect clipping
+([GHSA-2hm9-2h5q-x525](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-2hm9-2h5q-x525), high)
+and a use-after-free through the brush cache
+([GHSA-fw6x-h8gw-778w](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-fw6x-h8gw-778w), medium).
+Heap corruption in the Progressive codec
+([GHSA-v7hr-xh82-79p7](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-v7hr-xh82-79p7), high)
+is in the graphics pipeline, which stays off (`disable-gfx`); this update is a
+precondition for turning it on. The other published advisories are in parts
+Keybash does not build or enable: the proxy, shadow server, RD Gateway,
+smartcard, device redirection, Remote Credential Guard, the H.264 encoder and
+image clipboard formats. The private ones are fixed by the same pin.
+
+guacamole-server stays 1.6.0. `native/prepare.py` patches FreeRDP only in the
+synthetic fixture server, whose source differs between the two releases by two
+error-log lines away from every anchor. WinPR now gives a default-size thread
+at least 8 MiB of stack (FreeRDP #14004), which is already glibc's default
+under the usual 8 MiB stack limit; the worker's 2 GiB address-space limit is
+unchanged. The required native CI lab builds the new archive and reruns its
+success, refusal and callback sabotage matrix.
+
 ## Toolchain security update (2026-11-11)
 
 The current pin is Go 1.26.11. The live vulnerability gate reported
@@ -52,8 +84,9 @@ All native/browser/service and analysis gates must pass with the updated pin.
 
 ## RDP source runtime integration (2026-10-21)
 
-Versions and source archive digests remain the pinned Guacamole 1.6.0/FreeRDP
-3.32.2 reviewed below. `build-native-runtime.sh` shares the checked build between
+Versions and source archive digests were then the pinned Guacamole 1.6.0/FreeRDP
+3.32.2; FreeRDP is 3.33.1 since 12 November (see above).
+`build-native-runtime.sh` shares the checked build between
 the synthetic sample-enabled prefix and the empty-prefix server/sample-disabled
 test-VM path. The installed manager runtime is staged from the latter. It
 contains only guacd, its selected libraries and transitive loader/library closure,
@@ -303,7 +336,7 @@ Sources: [xterm security](https://xtermjs.org/docs/guides/security/),
 ## Remaining adoptions
 
 The native RDP lab uses test-only source builds of Guacamole 1.6.0 and
-FreeRDP 3.32.2. Exact archives, integration changes, upstream/OS review, license
+FreeRDP 3.33.1. Exact archives, integration changes, upstream/OS review, license
 inventory and limits are recorded in `NATIVE-RDP-LAB.md`; required Linux CI
 checks native success, refusal, decoded images, cancellation and actual C
 callback sabotage in both directions, followed by restored-source verification. They are not adopted

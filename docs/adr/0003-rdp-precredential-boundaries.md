@@ -176,7 +176,8 @@ disabled. Production ownership/vault and independent audit are separate gates.
 - [FreeRDP releases](https://github.com/FreeRDP/FreeRDP/releases)
 
 The original probe/codec uses Go's standard library. The subsequent synthetic
-native lab source-builds pinned Guacamole 1.6.0/FreeRDP 3.32.2 and OS libraries
+native lab source-builds the pinned Guacamole/FreeRDP releases recorded in
+`NATIVE-RDP-LAB.md` and OS libraries
 with inventory, license/NOTICE and narrow integration patches. The actual
 native TLS hook enforces identity before CredSSP; a one-use guarded broker and
 test-only filesystem/network/UID/resource isolation provide the sole transport.
