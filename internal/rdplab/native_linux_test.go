@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -187,7 +188,9 @@ type nativeMarker struct {
 	keysOnce, mouseOnce        sync.Once
 	clipboard, resized         chan struct{}
 	clipboardOnce, resizedOnce sync.Once
-	pointers                   string // the settled pointer capabilities, digits only
+	pointers                   string   // the settled pointer capabilities, digits only
+	scale                      string   // the core data's scales and physical size, digits only
+	layouts                    []string // display-control layouts received, digits only, newest 32
 }
 
 // clientPointers is the pointer cache and large-pointer support the sample
@@ -198,6 +201,27 @@ func (m *nativeMarker) clientPointers() string {
 	return m.pointers
 }
 
+// clientScale is the desktop and device scale factors and the physical size in
+// millimetres the client's core data told the sample server.
+func (m *nativeMarker) clientScale() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.scale
+}
+
+// sawLayout reports whether the sample server received this display-control
+// layout: width, height, desktop and device scale, physical millimetres.
+func (m *nativeMarker) sawLayout(want string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Contains(m.layouts, want)
+}
+
+// fixtureDigits holds only what the fixture printed as numbers and underscores.
+func fixtureDigits(values string) bool {
+	return len(values) <= 64 && strings.Trim(values, "0123456789_") == ""
+}
+
 func (m *nativeMarker) Write(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -205,6 +229,12 @@ func (m *nativeMarker) Write(p []byte) (int, error) {
 		if b == '\n' {
 			if values, ok := strings.CutPrefix(m.tail, "KB_CLIENT_POINTERS_"); ok && len(values) <= 32 && strings.Trim(values, "0123456789_") == "" {
 				m.pointers = values
+			}
+			if values, ok := strings.CutPrefix(m.tail, "KB_CLIENT_SCALE_"); ok && fixtureDigits(values) {
+				m.scale = values
+			}
+			if values, ok := strings.CutPrefix(m.tail, "KB_LAYOUT_"); ok && fixtureDigits(values) {
+				m.layouts = append(m.layouts[max(0, len(m.layouts)-31):], values)
 			}
 			switch m.tail {
 			case "KB_AUTHENTICATED":
@@ -791,6 +821,78 @@ func TestNativeRDPExactCertificateAuthenticates(t *testing.T) {
 	// settles on the smaller; the large-pointer flags are FreeRDP's to settle.
 	if got := marker.clientPointers(); !strings.HasPrefix(got, "32_32_") {
 		t.Fatalf("pointer caches settled as %q, want 32 and 32", got)
+	}
+	// The fixed lab desktop is 100%: 1024 by 768 at 96 DPI is 271 by 203 mm.
+	if got := marker.clientScale(); got != "100_100_271_203" {
+		t.Fatalf("core data told scale and size %q, want 100%% at 271 by 203 mm", got)
+	}
+}
+
+// Windows draws at a desktop's scale only when the client says so. A desktop
+// opened at 192 DPI tells it 200% when it connects and in every resize after,
+// with the physical size of a 192 DPI monitor; without that Windows draws at
+// 100% in twice the pixels and everything on the page is half size.
+func TestNativeRDPScaledDesktopTellsWindowsItsScale(t *testing.T) {
+	prefix := nativePrefix(t)
+	cert := windowsCertificate(t, nil, nil)
+	identity, err := NewExactIdentity(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	address, marker := nativePeerWithInput(t, ctx, prefix, cert, "Synthetic-scaled-NLA-password")
+	control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(c, "tcp", address)
+	})
+	plan, err := managedPlan(identity, "synthetic-user", "Synthetic-scaled-NLA-password", 2880, 1800, 192)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := nativeConnect(ctx, control, plan)
+	if err != nil {
+		t.Fatal("native control handshake failed")
+	}
+	defer stream.close()
+	// guacd's own output is read and its frames answered, as a page would.
+	var writes sync.Mutex
+	send := func(in instruction) bool {
+		writes.Lock()
+		defer writes.Unlock()
+		return writeInstruction(stream.raw, in) == nil
+	}
+	go func() {
+		for {
+			in, err := stream.next()
+			if err != nil {
+				return
+			}
+			if len(in) >= 2 && in[0] == "sync" {
+				_ = send(instruction{"sync", in[1]})
+			}
+		}
+	}()
+	select {
+	case <-marker.ready:
+	case <-ctx.Done():
+		t.Fatal("native account did not authenticate")
+	}
+	// 2880 by 1800 at 192 DPI is 381 by 238 mm.
+	if got := marker.clientScale(); got != "200_100_381_238" {
+		t.Fatalf("core data told scale and size %q, want 200%% at 381 by 238 mm", got)
+	}
+	// A resize from the page keeps the scale: 1280 by 720 at 192 DPI, 169 by
+	// 95 mm. guacd sends it once the display channel is up, so ask until then.
+	const want = "1280_720_200_100_169_95"
+	for !marker.sawLayout(want) {
+		if !send(instruction{"size", "1280", "720"}) {
+			t.Fatal("resize could not be sent")
+		}
+		select {
+		case <-time.After(250 * time.Millisecond):
+		case <-ctx.Done():
+			t.Fatalf("display-control layout %s never arrived", want)
+		}
 	}
 }
 

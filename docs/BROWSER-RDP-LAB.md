@@ -113,6 +113,17 @@ session's DPI over the handshake's, so any other value would scale every
 resize (the first test on a 200% screen asked for 2880 by 1800 and guacd
 made 5760 by 3600, which the viewer refused).
 
+Windows draws at that scale only when the client says so: in the core data
+when it connects and in every display-control layout after it. guacd 1.6 uses
+its `dpi` argument for sizes alone and says neither, so the first 200% desktop
+was drawn at 100% in twice the pixels and everything on the page looked half
+size. The native build now tells Windows the session's scale in both
+(`native/scale.c`, included by `native/prepare.py`): 100, 125, 150, 175 or
+200%; a device scale of 100, which is what FreeRDP's own SDL client sends and
+one of the three values without which Windows ignores the desktop scale; and
+the physical size in millimetres that a monitor of that DPI reports. Any other
+DPI is told as 100%.
+
 Bounds and budgets grow with the scale and with nothing else
 (`identity.DesktopBounds`, `areaScale`):
 
@@ -129,8 +140,9 @@ that much more memory per session on the gateway host, which the operator's
 aggregate memory limit (`--memory-mib`, 1 GiB by default) still bounds, and
 more network bandwidth for lossless pictures. Evidence:
 `TestOwnedRemoteDesktopStartsAtThePageSize`,
-`TestDesktopStartsAtThePageSize`, `TestScaledDesktopHoldsItsPixelsAndNoMore`
-and `web/desktop-workspace.test.mjs`.
+`TestDesktopStartsAtThePageSize`, `TestScaledDesktopHoldsItsPixelsAndNoMore`,
+`TestNativeRDPScaledDesktopTellsWindowsItsScale`, `native/scale_test.c` and
+`web/desktop-workspace.test.mjs`.
 
 ## Evidence and remaining gates
 

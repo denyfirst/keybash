@@ -60,5 +60,9 @@ func TestNativeRDPWorkspaceClipboardAndDisplay(t *testing.T) {
 			t.Fatal("actual native clipboard or display-control evidence missing")
 		}
 	}
+	// A 100% desktop's resize tells Windows 100% and a 96 DPI monitor's size.
+	if !marker.sawLayout("1280_720_100_100_339_191") {
+		t.Fatal("the resize did not tell the desktop's scale and physical size")
+	}
 	t.Log("Actual native CLIPRDR Unicode in both directions and DISPLAYCONTROL resize reached the browser")
 }

@@ -66,7 +66,8 @@ unknown, duplicate, missing or changed-version fields refuse before credentials
 are sent. Native clipboard, touch and dynamic display channels stay disabled. The lab
 uses a fixed 1024x768 viewport (a managed workspace starts at its page's size
 and DPI, even and within full HD times the screen's scale, the bounds a resize
-already had; see `BROWSER-RDP-LAB.md`)
+already had; see `BROWSER-RDP-LAB.md`; the guacd patch tells Windows that
+DPI's scale when connecting and in each resize, `native/scale.c`)
 and classic NSCodec bitmap updates; PNG is the
 only advertised image format. Image evidence bounds eight concurrent streams,
 256 KiB each/1 MiB aggregate, dimensions and layer count before decoding. It is

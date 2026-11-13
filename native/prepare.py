@@ -45,6 +45,9 @@ replace_once(sample, "\tif (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecu
              "\tif (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE))\n\t\tgoto fail;\n\tif (!freerdp_settings_set_uint32(settings, FreeRDP_PointerCacheSize, 128) ||\n\t    !freerdp_settings_set_uint32(settings, FreeRDP_ColorPointerCacheSize, 128))\n\t\tgoto fail;")
 replace_once(sample, "\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);",
              "\tprintf(\"KB_CLIENT_POINTERS_%u_%u_%u\\n\", freerdp_settings_get_uint32(client->context->settings, FreeRDP_PointerCacheSize), freerdp_settings_get_uint32(client->context->settings, FreeRDP_ColorPointerCacheSize), freerdp_settings_get_uint32(client->context->settings, FreeRDP_LargePointerFlag)); fflush(stdout);\n\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);")
+# The scale and physical size the client's core data told the server.
+replace_once(sample, "\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);",
+             "\tprintf(\"KB_CLIENT_SCALE_%u_%u_%u_%u\\n\", freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopScaleFactor), freerdp_settings_get_uint32(client->context->settings, FreeRDP_DeviceScaleFactor), freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopPhysicalWidth), freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopPhysicalHeight)); fflush(stdout);\n\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);")
 replace_once(sample, "static BOOL tf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT8 code)\n{",
              "static BOOL tf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT8 code)\n{\n\tif (code == RDP_SCANCODE_KEY_A && !(flags & KBD_FLAGS_RELEASE)) { puts(\"KB_INPUT_A\"); fflush(stdout); }")
 replace_once(sample, "static BOOL tf_peer_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y)\n{",
@@ -176,6 +179,29 @@ replace_once(settings, offscreen, offscreen + '''
     freerdp_settings_set_uint32(rdp_settings, FreeRDP_PointerCacheSize, 32);
     freerdp_settings_set_uint32(rdp_settings, FreeRDP_ColorPointerCacheSize, 32);''')
 replace_once(settings, "if (guac_settings->certificate_fingerprints != NULL)\n        freerdp_settings_set_string(rdp_settings, FreeRDP_CertificateAcceptedFingerprints, \n                guac_strdup(guac_settings->certificate_fingerprints));", "/* The mandatory exact pin is checked in the native X509 callback. */")
+# Windows draws at the desktop's DPI only when told it (native/scale.c): in
+# the core data at connection and in every display-control layout. Guacamole
+# 1.6 sends neither, so a 192 DPI desktop was drawn at 100% and looked half
+# size. Both places take the scale from the same dpi argument.
+(settings.parent / "keybash_scale.c").write_bytes((identity_source.parent / "scale.c").read_bytes())
+replace_once(settings, '#include "resolution.h"', '#include "resolution.h"\n#include "keybash_scale.c"')
+desktop_height = "freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopHeight, guac_settings->height);"
+replace_once(settings, desktop_height, desktop_height + '''
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopScaleFactor, keybash_desktop_scale(guac_settings->resolution));
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DeviceScaleFactor, keybash_device_scale());
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopPhysicalWidth, keybash_millimetres(guac_settings->width, guac_settings->resolution));
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopPhysicalHeight, keybash_millimetres(guac_settings->height, guac_settings->resolution));''')
+disp = guac / "src/protocols/rdp/channels/disp.c"
+replace_once(disp, '#include "settings.h"', '#include "settings.h"\n#include "keybash_scale.c"')
+replace_once(disp, '''            .PhysicalWidth = 0,
+            .PhysicalHeight = 0,
+            .Orientation = 0,
+            .DesktopScaleFactor = 0,
+            .DeviceScaleFactor = 0''', '''            .PhysicalWidth = keybash_millimetres(width, settings->resolution),
+            .PhysicalHeight = keybash_millimetres(height, settings->resolution),
+            .Orientation = 0,
+            .DesktopScaleFactor = keybash_desktop_scale(settings->resolution),
+            .DeviceScaleFactor = keybash_device_scale()''')
 
 # Guacamole 1.6's common UTF-16 reader/writer handles only individual 16-bit
 # units. Keep that upstream code untouched; the RDP Unicode clipboard path
