@@ -11,7 +11,7 @@ sudo apt-get install -y --no-install-recommends build-essential clang cmake ninj
 prefix="${lab}/prefix"
 mkdir -p "${prefix}/bin"
 # Fixed verified test Node runtime; no browser runtime enters a release.
-test "$(node --version)" = v24.19.0
+test "$(node --version)" = v26.13.1
 cp "$(command -v node)" "${prefix}/bin/node"
 export KEYBASH_NATIVE_BROWSER_CACHE="${HOME}/.cache/ms-playwright"
 test -d "${KEYBASH_NATIVE_BROWSER_CACHE}"
