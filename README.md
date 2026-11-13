@@ -92,6 +92,7 @@ without deploying anything on the workstation.
 - [Try the local interactive UI demo](docs/INTERACTIVE-DEMO.md)
 - [Separate test VM setup](docs/TEST-SETUP.md)
 - [Pinned SSH dependency review](docs/DEPENDENCIES.md)
+- [Staying current: scheduled version and vulnerability checks](docs/STAYING-CURRENT.md)
 
 ## Development checks
 
