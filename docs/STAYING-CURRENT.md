@@ -23,8 +23,9 @@ the version check runs locally from the repository root:
 go run ./cmd/keybash-freshness
 ```
 
-It exits 0 when every pin is current, 3 when one is behind and 1 when a pin
-or a lookup failed.
+The program exits 0 when every pin is current, 3 when one is behind and 1
+when a pin or a lookup failed. `go run` reports any non-zero exit as 1, so
+the workflow builds it first and runs the binary.
 
 ## Where each newest version comes from
 

@@ -1,7 +1,8 @@
 // Maintainer check: compares every version Keybash pins with the newest
 // upstream release and prints a Markdown table. It exits 0 when every pin is
-// current, 3 when one is behind and 1 when a pin or a lookup failed. Run it
-// from the repository root: go run ./cmd/keybash-freshness. Not part of the
+// current, 3 when one is behind and 1 when a pin or a lookup failed (go run
+// shows any of these as 1). Run it from the repository root:
+// go run ./cmd/keybash-freshness. Not part of the
 // product; the weekly freshness workflow runs it.
 package main
 
