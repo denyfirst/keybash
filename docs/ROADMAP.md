@@ -66,3 +66,61 @@ the real Windows/browser matrix, production installer, restore or release gates.
 
 Sharing, SFTP, jump hosts and mobile parity remain later decisions. We do not
 copy application code from Porch or Rootwell to accelerate these stages.
+
+## Desktop picture and staying current (11 November 2026)
+
+Measured on the test VM with two VM-only instrumented builds (never
+committed) on a real Windows Server 2025 desktop:
+
+- Before PR 70: 9 to 20 frames a second in motion; the gateway's reader was
+  busy about 55% of the time, mostly writing PNGs again; the browser answered
+  each frame in 8 to 21 ms.
+- With PR 70's parallel rebuild: still 11 to 20 frames a second, but the
+  gateway now mostly waits on guacd, the VM is about 80% idle and guacd uses
+  about 45% of one core. The remaining limits are Windows' legacy bitmap path
+  (`disable-gfx`) and a half-resolution picture on high-DPI screens: at 200%
+  scale the browser stretches the desktop twice, so text is less sharp than
+  in Hyper-V's own console.
+
+State of the art: the RDP Graphics Pipeline (MS-RDPEGFX) with H.264 (AVC420,
+AVC444) decoded in the browser on the GPU through WebCodecs. guacamole-server
+1.6.0, the latest release, decodes the pipeline into pictures; offering H.264
+is an open upstream pull request (apache/guacamole-server#733). Third-party
+projects pass H.264 to WebCodecs (rustguac, guac-extra), FreeRDP merged a
+WebCodecs H.264 decoder for its WebAssembly build, and IronRDP (Rust,
+memory-safe) merged client graphics-pipeline support with AVC420 in 2026.
+
+In order:
+
+1. **FreeRDP 3.32.2 to 3.33.1.** 3.33.0 and 3.33.1 carry 24 security
+   advisories. Among those that reach Keybash's client: an out-of-bounds write
+   in client GDI OpaqueRect clipping (high), a use-after-free in the brush
+   cache drawing orders, and heap corruption in the Progressive codec (high,
+   graphics pipeline). This comes before anything turns the pipeline on.
+   Done in PR 72: the archive's checksum and release signature were verified
+   before pinning, and the native CI lab built and passed with it.
+2. **Toolchain:** Go 1.27, golang.org/x/sys 0.50, the Node 24 LTS patch,
+   Playwright 1.65 and pnpm 12 (its lockfile checked in CI).
+3. **Staying current:** Dependabot for Go modules, the web lockfile and GitHub
+   Actions; a weekly workflow that compares the pinned native sources and
+   tools (FreeRDP, guacamole-server, Go, Node, pnpm) with their upstream
+   releases and opens an issue when one is behind; govulncheck nightly, not
+   only on pull requests. Security releases are adopted within days.
+4. **A sharp desktop on high-DPI screens:** the page asks for the screen's
+   device pixels and the matching remote DPI, within raised size bounds that
+   keep their tests and budgets.
+5. **Graphics pipeline experiment** (after 1): RemoteFX Progressive on the
+   test VM, measured with the same instrumented build.
+6. **ADR 0007 (to propose): H.264 to the browser through WebCodecs.** The
+   default keeps today's rule that the browser never parses bytes made by the
+   remote server: guacd and FreeRDP decode the stream inside the sandbox, and
+   Keybash's own encoder writes the stream the browser decodes, with lossless
+   pictures kept for still text. A strictly validated passthrough of Windows'
+   own H.264 is the faster alternative to measure against it. Codec choices
+   wait for the project licence: OpenH264 (BSD-2-Clause) or FFmpeg (LGPL),
+   never a GPL encoder.
+7. **Watch:** IronRDP as a memory-safe replacement for FreeRDP once its client
+   graphics pipeline is ready for production.
+
+The QOI-style picture draft (ADR 0006) is set aside: the gateway is no longer
+the bottleneck.
