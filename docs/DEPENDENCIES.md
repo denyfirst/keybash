@@ -34,6 +34,53 @@ server with an exact `font/woff2` type and `nosniff`, every page policy limits
 fonts to `font-src 'self'`, and no stylesheet loads any other URL or import.
 It adds no Go or JavaScript dependency and nothing at runtime outside the page.
 
+## Toolchain and test tools (2026-11-13)
+
+Go moves from 1.26.11 to 1.27.4, the current release. 1.26 still receives
+security fixes until 1.28, so this keeps Keybash current rather than closing
+a known hole. Raising the `go` line also moves GODEBUG defaults to 1.27. The
+removed settings (`tlsrsakex`, `tls3des`, `tls10server`, `tlsunsafeekm`,
+`x509keypairleaf`, `asynctimerchan`) only restored older behaviour, and
+Keybash set none of them; `tracebacklabels=1` matters only with goroutine
+labels, which Keybash does not use. Unix-socket reads now return a bare
+`io.EOF`; no Keybash code looks inside the wrapped error. `go mod tidy` now
+keeps one block for direct requirements.
+
+Go 1.27's new DEFLATE encoder makes the PNG rebuild faster. On a 14-thread
+Windows desktop, `BenchmarkFastNormalizeDesktop` takes 72 ms instead of 80 ms
+for a full-HD picture and 4.0 ms instead of 4.7 ms for a 256-pixel tile.
+Decoding is about 3% slower (inflate's `huffSym`). The parallel
+`BenchmarkViewerFrameOfTiles` spends 4% less CPU but finishes about 5% later
+(64.5 against 61.2 ms, nine alternating runs each). The measured desktop is
+limited by guacd and Windows, not by this stage.
+
+`golang.org/x/crypto` 0.59.0, `x/sys` 0.50.0 and `x/term` 0.48.0 are the
+current releases; their licences are unchanged. The crypto release deletes its
+unmaintained OpenPGP packages, so govulncheck no longer reports GO-2026-5932
+for the module (it still does for 0.58.0); the CI import ban stays as a guard.
+SSH changes reviewed for Keybash: DSA support is removed (Keybash pins Ed25519
+host keys and never accepted DSA user keys), certificates with no principals
+are rejected, peer-controlled strings are quoted in errors and banners
+escaped, `OpenChannel` fails once the connection is lost, and rejected
+public-key queries count towards a server's attempt limit. `x/sys` now
+rejects a short `SCM_CREDENTIALS` payload; Keybash reads peer credentials
+through `SO_PEERCRED` instead.
+
+Analysis tools move to staticcheck v0.8.2, gosec v2.30.0 and govulncheck
+v1.9.0 (actionlint v1.7.12 is current). All pass on Linux, and govulncheck
+reports no vulnerability.
+
+Test tools: Node 26.13.1, the active LTS line since October (24 is now in
+maintenance). Its `SHASUMS256.txt` has a good signature from a release key
+listed in Node's README, and CI pins the Linux archive's SHA-256. pnpm 12.18.0
+is a native program whose wrapper package would fetch the binary from the
+registry without our pin, so CI downloads `@pnpm/exe.linux-x64` itself, pins
+its SHA-256 (which matched the registry's sha512 integrity) and runs it
+without npm. pnpm 12 keeps lockfile format 9.0; regenerating it changed only
+Playwright and playwright-core, 1.64.0 to 1.65.0, whose integrities match the
+registry. The audit reports no known vulnerability. None of these tools runs
+in the product.
+
 ## FreeRDP security update (2026-11-12)
 
 The native pin moves from FreeRDP 3.32.2 to 3.33.1, released 10 November.
@@ -235,8 +282,8 @@ License: BSD-3-Clause. Original license texts for crypto, sys and term are in
 source license remains a separate decision. A library license does not assign
 a license to Keybash.
 
-The graph also selects `x/sys v0.49.0`, `x/term v0.47.0`, `x/net v0.60.0` and
-`x/text v0.43.0`. `x/sys` supplies architecture-dependent CPU support. `x/term`
+The graph now selects `x/sys v0.50.0`, `x/term v0.48.0`, `x/net v0.62.0` and
+`x/text v0.44.0` (x/crypto is v0.59.0 since 2026-11-13). `x/sys` supplies architecture-dependent CPU support. `x/term`
 is reached by upstream SSH tests, not our terminal implementation. net/text
 are upstream module requirements, not current Keybash runtime imports.
 `go.mod`, `go.sum`, `go mod graph`, `go mod why -m`, and per-platform package
@@ -248,7 +295,9 @@ inventories are the source of truth; the graph is not a runtime SBOM.
 zero reachable vulnerable symbols on the reviewed source. It also reported
 module-level [GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932): the module's
 unmaintained OpenPGP packages, with no fixed version. Keybash does not import
-them. This is not a claim that the whole crypto module is vulnerability-free.
+them. x/crypto 0.59.0 (2026-11-13 update) deletes those packages, and
+govulncheck no longer reports the advisory.
+This is not a claim that the whole crypto module is vulnerability-free.
 Local and CI gates reject OpenPGP imports, including test/transitive imports.
 Do not waive a future reachable SSH vulnerability based on this scoped result.
 
@@ -305,14 +354,15 @@ No forwarding handlers, local process or raw SSH client is exposed to callers.
   56–71 against 28–44 frames a second, Edge on an Intel GPU). Without WebGL 2,
   or once the GPU drops the context, the DOM renderer draws, in the same session
   (`TestBrowserTerminalOnTheGPU`).
-- Playwright/core `1.64.0`: Apache-2.0, browser-test tooling only. Node `24.19.0`
-  and pnpm `11.25.0` are CI tools; Node's official Linux archive SHA-256 is pinned
-  before extraction. Install scripts are disabled; browser installation is an
-  explicit test setup step. These are not runtime product requirements.
+- Playwright/core `1.65.0`: Apache-2.0, browser-test tooling only. Node `26.13.1`
+  and pnpm `12.18.0` are CI tools; Node's official Linux archive and pnpm's
+  Linux binary package are pinned by SHA-256 before extraction. Install scripts
+  are disabled; browser installation is an explicit test setup step. These are
+  not runtime product requirements.
 
 Go call/package scanning found no affected imported packages/reachable symbols;
-the excluded OpenPGP module advisory above still applies. The locked JS graph
-audit reported no known advisories. These dated scans do not replace review.
+since x/crypto 0.59.0 the module-level OpenPGP advisory no longer applies.
+The locked JS graph audit reported no known advisories. These dated scans do not replace review.
 
 The lab caps WebSocket input at 32 KiB, control JSON at 1 KiB, and outgoing
 frames at 8 KiB plus sequence. At most 32 outgoing frames await in-order
@@ -331,7 +381,7 @@ full browser/OS permission matrix. Application code has no TLS-ignore option.
 Sources: [xterm security](https://xtermjs.org/docs/guides/security/),
 [Coder WebSocket](https://github.com/coder/websocket/tree/v1.8.15),
 [PTY fixture library](https://github.com/creack/pty/tree/v1.1.24),
-[Node checksums](https://nodejs.org/dist/v24.19.0/SHASUMS256.txt).
+[Node checksums](https://nodejs.org/dist/v26.13.1/SHASUMS256.txt).
 
 ## Remaining adoptions
 

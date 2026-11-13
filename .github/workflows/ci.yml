@@ -18,7 +18,9 @@ jobs:
   build:
     name: Build and test
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # A normal run takes about 35 minutes; slow runners passed every test
+    # yet crossed 45.
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -45,26 +47,31 @@ jobs:
         run: |
           set -eu
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.3 \
-            https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz \
+            https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.xz \
             --output "${RUNNER_TEMP}/keybash-node.tar.xz"
-          printf '%s  %s\n' 14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647 \
+          printf '%s  %s\n' 5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864 \
             "${RUNNER_TEMP}/keybash-node.tar.xz" | sha256sum -c -
           tar -xf "${RUNNER_TEMP}/keybash-node.tar.xz" -C "${RUNNER_TEMP}"
-          node_bin="${RUNNER_TEMP}/node-v24.19.0-linux-x64/bin"
+          node_bin="${RUNNER_TEMP}/node-v26.13.1-linux-x64/bin"
           echo "${node_bin}" >> "${GITHUB_PATH}"
           export PATH="${node_bin}:${PATH}"
-          test "$(node --version)" = v24.19.0
+          test "$(node --version)" = v26.13.1
           # pnpm is pinned by hash like Node, not by the registry's word: the
           # tarball's SHA-256 matches its published sha512 integrity. The
           # registry negotiates TLS 1.2 at most; the fixed hash, not the
-          # transport, is what pins the file.
+          # transport, is what pins the file. pnpm 12 is a native program
+          # whose wrapper package would fetch this binary unpinned, so the
+          # Linux binary's own package is pinned and run without npm.
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-            https://registry.npmjs.org/pnpm/-/pnpm-11.25.0.tgz \
+            https://registry.npmjs.org/@pnpm/exe.linux-x64/-/exe.linux-x64-12.18.0.tgz \
             --output "${RUNNER_TEMP}/keybash-pnpm.tgz"
-          printf '%s  %s\n' 33dd0748f27e7916c4f1c8b6943461983e3453b06bbda6312a6280130b4881e5 \
+          printf '%s  %s\n' 679df2eedf158f639db6d1f00e713d766d0d7afc6a931bc51497a625d1e1bdf7 \
             "${RUNNER_TEMP}/keybash-pnpm.tgz" | sha256sum -c -
-          npm install --prefix "${RUNNER_TEMP}/keybash-node-tools" "${RUNNER_TEMP}/keybash-pnpm.tgz" --ignore-scripts --no-audit --no-fund
-          pnpm="${RUNNER_TEMP}/keybash-node-tools/node_modules/.bin/pnpm"
+          mkdir "${RUNNER_TEMP}/keybash-pnpm"
+          tar -xzf "${RUNNER_TEMP}/keybash-pnpm.tgz" -C "${RUNNER_TEMP}/keybash-pnpm"
+          pnpm="${RUNNER_TEMP}/keybash-pnpm/package/pnpm"
+          chmod 755 "${pnpm}"
+          test "$("${pnpm}" --version)" = 12.18.0
           "${pnpm}" --dir web install --frozen-lockfile --ignore-scripts
           "${pnpm}" --dir web audit
           node web/vendor.mjs
@@ -180,9 +187,14 @@ jobs:
           set -eu
           export GOBIN="${RUNNER_TEMP}/keybash-tools"
           mkdir -p "${GOBIN}"
-          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
-          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          # `go install tool@version` takes its Go version from the tool's own
+          # go.mod, not this one. An analyser must be built by at least the
+          # Go version it reads, so build every tool with the pinned one.
+          GOTOOLCHAIN="$(awk '$1 == "go" {print "go" $2}' go.mod)"
+          export GOTOOLCHAIN
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
       - name: Run static, security, vulnerability and workflow checks
