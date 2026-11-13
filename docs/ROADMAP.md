@@ -106,6 +106,9 @@ In order:
    tools (FreeRDP, guacamole-server, Go, Node, pnpm) with their upstream
    releases and opens an issue when one is behind; govulncheck nightly, not
    only on pull requests. Security releases are adopted within days.
+   Done in PR 74 without Dependabot, whose unsigned commits cannot pass the
+   signature gate: one weekly check covers Go, modules, native sources, Node,
+   pnpm, browser packages and analysis tools (`STAYING-CURRENT.md`).
 4. **A sharp desktop on high-DPI screens:** the page asks for the screen's
    device pixels and the matching remote DPI, within raised size bounds that
    keep their tests and budgets.
