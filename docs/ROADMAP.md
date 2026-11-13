@@ -101,11 +101,16 @@ In order:
    before pinning, and the native CI lab built and passed with it.
 2. **Toolchain:** Go 1.27, golang.org/x/sys 0.50, the Node 24 LTS patch,
    Playwright 1.65 and pnpm 12 (its lockfile checked in CI).
+   Done in PR 73, with Node 26 instead: it became the active LTS line in
+   October. pnpm 12's native binary is pinned by hash and run without npm.
 3. **Staying current:** Dependabot for Go modules, the web lockfile and GitHub
    Actions; a weekly workflow that compares the pinned native sources and
    tools (FreeRDP, guacamole-server, Go, Node, pnpm) with their upstream
    releases and opens an issue when one is behind; govulncheck nightly, not
    only on pull requests. Security releases are adopted within days.
+   Done in PR 74 without Dependabot, whose unsigned commits cannot pass the
+   signature gate: one weekly check covers Go, modules, native sources, Node,
+   pnpm, browser packages and analysis tools (`STAYING-CURRENT.md`).
 4. **A sharp desktop on high-DPI screens:** the page asks for the screen's
    device pixels and the matching remote DPI, within raised size bounds that
    keep their tests and budgets.
