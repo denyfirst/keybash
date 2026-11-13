@@ -97,6 +97,53 @@ message; a desktop that sent what the viewer refuses says so too.
 Remote text is not reflected into application HTML. Browser storage and local
 clipboard APIs are unused. RAM erasure is not guaranteed.
 
+## Scaled screens (2026-11-13)
+
+A desktop on a screen scaled to 200% used to be drawn at half the screen's
+pixels and stretched, so its text was softer than Windows' own client. The
+page now picks the Windows scale nearest the screen's (100, 125, 150, 175 or
+200%), asks for the desktop in device pixels at the matching DPI (96, 120,
+144, 168, 192), and shows it at 1/scale: one remote pixel per screen pixel,
+and Windows draws text and controls at the size a person expects. The start
+size reads `2880x1800@192`; plain `1600x900` is 96. Windows keeps its DPI for
+a session, so the scale is chosen when the desktop opens and later resizes
+stay at it. guacd hears the same DPI in its handshake as in its
+parameters: it turns each resize from the page into remote pixels by the
+session's DPI over the handshake's, so any other value would scale every
+resize (the first test on a 200% screen asked for 2880 by 1800 and guacd
+made 5760 by 3600, which the viewer refused).
+
+Windows draws at that scale only when the client says so: in the core data
+when it connects and in every display-control layout after it. guacd 1.6 uses
+its `dpi` argument for sizes alone and says neither, so the first 200% desktop
+was drawn at 100% in twice the pixels and everything on the page looked half
+size. The native build now tells Windows the session's scale in both
+(`native/scale.c`, included by `native/prepare.py`): 100, 125, 150, 175 or
+200%; a device scale of 100, which is what FreeRDP's own SDL client sends and
+one of the three values without which Windows ignores the desktop scale; and
+the physical size in millimetres that a monitor of that DPI reports. Any other
+DPI is told as 100%.
+
+Bounds and budgets grow with the scale and with nothing else
+(`identity.DesktopBounds`, `areaScale`):
+
+- the largest desktop is full HD times the scale (3840 by 2160 at 200%);
+  another DPI, `@96` spelled out, or a size past the bound opens nothing;
+- every per-desktop budget sized for full HD (live canvas pixels, decode and
+  draw rates, staged and rebuilt image bytes, held output, guacd's byte rate)
+  is multiplied by the area's ratio rounded up: 2 at 125%, 3 at 150%, 4 at
+  175% and 200%;
+- a 100% desktop keeps every bound and budget exactly as before.
+
+A 200% desktop has about four times the pixels of a 100% one. It needs about
+that much more memory per session on the gateway host, which the operator's
+aggregate memory limit (`--memory-mib`, 1 GiB by default) still bounds, and
+more network bandwidth for lossless pictures. Evidence:
+`TestOwnedRemoteDesktopStartsAtThePageSize`,
+`TestDesktopStartsAtThePageSize`, `TestScaledDesktopHoldsItsPixelsAndNoMore`,
+`TestNativeRDPScaledDesktopTellsWindowsItsScale`, `native/scale_test.c` and
+`web/desktop-workspace.test.mjs`.
+
 ## Evidence and remaining gates
 
 Unit tests cover valid concurrent PNG groups preserving pixels and drawing order,

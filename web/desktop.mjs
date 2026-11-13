@@ -30,7 +30,8 @@ function fit() {
   if (!client || stopped) return;
   const width = $('desktop').clientWidth, height = $('desktop').clientHeight;
   const display = client.getDisplay();
-  display.scale(Math.min(1, width/Math.max(1,display.getWidth()), height/Math.max(1,display.getHeight())));
+  // At most 1/scale: a scaled screen's desktop has scale remote pixels per CSS pixel.
+  display.scale(Math.min(1/controls.scale(), width/Math.max(1,display.getWidth()), height/Math.max(1,display.getHeight())));
   controls.resize();
 }
 function begin(proof=null) {

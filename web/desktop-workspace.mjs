@@ -1,5 +1,31 @@
 import { inspectPaste } from './paste.mjs';
 
+// A scaled screen (125 to 200%) gets its own pixels: the desktop is asked for at
+// the screen's device pixels and the matching DPI, and shown at 1/scale, so one
+// remote pixel is one screen pixel and text is as sharp as on the screen itself.
+// Windows fixes its DPI for a session, so the scale is chosen when the desktop
+// opens and kept. The server allows full HD times the scale, and these exact
+// scales only (identity.DesktopBounds).
+export const desktopScales = [1, 1.25, 1.5, 1.75, 2];
+
+// The Windows scale nearest the screen's, 100% for anything unusable.
+export function nearestScale(ratio) {
+  if (!Number.isFinite(ratio) || ratio <= 0) return 1;
+  return desktopScales.reduce((best, s) => Math.abs(s - ratio) < Math.abs(best - ratio) ? s : best, 1);
+}
+
+// Device pixels for a space of w by h CSS pixels at scale: even, at least 200,
+// at most full HD times the scale.
+export function scaledSize(w, h, scale) {
+  const even = (n, most) => Math.max(200, Math.min(most, Math.floor(n * scale / 2) * 2));
+  return [even(w, 1920 * scale), even(h, 1080 * scale)];
+}
+
+// What the page tells the server it opens at: "1600x900" at 100%, "2880x1800@192" scaled.
+export function startSizeField(w, h, scale) {
+  return scale === 1 ? `${w}x${h}` : `${w}x${h}@${Math.round(96 * scale)}`;
+}
+
 // One instance belongs to one desktop. No timers/polling read the OS clipboard,
 // and text the remote copied reaches this computer's clipboard only on a click.
 export function workspaceControls({ $, live, client, send, resetKeyboard }) {
@@ -9,6 +35,9 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   const usable = () => enabled && live();
   const valid = text => typeof text === 'string' && text.isWellFormed() && !text.includes('\0') && inspectPaste(text).allowed;
   const close = id => { if ($(id).open) $(id).close(); };
+
+  let scale = 1; // chosen when the desktop opens (startSize)
+  const deviceSize = (w, h) => scaledSize(w, h, scale);
 
   // Paste: one line goes at once; several lines, or hidden characters, are
   // shown first, as in a terminal. Nothing is sent before the person says so.
@@ -72,9 +101,8 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   function requestSize() {
     if (!usable()) return;
     // Fit asks the remote for exactly the space the desktop has here.
-    let [w, h] = screen === 'fit' ? [$('desktop').clientWidth, $('desktop').clientHeight] : screen.split('x').map(Number);
-    w = Math.max(200, Math.min(1920, Math.floor(w / 2) * 2));
-    h = Math.max(200, Math.min(1080, Math.floor(h / 2) * 2));
+    // A fixed size is in the screen's own units, like Fit, so it looks the same size at any scale.
+    const [w, h] = deviceSize(...(screen === 'fit' ? [$('desktop').clientWidth, $('desktop').clientHeight] : screen.split('x').map(Number)));
     if (!Number.isInteger(w) || !Number.isInteger(h)) return;
     const size = `${w}x${h}`;
     if (size !== lastSize) { lastSize = size; send('size', w, h); }
@@ -158,13 +186,16 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
       if (modifiers.ctrl && key === 118) return true; // browser paste event
       return undefined;
     },
-    // The size the desktop opens at: the space it has, before anything connects.
+    // The size the desktop opens at: the space it has, before anything connects,
+    // in device pixels with the DPI of the screen's scale ("2880x1800@192").
     startSize() {
-      const w = Math.max(200, Math.min(1920, Math.floor($('desktop').clientWidth / 2) * 2));
-      const h = Math.max(200, Math.min(1080, Math.floor($('desktop').clientHeight / 2) * 2));
+      scale = nearestScale(window.devicePixelRatio || 1);
+      const [w, h] = deviceSize($('desktop').clientWidth, $('desktop').clientHeight);
       lastSize = `${w}x${h}`;
-      return lastSize;
+      return startSizeField(w, h, scale);
     },
+    // Remote pixels per CSS pixel: the desktop is shown at 1/scale.
+    scale: () => scale,
     resize,
     end() {
       generation++; enabled = false; remoteText = ''; lastSize = ''; copyAsked = 0; clearTimeout(resizeTimer);

@@ -76,6 +76,8 @@ static UINT kb_disp_layout(DispServerContext* ctx, const DISPLAY_CONTROL_MONITOR
     if (pdu->NumMonitors != 1 || !pdu->Monitors) return ERROR_INVALID_DATA;
     const DISPLAY_CONTROL_MONITOR_LAYOUT* monitor = &pdu->Monitors[0];
     if (monitor->Width<64 || monitor->Width>1920 || monitor->Height<64 || monitor->Height>1080) return ERROR_INVALID_DATA;
+    printf("KB_LAYOUT_%u_%u_%u_%u_%u_%u\n", monitor->Width, monitor->Height, monitor->DesktopScaleFactor,
+           monitor->DeviceScaleFactor, monitor->PhysicalWidth, monitor->PhysicalHeight); fflush(stdout);
     uint_fast64_t size = ((uint_fast64_t)monitor->Width<<32) | monitor->Height;
     atomic_store_explicit(&peer->kb_size,size,memory_order_release);
     return SetEvent(peer->kb_resize_event) ? CHANNEL_RC_OK : ERROR_INTERNAL_ERROR;

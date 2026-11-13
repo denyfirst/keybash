@@ -196,7 +196,7 @@ func TestBackupRestoresEveryRecordAndResetsMFA(t *testing.T) {
 	}
 	defer l.Close()
 	credential, _ := restored.readCredential(alice.ID, passwordID)
-	_, _ = l.openRemote(context.Background(), target, credential, 0, 0)
+	_, _ = l.openRemote(context.Background(), target, credential, 0, 0, 0)
 	if _, ok := worker.got.(*sshkey.Password); !ok {
 		t.Fatal("restored password did not reach the SSH worker")
 	}

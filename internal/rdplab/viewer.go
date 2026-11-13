@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/identity"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
@@ -31,13 +32,15 @@ type viewerImage struct {
 var imageWorkers = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)))
 
 // maxImageJobs bounds the images one desktop has waiting to be rebuilt: at most
-// 16 PNGs of 256 KiB in memory besides those being decoded.
+// 16 PNGs of 256 KiB (times the desktop's areaScale) in memory besides those
+// being decoded.
 const maxImageJobs = 16
 
 // imageJob is one image decoded and written again off the reader, while the
 // images after it are read; its blobs take its place in the output.
 type imageJob struct {
 	stream string
+	limit  int // the rebuilt PNG's largest size, scaled like the image it came from
 	done   chan struct{}
 	blobs  []byte
 	chunks int
@@ -66,7 +69,7 @@ func (j *imageJob) rebuild(stream string, data []byte, revoked func() bool) {
 	}
 	// Re-encode only the decoded static image. Ancillary metadata, APNG
 	// frames and trailing/polyglot bytes never reach the browser decoder.
-	normalized, ok := normalizedPNG(decoded, 256*1024)
+	normalized, ok := normalizedPNG(decoded, max(256*1024, j.limit))
 	if !ok {
 		return
 	}
@@ -109,6 +112,8 @@ type viewerStream struct {
 	closeOnce             sync.Once
 	closed                atomic.Bool
 	width, height         atomic.Int64
+	dpi                   int // the DPI the desktop opened at; fixed for the session
+	area                  int // areaScale(dpi): every full-HD budget is multiplied by it
 	inputClip, outputClip clipboard
 	pastes, copies        pacer
 	resizeWindow          time.Time
@@ -116,13 +121,13 @@ type viewerStream struct {
 }
 
 func newViewerStream(native *nativeStream) *viewerStream {
-	// A workspace starts at the size its desktop was opened at; the lab and
-	// anything else at its fixed 1024 by 768.
-	w, h := 1024, 768
-	if native != nil && native.workspace && desktopSize(native.width, native.height) {
-		w, h = native.width, native.height
+	// A workspace starts at the size and DPI its desktop was opened at; the lab
+	// and anything else at its fixed 1024 by 768 at 96.
+	w, h, dpi := 1024, 768, 96
+	if native != nil && native.workspace && desktopSize(native.width, native.height, native.dpi) {
+		w, h, dpi = native.width, native.height, defaultDPI(native.dpi)
 	}
-	s := &viewerStream{native: native, layers: map[int]viewerLayer{0: {w, h, 0}},
+	s := &viewerStream{native: native, dpi: dpi, area: areaScale(dpi), layers: map[int]viewerLayer{0: {w, h, 0}},
 		images: make(map[string]*viewerImage), acks: make(map[string]int), newestSync: -1, keys: make(map[uint32]bool), done: make(chan struct{})}
 	s.outputClip.dropOversize = true
 	s.heard.Store(time.Now().UnixNano())
@@ -254,7 +259,7 @@ func (s *viewerStream) spend(budget *pacer, cost int, burst, perSecond float64) 
 }
 
 func (s *viewerStream) renderWork(pixels int) bool {
-	return s.spend(&s.render, pixels, renderBurst, renderPerSecond)
+	return s.spend(&s.render, pixels, float64(renderBurst*s.area), float64(renderPerSecond*s.area))
 }
 
 type viewerBoundedWriter struct {
@@ -346,7 +351,7 @@ func (s *viewerStream) fit(id, x, y, w, h int, exact bool) bool {
 		}
 		pixels += ((l.width + 63) / 64 * 64) * ((l.height + 63) / 64 * 64)
 	}
-	if pixels > viewerPixels {
+	if pixels > viewerPixels*s.area {
 		return false
 	}
 	s.layers[id] = layer
@@ -404,7 +409,7 @@ func (s *viewerStream) drawing(in instruction) bool {
 		}
 		data, err := base64.StdEncoding.Strict().DecodeString(in[2])
 		image := s.images[in[1]]
-		if err != nil || base64.StdEncoding.EncodeToString(data) != in[2] || len(data) == 0 || len(image.pixels)+len(data) > 256*1024 || s.imageBytes+len(data) > 1024*1024 {
+		if err != nil || base64.StdEncoding.EncodeToString(data) != in[2] || len(data) == 0 || len(image.pixels)+len(data) > 256*1024*s.area || s.imageBytes+len(data) > 1024*1024*s.area {
 			return false
 		}
 		image.pixels = append(image.pixels, data...)
@@ -422,7 +427,7 @@ func (s *viewerStream) drawing(in instruction) bool {
 			return false
 		}
 		pixels := cfg.Width * cfg.Height
-		if !s.spend(&s.decode, pixels, decodeBurst, decodePerSecond) || !s.renderWork(pixels) {
+		if !s.spend(&s.decode, pixels, float64(decodeBurst*s.area), float64(decodePerSecond*s.area)) || !s.renderWork(pixels) {
 			return false
 		}
 		// Decoding and writing it again happen off the reader, at the same time
@@ -430,10 +435,10 @@ func (s *viewerStream) drawing(in instruction) bool {
 		// (settle), so the browser receives everything in guacd's order.
 		// At most 16 images wait, and 2 MiB besides the pending output, as the
 		// pending output alone was bounded before.
-		if (s.jobs >= maxImageJobs || s.held+s.pending.Len() > 2*1024*1024) && !s.settle(true) {
+		if (s.jobs >= maxImageJobs || s.held+s.pending.Len() > 2*1024*1024*s.area) && !s.settle(true) {
 			return false
 		}
-		job := &imageJob{stream: in[1], done: make(chan struct{})}
+		job := &imageJob{stream: in[1], limit: 256 * 1024 * s.area, done: make(chan struct{})}
 		s.parts = append(s.parts, viewerPart{data: bytes.Clone(s.pending.Bytes())}, viewerPart{job: job})
 		s.held += s.pending.Len()
 		s.pending.Reset()
@@ -719,8 +724,9 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 	switch in[0] {
 	case "size":
 		if s.workspace && len(in) == 3 {
-			w, a := canonicalNumber(in[1], 64, 1920)
-			h, b := canonicalNumber(in[2], 64, 1080)
+			mw, mh := s.bounds()
+			w, a := canonicalNumber(in[1], 64, mw)
+			h, b := canonicalNumber(in[2], 64, mh)
 			now := time.Now()
 			if now.Sub(s.resizeWindow) >= time.Second {
 				s.resizeWindow = now
@@ -798,7 +804,9 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 
 func (s *viewerStream) bounds() (int, int) {
 	if s.workspace {
-		return 1920, 1080
+		if w, h, ok := identity.DesktopBounds(s.dpi); ok {
+			return w, h
+		}
 	}
 	return 1024, 768
 }
