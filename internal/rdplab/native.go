@@ -106,17 +106,9 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 		"disable-copy": "true", "disable-paste": "true", "normalize-clipboard": "preserve",
 		// Fixed lab viewport. Dynamic display channels need their own native
 		// callback/resize evidence before enabling them in a browser workspace.
-		// The RDP graphics pipeline is on (2026-11-16): Windows sends whole
-		// frames with their boundaries and moves scrolled areas instead of
-		// sending them again, which removed the half-drawn frames, repeated
-		// text and black areas left after a resize on the classic bitmap
-		// path, and carried 3.7 times the picture a second while scrolling.
-		// Its codecs run in FreeRDP 3.33.1 (the Progressive heap corruption is
-		// fixed there) inside the sandboxed worker, and every picture still
-		// passes the viewer; a server without the pipeline gets the classic
-		// path. FreeRDP is built without H.264, so Windows uses its lossless
-		// and progressive codecs.
-		"resize-method": "", "client-name": "Keybash-lab", "disable-gfx": "false", "force-lossless": "true",
+		// The lab keeps the classic bitmap path; a managed desktop takes the
+		// RDP graphics pipeline (below).
+		"resize-method": "", "client-name": "Keybash-lab", "disable-gfx": "true", "force-lossless": "true",
 		// How the desktop looks: ClearType text and the window theme, as Windows'
 		// own client shows them. Only what the server draws changes; wallpaper,
 		// animations and live window dragging stay off, as guacd's defaults.
@@ -127,6 +119,19 @@ func (p nativePlan) arguments(args instruction) (instruction, error) {
 		values["disable-paste"] = "false"
 		values["resize-method"] = "display-update"
 		values["client-name"] = "Keybash"
+		// The RDP graphics pipeline (2026-11-16): Windows sends whole frames
+		// with their boundaries and moves scrolled areas instead of sending
+		// them again, which removed the half-drawn frames, repeated text and
+		// black areas left after a resize on the classic bitmap path, and
+		// carried 3.7 times the picture a second while scrolling. Its codecs
+		// run in FreeRDP 3.33.1 (the Progressive heap corruption is fixed
+		// there) inside the sandboxed worker, and every picture still passes
+		// the viewer; a server without the pipeline gets the classic path.
+		// FreeRDP is built without H.264, so Windows uses its lossless and
+		// progressive codecs. The lab's fixed viewport keeps the classic path:
+		// the pipeline brings up the dynamic channels, which its synthetic peer
+		// fails on when the lab's client has no display channel.
+		values["disable-gfx"] = "false"
 	}
 	result := instruction{"connect", "VERSION_1_5_0"}
 	for _, name := range args[2:] {

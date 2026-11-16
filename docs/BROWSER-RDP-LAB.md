@@ -199,8 +199,9 @@ more network bandwidth for lossless pictures. Evidence:
 
 ## Graphics pipeline (2026-11-16)
 
-guacd now connects with the RDP graphics pipeline (MS-RDPEGFX, `disable-gfx`
-false). On the classic bitmap path Windows sends every step of a scroll in a
+A managed desktop now connects with the RDP graphics pipeline (MS-RDPEGFX,
+`disable-gfx` false); the lab's fixed viewport keeps the classic path. On the
+classic bitmap path Windows sends every step of a scroll in a
 composited window (Settings, Explorer, Edge) as a new bitmap of the whole
 area, with no frame boundaries, so guacd showed half-drawn frames: text
 appeared twice while scrolling, and areas a resize left black stayed until
@@ -224,9 +225,12 @@ sends inside FreeRDP 3.33.1, whose release fixed the Progressive heap
 corruption advisory, in the sandboxed worker; FreeRDP is built without H.264,
 so Windows uses those lossless and progressive codecs. Every picture still
 passes the viewer's checks and is re-encoded, and guacd still sends lossless
-PNG only. A server without the pipeline, such as the synthetic peer in CI,
-gets the classic path, which CI keeps exercising; the pipeline itself is
-verified against Windows Server 2025 on the test VM, not in CI. H.264 to the
+PNG only. Guacamole turns on the legacy RemoteFX surface-bits codec with the
+pipeline, which FreeRDP 3's pipeline does not need; `native/prepare.py` leaves
+it off, so a server without the pipeline, such as the synthetic peer in CI,
+gets the NSCodec classic path CI keeps exercising (with RemoteFX on, that peer
+ended the connection after its first picture). The pipeline itself is verified
+against Windows Server 2025 on the test VM, not in CI. H.264 to the
 browser (ADR 0007) is the next step.
 
 ## Evidence and remaining gates

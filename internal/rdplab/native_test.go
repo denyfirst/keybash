@@ -47,9 +47,9 @@ func TestNativePlanEnforcesNLAChannelsAndRedactsCredentials(t *testing.T) {
 	if values["resize-method"] != "" || values["enable-touch"] != "false" {
 		t.Fatal("unverified dynamic display channels enabled")
 	}
-	// The graphics pipeline is on, and pictures stay lossless.
-	if values["disable-gfx"] != "false" || values["force-lossless"] != "true" {
-		t.Fatal("the graphics pipeline or lossless pictures changed")
+	// The lab keeps the classic path; pictures stay lossless.
+	if values["disable-gfx"] != "true" || values["force-lossless"] != "true" {
+		t.Fatal("the lab's classic path or lossless pictures changed")
 	}
 	// The RDP caches stay on: in guacd 1.6 they never become browser buffers
 	// (only pointers do, bounded in native/prepare.py), and turning them off

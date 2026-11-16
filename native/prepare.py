@@ -157,6 +157,13 @@ settings = guac / "src/protocols/rdp/settings.c"
 # use it. Guacamole enables RemoteFX only together with the pipeline, and
 # FreeRDP's default NSCodec is off, so enable NSCodec explicitly; this opens no
 # virtual channel and changes no TLS/NLA policy.
+# Guacamole turns on the legacy RemoteFX surface-bits codec together with the
+# graphics pipeline, which FreeRDP 3's pipeline does not need (its capabilities
+# come from the Gfx settings alone). A server without the pipeline then sent
+# RemoteFX surface bits that ended the connection with the synthetic peer;
+# such servers keep the NSCodec path below, tested in CI.
+replace_once(settings, "        freerdp_settings_set_bool(rdp_settings, FreeRDP_SupportGraphicsPipeline, TRUE);\n        freerdp_settings_set_bool(rdp_settings, FreeRDP_RemoteFxCodec, TRUE);",
+             "        freerdp_settings_set_bool(rdp_settings, FreeRDP_SupportGraphicsPipeline, TRUE);\n        /* Keybash: no legacy RemoteFX surface bits (native/prepare.py). */")
 replace_once(settings, "freerdp_settings_set_bool(rdp_settings, FreeRDP_FrameMarkerCommandEnabled, TRUE);",
              "/* Classic bitmap path, for a server without the graphics pipeline. */\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodec, TRUE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowDynamicColorFidelity, FALSE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowSubsampling, FALSE);\n    freerdp_settings_set_uint32(rdp_settings, FreeRDP_NSCodecColorLossLevel, 1);\n\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_FrameMarkerCommandEnabled, TRUE);")
 anchor = "freerdp_settings_set_bool(rdp_settings, FreeRDP_IgnoreCertificate, guac_settings->ignore_certificate);"
