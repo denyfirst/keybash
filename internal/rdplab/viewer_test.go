@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -223,9 +225,104 @@ func TestViewerRefusesMalformedAndExcessDrawing(t *testing.T) {
 	if want := viewerPixels/(1024*768) - 1; accepted != want {
 		t.Fatalf("aggregate canvas quota took %d full layers beside the display, want %d", accepted, want)
 	}
-	for i := 0; i < 9; i++ {
-		if s.drawing(instruction{"push", "0"}) != (i < 8) {
-			t.Fatal("drawing stack quota failed")
+	// A visible layer named without a size is counted at the largest display,
+	// as the browser may create it before a pending resize: the same quota.
+	s, _, _ = viewerFixture(t)
+	accepted = 0
+	for i := 1; i <= 32 && s.drawing(instruction{"rect", strconv.Itoa(i), "0", "0", "1", "1"}); i++ {
+		accepted++
+	}
+	if want := viewerPixels/(1024*768) - 1; accepted != want || s.layers[1].width != 1024 || s.layers[1].height != 768 {
+		t.Fatalf("visible layers named without a size: %d accepted (want %d), first counted at %dx%d", accepted, want, s.layers[1].width, s.layers[1].height)
+	}
+	// guacd 1.6 never sends these for RDP; they are refused, not priced.
+	s, _, _ = viewerFixture(t)
+	for _, in := range []instruction{{"transfer", "0", "0", "0", "2", "2", "12", "0", "50", "50"}, {"start", "0", "5", "5"}, {"line", "0", "5", "5"},
+		{"clip", "0"}, {"close", "0"}, {"push", "0"}, {"pop", "0"}, {"identity", "0"}, {"reset", "0"}, {"move", "1", "0", "0", "0", "0"}, {"shade", "1", "128"}} {
+		if s.drawing(in) {
+			t.Fatalf("%s accepted", in[0])
+		}
+	}
+	// One path holds viewerPathRects rects before a fill and no more; a fill
+	// closes it and the next rect begins a new one.
+	for i := 0; i <= viewerPathRects; i++ {
+		if s.drawing(instruction{"rect", "-1", strconv.Itoa(i), "0", "1", "1"}) != (i < viewerPathRects) {
+			t.Fatalf("rect %d into one path: accepted %v", i+1, i < viewerPathRects)
+		}
+	}
+	if !s.drawing(instruction{"cfill", "14", "-1", "0", "0", "0", "255"}) || !s.drawing(instruction{"rect", "-1", "0", "0", "1", "1"}) {
+		t.Fatal("a filled path did not begin anew")
+	}
+}
+
+// A pointer still over a desktop that has just shrunk is moved inside it, not
+// refused: the browser draws a new size only when its frame arrives. A point
+// past the session's bounds still refuses. The ISO group keys the browser's
+// keyboard sends for AltGr and for Mac Option reach guacd; their neighbours do
+// not. A pointer image up to FreeRDP's 384 by 384 is shown.
+func TestViewerInputSurvivesAShrinkAndTakesAltGr(t *testing.T) {
+	scaled := func() (*viewerStream, <-chan instruction) {
+		a, b := net.Pipe()
+		t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
+		sent := make(chan instruction, 8)
+		go func() {
+			r := bufio.NewReader(b)
+			for {
+				in, err := readInstruction(r)
+				if err != nil {
+					return
+				}
+				sent <- in
+			}
+		}()
+		return newViewerStream(&nativeStream{raw: a, reader: bufio.NewReader(a), stop: func() bool { return true }, workspace: true, width: 2880, height: 1800, dpi: 192}), sent
+	}
+	s, sent := scaled()
+	if !s.drawing(instruction{"size", "0", "2400", "1300"}) {
+		t.Fatal("a shrink was refused")
+	}
+	for _, c := range []struct {
+		in   instruction
+		want string
+	}{
+		{instruction{"mouse", "2700", "1700", "1"}, "mouse 2399 1299 1"},
+		{instruction{"mouse", "3839", "2159", "0"}, "mouse 2399 1299 0"},
+		{instruction{"mouse", "100", "200", "0"}, "mouse 100 200 0"},
+		{instruction{"key", "65027", "1"}, "key 65027 1"},
+		{instruction{"key", "65027", "0"}, "key 65027 0"},
+		{instruction{"key", "65025", "1"}, "key 65025 1"},
+		{instruction{"key", "65039", "1"}, "key 65039 1"},
+	} {
+		if _, err := s.Write(encodedInstruction(t, c.in)); err != nil {
+			t.Fatalf("%v was refused", c.in)
+		}
+		select {
+		case got := <-sent:
+			if g := fmt.Sprint(strings.Join(got, " ")); g != c.want {
+				t.Fatalf("%v reached guacd as %q, want %q", c.in, g, c.want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%v never reached guacd", c.in)
+		}
+	}
+	for _, in := range []instruction{{"mouse", "3840", "0", "0"}, {"mouse", "0", "2160", "0"}, {"mouse", "01", "0", "0"}, {"mouse", "-1", "0", "0"},
+		{"key", "65024", "1"}, {"key", "65040", "1"}, {"key", "65105", "1"}} {
+		s, _ := scaled()
+		if _, err := s.Write(encodedInstruction(t, in)); err == nil {
+			t.Fatalf("%v was accepted", in)
+		}
+	}
+	s, _ = scaled()
+	for _, c := range []struct {
+		in instruction
+		ok bool
+	}{
+		{instruction{"cursor", "383", "383", "-1", "0", "0", "384", "384"}, true},
+		{instruction{"cursor", "0", "0", "-1", "0", "0", "385", "384"}, false},
+		{instruction{"cursor", "384", "0", "-1", "0", "0", "384", "384"}, false},
+	} {
+		if s.drawing(c.in) != c.ok {
+			t.Fatalf("%v accepted %v, want %v", c.in, !c.ok, c.ok)
 		}
 	}
 }
@@ -413,7 +510,7 @@ func FuzzViewerDrawingSchemas(f *testing.F) {
 		// start, so this schema pass performs no transport I/O or native launch.
 		viewer := newViewerStream(nil)
 		_ = viewer.drawing(in)
-		if len(viewer.layers) > viewerLayers || len(viewer.images) > 8 {
+		if len(viewer.layers) > viewerLayers || len(viewer.images) > viewerImages {
 			t.Fatal("viewer state quota escaped")
 		}
 	})
@@ -488,6 +585,215 @@ func TestViewerDecodeAndRenderWorkArePacedNotEnded(t *testing.T) {
 	// A cost larger than any burst refuses outright.
 	if s.spend(&s.render, renderBurst+1, renderBurst, renderPerSecond) {
 		t.Fatal("unbounded single render cost accepted")
+	}
+}
+
+// A fill is charged for what the browser's canvas paints: the current path's
+// bounds within the layer's canvas, never the whole layer for a small rect,
+// and never nothing for a path it paints again.
+func TestViewerFillIsChargedForThePathItPaints(t *testing.T) {
+	const display = 1024 * 768 // a visible layer is created at the largest display
+	s, slept := pacedViewer(t)
+	fill := func(id string) instruction { return instruction{"cfill", "14", id, "1", "2", "3", "255"} }
+	for i, c := range []struct {
+		ins  []instruction
+		cost float64
+	}{
+		{[]instruction{{"rect", "0", "10", "10", "4", "4"}, fill("0")}, 16},
+		// A fill closes the path without clearing it: a second fill paints it again.
+		{[]instruction{fill("0")}, 16},
+		// The next rect after a closed path begins a new one.
+		{[]instruction{{"rect", "0", "100", "100", "2", "3"}, fill("0")}, 6},
+		// Rects in an open path paint within their joint bounds.
+		{[]instruction{{"rect", "0", "0", "0", "2", "2"}, {"rect", "0", "10", "10", "2", "2"}, fill("0")}, 144},
+		// guacd's own sequence on a non-opaque buffer: one rect, two fills.
+		{[]instruction{{"rect", "-3", "0", "0", "8", "8"}, {"cfill", "2", "-3", "0", "0", "0", "255"}, fill("-3")}, 64 + 64},
+		// A whole-layer path still costs the whole layer.
+		{[]instruction{{"rect", "0", "0", "0", "1024", "768"}, fill("0")}, 1024 * 768},
+		// A path past a layer is cut at its canvas, rounded up to 64 pixels.
+		{[]instruction{{"size", "1", "100", "100"}, {"rect", "1", "0", "0", "300", "300"}, fill("1")}, display + 100*100 + 128*128},
+		// A visible layer named first by a rect is filled across its whole canvas.
+		{[]instruction{{"rect", "2", "0", "0", "1024", "768"}, fill("2")}, display + display},
+		// A buffer grows with what is drawn into it, and so does its fill.
+		{[]instruction{{"rect", "-1", "0", "0", "30", "40"}, fill("-1")}, 1200},
+	} {
+		before := s.render.debt
+		for _, in := range c.ins {
+			if !s.drawing(in) {
+				t.Fatalf("case %d: %v refused", i, in)
+			}
+		}
+		if got := s.render.debt - before; got != c.cost {
+			t.Fatalf("case %d: charged %v pixels, want %v", i, got, c.cost)
+		}
+	}
+	if *slept != 0 {
+		t.Fatal("fills within the burst were delayed")
+	}
+	// Fills beyond the budget still pace the reader rather than end the desktop.
+	s.render.debt = renderBurst
+	if !s.drawing(instruction{"rect", "0", "0", "0", "8", "8"}) || !s.drawing(fill("0")) || *slept <= 0 {
+		t.Fatal("a fill past the budget was not paced")
+	}
+}
+
+// A channel mask whose canvas operation changes the whole canvas outside the
+// drawing (destination-in, source-in, source-out, destination-atop, copy), or
+// one the client does not map and so leaves the previous operation in force,
+// costs the destination's whole canvas, for fills, copies and images alike.
+// The bounded operations cost what they draw.
+func TestViewerUnboundedMasksCostTheWholeCanvas(t *testing.T) {
+	const canvas = 1024 * 768
+	s, _ := pacedViewer(t)
+	charge := func(in instruction) float64 {
+		t.Helper()
+		before := s.render.debt
+		if !s.drawing(in) {
+			t.Fatalf("%v refused", in)
+		}
+		return s.render.debt - before
+	}
+	if charge(instruction{"rect", "0", "10", "10", "4", "4"}) != 0 {
+		t.Fatal("a rect alone was charged")
+	}
+	for mask := 0; mask < 16; mask++ {
+		want := float64(canvas)
+		switch mask {
+		case 0x2, 0x6, 0xA, 0xB, 0xE, 0xF:
+			want = 16
+		}
+		if got := charge(instruction{"cfill", strconv.Itoa(mask), "0", "1", "2", "3", "255"}); got != want {
+			t.Fatalf("cfill with mask %#x charged %v, want %v", mask, got, want)
+		}
+		if mask == 0xC || mask == 0xE {
+			want = 4
+			if mask == 0xC {
+				want = canvas
+			}
+			if got := charge(instruction{"copy", "0", "0", "0", "2", "2", strconv.Itoa(mask), "0", "50", "50"}); got != want {
+				t.Fatalf("copy with mask %#x charged %v, want %v", mask, got, want)
+			}
+		}
+	}
+	// A buffer's canvas is what has been drawn into it, rounded up to 64.
+	if got := charge(instruction{"copy", "0", "0", "0", "2", "2", "12", "-2", "0", "0"}); got != 64*64 {
+		t.Fatalf("copy into a buffer with mask 0xc charged %v, want %v", got, 64*64)
+	}
+	// Drawing larger than a small layer's canvas never costs less than itself.
+	if charge(instruction{"size", "1", "10", "10"}) != canvas+100 {
+		t.Fatal("a new 10 by 10 layer was not charged its creation and its pixels")
+	}
+	if got := charge(instruction{"copy", "0", "0", "0", "100", "100", "12", "1", "0", "0"}); got != 100*100 {
+		t.Fatalf("copy past a small layer with mask 0xc charged %v, want %v", got, 100*100)
+	}
+	// An image draws with its mask too: 2 by 2 pixels, or the whole canvas.
+	for mask, want := range map[string]float64{"14": 4, "12": canvas, "0": canvas} {
+		id := "3" + mask
+		if !s.drawing(instruction{"img", id, mask, "0", "image/png", "0", "0"}) {
+			t.Fatalf("image with mask %s refused", mask)
+		}
+		s.images[id].pixels = fixturePNG(t)
+		s.imageBytes += len(s.images[id].pixels)
+		if got := charge(instruction{"end", id}); got != want {
+			t.Fatalf("image with mask %s charged %v, want %v", mask, got, want)
+		}
+	}
+}
+
+// Images may be what guacd legitimately sends: a 512 by 512 photograph is over
+// 256 KiB, and guacd's display workers stream several at once. Each image may
+// hold what a PNG of its own size can, the open images and those waiting to be
+// rebuilt viewerImageBytes each, and at most viewerImages may be open; the
+// sizes and forms guacd never writes refuse at the header.
+func TestViewerImagesTakeWhatGuacdSends(t *testing.T) {
+	viewer := func() *viewerStream {
+		a, b := net.Pipe()
+		t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
+		go func() { _, _ = io.Copy(io.Discard, b) }()
+		return newViewerStream(&nativeStream{raw: a, reader: bufio.NewReader(a), stop: func() bool { return true }})
+	}
+	encode := func(img image.Image) []byte {
+		var b bytes.Buffer
+		if png.Encode(&b, img) != nil {
+			t.Fatal("fixture encoding failed")
+		}
+		return b.Bytes()
+	}
+	feed := func(s *viewerStream, id string, data []byte) bool {
+		if !s.drawing(instruction{"img", id, "14", "0", "image/png", "0", "0"}) {
+			return false
+		}
+		for len(data) > 0 {
+			n := min(len(data), 256<<10)
+			if !s.drawing(instruction{"blob", id, base64.StdEncoding.EncodeToString(data[:n])}) {
+				return false
+			}
+			data = data[n:]
+		}
+		return true
+	}
+	noise := image.NewRGBA(image.Rect(0, 0, 512, 512))
+	state := uint32(1)
+	for i := range noise.Pix {
+		state = state*1664525 + 1013904223
+		noise.Pix[i] = byte(state >> 24)
+		if i%4 == 3 {
+			noise.Pix[i] = 255
+		}
+	}
+	photo := encode(noise)
+	if len(photo) <= 256<<10 || len(photo) > pngLimit(512, 512) {
+		t.Fatalf("a 512 by 512 photograph is %d bytes, want past 256 KiB and within %d", len(photo), pngLimit(512, 512))
+	}
+	s := viewer()
+	if !feed(s, "1", photo) || !s.drawing(instruction{"end", "1"}) || !s.settle(true) {
+		t.Fatal("a 512 by 512 photograph at 100% was refused")
+	}
+	// A file larger than a PNG of its own size can be, a size past the
+	// desktop, 16-bit samples and interlacing refuse at the header.
+	small := fixturePNG(t)
+	wide := encode(image.NewRGBA(image.Rect(0, 0, 1025, 2)))
+	deep := encode(image.NewRGBA64(image.Rect(0, 0, 2, 2)))
+	interlaced := bytes.Clone(small)
+	interlaced[28] = 1
+	for name, data := range map[string][]byte{"padded": append(bytes.Clone(small), make([]byte, 8<<10)...), "wide": wide, "16-bit": deep, "interlaced": interlaced} {
+		if feed(viewer(), "1", data) {
+			t.Fatalf("a %s PNG was taken", name)
+		}
+	}
+	// viewerImages open at once, and no more.
+	s = viewer()
+	for i := 0; i <= viewerImages; i++ {
+		if s.drawing(instruction{"img", strconv.Itoa(2*i + 1), "14", "-1", "image/png", "0", "0"}) != (i < viewerImages) {
+			t.Fatalf("open image %d: accepted %v", i+1, i < viewerImages)
+		}
+	}
+	// Open images hold viewerImageBytes together: the first photograph past
+	// it refuses.
+	s = viewer()
+	fits := viewerImageBytes / len(photo)
+	for i := 0; i <= fits; i++ {
+		if feed(s, strconv.Itoa(2*i+1), photo) != (i < fits) {
+			t.Fatalf("open photograph %d: accepted %v, want %v", i+1, i >= fits, i < fits)
+		}
+	}
+	// Images waiting to be rebuilt hold at most viewerImageBytes too: past it
+	// the reader waits for them rather than refusing.
+	s = viewer()
+	for i := 0; i < 3*fits; i++ {
+		id := strconv.Itoa(2*i + 1)
+		if !feed(s, id, photo) || !s.drawing(instruction{"end", id}) {
+			t.Fatalf("photograph %d was refused", i+1)
+		}
+		if i == 0 && (s.jobBytes != len(photo) || s.imageBytes != 0) {
+			t.Fatalf("an ended photograph moved %d bytes to the jobs and left %d open, want %d and 0", s.jobBytes, s.imageBytes, len(photo))
+		}
+		if s.jobBytes > viewerImageBytes {
+			t.Fatalf("images waiting to be rebuilt hold %d bytes", s.jobBytes)
+		}
+	}
+	if !s.settle(true) || s.jobBytes != 0 || s.imageBytes != 0 {
+		t.Fatalf("after every image: %d bytes waiting, %d open", s.jobBytes, s.imageBytes)
 	}
 }
 

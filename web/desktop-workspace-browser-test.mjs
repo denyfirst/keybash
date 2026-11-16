@@ -20,7 +20,8 @@ await context.addInitScript(({native})=>{
 },{native:config.Native});
 const page=await context.newPage(),errors=[],outbound=[];
 page.on('pageerror',e=>errors.push(e.name+': '+e.message));
-page.on('request',r=>{if(!r.url().startsWith(config.Origin+'/'))outbound.push('external request');});
+// A blob: URL of the page's own origin is in memory (the pointer image), not the network.
+page.on('request',r=>{if(!r.url().startsWith(config.Origin+'/')&&!r.url().startsWith('blob:'+config.Origin+'/'))outbound.push('external request');});
 try{
   await page.goto(config.Origin);await page.locator('#code').fill(config.Code);await page.getByRole('button',{name:'Open session',exact:true}).click();
   await page.locator('#status').filter({hasText:/^Connected$/}).waitFor();

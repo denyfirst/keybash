@@ -124,10 +124,13 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	if unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0) != nil {
 		return errNative
 	}
+	// RLIMIT_NPROC counts every task of the one worker UID, desktops and SSH
+	// sessions together: guacd and FreeRDP need about 30 threads per desktop,
+	// so 128 ran out at four. The slice's TasksMax bounds them all.
 	for _, limit := range []struct {
 		kind  int
 		value uint64
-	}{{unix.RLIMIT_CORE, 0}, {unix.RLIMIT_NOFILE, 128}, {unix.RLIMIT_NPROC, 128}, {unix.RLIMIT_AS, 2 << 30}} {
+	}{{unix.RLIMIT_CORE, 0}, {unix.RLIMIT_NOFILE, 128}, {unix.RLIMIT_NPROC, 1024}, {unix.RLIMIT_AS, 2 << 30}} {
 		if unix.Setrlimit(limit.kind, &unix.Rlimit{Cur: limit.value, Max: limit.value}) != nil {
 			return errNative
 		}
@@ -169,7 +172,10 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	}
 	defer bridge.Close()
 	guacd := exec.Command("/opt/keybash-rdp/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error")
-	guacd.Env = []string{"LD_LIBRARY_PATH=/opt/keybash-rdp/lib", "OPENSSL_MODULES=/opt/keybash-rdp/ossl-modules", "HOME=/tmp", "LANG=C.UTF-8", "WLOG_LEVEL=OFF"}
+	// Two malloc arenas instead of glibc's one per thread: each reserves 64 MiB
+	// of address space against RLIMIT_AS and keeps freed image buffers
+	// resident, so guacd's footprint followed the host's processor count.
+	guacd.Env = []string{"LD_LIBRARY_PATH=/opt/keybash-rdp/lib", "OPENSSL_MODULES=/opt/keybash-rdp/ossl-modules", "HOME=/tmp", "LANG=C.UTF-8", "WLOG_LEVEL=OFF", "MALLOC_ARENA_MAX=2"}
 	guacd.Stdout, guacd.Stderr = io.Discard, io.Discard
 	guacd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if guacd.Start() != nil {

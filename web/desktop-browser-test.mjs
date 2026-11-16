@@ -11,7 +11,8 @@ const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1
 const page=await context.newPage();
 const errors=[],outbound=[];
 page.on('pageerror',error=>errors.push(error.name+': '+error.message));
-page.on('request',r=>{if(!r.url().startsWith(config.Origin+'/'))outbound.push('external request')});
+// A blob: URL of the page's own origin is in memory (the pointer image), not the network.
+page.on('request',r=>{if(!r.url().startsWith(config.Origin+'/')&&!r.url().startsWith('blob:'+config.Origin+'/'))outbound.push('external request')});
 await context.addInitScript(()=>{
   globalThis.clipboardCalls=0;
   Object.defineProperty(navigator,'clipboard',{value:{readText(){clipboardCalls++;throw new Error('disabled')},writeText(){clipboardCalls++;throw new Error('disabled')}}});

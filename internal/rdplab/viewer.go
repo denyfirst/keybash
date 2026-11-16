@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"image"
 	"image/png"
@@ -15,29 +16,154 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/denyfirst/keybash/internal/identity"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
 // The legacy profile has a fixed viewport; the manager workspace adds bounded
 // text/display controls. Neither admits arbitrary streams, URLs or parameters.
-type viewerLayer struct{ width, height, depth int }
+type viewerLayer struct {
+	width, height int
+	path          viewerPath
+}
+
+// viewerPath is a layer's current path as the browser's canvas keeps it, by
+// its bounds and its number of rects: a fill paints only inside the bounds and
+// rasterizes every rect. A fill closes the path without clearing it, so
+// another fill paints it again; the next rect after that begins a new path
+// (guacamole-common-js Layer). Charging a fill for the whole layer instead took
+// the render budget on every small fill: scrolling a 200% Windows desktop spent
+// nine tenths of each second paused for pixels never drawn.
+type viewerPath struct {
+	x0, y0, x1, y1 int
+	rects          int  // rects in the path; 0 means it is empty
+	closed         bool // the next rect begins a new path
+}
+
+// viewerPathRects bounds the rects one path may hold. guacd 1.6 sends one rect
+// and then fills it; display workers drawing on the same small non-opaque
+// buffer at once can add one each before the first fill. A path of more would
+// make every fill of it rasterize them all for the price of their bounds.
+const viewerPathRects = 64
+
+// add takes a rect's bounds into the path, beginning a new path if the last one
+// was closed. It reports false when the path already holds viewerPathRects.
+func (p viewerPath) add(x0, y0, x1, y1 int) (viewerPath, bool) {
+	if p.closed || p.rects == 0 {
+		return viewerPath{x0: x0, y0: y0, x1: x1, y1: y1, rects: 1}, true
+	}
+	if p.rects >= viewerPathRects {
+		return p, false
+	}
+	return viewerPath{x0: min(p.x0, x0), y0: min(p.y0, y0), x1: max(p.x1, x1), y1: max(p.y1, y1), rects: p.rects + 1}, true
+}
+
+// canvas is the layer's canvas size: the renderer allocates it in multiples of
+// 64 pixels.
+func (l viewerLayer) canvas() (int, int) {
+	return (l.width + 63) / 64 * 64, (l.height + 63) / 64 * 64
+}
+
+// fillPixels is what a fill can paint: the path's bounds within the layer's
+// canvas.
+func (l viewerLayer) fillPixels() int {
+	if l.path.rects == 0 {
+		return 0
+	}
+	cw, ch := l.canvas()
+	w := max(0, min(l.path.x1, cw)-min(l.path.x0, cw))
+	h := max(0, min(l.path.y1, ch)-min(l.path.y0, ch))
+	return w * h
+}
+
+// boundedMask reports whether a channel mask's canvas operation changes only
+// the pixels under what is drawn (guacamole-common-js Layer: 0x2
+// destination-out, 0x6 source-atop, 0xA xor, 0xB destination-over, 0xE
+// source-over, 0xF lighter). The others change the whole canvas outside the
+// drawing too (0x1 destination-in, 0x4 source-in, 0x8 source-out, 0x9
+// destination-atop, 0xC copy), and a mask the client does not map leaves the
+// layer's previous operation in force, so those cost the whole canvas. guacd
+// 1.6 draws with 0xE and 0x2, and uses 0x9 only on its small non-opaque buffers.
+func boundedMask(mask int) bool {
+	switch mask {
+	case 0x2, 0x6, 0xA, 0xB, 0xE, 0xF:
+		return true
+	}
+	return false
+}
+
+// drawPixels is the render cost of drawing area pixels on layer id with mask:
+// the area for a bounded operation, else the whole canvas, and never less than
+// the area.
+func (s *viewerStream) drawPixels(id, mask, area int) int {
+	if boundedMask(mask) {
+		return area
+	}
+	cw, ch := s.layers[id].canvas()
+	return max(area, cw*ch)
+}
+
 type viewerImage struct {
-	layer, x, y int
-	pixels      []byte
+	layer, x, y, mask int
+	limit             int // pngLimit of the size its header gives; 0 until the header has arrived
+	pixels            []byte
 }
 
 // imageWorkers bounds the images rebuilt at once across every desktop: one per
 // processor, so a busy desktop uses the machine without starving it.
 var imageWorkers = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)))
 
-// maxImageJobs bounds the images one desktop has waiting to be rebuilt: at most
-// 16 PNGs of 256 KiB in memory besides those being decoded.
+// maxImageJobs bounds the images one desktop has waiting to be rebuilt, and
+// viewerImageBytes the compressed bytes they and the open images hold, each.
 const maxImageJobs = 16
+
+// viewerImages bounds the image streams open at once. guacd streams one PNG per
+// display worker at the same time (the native build runs four, prepare.py);
+// what bounds memory is imageBytes, not the count.
+const viewerImages = 32
+
+// viewerImageBytes is what open images may hold together, and again what images
+// waiting to be rebuilt may hold, at full HD; times areaScale like every
+// full-HD budget. Eight of guacd's largest tiles, 512 by 512 photographs.
+const viewerImageBytes = 8 << 20
+
+// pngLimit is the largest PNG of a width by height image: every row stored
+// unfiltered at four bytes a pixel, with room for zlib's stored blocks and the
+// chunks around them. guacd's PNG of a photograph comes close to it; a larger
+// file is not a picture of that size.
+func pngLimit(width, height int) int {
+	raw := height * (1 + 4*width)
+	return raw + raw/64 + 4096
+}
+
+// pngHeader reads a PNG's size from its first 33 bytes, which hold the
+// signature and the header chunk, and refuses what guacd never writes: 16-bit
+// samples and interlacing, which double or add decoding memory. The full
+// decode at the image's end checks the rest.
+func pngHeader(data []byte) (width, height int, ok bool) {
+	if len(data) < 33 || string(data[:8]) != "\x89PNG\r\n\x1a\n" || binary.BigEndian.Uint32(data[8:12]) != 13 || string(data[12:16]) != "IHDR" {
+		return 0, 0, false
+	}
+	w, h := binary.BigEndian.Uint32(data[16:20]), binary.BigEndian.Uint32(data[20:24])
+	depth, kind := data[24], data[25]
+	if w == 0 || h == 0 || w > 1<<16 || h > 1<<16 || data[26] != 0 || data[27] != 0 || data[28] != 0 {
+		return 0, 0, false
+	}
+	switch {
+	case depth == 8 && (kind == 0 || kind == 2 || kind == 3 || kind == 4 || kind == 6):
+	case (depth == 1 || depth == 2 || depth == 4) && (kind == 0 || kind == 3):
+	default:
+		return 0, 0, false
+	}
+	return int(w), int(h), true
+}
 
 // imageJob is one image decoded and written again off the reader, while the
 // images after it are read; its blobs take its place in the output.
 type imageJob struct {
 	stream string
+	limit  int // the rebuilt PNG's largest size: pngLimit of its own size
+	size   int // the compressed bytes it holds until it is rebuilt
 	done   chan struct{}
 	blobs  []byte
 	chunks int
@@ -66,7 +192,7 @@ func (j *imageJob) rebuild(stream string, data []byte, revoked func() bool) {
 	}
 	// Re-encode only the decoded static image. Ancillary metadata, APNG
 	// frames and trailing/polyglot bytes never reach the browser decoder.
-	normalized, ok := normalizedPNG(decoded, 256*1024)
+	normalized, ok := normalizedPNG(decoded, j.limit)
 	if !ok {
 		return
 	}
@@ -87,7 +213,8 @@ type viewerStream struct {
 	workspace      bool
 	layers         map[int]viewerLayer // owned by the single output reader
 	images         map[string]*viewerImage
-	imageBytes     int
+	imageBytes     int                 // compressed bytes the open images hold
+	jobBytes       int                 // compressed bytes the images waiting to be rebuilt hold
 	decode, render pacer               // owned by the single output reader
 	clock          func() time.Time    // nil means time.Now; tests supply a fake
 	sleep          func(time.Duration) // nil means time.Sleep
@@ -109,6 +236,8 @@ type viewerStream struct {
 	closeOnce             sync.Once
 	closed                atomic.Bool
 	width, height         atomic.Int64
+	dpi                   int // the DPI the desktop opened at; fixed for the session
+	area                  int // areaScale(dpi): every full-HD budget is multiplied by it
 	inputClip, outputClip clipboard
 	pastes, copies        pacer
 	resizeWindow          time.Time
@@ -116,13 +245,13 @@ type viewerStream struct {
 }
 
 func newViewerStream(native *nativeStream) *viewerStream {
-	// A workspace starts at the size its desktop was opened at; the lab and
-	// anything else at its fixed 1024 by 768.
-	w, h := 1024, 768
-	if native != nil && native.workspace && desktopSize(native.width, native.height) {
-		w, h = native.width, native.height
+	// A workspace starts at the size and DPI its desktop was opened at; the lab
+	// and anything else at its fixed 1024 by 768 at 96.
+	w, h, dpi := 1024, 768, 96
+	if native != nil && native.workspace && desktopSize(native.width, native.height, native.dpi) {
+		w, h, dpi = native.width, native.height, defaultDPI(native.dpi)
 	}
-	s := &viewerStream{native: native, layers: map[int]viewerLayer{0: {w, h, 0}},
+	s := &viewerStream{native: native, dpi: dpi, area: areaScale(dpi), layers: map[int]viewerLayer{0: {width: w, height: h}},
 		images: make(map[string]*viewerImage), acks: make(map[string]int), newestSync: -1, keys: make(map[uint32]bool), done: make(chan struct{})}
 	s.outputClip.dropOversize = true
 	s.heard.Store(time.Now().UnixNano())
@@ -254,7 +383,14 @@ func (s *viewerStream) spend(budget *pacer, cost int, burst, perSecond float64) 
 }
 
 func (s *viewerStream) renderWork(pixels int) bool {
-	return s.spend(&s.render, pixels, renderBurst, renderPerSecond)
+	return s.spend(&s.render, pixels, float64(renderBurst*s.area), float64(renderPerSecond*s.area))
+}
+
+// heldLimit bounds the output held behind images being rebuilt or still open,
+// besides the image staging: 2 MiB at full HD, times areaScale like every
+// full-HD budget.
+func (s *viewerStream) heldLimit() int {
+	return (2 << 20) * s.area
 }
 
 type viewerBoundedWriter struct {
@@ -287,24 +423,30 @@ const (
 	viewerLowestBuffer = -4096    // past 1024 + viewerLayers
 	viewerHighestLayer = 32
 	viewerSyncs        = 128 // unanswered frames remembered at once
+	viewerPointer      = 384 // the largest pointer FreeRDP accepts, each side
 )
 
 // normalizedPNG re-encodes a decoded image for the browser within limit bytes.
-// Our own minimal encoder first (fastpng.go): re-encoding cost several times
-// decoding on a real desktop, and that delay is what a person sees. Then the
-// standard encoder, fastest level and default, so speed never refuses an
-// image that fitted.
+// Our own minimal encoders first (fastpng.go), for truecolour and for guacd's
+// palette tiles: re-encoding cost several times decoding on a real desktop,
+// and that delay is what a person sees. Then the standard encoder with pooled
+// buffers, fastest level and default, so speed never refuses an image that
+// fitted.
 func normalizedPNG(decoded image.Image, limit int) ([]byte, bool) {
 	if out, ok := fastPNG(decoded, limit); ok {
 		return out, true
 	}
+	if out, ok := fastPalettePNG(decoded, limit); ok {
+		return out, true
+	}
 	var out bytes.Buffer
-	fast := png.Encoder{CompressionLevel: png.BestSpeed}
+	fast := png.Encoder{CompressionLevel: png.BestSpeed, BufferPool: encoderBuffers}
 	if fast.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
 		return out.Bytes(), true
 	}
 	out.Reset()
-	if png.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
+	standard := png.Encoder{BufferPool: encoderBuffers}
+	if standard.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
 		return out.Bytes(), true
 	}
 	return nil, false
@@ -320,6 +462,19 @@ func (s *viewerStream) layer(raw string) (int, bool) {
 			return 0, false
 		}
 		s.layers[id] = viewerLayer{}
+		// The browser creates a visible layer at the display's size the first
+		// time it is named, and that size may still be one a pending resize is
+		// about to replace, so it is counted at the session's largest display
+		// until a size instruction sets it. guacd 1.6 draws RDP on the default
+		// layer and buffers only. Buffers start empty and grow with what is
+		// drawn into them.
+		if id > 0 {
+			mw, mh := s.bounds()
+			if !s.fit(id, 0, 0, mw, mh, true) {
+				delete(s.layers, id)
+				return 0, false
+			}
+		}
 	}
 	return id, true
 }
@@ -346,7 +501,7 @@ func (s *viewerStream) fit(id, x, y, w, h int, exact bool) bool {
 		}
 		pixels += ((l.width + 63) / 64 * 64) * ((l.height + 63) / 64 * 64)
 	}
-	if pixels > viewerPixels {
+	if pixels > viewerPixels*s.area {
 		return false
 	}
 	s.layers[id] = layer
@@ -390,13 +545,13 @@ func (s *viewerStream) drawing(in instruction) bool {
 		return valid
 	case "img":
 		id, a := layer(3)
-		_, b := num(2, 0, 15)
+		mask, b := num(2, 0, 15)
 		x, c := num(5, 0, mw)
 		y, d := num(6, 0, mh)
-		if len(in) != 7 || !a || !b || !c || !d || !streamID(in[1]) || in[4] != "image/png" || len(s.images) >= 8 || s.images[in[1]] != nil || s.outputClip.matches(in[1]) {
+		if len(in) != 7 || !a || !b || !c || !d || !streamID(in[1]) || in[4] != "image/png" || len(s.images) >= viewerImages || s.images[in[1]] != nil || s.outputClip.matches(in[1]) {
 			return false
 		}
-		s.images[in[1]] = &viewerImage{layer: id, x: x, y: y}
+		s.images[in[1]] = &viewerImage{layer: id, x: x, y: y, mask: mask}
 		return true
 	case "blob":
 		if len(in) != 3 || s.images[in[1]] == nil {
@@ -404,11 +559,23 @@ func (s *viewerStream) drawing(in instruction) bool {
 		}
 		data, err := base64.StdEncoding.Strict().DecodeString(in[2])
 		image := s.images[in[1]]
-		if err != nil || base64.StdEncoding.EncodeToString(data) != in[2] || len(data) == 0 || len(image.pixels)+len(data) > 256*1024 || s.imageBytes+len(data) > 1024*1024 {
+		if err != nil || base64.StdEncoding.EncodeToString(data) != in[2] || len(data) == 0 || s.imageBytes+len(data) > viewerImageBytes*s.area {
 			return false
 		}
 		image.pixels = append(image.pixels, data...)
 		s.imageBytes += len(data)
+		// An image may hold what a PNG of its own size can: a photograph's
+		// 512 by 512 tile is over 400 KiB, past the fixed 256 KiB this was.
+		if image.limit == 0 && len(image.pixels) >= 33 {
+			w, h, ok := pngHeader(image.pixels)
+			if !ok || w > mw || h > mh {
+				return false
+			}
+			image.limit = pngLimit(w, h)
+		}
+		if image.limit != 0 && len(image.pixels) > image.limit {
+			return false
+		}
 		// Acknowledge the native blob to prevent a staged image from deadlocking.
 		// Browser acks are checked separately and never forwarded a second time.
 		return s.send(instruction{"ack", in[1], "OK", "0"}) == nil
@@ -422,30 +589,33 @@ func (s *viewerStream) drawing(in instruction) bool {
 			return false
 		}
 		pixels := cfg.Width * cfg.Height
-		if !s.spend(&s.decode, pixels, decodeBurst, decodePerSecond) || !s.renderWork(pixels) {
+		if !s.spend(&s.decode, pixels, float64(decodeBurst*s.area), float64(decodePerSecond*s.area)) || !s.renderWork(s.drawPixels(image.layer, image.mask, pixels)) {
 			return false
 		}
 		// Decoding and writing it again happen off the reader, at the same time
 		// as the images after it; its blobs take its place in the output
 		// (settle), so the browser receives everything in guacd's order.
-		// At most 16 images wait, and 2 MiB besides the pending output, as the
-		// pending output alone was bounded before.
-		if (s.jobs >= maxImageJobs || s.held+s.pending.Len() > 2*1024*1024) && !s.settle(true) {
+		// At most 16 images wait, holding at most viewerImageBytes times the
+		// area, and 2 MiB besides the pending output, as the pending output
+		// alone was bounded before; past that the reader waits for them.
+		size := len(image.pixels)
+		if (s.jobs >= maxImageJobs || s.jobBytes+size > viewerImageBytes*s.area || s.held+s.pending.Len() > s.heldLimit()) && !s.settle(true) {
 			return false
 		}
-		job := &imageJob{stream: in[1], done: make(chan struct{})}
+		job := &imageJob{stream: in[1], limit: pngLimit(cfg.Width, cfg.Height), size: size, done: make(chan struct{})}
 		s.parts = append(s.parts, viewerPart{data: bytes.Clone(s.pending.Bytes())}, viewerPart{job: job})
 		s.held += s.pending.Len()
 		s.pending.Reset()
 		s.jobs++
-		s.imageBytes -= len(image.pixels)
+		s.jobBytes += size
+		s.imageBytes -= size
 		go job.rebuild(in[1], image.pixels, s.revoked)
 		delete(s.images, in[1])
 		return true
-	case "copy", "transfer":
+	case "copy":
 		_, a := layer(1)
 		dst, b := layer(7)
-		_, c := num(6, 0, 15)
+		mask, c := num(6, 0, 15)
 		if len(in) != 10 || !a || !b || !c {
 			return false
 		}
@@ -458,22 +628,24 @@ func (s *viewerStream) drawing(in instruction) bool {
 		h, _ := num(5, 0, mh)
 		x, _ := num(8, 0, mw)
 		y, _ := num(9, 0, mh)
-		return s.fit(dst, x, y, w, h, false) && s.renderWork(w*h)
+		return s.fit(dst, x, y, w, h, false) && s.renderWork(s.drawPixels(dst, mask, w*h))
 	case "cursor":
+		// FreeRDP accepts pointers of up to 384 by 384, and Windows sends them
+		// that large on a scaled desktop or with a large pointer setting.
 		_, a := layer(3)
 		if len(in) != 8 || !a {
 			return false
 		}
-		for i, hi := range map[int]int{1: 256, 2: 256, 4: mw, 5: mh, 6: 256, 7: 256} {
+		for i, hi := range map[int]int{1: viewerPointer - 1, 2: viewerPointer - 1, 4: mw, 5: mh, 6: viewerPointer, 7: viewerPointer} {
 			if _, ok := num(i, 0, hi); !ok {
 				return false
 			}
 		}
-		w, _ := num(6, 0, 256)
-		h, _ := num(7, 0, 256)
+		w, _ := num(6, 0, viewerPointer)
+		h, _ := num(7, 0, viewerPointer)
 		return s.renderWork(w * h)
 	case "cfill":
-		_, a := num(1, 0, 15)
+		mask, a := num(1, 0, 15)
 		id, b := layer(2)
 		if len(in) != 7 || !a || !b {
 			return false
@@ -484,38 +656,26 @@ func (s *viewerStream) drawing(in instruction) bool {
 			}
 		}
 		l := s.layers[id]
-		return s.renderWork(l.width * l.height)
-	case "rect":
-		id, ok := layer(1)
-		return len(in) == 6 && ok && xy(id, 2, 3, 4, 5)
-	case "start", "line":
-		id, a := layer(1)
-		x, b := num(2, 0, mw)
-		y, c := num(3, 0, mh)
-		return len(in) == 4 && a && b && c && s.fit(id, x, y, 0, 0, false)
-	case "clip", "close", "identity", "reset", "push", "pop":
-		id, ok := layer(1)
-		if len(in) != 2 || !ok {
+		if !s.renderWork(s.drawPixels(id, mask, l.fillPixels())) {
 			return false
 		}
-		l := s.layers[id]
-		if in[0] == "push" {
-			if l.depth >= 8 {
-				return false
-			}
-			l.depth++
-		}
-		if in[0] == "pop" {
-			if l.depth == 0 {
-				return false
-			}
-			l.depth--
-		}
-		if in[0] == "reset" {
-			l.depth = 0
-		}
+		l.path.closed = true
 		s.layers[id] = l
 		return true
+	case "rect":
+		id, ok := layer(1)
+		if len(in) != 6 || !ok || !xy(id, 2, 3, 4, 5) {
+			return false
+		}
+		x, _ := num(2, 0, mw)
+		y, _ := num(3, 0, mh)
+		w, _ := num(4, 0, mw)
+		h, _ := num(5, 0, mh)
+		l := s.layers[id]
+		path, ok := l.path.add(x, y, x+w, y+h)
+		l.path = path
+		s.layers[id] = l
+		return ok
 	case "dispose":
 		if len(in) != 2 {
 			return false
@@ -562,7 +722,12 @@ func (s *viewerStream) drawing(in instruction) bool {
 		s.newestSync = max(s.newestSync, timestamp)
 		return true
 	}
-	return false // No remote names, arbitrary transforms or auxiliary streams.
+	// No remote names, arbitrary transforms or auxiliary streams. guacd 1.6
+	// draws RDP with size, img, copy, rect and cfill alone: transfer (a pixel
+	// function the browser runs in JavaScript for every pixel), start, line,
+	// clip, close, push, pop, identity and reset come only from guacd's
+	// terminal surfaces, so they are refused rather than priced.
+	return false
 }
 
 func (s *viewerStream) Read(data []byte) (int, error) {
@@ -603,7 +768,7 @@ func (s *viewerStream) Read(data []byte) (int, error) {
 			_ = s.Close()
 			return 0, errNative
 		}
-		if in[0] != "blob" && writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, in) != nil {
+		if in[0] != "blob" && writeInstruction(viewerBoundedWriter{&s.pending, s.heldLimit()}, in) != nil {
 			_ = s.Close()
 			return 0, errNative
 		}
@@ -661,6 +826,7 @@ func (s *viewerStream) settle(wait bool) bool {
 				}
 			}
 			s.jobs--
+			s.jobBytes -= job.size
 			if !job.ok {
 				return false
 			}
@@ -719,8 +885,9 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 	switch in[0] {
 	case "size":
 		if s.workspace && len(in) == 3 {
-			w, a := canonicalNumber(in[1], 64, 1920)
-			h, b := canonicalNumber(in[2], 64, 1080)
+			mw, mh := s.bounds()
+			w, a := canonicalNumber(in[1], 64, mw)
+			h, b := canonicalNumber(in[2], 64, mh)
 			now := time.Now()
 			if now.Sub(s.resizeWindow) >= time.Second {
 				s.resizeWindow = now
@@ -756,11 +923,20 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 			}
 		}
 	case "mouse":
+		// The browser applies a new desktop size only when its frame arrives,
+		// so a pointer may still be over a desktop that has just shrunk. A
+		// point within the session's bounds is taken and moved inside the
+		// current desktop; a point past the bounds still refuses.
 		if len(in) == 4 {
-			_, a := canonicalNumber(in[1], 0, int(s.width.Load())-1)
-			_, b := canonicalNumber(in[2], 0, int(s.height.Load())-1)
+			mw, mh := s.bounds()
+			x, a := canonicalNumber(in[1], 0, mw-1)
+			y, b := canonicalNumber(in[2], 0, mh-1)
 			_, c := canonicalNumber(in[3], 0, 31)
 			valid = a && b && c
+			if valid {
+				in[1] = strconv.Itoa(min(x, int(s.width.Load())-1))
+				in[2] = strconv.Itoa(min(y, int(s.height.Load())-1))
+			}
 			forward = valid
 		}
 	case "key":
@@ -768,7 +944,10 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 			key, e := strconv.ParseUint(in[1], 10, 32)
 			code := uint32(key)
 			scalar := code & 0xffffff
-			allowed := code >= 0x20 && code <= 0xff || code >= 0xff00 && code <= 0xffff || code >= 0x1000100 && code <= 0x110ffff && !(scalar >= 0xd800 && scalar <= 0xdfff)
+			// The ISO group keys (0xfe01-0xfe0f) are what the browser's
+			// Guacamole keyboard sends for AltGr and for every Mac Option key;
+			// guacd reads 0xfe03 as AltGr.
+			allowed := code >= 0x20 && code <= 0xff || code >= 0xfe01 && code <= 0xfe0f || code >= 0xff00 && code <= 0xffff || code >= 0x1000100 && code <= 0x110ffff && !(scalar >= 0xd800 && scalar <= 0xdfff)
 			if e == nil && strconv.FormatUint(key, 10) == in[1] && allowed && (in[2] == "0" || in[2] == "1") {
 				valid = true
 				if in[2] == "1" {
@@ -798,7 +977,9 @@ func (s *viewerStream) Write(data []byte) (int, error) {
 
 func (s *viewerStream) bounds() (int, int) {
 	if s.workspace {
-		return 1920, 1080
+		if w, h, ok := identity.DesktopBounds(s.dpi); ok {
+			return w, h
+		}
 	}
 	return 1024, 768
 }
@@ -832,7 +1013,7 @@ func (s *viewerStream) clipboardOutput(in instruction) (bool, bool) {
 		if tooLarge {
 			told = instruction{"keybash-clipboard-large"}
 		}
-		if writeInstruction(viewerBoundedWriter{&s.pending, 2 * 1024 * 1024}, told) != nil {
+		if writeInstruction(viewerBoundedWriter{&s.pending, s.heldLimit()}, told) != nil {
 			return true, false
 		}
 	}

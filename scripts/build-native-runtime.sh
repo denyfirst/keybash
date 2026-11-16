@@ -68,6 +68,10 @@ cc -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -fsanitize=address,undefined -fn
 "${lab}/clipboard-test"
 python3 scripts/clipboard-codec-mutations.py "${lab}"
 "${lab}/clipboard-test"
+# The scale Windows is told for each DPI, the same source the RDP plugin includes.
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+  native/scale_test.c -o "${lab}/scale-test"
+"${lab}/scale-test"
 cd "${lab}/guacamole-server-1.6.0"
 ./configure --prefix="${prefix}" --with-rdp --without-ssh --without-vnc --without-telnet --without-kubernetes \
   --without-pulse --without-avcodec --without-avformat --without-avutil --without-swscale \

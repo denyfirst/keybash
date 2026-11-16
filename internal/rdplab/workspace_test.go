@@ -20,7 +20,7 @@ func TestWorkspacePlanKeepsNLAAndClosedAuxiliaryChannels(t *testing.T) {
 	for i, name := range names[2:] {
 		values[name] = args[i+2]
 	}
-	for k, v := range map[string]string{"security": "nla", "ignore-cert": "false", "cert-tofu": "false", "disable-auth": "false", "disable-copy": "false", "disable-paste": "false", "resize-method": "display-update", "enable-drive": "false", "enable-printing": "false", "disable-audio": "true", "gateway-hostname": "", "static-channels": "", "recording-path": ""} {
+	for k, v := range map[string]string{"security": "nla", "ignore-cert": "false", "cert-tofu": "false", "disable-auth": "false", "disable-copy": "false", "disable-paste": "false", "resize-method": "display-update", "disable-gfx": "false", "force-lossless": "true", "enable-drive": "false", "enable-printing": "false", "disable-audio": "true", "gateway-hostname": "", "static-channels": "", "recording-path": ""} {
 		if values[k] != v {
 			t.Fatal("workspace security/profile mismatch: " + k)
 		}

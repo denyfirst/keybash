@@ -122,8 +122,8 @@ and a use-after-free through the brush cache
 ([GHSA-fw6x-h8gw-778w](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-fw6x-h8gw-778w), medium).
 Heap corruption in the Progressive codec
 ([GHSA-v7hr-xh82-79p7](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-v7hr-xh82-79p7), high)
-is in the graphics pipeline, which stays off (`disable-gfx`); this update is a
-precondition for turning it on. The other published advisories are in parts
+is in the graphics pipeline, which Keybash turned on on 16 November with this
+pin in place (`disable-gfx` false, `BROWSER-RDP-LAB.md`). The other published advisories are in parts
 Keybash does not build or enable: the proxy, shadow server, RD Gateway,
 smartcard, device redirection, Remote Credential Guard, the H.264 encoder and
 image clipboard formats. The private ones are fixed by the same pin.
