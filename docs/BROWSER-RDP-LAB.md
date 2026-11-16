@@ -72,7 +72,15 @@ The application uses the upstream renderer rather than implementing RDP.
   or RGBA, every row Sub-filtered, a large image compressed in bands at once
   that join into one zlib stream. It is about three times faster than the
   standard encoder on a desktop-like 1080p frame (`BenchmarkNormalizeDesktop`,
-  `BenchmarkFastNormalizeDesktop`); other layouts fall back to the standard one.
+  `BenchmarkFastNormalizeDesktop`). guacd sends every tile of at most 256
+  colours as a palette PNG; those are written again by a second minimal
+  encoder as IHDR, a PLTE rebuilt from the decoded colours, one IDAT and IEND,
+  rows filtered None, one pooled compressor. The standard encoder had taken a
+  fresh compressor of about a megabyte for each: a 64 by 64 palette tile went
+  from 462 to 82 microseconds and from 904 to 70 KB decoded and written again
+  (`BenchmarkNormalizePaletteTile`). Other layouts, a palette with
+  transparency or an index outside the palette fall back to the standard
+  encoder, which now reuses its buffers too.
   Image starts, ends and drawing operations retain their original order;
   normalized blob bodies are inserted immediately before their image end.
   Groups wait until all active images complete, with a 2 MiB staging ceiling.

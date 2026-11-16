@@ -119,3 +119,26 @@ func BenchmarkFastNormalizeDesktop(b *testing.B) {
 		})
 	}
 }
+
+// guacd's palette tiles: a 64 by 64 cell of text in a few colours, decoded
+// and written again, as most images are while a desktop scrolls.
+func BenchmarkNormalizePaletteTile(b *testing.B) {
+	m := image.NewPaletted(image.Rect(0, 0, 64, 64), color.Palette{color.White, color.Black, color.RGBA{0, 120, 215, 255}, color.RGBA{230, 230, 230, 255}})
+	for i := range m.Pix {
+		m.Pix[i] = uint8(i * 7 / 64 % 4)
+	}
+	var encoded bytes.Buffer
+	if png.Encode(&encoded, m) != nil {
+		b.Fatal("fixture encoding failed")
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		decoded, err := png.Decode(bytes.NewReader(encoded.Bytes()))
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, ok := normalizedPNG(decoded, pngLimit(64, 64)); !ok {
+			b.Fatal("refused")
+		}
+	}
+}

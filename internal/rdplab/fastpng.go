@@ -7,6 +7,7 @@ import (
 	"hash/adler32"
 	"hash/crc32"
 	"image"
+	"image/png"
 	"runtime"
 	"sync"
 )
@@ -197,3 +198,79 @@ func writeChunk(out *bytes.Buffer, kind string, data []byte) {
 	binary.BigEndian.PutUint32(n[:], crc.Sum32())
 	out.Write(n[:])
 }
+
+// fastPalettePNG writes an opaque paletted image again: guacd sends every tile
+// of at most 256 colours that way, and the standard encoder took a fresh
+// compressor of more than a megabyte for each, most of the gateway's work
+// while a desktop scrolled. Only the decoded pixels survive, as above: a PLTE
+// rebuilt from the decoded colours, 8-bit indices in rows filtered None (as
+// guacd's libpng writes palettes), one pooled compressor reset before use.
+// A palette with transparency, or an index outside it, is left to the
+// standard encoder.
+func fastPalettePNG(img image.Image, limit int) ([]byte, bool) {
+	m, ok := img.(*image.Paletted)
+	if !ok || len(m.Palette) == 0 || len(m.Palette) > 256 {
+		return nil, false
+	}
+	w, h := m.Rect.Dx(), m.Rect.Dy()
+	if w < 1 || h < 1 || w > 1<<14 || h > 1<<14 || len(m.Pix) < (h-1)*m.Stride+w {
+		return nil, false
+	}
+	plte := make([]byte, 0, 3*len(m.Palette))
+	for _, c := range m.Palette {
+		r, g, b, a := c.RGBA()
+		if a != 0xffff {
+			return nil, false
+		}
+		plte = append(plte, byte(r>>8), byte(g>>8), byte(b>>8))
+	}
+	var data bytes.Buffer
+	z := flateWriters.Get().(*flate.Writer)
+	defer flateWriters.Put(z)
+	z.Reset(&data)
+	sum := adler32.New()
+	row := make([]byte, 1+w)
+	for y := range h {
+		src := m.Pix[y*m.Stride : y*m.Stride+w]
+		for _, index := range src {
+			if int(index) >= len(m.Palette) {
+				return nil, false
+			}
+		}
+		copy(row[1:], src)
+		_, _ = sum.Write(row)
+		if _, err := z.Write(row); err != nil || data.Len() > limit {
+			return nil, false
+		}
+	}
+	if z.Close() != nil || data.Len()+len(plte)+64 > limit {
+		return nil, false
+	}
+	out := bytes.NewBuffer(make([]byte, 0, data.Len()+len(plte)+64))
+	out.WriteString("\x89PNG\r\n\x1a\n")
+	var ihdr [13]byte
+	binary.BigEndian.PutUint32(ihdr[0:], uint32(w)) // #nosec G115 -- w is within 1..16384
+	binary.BigEndian.PutUint32(ihdr[4:], uint32(h)) // #nosec G115 -- h is within 1..16384
+	ihdr[8], ihdr[9] = 8, 3                         // 8-bit palette indices
+	writeChunk(out, "IHDR", ihdr[:])
+	writeChunk(out, "PLTE", plte)
+	idat := make([]byte, 0, data.Len()+6)
+	idat = append(idat, 0x78, 0x01) // zlib header: deflate, 32K window, fastest
+	idat = append(idat, data.Bytes()...)
+	idat = binary.BigEndian.AppendUint32(idat, sum.Sum32())
+	writeChunk(out, "IDAT", idat)
+	writeChunk(out, "IEND", nil)
+	return out.Bytes(), true
+}
+
+// encoderBuffers lets the standard encoder reuse its compressor and buffers,
+// which it resets before each image, instead of allocating them every time.
+type encoderPool struct{ pool sync.Pool }
+
+func (e *encoderPool) Get() *png.EncoderBuffer {
+	b, _ := e.pool.Get().(*png.EncoderBuffer)
+	return b
+}
+func (e *encoderPool) Put(b *png.EncoderBuffer) { e.pool.Put(b) }
+
+var encoderBuffers = &encoderPool{}

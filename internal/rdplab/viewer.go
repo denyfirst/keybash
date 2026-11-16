@@ -427,21 +427,26 @@ const (
 )
 
 // normalizedPNG re-encodes a decoded image for the browser within limit bytes.
-// Our own minimal encoder first (fastpng.go): re-encoding cost several times
-// decoding on a real desktop, and that delay is what a person sees. Then the
-// standard encoder, fastest level and default, so speed never refuses an
-// image that fitted.
+// Our own minimal encoders first (fastpng.go), for truecolour and for guacd's
+// palette tiles: re-encoding cost several times decoding on a real desktop,
+// and that delay is what a person sees. Then the standard encoder with pooled
+// buffers, fastest level and default, so speed never refuses an image that
+// fitted.
 func normalizedPNG(decoded image.Image, limit int) ([]byte, bool) {
 	if out, ok := fastPNG(decoded, limit); ok {
 		return out, true
 	}
+	if out, ok := fastPalettePNG(decoded, limit); ok {
+		return out, true
+	}
 	var out bytes.Buffer
-	fast := png.Encoder{CompressionLevel: png.BestSpeed}
+	fast := png.Encoder{CompressionLevel: png.BestSpeed, BufferPool: encoderBuffers}
 	if fast.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
 		return out.Bytes(), true
 	}
 	out.Reset()
-	if png.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
+	standard := png.Encoder{BufferPool: encoderBuffers}
+	if standard.Encode(viewerBoundedWriter{&out, limit}, decoded) == nil {
 		return out.Bytes(), true
 	}
 	return nil, false

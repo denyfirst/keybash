@@ -94,6 +94,69 @@ func TestFastPNGKeepsEveryPixelAndNothingElse(t *testing.T) {
 	}
 }
 
+// guacd sends every tile of at most 256 colours as a palette PNG. Those are
+// written again as IHDR, PLTE, IDAT and IEND with exactly the decoded pixels,
+// at every size and palette length; a palette with transparency or an index
+// outside the palette is left to the standard encoder, and a tile past the
+// limit is refused.
+func TestFastPalettePNGKeepsEveryPixelAndNothingElse(t *testing.T) {
+	r := rand.New(rand.NewPCG(5, 6))
+	for _, size := range [][2]int{{1, 1}, {64, 64}, {2880, 64}, {300, 7}} {
+		for _, colours := range []int{1, 2, 16, 256} {
+			palette := make(color.Palette, colours)
+			for i := range palette {
+				palette[i] = color.RGBA{uint8(r.IntN(256)), uint8(r.IntN(256)), uint8(r.IntN(256)), 255}
+			}
+			m := image.NewPaletted(image.Rect(0, 0, size[0], size[1]), palette)
+			for i := range m.Pix {
+				m.Pix[i] = uint8(r.IntN(colours))
+			}
+			// guacd's own file decodes to the same paletted image.
+			var guacd bytes.Buffer
+			if png.Encode(&guacd, m) != nil {
+				t.Fatal("fixture encoding failed")
+			}
+			decoded, err := png.Decode(bytes.NewReader(guacd.Bytes()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, ok := normalizedPNG(decoded, pngLimit(size[0], size[1]))
+			if !ok {
+				t.Fatalf("%dx%d with %d colours was refused", size[0], size[1], colours)
+			}
+			if kinds, _ := pngChunks(t, out); len(kinds) != 4 || kinds[0] != "IHDR" || kinds[1] != "PLTE" || kinds[2] != "IDAT" || kinds[3] != "IEND" {
+				t.Fatalf("%dx%d with %d colours: chunks %v", size[0], size[1], colours, kinds)
+			}
+			back, err := png.Decode(bytes.NewReader(out))
+			if err != nil || back.Bounds() != m.Bounds() {
+				t.Fatalf("%dx%d with %d colours came back wrong: %v", size[0], size[1], colours, err)
+			}
+			for y := range size[1] {
+				for x := range size[0] {
+					if color.NRGBAModel.Convert(back.At(x, y)) != color.NRGBAModel.Convert(m.At(x, y)) {
+						t.Fatalf("%dx%d with %d colours: pixel %d,%d changed", size[0], size[1], colours, x, y)
+					}
+				}
+			}
+		}
+	}
+	transparent := image.NewPaletted(image.Rect(0, 0, 4, 4), color.Palette{color.Black, color.Transparent})
+	outside := image.NewPaletted(image.Rect(0, 0, 4, 4), color.Palette{color.Black})
+	outside.Pix[5] = 3
+	for name, m := range map[string]*image.Paletted{"transparent palette": transparent, "index outside the palette": outside} {
+		if _, ok := fastPalettePNG(m, 1<<20); ok {
+			t.Fatalf("a %s was taken by the palette encoder", name)
+		}
+	}
+	noise := image.NewPaletted(image.Rect(0, 0, 512, 512), color.Palette{color.Black, color.White})
+	for i := range noise.Pix {
+		noise.Pix[i] = uint8(r.IntN(2))
+	}
+	if out, ok := fastPalettePNG(noise, 1024); ok || out != nil {
+		t.Fatal("a palette tile over the limit was written")
+	}
+}
+
 // What the fast encoder does not take, it leaves to the standard one; what
 // does not fit is refused, never cut.
 func TestFastPNGLeavesTheRestToTheStandardEncoder(t *testing.T) {
