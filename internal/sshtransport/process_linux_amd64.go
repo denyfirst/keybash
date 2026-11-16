@@ -283,7 +283,7 @@ func prepareSSHWorker(parentNS string, uid, gid uint32) error {
 	for _, limit := range []struct {
 		resource int
 		value    uint64
-	}{{unix.RLIMIT_CORE, 0}, {unix.RLIMIT_FSIZE, 0}, {unix.RLIMIT_NOFILE, 64}, {unix.RLIMIT_CPU, 60}, {unix.RLIMIT_NPROC, 128}} {
+	}{{unix.RLIMIT_CORE, 0}, {unix.RLIMIT_FSIZE, 0}, {unix.RLIMIT_NOFILE, 64}, {unix.RLIMIT_CPU, 60}, {unix.RLIMIT_NPROC, 1024}} { // NPROC: the worker UID is shared with desktops; TasksMax bounds all
 		if unix.Setrlimit(limit.resource, &unix.Rlimit{Cur: limit.value, Max: limit.value}) != nil {
 			return ErrProcess
 		}

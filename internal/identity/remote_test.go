@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,9 +37,11 @@ type fixtureRDPWorker struct {
 	calls    atomic.Int32
 	width    atomic.Int64 // the size the last desktop was asked to start at
 	height   atomic.Int64
+	dpi      atomic.Int64
 	started  chan struct{}
 	release  chan struct{}
 	closed   chan struct{}
+	once     sync.Once // closed is closed once, however many desktops a test opens
 	expected string
 }
 
@@ -49,6 +52,7 @@ func (f *fixtureRDPWorker) OpenRDP(ctx context.Context, r RDPRequest) (terminalw
 	f.calls.Add(1)
 	f.width.Store(int64(r.Width))
 	f.height.Store(int64(r.Height))
+	f.dpi.Store(int64(r.DPI))
 	if f.started != nil {
 		close(f.started)
 	}
@@ -61,7 +65,7 @@ func (f *fixtureRDPWorker) OpenRDP(ctx context.Context, r RDPRequest) (terminalw
 		<-ctx.Done()
 		_ = left.Close()
 		if f.closed != nil {
-			close(f.closed)
+			f.once.Do(func() { close(f.closed) })
 		}
 	}()
 	return fixtureRemoteStream{left}, nil
@@ -590,7 +594,7 @@ func TestExpiredRDPCertificateDisablesOnlyItsServer(t *testing.T) {
 	if !future.UsableAt(now.Add(90 * time.Minute)) {
 		t.Fatal("a future certificate did not become usable in its period")
 	}
-	_, _ = l.openRemote(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"}, 0, 0)
+	_, _ = l.openRemote(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"}, 0, 0, 0)
 	if _, ok := worker.got.(*sshkey.Password); !ok {
 		t.Fatal("the SSH server stopped working beside an expired RDP certificate")
 	}
@@ -681,20 +685,35 @@ func TestOwnedRemoteSessionsEndWithTheirReason(t *testing.T) {
 // could ask for once connected; any other size, or a size for a terminal,
 // opens nothing.
 func TestOwnedRemoteDesktopStartsAtThePageSize(t *testing.T) {
-	for raw, want := range map[string][2]int{"1600x900": {1600, 900}, "200x200": {200, 200}, "1920x1080": {1920, 1080}} {
-		if w, h, ok := desktopSize(raw); !ok || w != want[0] || h != want[1] {
+	for raw, want := range map[string][3]int{"1600x900": {1600, 900, 96}, "200x200": {200, 200, 96}, "1920x1080": {1920, 1080, 96},
+		"2880x1800@192": {2880, 1800, 192}, "3840x2160@192": {3840, 2160, 192}, "2400x1350@120": {2400, 1350, 120},
+		"2880x1620@144": {2880, 1620, 144}, "3360x1890@168": {3360, 1890, 168}, "200x200@192": {200, 200, 192}} {
+		if w, h, dpi, ok := desktopSize(raw); !ok || w != want[0] || h != want[1] || dpi != want[2] {
 			t.Fatalf("%q refused", raw)
 		}
 	}
-	bad := []string{"", "1601x900", "1600x901", "198x900", "1922x900", "1600x198", "1600x1082", "01600x900", "1600x0900", "1600X900", "1600x", "x900", "1600x900x2", " 1600x900", "1600x900 ", "+1600x900", "-1600x900", "1600×900"}
+	bad := []string{"", "1601x900", "1600x901", "198x900", "1922x900", "1600x198", "1600x1082", "01600x900", "1600x0900", "1600X900", "1600x", "x900", "1600x900x2", " 1600x900", "1600x900 ", "+1600x900", "-1600x900", "1600×900",
+		// Only Windows' scales, one spelling each, and never past full HD times the scale.
+		"1600x900@96", "1600x900@100", "1600x900@288", "1600x900@0", "1600x900@-192", "1600x900@0192", "1600x900@+192", "1600x900@", "1600x900@192@192", "1600x900@192 ",
+		"3842x2160@192", "3840x2162@192", "2402x1350@120", "2400x1352@120", "2882x1620@144", "3362x1890@168", "2880x1800@144", "1922x1080@96"}
 	for _, raw := range bad {
-		if _, _, ok := desktopSize(raw); ok {
+		if _, _, _, ok := desktopSize(raw); ok {
 			t.Fatalf("%q accepted", raw)
+		}
+	}
+	for dpi, want := range map[int][2]int{96: {1920, 1080}, 120: {2400, 1350}, 144: {2880, 1620}, 168: {3360, 1890}, 192: {3840, 2160}} {
+		if w, h, ok := DesktopBounds(dpi); !ok || w != want[0] || h != want[1] || !DesktopSize(w, h, dpi) || DesktopSize(w+2, h, dpi) || DesktopSize(w, h+2, dpi) {
+			t.Fatalf("bounds at %d DPI: %dx%d %v", dpi, w, h, ok)
+		}
+	}
+	for _, dpi := range []int{0, 72, 95, 97, 100, 110, 200, 240, 288, 384} {
+		if _, _, ok := DesktopBounds(dpi); ok || DesktopSize(1600, 900, dpi) {
+			t.Fatalf("%d DPI accepted", dpi)
 		}
 	}
 	server := httptest.NewUnstartedServer(nil)
 	origin := "https://" + server.Listener.Addr().String()
-	l, _, c, record, worker := remoteFixtureWithLimits(t, origin, sessionlimits.Limits{Total: 16, PerOwner: 8})
+	l, _, c, record, worker := remoteFixtureWithLimits(t, origin, sessionlimits.Limits{Total: 16, PerOwner: 16})
 	server.Config.Handler = l
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	server.StartTLS()
@@ -719,13 +738,16 @@ func TestOwnedRemoteDesktopStartsAtThePageSize(t *testing.T) {
 		}
 		return string(data)
 	}
-	for _, raw := range []string{"1601x900", "1922x1080", "01600x900", "1600x900x2"} {
+	for _, raw := range []string{"1601x900", "1922x1080", "01600x900", "1600x900x2", "1600x900@96", "3842x2160@192", "1600x900@100"} {
 		if got := open(raw); got != "" || worker.calls.Load() != 0 {
 			t.Fatalf("a desktop opened at %q (%q)", raw, got)
 		}
 	}
-	if got := open("1600x900"); got != `{"type":"ready"}` || worker.width.Load() != 1600 || worker.height.Load() != 900 {
-		t.Fatalf("the page's size did not reach the desktop: %q %dx%d", got, worker.width.Load(), worker.height.Load())
+	if got := open("1600x900"); got != `{"type":"ready"}` || worker.width.Load() != 1600 || worker.height.Load() != 900 || worker.dpi.Load() != 96 {
+		t.Fatalf("the page's size did not reach the desktop: %q %dx%d at %d", got, worker.width.Load(), worker.height.Load(), worker.dpi.Load())
+	}
+	if got := open("2880x1800@192"); got != `{"type":"ready"}` || worker.width.Load() != 2880 || worker.height.Load() != 1800 || worker.dpi.Load() != 192 {
+		t.Fatalf("a scaled screen's size did not reach the desktop: %q %dx%d at %d", got, worker.width.Load(), worker.height.Load(), worker.dpi.Load())
 	}
 }
 

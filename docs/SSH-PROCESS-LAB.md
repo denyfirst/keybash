@@ -76,7 +76,8 @@ groups/capabilities, no-new-privileges, absent host paths and a behavioral EPERM
 socket probe before reading credentials. Unsupported sandbox conditions refuse.
 
 Core/file output is limited to zero; descriptors to 64, CPU to 60 seconds and
-process/thread RLIMIT_NPROC to 128 for that real UID. Runtime GOMAXPROCS=2 and
+process/thread RLIMIT_NPROC to 1024 for that real UID, which desktops share
+(the slice's TasksMax is the tighter bound). Runtime GOMAXPROCS=2 and
 GOMEMLIMIT=64MiB are hints, not a hard process-memory ceiling. Aggregate cgroup
 quotas and a dedicated per-installation service identity remain gates; shared
 UID 65534 and a privileged manager are for this isolated laboratory only.

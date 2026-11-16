@@ -14,6 +14,8 @@
 # other address to its unit. They are kept too, --target-networks=NETS names
 # others, and an install from before that boundary gets one host network per
 # catalog server, so it reaches what it reached before and nothing more.
+# --cpu-percent, --memory-mib and --tasks replace the aggregate limits the
+# same way; the new plan checks their range before anything changes.
 #
 # Before anything is replaced, the old programs, units, RDP runtime and
 # database are copied to /var/backups/keybash/<time>. If the new version does
@@ -27,13 +29,22 @@ export PATH
 refuse() { printf 'upgrade refused: %s\n' "$1" >&2; exit 1; }
 fail() { printf 'upgrade failed: %s\n' "$1" >&2; exit 1; }
 
-stage='' networks=''
+stage='' networks='' cpu=keep memory=keep tasks=keep
 for argument in "$@"; do
   case "${argument}" in
     --stage=*) stage="${argument#*=}" ;;
     --target-networks=*) networks="${argument#*=}" ;;
+    --cpu-percent=*) cpu="${argument#*=}" ;;
+    --memory-mib=*) memory="${argument#*=}" ;;
+    --tasks=*) tasks="${argument#*=}" ;;
     *) refuse "unknown option ${argument} (options take the --name=value form)" ;;
   esac
+done
+# A limit named here replaces the installed one; the new service plan checks
+# its range. Unnamed limits are kept.
+for value in "${cpu}" "${memory}" "${tasks}"; do
+  case "${value}" in keep) continue ;; '' | *[!0-9]* | 0*) refuse 'limits are positive integers' ;; esac
+  test "${#value}" -le 9 || refuse 'limit out of range'
 done
 
 libexec=/usr/local/libexec/keybash
@@ -248,8 +259,18 @@ if test "${rdp}" = yes; then
   new_rdp="--rdp-worker-digest=$(digest "${stage}/bin/keybash-rdp-worker") --rdp-runtime-digest=${new_runtime}"
 fi
 new_worker="$(digest "${stage}/bin/keybash-ssh-worker")"
-# shellcheck disable=SC2086
-"${stage}/bin/keybash-service-plan" ${kept} --worker-digest="${new_worker}" ${new_rdp} --listen="${listen}" ${exposure} \
+# The kept settings, with any limit named on the command line in its place.
+settings=''
+for word in ${kept}; do
+  case "${word}" in
+    --cpu-percent=*) test "${cpu}" = keep || word="--cpu-percent=${cpu}" ;;
+    --memory-mib=*) test "${memory}" = keep || word="--memory-mib=${memory}" ;;
+    --tasks=*) test "${tasks}" = keep || word="--tasks=${tasks}" ;;
+  esac
+  settings="${settings} ${word}"
+done
+# shellcheck disable=SC2086 # settings holds only the checked words of kept and the checked limits
+"${stage}/bin/keybash-service-plan" ${settings} --worker-digest="${new_worker}" ${new_rdp} --listen="${listen}" ${exposure} \
   --target-networks="${networks}" --output="${work}/plan" >/dev/null || refuse 'the new service plan refused this installation'"'"'s settings'
 grep -qx 'IPAddressDeny=0.0.0.0/0 ::/0' "${work}/plan/keybash-gateway.service" || refuse 'the new service plan has no network boundary'
 cmp -s "${work}/plan/keybash.conf" /etc/sysusers.d/keybash.conf || refuse 'the new plan changes the service accounts; reinstall instead'

@@ -290,6 +290,23 @@ serves
 signs_in
 echo 'Upgrades keep, set and add the network boundary, and refuse networks that leave a server out'
 
+# The aggregate limits are kept, an upgrade that names one replaces it, and a
+# limit the plan or the upgrader refuses changes nothing.
+slice_limits() { sed -n -e 's/^CPUQuota=//p' -e 's/^MemoryMax=//p' -e 's/^TasksMax=//p' /etc/systemd/system/keybash.slice | tr '\n' ' '; }
+refused_upgrade cpu-below-plan scripts/upgrade.sh --stage="${stage_b}" --cpu-percent=5
+refused_upgrade memory-with-unit scripts/upgrade.sh --stage="${stage_b}" --memory-mib=1G
+refused_upgrade tasks-empty scripts/upgrade.sh --stage="${stage_b}" --tasks=
+sleep 1
+sudo -n sh scripts/upgrade.sh --stage="${stage_b}" --cpu-percent=300 --memory-mib=1536 --tasks=600 >"${work}/upgrade.out" 2>"${work}/upgrade.err" ||
+  { cat "${work}/upgrade.err" >&2; exit 1; }
+test "$(slice_limits)" = '300% 1536M 600 ' || { echo "the upgrade did not set the named limits: $(slice_limits)" >&2; exit 1; }
+test "$(cat /sys/fs/cgroup/keybash.slice/cpu.max)" = '300000 100000' || { echo 'the slice does not run at the new CPU limit' >&2; exit 1; }
+upgrade_ok scripts/upgrade.sh "${stage_b}"
+test "$(slice_limits)" = '300% 1536M 600 ' || { echo 'the next upgrade did not keep the limits' >&2; exit 1; }
+serves
+signs_in
+echo 'Upgrades keep and replace the aggregate limits, and refuse limits that are not plain numbers in range'
+
 # Stage C passes every check but its gateway never serves: the upgrade must put
 # the previous programs, units and database back and start them.
 stage_c="${work}/stage-c"

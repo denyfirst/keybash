@@ -5,7 +5,7 @@ Push-Location $taskRepoRoot
 try {
     $taskUnformatted = @(gofmt -l cmd internal web)
     if ($LASTEXITCODE -ne 0 -or $taskUnformatted.Count -ne 0) { throw 'format check failed' }
-    node --test web/paste.test.mjs
+    node --test web/paste.test.mjs web/desktop-workspace.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'paste tests failed' }
     go mod verify
     if ($LASTEXITCODE -ne 0) { throw 'module verification failed' }

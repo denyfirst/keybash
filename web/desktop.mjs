@@ -1,5 +1,5 @@
 import { Guacamole } from './vendor/guacamole.mjs';
-import { workspaceControls } from './desktop-workspace.mjs';
+import { workspaceControls, rateLimiter, pointerCursor } from './desktop-workspace.mjs';
 import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
@@ -11,10 +11,27 @@ const controls = workspaceControls({ $,
   live: () => !stopped, client: () => client,
   send: (...values) => sendWorkspace?.(...values), resetKeyboard: () => keyboard?.reset()
 });
+// Windows' pointer is the browser's own pointer: the image guacd sends becomes
+// the CSS cursor, so it moves with the hand at once. Drawn as a picture in the
+// desktop instead, it followed the browser's arrow a frame or more behind.
+// The image is a blob: URL, the only image source the page's policy allows.
+let pointer = null, pointerChange = 0;
+function showPointer() {
+  if (!pointer || !client || stopped) return;
+  const element = client.getDisplay().getElement(), scale = client.getDisplay().getScale();
+  // A browser without image-set keeps the plain image at its own size.
+  element.style.cursor = `url("${pointer.url}") ${pointer.x} ${pointer.y}, default`;
+  element.style.cursor = pointerCursor(pointer.url, pointer.x, pointer.y, scale);
+}
+function dropPointer() {
+  if (pointer) URL.revokeObjectURL(pointer.url);
+  pointer = null; pointerChange++;
+}
 function end() {
   controls.end();
   if (stopped) return;
   stopped = true;
+  dropPointer();
   sendWorkspace = null;
   cancelAnimationFrame(mouseFrame); pendingMouse = null;
   keyboard?.reset(); client?.disconnect(); socket?.close();
@@ -30,7 +47,17 @@ function fit() {
   if (!client || stopped) return;
   const width = $('desktop').clientWidth, height = $('desktop').clientHeight;
   const display = client.getDisplay();
-  display.scale(Math.min(1, width/Math.max(1,display.getWidth()), height/Math.max(1,display.getHeight())));
+  // At most 1/scale: a scaled screen's desktop has scale remote pixels per CSS pixel.
+  display.scale(Math.min(1/controls.scale(), width/Math.max(1,display.getWidth()), height/Math.max(1,display.getHeight())));
+  // Centred, the picture can start part way into a device pixel (at 125, 150
+  // or 175%), and the browser then smooths every remote pixel across two.
+  // Move it the fraction back so remote pixels land on screen pixels.
+  const element = display.getElement(), ratio = window.devicePixelRatio || 1;
+  element.style.translate = '';
+  const box = element.getBoundingClientRect();
+  const snap = edge => (Math.round(edge * ratio) - edge * ratio) / ratio;
+  element.style.translate = `${snap(box.left)}px ${snap(box.top)}px`;
+  showPointer();
   controls.resize();
 }
 function begin(proof=null) {
@@ -86,6 +113,17 @@ function begin(proof=null) {
   client = new Guacamole.Client(tunnel);
   const display = client.getDisplay();
   display.onresize = (width,height) => { $('size').textContent = `${width} × ${height}`; fit(); };
+  display.oncursor = (canvas, x, y) => {
+    const change = ++pointerChange;
+    canvas.toBlob(blob => {
+      if (stopped || !blob || change !== pointerChange) return;
+      const old = pointer;
+      pointer = { url: URL.createObjectURL(blob), x, y };
+      showPointer();
+      display.showCursor(false);
+      if (old) URL.revokeObjectURL(old.url);
+    }, 'image/png');
+  };
   $('display').replaceChildren(display.getElement());
   keyboard = new Guacamole.Keyboard($('desktop'));
   keyboard.onkeydown = key => {
@@ -97,8 +135,17 @@ function begin(proof=null) {
   keyboard.onkeyup = key => { if (!stopped) client.sendKeyEvent(0,key); };
   $('desktop').onblur = () => { if (!stopped) keyboard.reset(); };
   const mouse = new Guacamole.Mouse(display.getElement());
+  // Each wheel notch is a press and a release of the up or down button, and a
+  // fast wheel or a trackpad fling gives many at once; past 512 input messages
+  // a second the gateway's relay ends the desktop. At most 100 notches a second
+  // (10 at once) reach Windows; the rest are dropped, press and release alike.
+  const wheel = rateLimiter(100, 10);
+  let dropRelease = false;
   mouse.onEach(['mousedown','mouseup'], event => {
-    if (!stopped) { $('desktop').focus(); client.sendMouseState(event.state,true); }
+    if (stopped) return;
+    if (event.type === 'mousedown' && (event.state.up || event.state.down) && !wheel()) { dropRelease = true; return; }
+    if (event.type === 'mouseup' && dropRelease) { dropRelease = false; return; }
+    $('desktop').focus(); client.sendMouseState(event.state,true);
   });
   mouse.on('mousemove', event => {
     if (stopped) return;

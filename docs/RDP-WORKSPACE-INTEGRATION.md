@@ -18,8 +18,8 @@ Host root and the gateway remain trusted. This is not a zero-knowledge model.
 The original native lab remains clipboard/resize-disabled. Only the fixed RDP
 manager selects the workspace profile. It admits text/plain up to 32 KiB,
 a burst of 128 transfers per direction refilling one per second, explicit
-local clipboard actions and even display sizes from 64x64 to 1920x1080 at at
-most four requests/second. HTML/files and auxiliary channels remain refused.
+local clipboard actions and even display sizes from 64x64 to full HD times the
+screen's scale (1920x1080 at 100%) at most four requests/second. HTML/files and auxiliary channels remain refused.
 Output, instruction and pixel work are paced per second instead of ending at
 a lifetime total (see `BROWSER-RDP-LAB.md`); long sessions on real Windows
 hosts are still unmeasured.

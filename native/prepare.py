@@ -45,6 +45,9 @@ replace_once(sample, "\tif (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecu
              "\tif (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE))\n\t\tgoto fail;\n\tif (!freerdp_settings_set_uint32(settings, FreeRDP_PointerCacheSize, 128) ||\n\t    !freerdp_settings_set_uint32(settings, FreeRDP_ColorPointerCacheSize, 128))\n\t\tgoto fail;")
 replace_once(sample, "\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);",
              "\tprintf(\"KB_CLIENT_POINTERS_%u_%u_%u\\n\", freerdp_settings_get_uint32(client->context->settings, FreeRDP_PointerCacheSize), freerdp_settings_get_uint32(client->context->settings, FreeRDP_ColorPointerCacheSize), freerdp_settings_get_uint32(client->context->settings, FreeRDP_LargePointerFlag)); fflush(stdout);\n\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);")
+# The scale and physical size the client's core data told the server.
+replace_once(sample, "\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);",
+             "\tprintf(\"KB_CLIENT_SCALE_%u_%u_%u_%u\\n\", freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopScaleFactor), freerdp_settings_get_uint32(client->context->settings, FreeRDP_DeviceScaleFactor), freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopPhysicalWidth), freerdp_settings_get_uint32(client->context->settings, FreeRDP_DesktopPhysicalHeight)); fflush(stdout);\n\tputs(\"KB_AUTHENTICATED\"); fflush(stdout);")
 replace_once(sample, "static BOOL tf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT8 code)\n{",
              "static BOOL tf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT8 code)\n{\n\tif (code == RDP_SCANCODE_KEY_A && !(flags & KBD_FLAGS_RELEASE)) { puts(\"KB_INPUT_A\"); fflush(stdout); }")
 replace_once(sample, "static BOOL tf_peer_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y)\n{",
@@ -149,12 +152,20 @@ replace_once(rdp, " *     Always TRUE.\n */\nstatic BOOL keybash_authentication_
 replace_once(rdp, "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;",
              "rdp_inst->VerifyCertificateEx = rdp_freerdp_verify_certificate;\n    rdp_inst->VerifyX509Certificate = keybash_verify_x509;")
 settings = guac / "src/protocols/rdp/settings.c"
-# The sample peer requires a negotiated classic bitmap codec. Guacamole only
-# enables RemoteFX together with its disabled dynamic graphics pipeline, while
-# FreeRDP's default NSCodec is off. Enable the classic NSCodec path
-# explicitly; this does not open a virtual channel or change TLS/NLA policy.
+# The classic bitmap path needs a negotiated codec: a server without the
+# graphics pipeline (the synthetic peer) and Windows before the pipeline is up
+# use it. Guacamole enables RemoteFX only together with the pipeline, and
+# FreeRDP's default NSCodec is off, so enable NSCodec explicitly; this opens no
+# virtual channel and changes no TLS/NLA policy.
+# Guacamole turns on the legacy RemoteFX surface-bits codec together with the
+# graphics pipeline, which FreeRDP 3's pipeline does not need (its capabilities
+# come from the Gfx settings alone). A server without the pipeline then sent
+# RemoteFX surface bits that ended the connection with the synthetic peer;
+# such servers keep the NSCodec path below, tested in CI.
+replace_once(settings, "        freerdp_settings_set_bool(rdp_settings, FreeRDP_SupportGraphicsPipeline, TRUE);\n        freerdp_settings_set_bool(rdp_settings, FreeRDP_RemoteFxCodec, TRUE);",
+             "        freerdp_settings_set_bool(rdp_settings, FreeRDP_SupportGraphicsPipeline, TRUE);\n        /* Keybash: no legacy RemoteFX surface bits (native/prepare.py). */")
 replace_once(settings, "freerdp_settings_set_bool(rdp_settings, FreeRDP_FrameMarkerCommandEnabled, TRUE);",
-             "/* Fixed classic bitmap path; dynamic graphics remains disabled. */\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodec, TRUE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowDynamicColorFidelity, FALSE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowSubsampling, FALSE);\n    freerdp_settings_set_uint32(rdp_settings, FreeRDP_NSCodecColorLossLevel, 1);\n\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_FrameMarkerCommandEnabled, TRUE);")
+             "/* Classic bitmap path, for a server without the graphics pipeline. */\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodec, TRUE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowDynamicColorFidelity, FALSE);\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_NSCodecAllowSubsampling, FALSE);\n    freerdp_settings_set_uint32(rdp_settings, FreeRDP_NSCodecColorLossLevel, 1);\n\n    freerdp_settings_set_bool(rdp_settings, FreeRDP_FrameMarkerCommandEnabled, TRUE);")
 anchor = "freerdp_settings_set_bool(rdp_settings, FreeRDP_IgnoreCertificate, guac_settings->ignore_certificate);"
 replace_once(settings, anchor, '''freerdp_settings_set_bool(rdp_settings, FreeRDP_IgnoreCertificate, FALSE);
     freerdp_settings_set_bool(rdp_settings, FreeRDP_AutoAcceptCertificate, FALSE);
@@ -176,6 +187,29 @@ replace_once(settings, offscreen, offscreen + '''
     freerdp_settings_set_uint32(rdp_settings, FreeRDP_PointerCacheSize, 32);
     freerdp_settings_set_uint32(rdp_settings, FreeRDP_ColorPointerCacheSize, 32);''')
 replace_once(settings, "if (guac_settings->certificate_fingerprints != NULL)\n        freerdp_settings_set_string(rdp_settings, FreeRDP_CertificateAcceptedFingerprints, \n                guac_strdup(guac_settings->certificate_fingerprints));", "/* The mandatory exact pin is checked in the native X509 callback. */")
+# Windows draws at the desktop's DPI only when told it (native/scale.c): in
+# the core data at connection and in every display-control layout. Guacamole
+# 1.6 sends neither, so a 192 DPI desktop was drawn at 100% and looked half
+# size. Both places take the scale from the same dpi argument.
+(settings.parent / "keybash_scale.c").write_bytes((identity_source.parent / "scale.c").read_bytes())
+replace_once(settings, '#include "resolution.h"', '#include "resolution.h"\n#include "keybash_scale.c"')
+desktop_height = "freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopHeight, guac_settings->height);"
+replace_once(settings, desktop_height, desktop_height + '''
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopScaleFactor, keybash_desktop_scale(guac_settings->resolution));
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DeviceScaleFactor, keybash_device_scale());
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopPhysicalWidth, keybash_millimetres(guac_settings->width, guac_settings->resolution));
+    freerdp_settings_set_uint32(rdp_settings, FreeRDP_DesktopPhysicalHeight, keybash_millimetres(guac_settings->height, guac_settings->resolution));''')
+disp = guac / "src/protocols/rdp/channels/disp.c"
+replace_once(disp, '#include "settings.h"', '#include "settings.h"\n#include "keybash_scale.c"')
+replace_once(disp, '''            .PhysicalWidth = 0,
+            .PhysicalHeight = 0,
+            .Orientation = 0,
+            .DesktopScaleFactor = 0,
+            .DeviceScaleFactor = 0''', '''            .PhysicalWidth = keybash_millimetres(width, settings->resolution),
+            .PhysicalHeight = keybash_millimetres(height, settings->resolution),
+            .Orientation = 0,
+            .DesktopScaleFactor = keybash_desktop_scale(settings->resolution),
+            .DeviceScaleFactor = keybash_device_scale()''')
 
 # Guacamole 1.6's common UTF-16 reader/writer handles only individual 16-bit
 # units. Keep that upstream code untouched; the RDP Unicode clipboard path
@@ -266,3 +300,152 @@ replace_once(clip, remote, '''    if (clipboard->requested_format == CF_UNICODET
         guac_common_clipboard_send(clipboard->clipboard, client);
     }
     else ''' + remote.strip())
+
+# After a resize FreeRDP gives guacd a new, zeroed framebuffer and guacd takes
+# it as what the browser shows. Windows repaints only what it invalidates, so
+# the rest stayed stale, showed the page, or turned black where guacd merged
+# it into a neighbouring update. Once the connection is active again, ask
+# Windows once for the whole desktop, as FreeRDP's own SDL client does.
+gdi = guac / "src/protocols/rdp/gdi.c"
+replace_once(gdi, '#include "settings.h"', '''#include "settings.h"
+
+/* Keybash: set when the server resized the desktop; rdp.c then asks once for
+ * a full repaint when the connection is active again. */
+int keybash_refresh_pending = 0;''')
+replace_once(gdi, '''    guac_client_log(client, GUAC_LOG_DEBUG, "Server resized display to %ix%i",
+            gdi->width, gdi->height);''', '''    guac_client_log(client, GUAC_LOG_DEBUG, "Server resized display to %ix%i",
+            gdi->width, gdi->height);
+    keybash_refresh_pending = 1;''')
+replace_once(rdp, '#include "keybash_identity.c"', '#include "keybash_identity.c"\nextern int keybash_refresh_pending;')
+replace_once(rdp, '''        /* Notify display of any changes to the GDI that may have occurred
+         * while handling events/messages */''', '''        /* Keybash: one full repaint after a resize, once active again. */
+        if (keybash_refresh_pending && !connection_closing
+                && freerdp_get_state(rdp_inst->context) == CONNECTION_STATE_ACTIVE) {
+            keybash_refresh_pending = 0;
+            rdpContext* keybash_context = rdp_inst->context;
+            const RECTANGLE_16 keybash_all = { 0, 0,
+                (UINT16) freerdp_settings_get_uint32(keybash_context->settings, FreeRDP_DesktopWidth),
+                (UINT16) freerdp_settings_get_uint32(keybash_context->settings, FreeRDP_DesktopHeight) };
+            pthread_mutex_lock(&(rdp_client->message_lock));
+            if (keybash_context->update != NULL && keybash_context->update->RefreshRect != NULL)
+                (void) keybash_context->update->RefreshRect(keybash_context, 1, &keybash_all);
+            pthread_mutex_unlock(&(rdp_client->message_lock));
+        }
+
+        /* Notify display of any changes to the GDI that may have occurred
+         * while handling events/messages */''')
+# The synthetic peer prints the first area a client asks it to repaint.
+replace_once(sample, '\tWLog_DBG(TAG, "Client requested to refresh:");',
+             '\tif (count > 0) { printf("KB_REFRESH_RECT_%u_%u_%u_%u\\n", areas[0].left, areas[0].top, areas[0].right, areas[0].bottom); fflush(stdout); }\n\tWLog_DBG(TAG, "Client requested to refresh:");')
+
+# guacd started one display worker per online processor, and ignored a thread
+# it could not create, later joining it. A few workers are enough for one
+# desktop, keep the open image streams within the viewer's count and the
+# threads within the worker's RLIMIT_NPROC on large hosts; only created
+# threads are counted, and a desktop with none ends.
+display = guac / "src/libguac/display.c"
+replace_once(display, '#include <unistd.h>', '#include <unistd.h>\n#include <stdlib.h>\n\n/* Keybash: display workers per desktop at most (native/prepare.py). */\n#define KEYBASH_DISPLAY_WORKERS 4')
+replace_once(display, '    display->worker_thread_count = cpu_count * GUAC_DISPLAY_CPU_THREAD_FACTOR;\n',
+             '    display->worker_thread_count = cpu_count * GUAC_DISPLAY_CPU_THREAD_FACTOR;\n    if (display->worker_thread_count > KEYBASH_DISPLAY_WORKERS)\n        display->worker_thread_count = KEYBASH_DISPLAY_WORKERS;\n')
+replace_once(display, '''    for (int i = 0; i < display->worker_thread_count; i++)
+        pthread_create(&(display->worker_threads[i]), NULL, guac_display_worker_thread, display);''', '''    int keybash_workers = 0;
+    while (keybash_workers < display->worker_thread_count
+            && pthread_create(&(display->worker_threads[keybash_workers]), NULL, guac_display_worker_thread, display) == 0)
+        keybash_workers++;
+    display->worker_thread_count = keybash_workers;
+    if (keybash_workers == 0) {
+        guac_client_log(client, GUAC_LOG_ERROR, "No display worker thread could be started.");
+        abort();
+    }''')
+
+# A removed layer's last-frame buffer went back to guacd's pool without a
+# dispose, so the browser kept its canvas and the viewer counted its pixels
+# for the rest of the session: pointers FreeRDP's cache dropped accumulated.
+layers = guac / "src/libguac/display-layer-list.c"
+replace_once(layers, '#include "guacamole/mem.h"', '#include "guacamole/mem.h"\n#include "guacamole/protocol.h"')
+replace_once(layers, '''    guac_client* client = display->client;
+    guac_client_free_buffer(client, display_layer->last_frame_buffer);''', '''    guac_client* client = display->client;
+    guac_protocol_send_dispose(client->socket, display_layer->last_frame_buffer);
+    guac_client_free_buffer(client, display_layer->last_frame_buffer);''')
+
+# The gateway decodes every image and writes it again, so guacd's default
+# compression (zlib level 6; for more than 256 colours Cairo's writer with
+# adaptive filters) bought nothing but CPU on the local socket. Palette tiles
+# use the fastest level; opaque truecolour tiles get a direct libpng writer
+# with the fastest level and the one Sub filter. Transparent layers (the
+# pointer) keep Cairo's writer.
+encode = guac / "src/libguac/encode-png.c"
+replace_once(encode, '''    png_set_write_fn(png, &write_state,
+            guac_png_write_handler,
+            guac_png_flush_handler);''', '''    png_set_write_fn(png, &write_state,
+            guac_png_write_handler,
+            guac_png_flush_handler);
+    png_set_compression_level(png, 1);''')
+replace_once(encode, '''    /* If not possible, resort to Cairo PNG writer */
+    if (palette == NULL)
+        return guac_png_cairo_write(socket, stream, surface);''', '''    /* Keybash: if not possible, write truecolour directly (prepare.py) */
+    if (palette == NULL)
+        return keybash_png_rgb_write(socket, stream, surface);''')
+replace_once(encode, '''int guac_png_write(guac_socket* socket, guac_stream* stream,
+        cairo_surface_t* surface) {''', '''/* Keybash (native/prepare.py): an opaque truecolour surface as 8-bit RGB,
+ * the fastest zlib level and the one Sub filter. */
+static int keybash_png_rgb_write(guac_socket* socket, guac_stream* stream,
+        cairo_surface_t* surface) {
+
+    int width = cairo_image_surface_get_width(surface);
+    int height = cairo_image_surface_get_height(surface);
+    int stride = cairo_image_surface_get_stride(surface);
+    unsigned char* data = cairo_image_surface_get_data(surface);
+    guac_png_write_state write_state;
+
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png) {
+        guac_error = GUAC_STATUS_INTERNAL_ERROR;
+        guac_error_message = "libpng failed to create write structure";
+        return -1;
+    }
+    png_infop png_info = png_create_info_struct(png);
+    if (!png_info) {
+        png_destroy_write_struct(&png, NULL);
+        guac_error = GUAC_STATUS_INTERNAL_ERROR;
+        guac_error_message = "libpng failed to create info structure";
+        return -1;
+    }
+    png_byte* row = (png_byte*) guac_mem_alloc(width, 3);
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_write_struct(&png, &png_info);
+        guac_mem_free(row);
+        guac_error = GUAC_STATUS_IO_ERROR;
+        guac_error_message = "libpng output error";
+        return -1;
+    }
+
+    write_state.socket = socket;
+    write_state.stream = stream;
+    write_state.buffer_size = 0;
+    png_set_write_fn(png, &write_state, guac_png_write_handler, guac_png_flush_handler);
+    png_set_compression_level(png, 1);
+    png_set_filter(png, PNG_FILTER_TYPE_BASE, PNG_FILTER_SUB);
+    png_set_IHDR(png, png_info, width, height, 8, PNG_COLOR_TYPE_RGB,
+            PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png, png_info);
+    for (int y = 0; y < height; y++) {
+        const uint32_t* source = (const uint32_t*) (data + (size_t) y * stride);
+        for (int x = 0; x < width; x++) {
+            row[3*x]     = (source[x] >> 16) & 0xFF;
+            row[3*x + 1] = (source[x] >> 8) & 0xFF;
+            row[3*x + 2] = source[x] & 0xFF;
+        }
+        png_write_row(png, row);
+    }
+    png_write_end(png, NULL);
+    png_destroy_write_struct(&png, &png_info);
+    guac_mem_free(row);
+
+    guac_png_flush_data(&write_state);
+    return 0;
+
+}
+
+int guac_png_write(guac_socket* socket, guac_stream* stream,
+        cairo_surface_t* surface) {''')

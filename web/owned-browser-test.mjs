@@ -8,7 +8,8 @@ const config=JSON.parse(readFileSync(0,'utf8'));assert.equal(new URL(config.Orig
 const browser=await chromium.launch({headless:true,args:['--disable-3d-apis'],...(process.env.KEYBASH_BROWSER_CHANNEL?{channel:process.env.KEYBASH_BROWSER_CHANNEL}:{})});
 const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1400,height:1000}});const page=await context.newPage(),account=await context.newPage();const errors=[],outbound=[],urls=[];
 context.on('page',p=>p.on('pageerror',e=>errors.push(e.name)));page.on('pageerror',e=>errors.push(e.name));account.on('pageerror',e=>errors.push(e.name));
-context.on('request',r=>{if(!r.url().startsWith(config.Origin+'/'))outbound.push('external');if([config.Password,config.Secret,config.Code].some(s=>r.url().includes(s)||r.url().includes(encodeURIComponent(s))))urls.push('secret URL');});
+// A blob: URL of the page's own origin is in memory (the pointer image), not the network.
+context.on('request',r=>{if(!r.url().startsWith(config.Origin+'/')&&!r.url().startsWith('blob:'+config.Origin+'/'))outbound.push('external');if([config.Password,config.Secret,config.Code].some(s=>r.url().includes(s)||r.url().includes(encodeURIComponent(s))))urls.push('secret URL');});
 function otp(seed,counter){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits='';for(const c of seed)bits+=alphabet.indexOf(c).toString(2).padStart(5,'0');const key=Buffer.from(bits.match(/.{8}/g).map(b=>parseInt(b,2)));const b=Buffer.alloc(8);b.writeBigUInt64BE(BigInt(counter));const h=createHmac('sha1',key).update(b).digest();return ((h.readUInt32BE(h[19]&15)&0x7fffffff)%1000000).toString().padStart(6,'0');}
 async function settle(){await account.waitForFunction(()=>!document.getElementById('logout')?.disabled);}
 let stage="bootstrap";

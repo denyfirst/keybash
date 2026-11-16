@@ -1,5 +1,73 @@
 import { inspectPaste } from './paste.mjs';
 
+// A scaled screen (125 to 200%) gets its own pixels: the desktop is asked for at
+// the screen's device pixels and the matching DPI, and shown at 1/scale, so one
+// remote pixel is one screen pixel and text is as sharp as on the screen itself.
+// Windows fixes its DPI for a session, so the scale is chosen when the desktop
+// opens and kept. The server allows full HD times the scale, and these exact
+// scales only (identity.DesktopBounds).
+export const desktopScales = [1, 1.25, 1.5, 1.75, 2];
+
+// The Windows scale nearest the screen's, 100% for anything unusable.
+export function nearestScale(ratio) {
+  if (!Number.isFinite(ratio) || ratio <= 0) return 1;
+  return desktopScales.reduce((best, s) => Math.abs(s - ratio) < Math.abs(best - ratio) ? s : best, 1);
+}
+
+// Device pixels for a space of w by h CSS pixels at scale: the width a multiple
+// of 4 (guacd opens a desktop at its width rounded down to that, so a page
+// asking for 1706 got 1704 and never asked again) and the height even, at
+// least 200, at most full HD times the scale.
+export function scaledSize(w, h, scale) {
+  const step = (n, most, by) => Math.max(200, Math.min(most, Math.floor(n * scale / by) * by));
+  return [step(w, 1920 * scale, 4), step(h, 1080 * scale, 2)];
+}
+
+// A refilling allowance: at most burst at once, then perSecond.
+export function rateLimiter(perSecond, burst, now = () => performance.now()) {
+  let tokens = burst, at = now();
+  return () => {
+    const t = now();
+    tokens = Math.min(burst, tokens + (t - at) * perSecond / 1000);
+    at = t;
+    if (tokens < 1) return false;
+    tokens -= 1;
+    return true;
+  };
+}
+
+// Pastes: the first goes at once, however soon after the page opened; later
+// ones at least half a second apart, and a burst of 8 then one a second.
+export function pastePacer(now = () => performance.now()) {
+  const allowance = rateLimiter(1, 8, now);
+  let last = -Infinity;
+  return () => {
+    const t = now();
+    if (t - last < 500 || !allowance()) return false;
+    last = t;
+    return true;
+  };
+}
+
+// The CSS cursor that makes Windows' pointer the browser's own, so it moves
+// with the hand at once instead of being a second picture a frame behind.
+// The image keeps its remote pixels (sharp at 200%), shown at the desktop's
+// scale (CSS pixels per remote pixel), with the hotspot in CSS pixels.
+export function pointerCursor(url, hotspotX, hotspotY, scale) {
+  const ratio = Math.round(1 / scale * 1000) / 1000;
+  return `image-set(url("${url}") ${ratio}x) ${Math.round(hotspotX * scale)} ${Math.round(hotspotY * scale)}, default`;
+}
+
+// Windows' text has CRLF line ends; a textarea and other systems give LF.
+export function windowsLines(text) {
+  return text.replace(/\r\n|\r|\n/g, '\r\n');
+}
+
+// What the page tells the server it opens at: "1600x900" at 100%, "2880x1800@192" scaled.
+export function startSizeField(w, h, scale) {
+  return scale === 1 ? `${w}x${h}` : `${w}x${h}@${Math.round(96 * scale)}`;
+}
+
 // One instance belongs to one desktop. No timers/polling read the OS clipboard,
 // and text the remote copied reaches this computer's clipboard only on a click.
 export function workspaceControls({ $, live, client, send, resetKeyboard }) {
@@ -10,11 +78,20 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   const valid = text => typeof text === 'string' && text.isWellFormed() && !text.includes('\0') && inspectPaste(text).allowed;
   const close = id => { if ($(id).open) $(id).close(); };
 
+  let scale = 1; // chosen when the desktop opens (startSize)
+  const deviceSize = (w, h) => scaledSize(w, h, scale);
+
   // Paste: one line goes at once; several lines, or hidden characters, are
   // shown first, as in a terminal. Nothing is sent before the person says so.
+  // A held or repeated Ctrl+V is paced well under what the gateway takes (a
+  // paste a second after a burst, 256 KiB of input a second), which ended the
+  // desktop when passed.
+  const pastes = pastePacer();
   function deliver(text) {
     if (!usable()) return;
+    text = windowsLines(text);
     if (!valid(text)) { $('notice').textContent = 'The text was not sent: too large or not valid Unicode.'; return; }
+    if (!pastes()) { $('notice').textContent = 'Paste skipped: one at a time, please.'; return; }
     resetKeyboard();
     send('clipboard', '0', 'text/plain');
     const bytes = encoder.encode(text);
@@ -72,9 +149,8 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   function requestSize() {
     if (!usable()) return;
     // Fit asks the remote for exactly the space the desktop has here.
-    let [w, h] = screen === 'fit' ? [$('desktop').clientWidth, $('desktop').clientHeight] : screen.split('x').map(Number);
-    w = Math.max(200, Math.min(1920, Math.floor(w / 2) * 2));
-    h = Math.max(200, Math.min(1080, Math.floor(h / 2) * 2));
+    // A fixed size is in the screen's own units, like Fit, so it looks the same size at any scale.
+    const [w, h] = deviceSize(...(screen === 'fit' ? [$('desktop').clientWidth, $('desktop').clientHeight] : screen.split('x').map(Number)));
     if (!Number.isInteger(w) || !Number.isInteger(h)) return;
     const size = `${w}x${h}`;
     if (size !== lastSize) { lastSize = size; send('size', w, h); }
@@ -158,13 +234,16 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
       if (modifiers.ctrl && key === 118) return true; // browser paste event
       return undefined;
     },
-    // The size the desktop opens at: the space it has, before anything connects.
+    // The size the desktop opens at: the space it has, before anything connects,
+    // in device pixels with the DPI of the screen's scale ("2880x1800@192").
     startSize() {
-      const w = Math.max(200, Math.min(1920, Math.floor($('desktop').clientWidth / 2) * 2));
-      const h = Math.max(200, Math.min(1080, Math.floor($('desktop').clientHeight / 2) * 2));
+      scale = nearestScale(window.devicePixelRatio || 1);
+      const [w, h] = deviceSize($('desktop').clientWidth, $('desktop').clientHeight);
       lastSize = `${w}x${h}`;
-      return lastSize;
+      return startSizeField(w, h, scale);
     },
+    // Remote pixels per CSS pixel: the desktop is shown at 1/scale.
+    scale: () => scale,
     resize,
     end() {
       generation++; enabled = false; remoteText = ''; lastSize = ''; copyAsked = 0; clearTimeout(resizeTimer);
