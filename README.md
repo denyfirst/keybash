@@ -84,6 +84,7 @@ without deploying anything on the workstation.
 - [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
 - [Protocol lab scope and next gates](docs/PROTOCOL-LAB.md)
 - [RDP boundaries and remaining native gates](docs/adr/0003-rdp-precredential-boundaries.md)
+- [Proposed: H.264 to the browser from our own encoder](docs/adr/0007-h264-to-the-browser.md)
 - [Native RDP lab evidence and limits](docs/NATIVE-RDP-LAB.md)
 - [Browser RDP lab evidence and limits](docs/BROWSER-RDP-LAB.md)
 - [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)
