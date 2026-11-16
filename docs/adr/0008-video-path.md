@@ -82,6 +82,57 @@ chooses D, or B with those numbers, in a follow-up to this record. Until then
 the PNG path with the graphics pipeline stays. B also remains the fallback if D's
 security trade-off is not accepted.
 
+## Step 1 results (16 November 2026)
+
+Setup:
+
+- The test VM and the Windows Server 2025 guest on the lab network. IronRDP's web client at `fe9608b2ab`, unchanged.
+- A lab proxy, not part of this repository:
+  - it completed TLS with Windows' pinned certificate and NLA with the stored credentials itself, in about 22 ms;
+  - the browser asked for TLS only and never received the password;
+  - Windows accepted the session after the proxy rewrote one field, the protocol named in the client's core data, from TLS to the one Windows had selected (HYBRID_EX).
+- Workload: Settings maximized, the mouse wheel five notches down and five up, 60 ms apart, for about 25 seconds. Edge drove it, headless with the GPU on, on the PC that hosts both VMs. A first run with 15 notches each way reached the end of the list at 100%, and was dropped.
+- Counters:
+  - the page counted the animation frames in which the canvas was painted, and the pixels painted;
+  - the proxy counted bytes;
+  - CPU and memory came from the processes' own counters.
+
+| | 100% (1440x721) | 200% (2880x1442) |
+|---|---|---|
+| Painted frames a second, median (range) | 36 (33-41) | 59 (47-83) |
+| Pixels painted a second | about 29.5 Mpx | 84-123 Mpx |
+| Windows to browser | about 2.0 MB/s | 3.0-4.6 MB/s |
+| Browser CPU, all processes | about 0.5 core | about 1.4 cores |
+| Proxy CPU, memory | about 1% of a core, 14 MB | about 1.5% of a core, 14 MB |
+| Wheel to first paint, median of 12 single notches (range) | 54 ms (25-56) | 51 ms (43-62) |
+
+Browser memory stayed between 0.6 and 0.95 GB across all of Edge's processes
+at both scales, with no growth over a run.
+
+Reading:
+
+- Frame rate:
+  - IronRDP paints regions as they arrive, so one Windows frame can span two animation frames.
+  - In whole screens, the pixels painted come to about 25-30 screens a second at both scales.
+  - The graphics-pipeline path ran at about 10 frames a second at 200% (see Context). That was counted on the gateway during a scroll by hand, so it is not the same counter.
+- At 200% the browser is the limit. After the first seconds, every read at the proxy filled its 64 KiB buffer, so data was waiting for the browser. The painted rate fell from about 80 to about 55.
+- Host cost almost leaves the Keybash host: 1-1.5% of one core and 14 MB, against about 2.1 cores and up to 700 MB for a 200% desktop on the guacd path.
+- The price is bandwidth: classic bitmaps without H.264 take 2-4.6 MB/s while scrolling.
+- The maintainer used both by hand on the same VM:
+  - scrolling felt about the same;
+  - IronRDP felt a little more alive;
+  - closing windows looked better on Keybash, likely because the graphics pipeline delivers whole frames while the classic path draws region by region.
+
+Not measured: Windows' CPU; the guacd path's bandwidth and input latency
+under the same workload; Edge outside the headless driver, beyond the
+maintainer's own use (a peak of 79 painted frames a second).
+
+Against the proposal, step 1 is at least as fast as today's graphics-pipeline
+path, at a small fraction of the host cost. Step 2, the pipeline and WebCodecs
+in the browser build, is therefore the next measurement. It should cut the
+bandwidth and the browser CPU, and give whole frames. The choice between B and
+D stays with the maintainer after step 2.
+
 ## References
 
 - ADR 0007 (H.264 to the browser), `BROWSER-RDP-LAB.md` (graphics pipeline).
