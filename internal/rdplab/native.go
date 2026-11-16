@@ -300,9 +300,10 @@ func (s *nativeStream) next() (instruction, error) {
 			}
 		}
 		// No files, pipes, audio/video, mutable args, credential prompts or remote
-		// messages escape. The private viewer further validates drawing schemas.
+		// messages escape. The private viewer further validates drawing schemas; the
+		// drawing it takes is all guacd 1.6 sends for RDP (see viewerStream.drawing).
 		allowed := false
-		for _, op := range strings.Fields("ack blob cfill clip close copy cursor dispose distort end identity img lfill line mouse move name path pop push rect reset shade size start sync transfer transform") {
+		for _, op := range strings.Fields("ack blob cfill copy cursor dispose end img mouse name rect size sync") {
 			allowed = allowed || op == in[0]
 		}
 		allowed = allowed || s.workspace && in[0] == "clipboard"

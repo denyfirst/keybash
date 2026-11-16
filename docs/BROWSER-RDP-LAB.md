@@ -32,16 +32,29 @@ reports were checked on 14 October; version selection is not a CVE-free claim.
 ## Viewer boundary
 
 Only the reviewed fixed-viewport drawing subset passes the private server
-adapter. Arity, canonical numeric syntax, coordinates, masks, stream/layer IDs,
-stack depth and operation state are checked before the browser receives them.
+adapter. Arity, canonical numeric syntax, coordinates, masks, stream/layer IDs
+and operation state are checked before the browser receives them.
 Unsupported transforms, remote names, URLs, file/pipe/audio/video/clipboard,
 argument changes and credential prompts are refused or discarded as specified.
 The application uses the upstream renderer rather than implementing RDP.
 
 - Fixed 1024x768 viewport; local display scaling/fullscreen does not negotiate
   another remote size or enable dynamic display/touch.
-- At most 32 tracked layers/buffers, eight stack entries per layer and four
-  million rounded canvas pixels (the renderer allocates multiples of 64).
+- The drawing taken is exactly what guacd 1.6 sends for RDP: size, img/blob/end,
+  copy, rect, cfill, cursor, dispose, mouse and sync (2026-11-16). transfer,
+  start, line, clip, close, push, pop, identity and reset come only from guacd's
+  terminal surfaces and are refused rather than priced: transfer makes the
+  browser run JavaScript for every pixel, and a path built from many shapes
+  makes every fill rasterize them all. One path holds at most 64 rects before
+  its fill (guacd sends one; display workers drawing on one small buffer at
+  once may each add one).
+- At most 1024 tracked layers/buffers and 16 Mi rounded canvas pixels times
+  the desktop's area ratio (the renderer allocates multiples of 64). A visible
+  layer the browser creates the first time it is named is counted at the
+  session's largest display from then on, as the browser may create it before
+  a pending resize; guacd draws RDP on the default layer and buffers only.
+- A pointer image may be up to 384 by 384, FreeRDP's largest, which Windows
+  sends on a scaled desktop or with a large pointer setting.
 - Eight active PNG streams, 256 KiB each and 1 MiB aggregate compressed data.
   Canonical base64, dimension bounds and complete PNG decoding precede forwarding.
   Decoded pixels are re-encoded as a static PNG (also at most 256 KiB); remote
@@ -64,7 +77,19 @@ The application uses the upstream renderer rather than implementing RDP.
   alone and takes 50 ms on seven processors (`BenchmarkViewerFrameOfTiles`).
 - Continuous work budgets: 32 million decoded image pixels and 64 million
   rendering pixels per second (bursts of 64M/128M), charged conservatively for
-  image/copy/transfer/fill/resize operations. Work beyond the rate pauses the
+  image/copy/transfer/fill/resize operations. A fill is charged for the bounds
+  of the path it paints, cut at the layer's canvas (rounded up to 64), as the
+  browser's canvas keeps that path: a fill, clip or close closes it without
+  clearing it, the next shape begins a new one and reset clears it. It used to
+  be charged for the whole layer, and scrolling a 200% Windows desktop then
+  spent nine tenths of each second paused for pixels never drawn
+  (`TestViewerFillIsChargedForThePathItPaints`). A fill, copy or image whose
+  channel mask makes the canvas change pixels outside the drawing too
+  (destination-in, source-in, source-out, destination-atop, copy), or whose
+  mask the client does not map and so keeps the previous operation, costs the
+  destination's whole canvas; guacd draws with source-over and
+  destination-out, which cost what they draw
+  (`TestViewerUnboundedMasksCostTheWholeCanvas`). Work beyond the rate pauses the
   reader and backpressures guacd instead of ending the session; revocation ends
   a pause. These are not throughput promises or exact process memory bounds;
   transient canvas copies/decoders also use memory.
@@ -84,6 +109,13 @@ The application uses the upstream renderer rather than implementing RDP.
 - Browser input is one complete <=1 KiB instruction: bounded mouse/buttons,
   supported X11/Unicode keysyms, tracked press/release, matched ack/sync or exact
   nop. Unknown/combined commands and auxiliary streams close the session.
+  The ISO group keys 0xfe01-0xfe0f are supported: the browser's keyboard sends
+  0xfe03 for AltGr and for every Mac Option key, and guacd reads it as AltGr;
+  refusing it ended the desktop at the first AltGr. A pointer position is
+  checked against the session's largest display and moved inside the current
+  one, as the browser applies a new size only when its frame arrives: a pointer
+  over a desktop that has just shrunk used to end it
+  (`TestViewerInputSurvivesAShrinkAndTakesAltGr`).
 
 Keyboard forwarding requires desktop focus; blur resets held keys. Mouse moves
 are coalesced per animation frame. Ctrl+Alt+Del is sent by an explicit button;

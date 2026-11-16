@@ -258,6 +258,15 @@ func TestScaledDesktopHoldsItsPixelsAndNoMore(t *testing.T) {
 	if !scaled.renderWork(renderBurst*4) || scaled.renderWork(renderBurst*4+1) {
 		t.Fatal("the render budget is not four times full HD's")
 	}
+	// Output held behind open images: four times full HD's 2 MiB, and no more.
+	held := bytes.Repeat([]byte{'a'}, 8<<20)
+	if n, err := (viewerBoundedWriter{&scaled.pending, scaled.heldLimit()}).Write(held); err != nil || n != len(held) {
+		t.Fatal("a 200% desktop could not hold four times full HD's output")
+	}
+	if _, err := (viewerBoundedWriter{&scaled.pending, scaled.heldLimit()}).Write([]byte{'a'}); err == nil {
+		t.Fatal("a 200% desktop held more than four times full HD's output")
+	}
+	scaled.pending.Reset()
 	// The page may resize within the scaled bounds, and not past them.
 	if _, err := scaled.Write(encodedInstruction(t, instruction{"size", "3840", "2160"})); err != nil {
 		t.Fatal("a resize to the scaled bounds was refused")
@@ -272,7 +281,7 @@ func TestScaledDesktopHoldsItsPixelsAndNoMore(t *testing.T) {
 	if w, h := plain.bounds(); w != 1920 || h != 1080 || plain.area != 1 || plain.dpi != 96 {
 		t.Fatalf("a 100%% desktop: bounds %dx%d, area %d, dpi %d", w, h, plain.area, plain.dpi)
 	}
-	if plain.drawing(instruction{"size", "0", "2880", "1800"}) || plain.renderWork(renderBurst+1) {
+	if plain.drawing(instruction{"size", "0", "2880", "1800"}) || plain.renderWork(renderBurst+1) || plain.heldLimit() != 2<<20 {
 		t.Fatal("a 100% desktop reached a scaled bound or budget")
 	}
 	// A DPI the page cannot ask for leaves the lab's size and 96.
