@@ -59,7 +59,8 @@ func TestBrowserRDPWorkspacePortable(t *testing.T) {
 	browserViewer(t, ctx, "node", factory, "", nil, true)
 	select {
 	case text := <-pasted:
-		if text != "Local Azərbaycan 🔑\nline" {
+		// The page gives the pasted text Windows' CRLF line ends.
+		if text != "Local Azərbaycan 🔑\r\nline" {
 			t.Fatal("browser paste bytes changed")
 		}
 	default:

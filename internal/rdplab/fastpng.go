@@ -222,7 +222,7 @@ func fastPalettePNG(img image.Image, limit int) ([]byte, bool) {
 		if a != 0xffff {
 			return nil, false
 		}
-		plte = append(plte, byte(r>>8), byte(g>>8), byte(b>>8))
+		plte = append(plte, byte(r>>8), byte(g>>8), byte(b>>8)) // #nosec G115 -- RGBA gives 16-bit components; >>8 is their high byte
 	}
 	var data bytes.Buffer
 	z := flateWriters.Get().(*flate.Writer)

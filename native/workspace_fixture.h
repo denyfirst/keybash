@@ -13,7 +13,7 @@ static const WCHAR kb_remote_text[] = {'R','e','m','o','t','e',' ','A','z',0x025
  * without ending the session, after which the text is offered again. */
 static const WCHAR kb_malformed_text[] = {'x',0xd83d,0};
 static atomic_int kb_clip_answers;
-static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,10,'l','i','n','e',0};
+static const WCHAR kb_local_text[] = {'L','o','c','a','l',' ','A','z',0x0259,'r','b','a','y','c','a','n',' ',0xd83d,0xdd11,13,10,'l','i','n','e',0};
 
 static BOOL kb_disp_assigned(DispServerContext* ctx, UINT32 id) {
     testPeerContext* peer = (testPeerContext*)ctx->custom;
