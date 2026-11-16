@@ -153,7 +153,7 @@ programs and units.
 | `--listen=IP:PORT` | default `127.0.0.1:8443`; another address needs `--allow-from` (`LAN-INGRESS.md`) |
 | `--allow-from=NETS`, `--server-name=NAME` | exposed listener only |
 | `--target-networks=NETS` | the networks the gateway may reach, such as `192.168.1.0/24`; the kernel denies every other address to its unit. Required without `--catalog`; with one, the default is one host network per server in it. Each must hold every server in the file and touch no protected network, loopback, link-local or metadata address |
-| `--cpu-percent`, `--memory-mib`, `--tasks` | aggregate limits, defaults 200, 1024, 512 |
+| `--cpu-percent`, `--memory-mib`, `--tasks` | aggregate limits for every Keybash service together. CPU defaults to every processor but one, at least 200% (a desktop at 200% scale keeps more than two busy while it scrolls); memory 1024 MiB, tasks 512. `upgrade.sh` can change them later |
 | `--gateway-id`, `--worker-id` | otherwise picked |
 
 The listener settings reach the gateway unit only through
@@ -312,9 +312,13 @@ sudo sh scripts/upgrade.sh --stage=$HOME/keybash-stage-$(git rev-parse --short H
 
 `upgrade.sh --target-networks=NETS` changes the networks the gateway may reach; an
 install from before that boundary gets one host network per catalog server.
+`--cpu-percent=N`, `--memory-mib=N` and `--tasks=N` replace the aggregate
+limits the same way; the new plan checks their range before anything changes,
+and later upgrades keep them. An install made before the CPU default followed
+the machine keeps its 200% until an upgrade names another.
 
 `upgrade.sh` replaces the programs (and the RDP runtime) and keeps everything
-else: accounts, IDs, listener, networks, server name, limits, catalog, TLS
+else unless named: accounts, IDs, listener, networks, server name, limits, catalog, TLS
 pair, keys and data. The Installation page in the workspace shows the same
 commands with the running version.
 
@@ -377,6 +381,10 @@ It then upgrades that install:
   new digest must be pinned in both units and match the installed worker. The
   account made at install still signs in, and the backup is root-only and holds
   the old worker.
+- **Limits:** an upgrade that names `--cpu-percent`, `--memory-mib` and
+  `--tasks` writes them into the slice and the running cgroup, and the next
+  upgrade keeps them. A CPU limit below the plan's range, a memory limit with a
+  unit and an empty limit are refused before any change.
 - **A failed upgrade:** a stage whose gateway passes every check but never
   serves. Programs, units, runtime and database must be byte-identical
   afterwards, and the old version must serve and sign in.
