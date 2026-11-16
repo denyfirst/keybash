@@ -1,5 +1,5 @@
 import { Guacamole } from './vendor/guacamole.mjs';
-import { workspaceControls } from './desktop-workspace.mjs';
+import { workspaceControls, rateLimiter } from './desktop-workspace.mjs';
 import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
@@ -32,6 +32,14 @@ function fit() {
   const display = client.getDisplay();
   // At most 1/scale: a scaled screen's desktop has scale remote pixels per CSS pixel.
   display.scale(Math.min(1/controls.scale(), width/Math.max(1,display.getWidth()), height/Math.max(1,display.getHeight())));
+  // Centred, the picture can start part way into a device pixel (at 125, 150
+  // or 175%), and the browser then smooths every remote pixel across two.
+  // Move it the fraction back so remote pixels land on screen pixels.
+  const element = display.getElement(), ratio = window.devicePixelRatio || 1;
+  element.style.translate = '';
+  const box = element.getBoundingClientRect();
+  const snap = edge => (Math.round(edge * ratio) - edge * ratio) / ratio;
+  element.style.translate = `${snap(box.left)}px ${snap(box.top)}px`;
   controls.resize();
 }
 function begin(proof=null) {
@@ -98,8 +106,17 @@ function begin(proof=null) {
   keyboard.onkeyup = key => { if (!stopped) client.sendKeyEvent(0,key); };
   $('desktop').onblur = () => { if (!stopped) keyboard.reset(); };
   const mouse = new Guacamole.Mouse(display.getElement());
+  // Each wheel notch is a press and a release of the up or down button, and a
+  // fast wheel or a trackpad fling gives many at once; past 512 input messages
+  // a second the gateway's relay ends the desktop. At most 100 notches a second
+  // (10 at once) reach Windows; the rest are dropped, press and release alike.
+  const wheel = rateLimiter(100, 10);
+  let dropRelease = false;
   mouse.onEach(['mousedown','mouseup'], event => {
-    if (!stopped) { $('desktop').focus(); client.sendMouseState(event.state,true); }
+    if (stopped) return;
+    if (event.type === 'mousedown' && (event.state.up || event.state.down) && !wheel()) { dropRelease = true; return; }
+    if (event.type === 'mouseup' && dropRelease) { dropRelease = false; return; }
+    $('desktop').focus(); client.sendMouseState(event.state,true);
   });
   mouse.on('mousemove', event => {
     if (stopped) return;

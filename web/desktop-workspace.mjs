@@ -14,11 +14,31 @@ export function nearestScale(ratio) {
   return desktopScales.reduce((best, s) => Math.abs(s - ratio) < Math.abs(best - ratio) ? s : best, 1);
 }
 
-// Device pixels for a space of w by h CSS pixels at scale: even, at least 200,
-// at most full HD times the scale.
+// Device pixels for a space of w by h CSS pixels at scale: the width a multiple
+// of 4 (guacd opens a desktop at its width rounded down to that, so a page
+// asking for 1706 got 1704 and never asked again) and the height even, at
+// least 200, at most full HD times the scale.
 export function scaledSize(w, h, scale) {
-  const even = (n, most) => Math.max(200, Math.min(most, Math.floor(n * scale / 2) * 2));
-  return [even(w, 1920 * scale), even(h, 1080 * scale)];
+  const step = (n, most, by) => Math.max(200, Math.min(most, Math.floor(n * scale / by) * by));
+  return [step(w, 1920 * scale, 4), step(h, 1080 * scale, 2)];
+}
+
+// A refilling allowance: at most burst at once, then perSecond.
+export function rateLimiter(perSecond, burst, now = () => performance.now()) {
+  let tokens = burst, at = now();
+  return () => {
+    const t = now();
+    tokens = Math.min(burst, tokens + (t - at) * perSecond / 1000);
+    at = t;
+    if (tokens < 1) return false;
+    tokens -= 1;
+    return true;
+  };
+}
+
+// Windows' text has CRLF line ends; a textarea and other systems give LF.
+export function windowsLines(text) {
+  return text.replace(/\r\n|\r|\n/g, '\r\n');
 }
 
 // What the page tells the server it opens at: "1600x900" at 100%, "2880x1800@192" scaled.
@@ -41,9 +61,18 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
 
   // Paste: one line goes at once; several lines, or hidden characters, are
   // shown first, as in a terminal. Nothing is sent before the person says so.
+  // A held or repeated Ctrl+V is paced well under what the gateway takes (a
+  // paste a second after a burst, 256 KiB of input a second), which ended the
+  // desktop when passed.
+  const pastes = rateLimiter(1, 8);
+  let lastPaste = 0;
   function deliver(text) {
     if (!usable()) return;
+    text = windowsLines(text);
     if (!valid(text)) { $('notice').textContent = 'The text was not sent: too large or not valid Unicode.'; return; }
+    const now = performance.now();
+    if (now - lastPaste < 500 || !pastes()) { $('notice').textContent = 'Paste skipped: one at a time, please.'; return; }
+    lastPaste = now;
     resetKeyboard();
     send('clipboard', '0', 'text/plain');
     const bytes = encoder.encode(text);
