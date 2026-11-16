@@ -39,37 +39,52 @@ on one thread.
 
 **D. A browser RDP client behind a credential-injecting proxy.**
 - What it is:
-  - The browser runs an RDP client, IronRDP compiled to WebAssembly (Apache-2.0; client-side pipeline with H.264 AVC420 decoding merged in March 2026).
+  - The browser runs an RDP client, IronRDP compiled to WebAssembly (Apache-2.0).
   - It connects only to Keybash.
   - Keybash's RDP proxy completes TLS and NLA with Windows using the vault's credentials, then relays RDP between the two sides.
   - Devolutions Gateway ships this "proxy-based credential injection" since 2026.1.
   - The browser never holds the password or the Windows-side session keys.
-  - Windows' own H.264 goes to the browser's hardware decoder with no re-encoding on the host.
-- Speed: closest to Windows' own client, with most of the chain gone.
+  - Once the browser build has the graphics pipeline, Windows' own H.264 goes to the browser's hardware decoder with no re-encoding on the host.
+- What exists today (IronRDP master, `fe9608b2ab`, 15 November 2026):
+  - the graphics pipeline and H.264 decoding (AVC420 and AVC444) are in IronRDP's protocol crate and its native client;
+  - its browser build does not use them: `crates/ironrdp-web/src/session.rs` sets `support_dyn_vc_gfx_protocol: false`, and the build has no WebCodecs bindings;
+  - in the browser it draws the classic bitmap updates on a 2D canvas.
+  - So the H.264 part of D is work for Keybash, or for IronRDP upstream: the pipeline in the browser build, and WebCodecs decoding.
+- Speed: with that work, closest to Windows' own client, with most of the chain gone. Without it, the classic bitmap path minus guacd's chain.
 - Cost: lowest host CPU per desktop.
 - Model changes:
   - the browser now parses data the server sends (in memory-safe WebAssembly, inside the browser's sandbox) instead of only pictures Keybash checked;
   - the proxy keeps channel policy (clipboard, drives, printing), revocation and recording, but cannot check video content;
   - the page, the clipboard and the resize handling are rebuilt around a new client.
-- Open questions to verify: whether IronRDP's browser build already feeds WebCodecs, and how it handles AVC444.
 
 ## Proposal
 
-Build a time-boxed prototype of D on the test VM: IronRDP's web client and a
-minimal credential-injecting proxy, not enabled for users. Measure:
+B and D both need a WebCodecs decoder in the browser. They differ in where
+the H.264 comes from: Keybash's own encoder after guacd (B), or Windows itself
+(D).
+
+Build a time-boxed prototype of D on the test VM, not enabled for users:
+
+1. IronRDP's web client as it is, behind a minimal credential-injecting proxy. This
+   measures what removing guacd's chain alone gives, before any H.264 work.
+2. Only if step 1 is at least as fast as today's graphics-pipeline path: the
+   pipeline and WebCodecs in the browser build.
+
+At each step, measure:
 
 - frames a second and input latency at 100% and 200%;
 - host and browser CPU, and memory.
 
 Review what the browser then parses.
 
-The maintainer then chooses D, or B with those numbers, in a follow-up to this record. Until then
-the PNG path with the graphics pipeline stays. B remains the fallback if D's
+If step 1 is slower, B is the better path, and the prototype stops there. The maintainer then
+chooses D, or B with those numbers, in a follow-up to this record. Until then
+the PNG path with the graphics pipeline stays. B also remains the fallback if D's
 security trade-off is not accepted.
 
 ## References
 
 - ADR 0007 (H.264 to the browser), `BROWSER-RDP-LAB.md` (graphics pipeline).
-- IronRDP: https://github.com/Devolutions/IronRDP (pull request 1103, client graphics pipeline with AVC420).
+- IronRDP: https://github.com/Devolutions/IronRDP (`crates/ironrdp-egfx`, `crates/ironrdp-client/src/h264.rs`, `crates/ironrdp-web/src/session.rs`).
 - Devolutions Gateway, proxy-based credential injection:
   https://docs.devolutions.net/gateway/knowledge-base/how-to-articles/configure-proxy-based-credential-injection
