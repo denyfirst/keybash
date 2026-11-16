@@ -119,7 +119,13 @@ Porch and Rootwell remain separate, read-only references. Keybash changes are
 made only in this repository. It uses the existing Denyfirst public commit/tag
 and separate release signer identities; private keys are never copied here.
 
-The maintainer authorized public repository development. A source license and
-production release have not yet been selected. No independent audit is
-claimed. The self-hosted gateway will need access to active credentials; the
-vault is not a zero-knowledge guarantee against host compromise.
+The maintainer authorized public repository development. Keybash is licensed
+under the AGPL-3.0 (see Licence below); no production release has been made
+yet. No independent audit is claimed. The self-hosted gateway will need
+access to active credentials; the vault is not a zero-knowledge guarantee
+against host compromise.
+
+## Licence
+
+AGPL-3.0. See [`LICENSE`](LICENSE). Third-party licences are listed in
+[`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) (Licence section).

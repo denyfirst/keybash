@@ -1,5 +1,28 @@
 # Protocol dependency review
 
+## Licence (2026-11-13)
+
+Keybash is licensed under the GNU Affero General Public License v3.0
+(`LICENSE`, the text published at gnu.org), like Porch. Anyone who runs a
+modified Keybash for others must offer those users its source.
+
+Every licence of code Keybash ships or vendors can be combined into AGPL-3.0
+code. Each notice ships beside its code in `docs/third-party/` or `web/vendor/`.
+
+| Licence | Components |
+|---|---|
+| Apache-2.0 | FreeRDP and guacamole-server (native runtime), the vendored Guacamole JavaScript client |
+| BSD-3-Clause | `golang.org/x/crypto`, `x/sys`, `x/term` |
+| MIT | bbolt, xterm and its WebGL addon, the SecLists password list; creack/pty in tests only |
+| ISC | coder/websocket |
+| OFL-1.1 | the Schibsted Grotesk font, a separate file |
+| CC0-1.0 | Simple Icons |
+
+Apache-2.0 code can be combined into GPLv3-family works, but not the other
+way round. Test-only tools (Playwright, Node.js, pnpm) are not shipped. For the
+planned H.264 encoder, AGPL-3.0 admits OpenH264 (BSD-2-Clause), FFmpeg (LGPL)
+and x264 (GPL-2.0-or-later); patents are a separate review in that decision.
+
 ## OTP and QR in the standard library (2026-11-01)
 
 `github.com/pquerna/otp` and `github.com/boombuler/barcode` (a 2019
@@ -279,8 +302,7 @@ vendored protocol fork, custom crypto or external SSH executable is introduced.
 
 License: BSD-3-Clause. Original license texts for crypto, sys and term are in
 `third-party/`; ship applicable notices with future artifacts. Keybash's own
-source license remains a separate decision. A library license does not assign
-a license to Keybash.
+licence is AGPL-3.0 since 2026-11-13 (see Licence above).
 
 The graph now selects `x/sys v0.50.0`, `x/term v0.48.0`, `x/net v0.62.0` and
 `x/text v0.44.0` (x/crypto is v0.59.0 since 2026-11-13). `x/sys` supplies architecture-dependent CPU support. `x/term`
