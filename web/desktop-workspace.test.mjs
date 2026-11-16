@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopScales, nearestScale, scaledSize, startSizeField, rateLimiter, windowsLines, pointerCursor } from './desktop-workspace.mjs';
+import { desktopScales, nearestScale, scaledSize, startSizeField, rateLimiter, pastePacer, windowsLines, pointerCursor } from './desktop-workspace.mjs';
 
 test("Windows' pointer becomes the browser's own at the desktop's scale", () => {
   // At 200% the desktop is shown at half size: the image is a 2x image and
@@ -49,6 +49,21 @@ test('a rate limiter gives its burst, then its rate', () => {
   t += 1000; // never more than the burst saved up
   for (let i = 0; i < 10; i++) assert.ok(allow(), `refilled ${i}`);
   assert.ok(!allow());
+});
+
+test('the first paste goes at once, later ones are paced', () => {
+  let t = 100; // a page open for a tenth of a second
+  const allow = pastePacer(() => t);
+  assert.ok(allow(), 'first paste');
+  t = 400;
+  assert.ok(!allow(), 'under half a second after the first');
+  // Held Ctrl+V, a paste every half second: the burst of 8 lasts 15 pastes
+  // (half a token back between each), then about one a second.
+  for (let i = 0; i < 14; i++) { t += 500; assert.ok(allow(), `held ${i}`); }
+  t += 500;
+  assert.ok(!allow(), 'past the burst');
+  t += 500;
+  assert.ok(allow(), 'a second later');
 });
 
 test('pasted text reaches Windows with CRLF line ends', () => {

@@ -36,6 +36,19 @@ export function rateLimiter(perSecond, burst, now = () => performance.now()) {
   };
 }
 
+// Pastes: the first goes at once, however soon after the page opened; later
+// ones at least half a second apart, and a burst of 8 then one a second.
+export function pastePacer(now = () => performance.now()) {
+  const allowance = rateLimiter(1, 8, now);
+  let last = -Infinity;
+  return () => {
+    const t = now();
+    if (t - last < 500 || !allowance()) return false;
+    last = t;
+    return true;
+  };
+}
+
 // The CSS cursor that makes Windows' pointer the browser's own, so it moves
 // with the hand at once instead of being a second picture a frame behind.
 // The image keeps its remote pixels (sharp at 200%), shown at the desktop's
@@ -73,15 +86,12 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   // A held or repeated Ctrl+V is paced well under what the gateway takes (a
   // paste a second after a burst, 256 KiB of input a second), which ended the
   // desktop when passed.
-  const pastes = rateLimiter(1, 8);
-  let lastPaste = 0;
+  const pastes = pastePacer();
   function deliver(text) {
     if (!usable()) return;
     text = windowsLines(text);
     if (!valid(text)) { $('notice').textContent = 'The text was not sent: too large or not valid Unicode.'; return; }
-    const now = performance.now();
-    if (now - lastPaste < 500 || !pastes()) { $('notice').textContent = 'Paste skipped: one at a time, please.'; return; }
-    lastPaste = now;
+    if (!pastes()) { $('notice').textContent = 'Paste skipped: one at a time, please.'; return; }
     resetKeyboard();
     send('clipboard', '0', 'text/plain');
     const bytes = encoder.encode(text);
