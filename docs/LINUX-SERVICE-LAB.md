@@ -117,11 +117,17 @@ cgroups prevent the gateway/worker from moving themselves. Root is trusted.
 CPU exhaustion throttles. Tasks exhaustion refuses process/thread creation.
 Memory exhaustion can invoke the kernel OOM killer and end active work; a hard
 memory ceiling is NOT an application busy queue or availability guarantee.
-OOMPolicy=kill and control-group cleanup apply per service; aggregate pressure
-can affect either service. No remote-process-kill or kernel-uninterruptible-task
+OOMPolicy=continue and control-group cleanup apply per service: the kernel
+kills the largest process, one desktop's guacd or one SSH worker, and only that
+session ends. With OOMPolicy=kill systemd killed the whole manager with it, and
+the gateway bound to it, so every session ended and Keybash stayed down (one
+200% desktop peaks near 500 MB of the default 1 GiB). Aggregate pressure can
+affect either service. No remote-process-kill or kernel-uninterruptible-task
 guarantee exists. Go's worker GOMEMLIMIT remains a soft hint, not this hard cap.
-The older worker RLIMIT_NPROC=128 remains an additional shared-per-UID backstop;
-capacity/profile sizing requires measurement, especially at higher admission.
+The worker RLIMIT_NPROC is 1024, a shared-per-UID backstop above the slice's
+TasksMax: desktops and SSH sessions share the worker UID, guacd and FreeRDP need
+about 30 threads per desktop, and the former 128 ran out at four desktops.
+Capacity/profile sizing requires measurement, especially at higher admission.
 
 ## Required evidence
 
