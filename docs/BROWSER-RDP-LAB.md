@@ -193,6 +193,38 @@ more network bandwidth for lossless pictures. Evidence:
 `TestNativeRDPScaledDesktopTellsWindowsItsScale`, `native/scale_test.c` and
 `web/desktop-workspace.test.mjs`.
 
+## Graphics pipeline (2026-11-16)
+
+guacd now connects with the RDP graphics pipeline (MS-RDPEGFX, `disable-gfx`
+false). On the classic bitmap path Windows sends every step of a scroll in a
+composited window (Settings, Explorer, Edge) as a new bitmap of the whole
+area, with no frame boundaries, so guacd showed half-drawn frames: text
+appeared twice while scrolling, and areas a resize left black stayed until
+something repainted them. With the pipeline Windows sends whole frames with
+their boundaries and moves scrolled areas itself. On the test VM at 200%
+(2880x1442), scrolling the same windows:
+
+| | classic path | graphics pipeline |
+|---|---|---|
+| frames a second, average | 11.6 | 9.5 |
+| picture delivered a second | 1.4 Mpx | 5.1 Mpx |
+| guacd and FreeRDP memory peak | 329 MiB | 694 MiB |
+
+Fewer but complete frames carry 3.7 times the picture; the repeated text and
+the black areas are gone. The cost is memory: FreeRDP keeps the pipeline's
+surfaces and caches, so a new install's memory limit is half the machine's
+memory (`INSTALL.md`).
+
+The pipeline's codecs (Progressive, ClearCodec, planar) parse what the server
+sends inside FreeRDP 3.33.1, whose release fixed the Progressive heap
+corruption advisory, in the sandboxed worker; FreeRDP is built without H.264,
+so Windows uses those lossless and progressive codecs. Every picture still
+passes the viewer's checks and is re-encoded, and guacd still sends lossless
+PNG only. A server without the pipeline, such as the synthetic peer in CI,
+gets the classic path, which CI keeps exercising; the pipeline itself is
+verified against Windows Server 2025 on the test VM, not in CI. H.264 to the
+browser (ADR 0007) is the next step.
+
 ## Evidence and remaining gates
 
 Unit tests cover valid concurrent PNG groups preserving pixels and drawing order,

@@ -153,7 +153,7 @@ programs and units.
 | `--listen=IP:PORT` | default `127.0.0.1:8443`; another address needs `--allow-from` (`LAN-INGRESS.md`) |
 | `--allow-from=NETS`, `--server-name=NAME` | exposed listener only |
 | `--target-networks=NETS` | the networks the gateway may reach, such as `192.168.1.0/24`; the kernel denies every other address to its unit. Required without `--catalog`; with one, the default is one host network per server in it. Each must hold every server in the file and touch no protected network, loopback, link-local or metadata address |
-| `--cpu-percent`, `--memory-mib`, `--tasks` | aggregate limits for every Keybash service together. CPU defaults to every processor but one, at least 200% (a desktop at 200% scale keeps more than two busy while it scrolls); memory 1024 MiB, tasks 512. `upgrade.sh` can change them later |
+| `--cpu-percent`, `--memory-mib`, `--tasks` | aggregate limits for every Keybash service together. CPU defaults to every processor but one, at least 200% (a desktop at 200% scale keeps more than two busy while it scrolls); memory to half the machine's memory, at least 1024 MiB (such a desktop peaks near 700 MB with the graphics pipeline); tasks 512. `upgrade.sh` can change them later |
 | `--gateway-id`, `--worker-id` | otherwise picked |
 
 The listener settings reach the gateway unit only through

@@ -15,7 +15,7 @@ export PATH
 refuse() { printf 'install refused: %s\n' "$1" >&2; exit 1; }
 
 stage='' catalog='' cert='' key='' listen=127.0.0.1:8443 allow='' name='' networks=''
-cpu=auto memory=1024 tasks=512 gateway_id='' worker_id=''
+cpu=auto memory=auto tasks=512 gateway_id='' worker_id=''
 for argument in "$@"; do
   case "${argument}" in
     --stage=*) stage="${argument#*=}" ;;
@@ -56,6 +56,15 @@ if test "${cpu}" = auto; then
   case "${processors}" in '' | *[!0-9]*) refuse 'nproc gave no number' ;; esac
   cpu=$(( processors > 3 ? (processors - 1) * 100 : 200 ))
   test "${cpu}" -le 6400 || cpu=6400
+fi
+# The aggregate memory limit is half the machine's memory, at least 1024 MiB: a
+# desktop at 200% with the graphics pipeline peaks near 700 MB.
+if test "${memory}" = auto; then
+  total="$(sed -n 's/^MemTotal: *\([0-9]*\) kB$/\1/p' /proc/meminfo)"
+  case "${total}" in '' | *[!0-9]*) refuse 'the memory size could not be read' ;; esac
+  memory=$(( total / 2048 ))
+  test "${memory}" -ge 1024 || memory=1024
+  test "${memory}" -le 1048576 || memory=1048576
 fi
 test -x /usr/bin/bwrap || refuse 'missing /usr/bin/bwrap (apt-get install bubblewrap)'
 test -x /usr/bin/setpriv || refuse 'missing /usr/bin/setpriv'
