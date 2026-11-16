@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"image"
 	"image/png"
@@ -104,6 +105,7 @@ func (s *viewerStream) drawPixels(id, mask, area int) int {
 
 type viewerImage struct {
 	layer, x, y, mask int
+	limit             int // pngLimit of the size its header gives; 0 until the header has arrived
 	pixels            []byte
 }
 
@@ -111,16 +113,57 @@ type viewerImage struct {
 // processor, so a busy desktop uses the machine without starving it.
 var imageWorkers = make(chan struct{}, max(1, runtime.GOMAXPROCS(0)))
 
-// maxImageJobs bounds the images one desktop has waiting to be rebuilt: at most
-// 16 PNGs of 256 KiB (times the desktop's areaScale) in memory besides those
-// being decoded.
+// maxImageJobs bounds the images one desktop has waiting to be rebuilt, and
+// viewerImageBytes the compressed bytes they and the open images hold, each.
 const maxImageJobs = 16
+
+// viewerImages bounds the image streams open at once. guacd streams one PNG per
+// display worker at the same time (the native build runs four, prepare.py);
+// what bounds memory is imageBytes, not the count.
+const viewerImages = 32
+
+// viewerImageBytes is what open images may hold together, and again what images
+// waiting to be rebuilt may hold, at full HD; times areaScale like every
+// full-HD budget. Eight of guacd's largest tiles, 512 by 512 photographs.
+const viewerImageBytes = 8 << 20
+
+// pngLimit is the largest PNG of a width by height image: every row stored
+// unfiltered at four bytes a pixel, with room for zlib's stored blocks and the
+// chunks around them. guacd's PNG of a photograph comes close to it; a larger
+// file is not a picture of that size.
+func pngLimit(width, height int) int {
+	raw := height * (1 + 4*width)
+	return raw + raw/64 + 4096
+}
+
+// pngHeader reads a PNG's size from its first 33 bytes, which hold the
+// signature and the header chunk, and refuses what guacd never writes: 16-bit
+// samples and interlacing, which double or add decoding memory. The full
+// decode at the image's end checks the rest.
+func pngHeader(data []byte) (width, height int, ok bool) {
+	if len(data) < 33 || string(data[:8]) != "\x89PNG\r\n\x1a\n" || binary.BigEndian.Uint32(data[8:12]) != 13 || string(data[12:16]) != "IHDR" {
+		return 0, 0, false
+	}
+	w, h := binary.BigEndian.Uint32(data[16:20]), binary.BigEndian.Uint32(data[20:24])
+	depth, kind := data[24], data[25]
+	if w == 0 || h == 0 || w > 1<<16 || h > 1<<16 || data[26] != 0 || data[27] != 0 || data[28] != 0 {
+		return 0, 0, false
+	}
+	switch {
+	case depth == 8 && (kind == 0 || kind == 2 || kind == 3 || kind == 4 || kind == 6):
+	case (depth == 1 || depth == 2 || depth == 4) && (kind == 0 || kind == 3):
+	default:
+		return 0, 0, false
+	}
+	return int(w), int(h), true
+}
 
 // imageJob is one image decoded and written again off the reader, while the
 // images after it are read; its blobs take its place in the output.
 type imageJob struct {
 	stream string
-	limit  int // the rebuilt PNG's largest size, scaled like the image it came from
+	limit  int // the rebuilt PNG's largest size: pngLimit of its own size
+	size   int // the compressed bytes it holds until it is rebuilt
 	done   chan struct{}
 	blobs  []byte
 	chunks int
@@ -149,7 +192,7 @@ func (j *imageJob) rebuild(stream string, data []byte, revoked func() bool) {
 	}
 	// Re-encode only the decoded static image. Ancillary metadata, APNG
 	// frames and trailing/polyglot bytes never reach the browser decoder.
-	normalized, ok := normalizedPNG(decoded, max(256*1024, j.limit))
+	normalized, ok := normalizedPNG(decoded, j.limit)
 	if !ok {
 		return
 	}
@@ -170,7 +213,8 @@ type viewerStream struct {
 	workspace      bool
 	layers         map[int]viewerLayer // owned by the single output reader
 	images         map[string]*viewerImage
-	imageBytes     int
+	imageBytes     int                 // compressed bytes the open images hold
+	jobBytes       int                 // compressed bytes the images waiting to be rebuilt hold
 	decode, render pacer               // owned by the single output reader
 	clock          func() time.Time    // nil means time.Now; tests supply a fake
 	sleep          func(time.Duration) // nil means time.Sleep
@@ -499,7 +543,7 @@ func (s *viewerStream) drawing(in instruction) bool {
 		mask, b := num(2, 0, 15)
 		x, c := num(5, 0, mw)
 		y, d := num(6, 0, mh)
-		if len(in) != 7 || !a || !b || !c || !d || !streamID(in[1]) || in[4] != "image/png" || len(s.images) >= 8 || s.images[in[1]] != nil || s.outputClip.matches(in[1]) {
+		if len(in) != 7 || !a || !b || !c || !d || !streamID(in[1]) || in[4] != "image/png" || len(s.images) >= viewerImages || s.images[in[1]] != nil || s.outputClip.matches(in[1]) {
 			return false
 		}
 		s.images[in[1]] = &viewerImage{layer: id, x: x, y: y, mask: mask}
@@ -510,11 +554,23 @@ func (s *viewerStream) drawing(in instruction) bool {
 		}
 		data, err := base64.StdEncoding.Strict().DecodeString(in[2])
 		image := s.images[in[1]]
-		if err != nil || base64.StdEncoding.EncodeToString(data) != in[2] || len(data) == 0 || len(image.pixels)+len(data) > 256*1024*s.area || s.imageBytes+len(data) > 1024*1024*s.area {
+		if err != nil || base64.StdEncoding.EncodeToString(data) != in[2] || len(data) == 0 || s.imageBytes+len(data) > viewerImageBytes*s.area {
 			return false
 		}
 		image.pixels = append(image.pixels, data...)
 		s.imageBytes += len(data)
+		// An image may hold what a PNG of its own size can: a photograph's
+		// 512 by 512 tile is over 400 KiB, past the fixed 256 KiB this was.
+		if image.limit == 0 && len(image.pixels) >= 33 {
+			w, h, ok := pngHeader(image.pixels)
+			if !ok || w > mw || h > mh {
+				return false
+			}
+			image.limit = pngLimit(w, h)
+		}
+		if image.limit != 0 && len(image.pixels) > image.limit {
+			return false
+		}
 		// Acknowledge the native blob to prevent a staged image from deadlocking.
 		// Browser acks are checked separately and never forwarded a second time.
 		return s.send(instruction{"ack", in[1], "OK", "0"}) == nil
@@ -534,17 +590,20 @@ func (s *viewerStream) drawing(in instruction) bool {
 		// Decoding and writing it again happen off the reader, at the same time
 		// as the images after it; its blobs take its place in the output
 		// (settle), so the browser receives everything in guacd's order.
-		// At most 16 images wait, and 2 MiB besides the pending output, as the
-		// pending output alone was bounded before.
-		if (s.jobs >= maxImageJobs || s.held+s.pending.Len() > s.heldLimit()) && !s.settle(true) {
+		// At most 16 images wait, holding at most viewerImageBytes times the
+		// area, and 2 MiB besides the pending output, as the pending output
+		// alone was bounded before; past that the reader waits for them.
+		size := len(image.pixels)
+		if (s.jobs >= maxImageJobs || s.jobBytes+size > viewerImageBytes*s.area || s.held+s.pending.Len() > s.heldLimit()) && !s.settle(true) {
 			return false
 		}
-		job := &imageJob{stream: in[1], limit: 256 * 1024 * s.area, done: make(chan struct{})}
+		job := &imageJob{stream: in[1], limit: pngLimit(cfg.Width, cfg.Height), size: size, done: make(chan struct{})}
 		s.parts = append(s.parts, viewerPart{data: bytes.Clone(s.pending.Bytes())}, viewerPart{job: job})
 		s.held += s.pending.Len()
 		s.pending.Reset()
 		s.jobs++
-		s.imageBytes -= len(image.pixels)
+		s.jobBytes += size
+		s.imageBytes -= size
 		go job.rebuild(in[1], image.pixels, s.revoked)
 		delete(s.images, in[1])
 		return true
@@ -762,6 +821,7 @@ func (s *viewerStream) settle(wait bool) bool {
 				}
 			}
 			s.jobs--
+			s.jobBytes -= job.size
 			if !job.ok {
 				return false
 			}

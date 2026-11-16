@@ -55,9 +55,18 @@ The application uses the upstream renderer rather than implementing RDP.
   a pending resize; guacd draws RDP on the default layer and buffers only.
 - A pointer image may be up to 384 by 384, FreeRDP's largest, which Windows
   sends on a scaled desktop or with a large pointer setting.
-- Eight active PNG streams, 256 KiB each and 1 MiB aggregate compressed data.
+- At most 32 open PNG streams (guacd streams one per display worker at once).
+  Each may hold what a PNG of its own size can be, read from its header:
+  every row stored unfiltered at four bytes a pixel, plus 1/64 and 4 KiB for
+  zlib and chunks. Open images hold at most 8 MiB together, and images waiting
+  to be rebuilt another 8 MiB, both times the area ratio; past the second the
+  reader waits for them. The fixed 256 KiB per image, 1 MiB together and eight
+  streams this replaced ended a desktop showing a photograph at 100% (a
+  512 by 512 tile is over 400 KiB) and on hosts with nine or more processors
+  (`TestViewerImagesTakeWhatGuacdSends`). The header must give a size within
+  the desktop, no 16-bit samples and no interlacing, which guacd never writes.
   Canonical base64, dimension bounds and complete PNG decoding precede forwarding.
-  Decoded pixels are re-encoded as a static PNG (also at most 256 KiB); remote
+  Decoded pixels are re-encoded as a static PNG (at most the same size); remote
   metadata, APNG control/frames and trailing/polyglot data are not forwarded.
   Keybash's own minimal encoder writes it: IHDR, one IDAT and IEND, 8-bit RGB
   or RGBA, every row Sub-filtered, a large image compressed in bands at once

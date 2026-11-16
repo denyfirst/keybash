@@ -510,7 +510,7 @@ func FuzzViewerDrawingSchemas(f *testing.F) {
 		// start, so this schema pass performs no transport I/O or native launch.
 		viewer := newViewerStream(nil)
 		_ = viewer.drawing(in)
-		if len(viewer.layers) > viewerLayers || len(viewer.images) > 8 {
+		if len(viewer.layers) > viewerLayers || len(viewer.images) > viewerImages {
 			t.Fatal("viewer state quota escaped")
 		}
 	})
@@ -697,6 +697,103 @@ func TestViewerUnboundedMasksCostTheWholeCanvas(t *testing.T) {
 		if got := charge(instruction{"end", id}); got != want {
 			t.Fatalf("image with mask %s charged %v, want %v", mask, got, want)
 		}
+	}
+}
+
+// Images may be what guacd legitimately sends: a 512 by 512 photograph is over
+// 256 KiB, and guacd's display workers stream several at once. Each image may
+// hold what a PNG of its own size can, the open images and those waiting to be
+// rebuilt viewerImageBytes each, and at most viewerImages may be open; the
+// sizes and forms guacd never writes refuse at the header.
+func TestViewerImagesTakeWhatGuacdSends(t *testing.T) {
+	viewer := func() *viewerStream {
+		a, b := net.Pipe()
+		t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
+		go func() { _, _ = io.Copy(io.Discard, b) }()
+		return newViewerStream(&nativeStream{raw: a, reader: bufio.NewReader(a), stop: func() bool { return true }})
+	}
+	encode := func(img image.Image) []byte {
+		var b bytes.Buffer
+		if png.Encode(&b, img) != nil {
+			t.Fatal("fixture encoding failed")
+		}
+		return b.Bytes()
+	}
+	feed := func(s *viewerStream, id string, data []byte) bool {
+		if !s.drawing(instruction{"img", id, "14", "0", "image/png", "0", "0"}) {
+			return false
+		}
+		for len(data) > 0 {
+			n := min(len(data), 256<<10)
+			if !s.drawing(instruction{"blob", id, base64.StdEncoding.EncodeToString(data[:n])}) {
+				return false
+			}
+			data = data[n:]
+		}
+		return true
+	}
+	noise := image.NewRGBA(image.Rect(0, 0, 512, 512))
+	state := uint32(1)
+	for i := range noise.Pix {
+		state = state*1664525 + 1013904223
+		noise.Pix[i] = byte(state >> 24)
+		if i%4 == 3 {
+			noise.Pix[i] = 255
+		}
+	}
+	photo := encode(noise)
+	if len(photo) <= 256<<10 || len(photo) > pngLimit(512, 512) {
+		t.Fatalf("a 512 by 512 photograph is %d bytes, want past 256 KiB and within %d", len(photo), pngLimit(512, 512))
+	}
+	s := viewer()
+	if !feed(s, "1", photo) || !s.drawing(instruction{"end", "1"}) || !s.settle(true) {
+		t.Fatal("a 512 by 512 photograph at 100% was refused")
+	}
+	// A file larger than a PNG of its own size can be, a size past the
+	// desktop, 16-bit samples and interlacing refuse at the header.
+	small := fixturePNG(t)
+	wide := encode(image.NewRGBA(image.Rect(0, 0, 1025, 2)))
+	deep := encode(image.NewRGBA64(image.Rect(0, 0, 2, 2)))
+	interlaced := bytes.Clone(small)
+	interlaced[28] = 1
+	for name, data := range map[string][]byte{"padded": append(bytes.Clone(small), make([]byte, 8<<10)...), "wide": wide, "16-bit": deep, "interlaced": interlaced} {
+		if feed(viewer(), "1", data) {
+			t.Fatalf("a %s PNG was taken", name)
+		}
+	}
+	// viewerImages open at once, and no more.
+	s = viewer()
+	for i := 0; i <= viewerImages; i++ {
+		if s.drawing(instruction{"img", strconv.Itoa(2*i + 1), "14", "-1", "image/png", "0", "0"}) != (i < viewerImages) {
+			t.Fatalf("open image %d: accepted %v", i+1, i < viewerImages)
+		}
+	}
+	// Open images hold viewerImageBytes together: the first photograph past
+	// it refuses.
+	s = viewer()
+	fits := viewerImageBytes / len(photo)
+	for i := 0; i <= fits; i++ {
+		if feed(s, strconv.Itoa(2*i+1), photo) != (i < fits) {
+			t.Fatalf("open photograph %d: accepted %v, want %v", i+1, i >= fits, i < fits)
+		}
+	}
+	// Images waiting to be rebuilt hold at most viewerImageBytes too: past it
+	// the reader waits for them rather than refusing.
+	s = viewer()
+	for i := 0; i < 3*fits; i++ {
+		id := strconv.Itoa(2*i + 1)
+		if !feed(s, id, photo) || !s.drawing(instruction{"end", id}) {
+			t.Fatalf("photograph %d was refused", i+1)
+		}
+		if i == 0 && (s.jobBytes != len(photo) || s.imageBytes != 0) {
+			t.Fatalf("an ended photograph moved %d bytes to the jobs and left %d open, want %d and 0", s.jobBytes, s.imageBytes, len(photo))
+		}
+		if s.jobBytes > viewerImageBytes {
+			t.Fatalf("images waiting to be rebuilt hold %d bytes", s.jobBytes)
+		}
+	}
+	if !s.settle(true) || s.jobBytes != 0 || s.imageBytes != 0 {
+		t.Fatalf("after every image: %d bytes waiting, %d open", s.jobBytes, s.imageBytes)
 	}
 }
 

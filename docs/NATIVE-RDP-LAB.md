@@ -69,8 +69,9 @@ and DPI, even and within full HD times the screen's scale, the bounds a resize
 already had; see `BROWSER-RDP-LAB.md`; the guacd patch tells Windows that
 DPI's scale when connecting and in each resize, `native/scale.c`)
 and classic NSCodec bitmap updates; PNG is the
-only advertised image format. Image evidence bounds eight concurrent streams,
-256 KiB each/1 MiB aggregate, dimensions and layer count before decoding. It is
+only advertised image format. Image evidence bounds the concurrent streams,
+the bytes each may hold from its own size and the bytes open together,
+dimensions and layer count before decoding (`BROWSER-RDP-LAB.md`). It is
 not a general browser drawing-instruction validator.
 
 A real Windows Server 2025 desktop (2026-11-08) showed what the synthetic peer
