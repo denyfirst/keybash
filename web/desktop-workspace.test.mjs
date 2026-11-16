@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopScales, nearestScale, scaledSize, startSizeField, rateLimiter, windowsLines } from './desktop-workspace.mjs';
+import { desktopScales, nearestScale, scaledSize, startSizeField, rateLimiter, windowsLines, pointerCursor } from './desktop-workspace.mjs';
+
+test("Windows' pointer becomes the browser's own at the desktop's scale", () => {
+  // At 200% the desktop is shown at half size: the image is a 2x image and
+  // the hotspot is in CSS pixels.
+  assert.equal(pointerCursor('blob:x', 10, 6, 0.5), 'image-set(url("blob:x") 2x) 5 3, default');
+  assert.equal(pointerCursor('blob:x', 10, 6, 1), 'image-set(url("blob:x") 1x) 10 6, default');
+  assert.equal(pointerCursor('blob:x', 9, 9, 0.8), 'image-set(url("blob:x") 1.25x) 7 7, default');
+  // A desktop fitted into a smaller window is shown smaller still.
+  assert.equal(pointerCursor('blob:x', 64, 64, 0.25), 'image-set(url("blob:x") 4x) 16 16, default');
+});
 
 test('a screen gets the nearest Windows scale, 100% for anything unusable', () => {
   for (const [ratio, want] of [[1, 1], [0.9, 1], [1.1, 1], [1.2, 1.25], [1.25, 1.25], [1.4, 1.5], [1.5, 1.5],

@@ -54,7 +54,11 @@ The application uses the upstream renderer rather than implementing RDP.
   session's largest display from then on, as the browser may create it before
   a pending resize; guacd draws RDP on the default layer and buffers only.
 - A pointer image may be up to 384 by 384, FreeRDP's largest, which Windows
-  sends on a scaled desktop or with a large pointer setting.
+  sends on a scaled desktop or with a large pointer setting. The page makes it
+  the browser's own CSS cursor (a `blob:` image, the only image source the
+  page's policy allows, at the desktop's scale through `image-set`), so it
+  moves with the hand; drawn inside the desktop it trailed the browser's arrow
+  by a frame or more, and two pointers showed.
 - At most 32 open PNG streams (guacd streams one per display worker at once).
   Each may hold what a PNG of its own size can be, read from its header:
   every row stored unfiltered at four bytes a pixel, plus 1/64 and 4 KiB for

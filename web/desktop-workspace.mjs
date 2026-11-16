@@ -36,6 +36,15 @@ export function rateLimiter(perSecond, burst, now = () => performance.now()) {
   };
 }
 
+// The CSS cursor that makes Windows' pointer the browser's own, so it moves
+// with the hand at once instead of being a second picture a frame behind.
+// The image keeps its remote pixels (sharp at 200%), shown at the desktop's
+// scale (CSS pixels per remote pixel), with the hotspot in CSS pixels.
+export function pointerCursor(url, hotspotX, hotspotY, scale) {
+  const ratio = Math.round(1 / scale * 1000) / 1000;
+  return `image-set(url("${url}") ${ratio}x) ${Math.round(hotspotX * scale)} ${Math.round(hotspotY * scale)}, default`;
+}
+
 // Windows' text has CRLF line ends; a textarea and other systems give LF.
 export function windowsLines(text) {
   return text.replace(/\r\n|\r|\n/g, '\r\n');
