@@ -191,6 +191,7 @@ type nativeMarker struct {
 	pointers                   string   // the settled pointer capabilities, digits only
 	scale                      string   // the core data's scales and physical size, digits only
 	layouts                    []string // display-control layouts received, digits only, newest 32
+	refreshes                  []string // repaint requests received, digits only, newest 32
 }
 
 // clientPointers is the pointer cache and large-pointer support the sample
@@ -217,6 +218,14 @@ func (m *nativeMarker) sawLayout(want string) bool {
 	return slices.Contains(m.layouts, want)
 }
 
+// sawRefresh reports whether the sample server was asked to repaint this area:
+// left, top, right, bottom.
+func (m *nativeMarker) sawRefresh(want string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Contains(m.refreshes, want)
+}
+
 // fixtureDigits holds only what the fixture printed as numbers and underscores.
 func fixtureDigits(values string) bool {
 	return len(values) <= 64 && strings.Trim(values, "0123456789_") == ""
@@ -235,6 +244,9 @@ func (m *nativeMarker) Write(p []byte) (int, error) {
 			}
 			if values, ok := strings.CutPrefix(m.tail, "KB_LAYOUT_"); ok && fixtureDigits(values) {
 				m.layouts = append(m.layouts[max(0, len(m.layouts)-31):], values)
+			}
+			if values, ok := strings.CutPrefix(m.tail, "KB_REFRESH_RECT_"); ok && fixtureDigits(values) {
+				m.refreshes = append(m.refreshes[max(0, len(m.refreshes)-31):], values)
 			}
 			switch m.tail {
 			case "KB_AUTHENTICATED":
@@ -892,6 +904,16 @@ func TestNativeRDPScaledDesktopTellsWindowsItsScale(t *testing.T) {
 		case <-time.After(250 * time.Millisecond):
 		case <-ctx.Done():
 			t.Fatalf("display-control layout %s never arrived", want)
+		}
+	}
+	// The resize gives guacd a new, empty framebuffer; once the connection is
+	// active again it asks the server once to repaint the whole desktop, so no
+	// region stays stale or black.
+	for !marker.sawRefresh("0_0_1280_720") {
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-ctx.Done():
+			t.Fatal("no full repaint was requested after the resize")
 		}
 	}
 }

@@ -101,6 +101,42 @@ environment. Formatting the plan redacts credentials. Streams have instruction,
 frame/byte limits and reject unsolicited files/pipes/argv/prompts. There is no
 browser RDP route or product login/ownership/vault in this candidate.
 
+## guacd behaviour the patches change (2026-11-16)
+
+An end-to-end review after the first 200% sessions found five places where
+guacd 1.6's own behaviour hurt a real Windows desktop. `native/prepare.py`
+changes each with an anchored patch; every patch fails the build if its
+anchor moves.
+
+- **Repaint after a resize.** FreeRDP gives guacd a new, zeroed framebuffer
+  when the server resizes the desktop, and guacd takes it as what the browser
+  shows. Windows repaints only what it invalidates, so the rest stayed stale,
+  showed the page, or turned black where guacd merged it into a neighbouring
+  update. Once the connection is active again after a resize, guacd asks the
+  server once for the whole desktop (Refresh Rect, as FreeRDP's own SDL client
+  does). `TestNativeRDPScaledDesktopTellsWindowsItsScale` resizes through the
+  display channel and requires the synthetic server to receive the full-size
+  request; with the request removed it fails.
+- **Display workers.** guacd started one encoding thread per online processor
+  and ignored a thread it could not create, joining it later. It now starts at
+  most four per desktop, counts only those created, and a desktop that gets
+  none ends. Four keep a desktop's open image streams within the viewer's 32
+  and its threads within the worker's limit on large hosts.
+- **Freed last-frame buffers.** When guacd removed a layer it returned the
+  layer's last-frame buffer to its pool without a dispose, so the browser kept
+  the canvas and the viewer counted its pixels for the rest of the session;
+  pointers dropped from FreeRDP's cache accumulated. guacd now disposes it.
+- **PNG effort.** The gateway decodes every image and writes it again, so
+  guacd's default compression bought only CPU: palette tiles now use zlib's
+  fastest level, and opaque truecolour tiles (more than 256 colours, such as
+  ClearType text) a direct libpng writer with the fastest level and one Sub
+  filter instead of Cairo's writer with adaptive filters. The pointer, which
+  has transparency, keeps Cairo's writer.
+- **Memory arenas.** guacd runs with `MALLOC_ARENA_MAX=2`: glibc's arena per
+  thread reserved 64 MiB of address space each against `RLIMIT_AS` and kept
+  freed image buffers resident, so guacd's footprint followed the host's
+  processor count.
+
 ## Worker and broker
 
 The launcher lives only in Linux test files. Bubblewrap supplies private network,
