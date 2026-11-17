@@ -259,15 +259,16 @@ The maintainer chose D. B is not built.
   - Windows' default is the lossless codecs. In step 2 that gave 32 whole frames a second at both scales, pixel-exact.
   - H.264 and 60 frames a second are each server administrator's choice (`AVC444ModePreferred`, `DWMFRAMEINTERVAL`).
   - Keybash shows which codec a desktop uses and explains the two settings. It does not change Windows itself, which would need administrator rights on the server and widen what stored credentials are used for.
-- On scaled screens the user chooses the picture, and the choice is kept per browser:
-  - "Smooth", the default, asks Windows for the desktop in CSS pixels at 100% and lets the browser enlarge it on the GPU. The desktop is the same size on screen, with softer text and a quarter of the pixels at 200%. In step 2 that meant the 100% numbers at 200%: 62 instead of 36 frames a second with H.264, 37 instead of 24 lossless, and about half the latency.
+- On scaled screens the user chooses the picture, and the choice is kept with the account:
+  - "Smooth" asks Windows for the desktop in CSS pixels at 100% and lets the browser enlarge it on the GPU. The desktop is the same size on screen, with softer text and a quarter of the pixels at 200%. In step 2 that meant the 100% numbers at 200%: 62 instead of 36 frames a second with H.264, 37 instead of 24 lossless, and about half the latency.
   - "Sharp" asks for the screen's own pixels and scale, as since PR 76.
+  - With no choice made, Smooth at 175% and 200%, where the saving is largest, and Sharp below.
 - Keybash carries the IronRDP changes as a pinned commit plus its own patch, as it does for guacd and FreeRDP. Offering them upstream is the maintainer's choice.
 - guacd and FreeRDP stay as the fallback until D covers what they do today, and then leave the runtime.
 
 Order of work. Each step is one or more pull requests with its own evidence.
 
-0. Smooth and Sharp on today's desktop page, Smooth by default. The choice carries over to D.
+0. Smooth and Sharp on today's desktop page. The choice carries over to D.
 1. The toolchain:
    - a pinned Rust toolchain and wasm-bindgen;
    - IronRDP's pinned commit with Keybash's patch, built in CI and in the stage build;
