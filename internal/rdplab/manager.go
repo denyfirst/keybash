@@ -86,7 +86,7 @@ func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) 
 	}
 	setup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	raw, err := connectRDPManager(ctx, setup, w.SocketPath, dial, pin)
+	raw, err := connectRDPManager(ctx, setup, w.SocketPath, dial, pin, false)
 	if err != nil {
 		return nil, errNative
 	}

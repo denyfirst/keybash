@@ -35,6 +35,15 @@ sudo apt-get install --no-install-recommends build-essential clang cmake ninja-b
 sh scripts/build-stage.sh "$HOME/keybash-stage" --with-rdp
 ```
 
+`--with-rdp-proxy` builds the same, plus Keybash's RDP proxy for desktops
+whose RDP client runs in the browser (`BROWSER-RDP-PROXY.md`). No page uses it
+yet. It needs rustup with the toolchain IronRDP pins:
+
+```sh
+rustup toolchain install 1.94.1 --profile minimal
+sh scripts/build-stage.sh "$HOME/keybash-stage" --with-rdp-proxy
+```
+
 ### 2. An HTTPS certificate, for testing
 
 For the name or address browsers will use:

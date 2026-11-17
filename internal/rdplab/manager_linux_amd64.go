@@ -16,11 +16,14 @@ import (
 )
 
 const (
-	managerHello  = "keybash-rdp-manager/v1"
-	managerStart  = "start/v1"
-	managerActive = "active/v1"
-	managerCancel = "cancel/v1"
-	managerDone   = "done/v1"
+	managerHello = "keybash-rdp-manager/v1"
+	managerStart = "start/v1"
+	// The same lease, with the worker starting Keybash's RDP proxy instead of
+	// guacd (docs/BROWSER-RDP-PROXY.md). Refused unless the runtime holds it.
+	managerStartProxy = "start-proxy/v1"
+	managerActive     = "active/v1"
+	managerCancel     = "cancel/v1"
+	managerDone       = "done/v1"
 )
 
 func rdpPeerCredentials(c *net.UnixConn) (*unix.Ucred, error) {
@@ -239,7 +242,8 @@ func serveRDPLease(life context.Context, conn *net.UnixConn, w ManagerConfig) {
 	}
 	packet, files, err := recvRDPPacket(conn)
 	defer closeRDPFiles(files)
-	if err != nil || packet != managerStart || !validManagerFiles(files) {
+	proxy := packet == managerStartProxy
+	if err != nil || packet != managerStart && !proxy || !validManagerFiles(files) || proxy && !runtimeHasProxy(w) {
 		return
 	}
 	parentNS, err := os.Readlink("/proc/self/ns/net")
@@ -256,7 +260,7 @@ func serveRDPLease(life context.Context, conn *net.UnixConn, w ManagerConfig) {
 	if err != nil {
 		return
 	}
-	_, kill, done, err := startRDPProcess(ctx, parentNS, w, files[0], binary, filter, files[1], files[2], files[3], files[4])
+	_, kill, done, err := startRDPProcess(ctx, parentNS, w, proxy, files[0], binary, filter, files[1], files[2], files[3], files[4])
 	if err != nil {
 		return
 	}
@@ -283,7 +287,7 @@ func serveRDPLease(life context.Context, conn *net.UnixConn, w ManagerConfig) {
 	<-monitor
 }
 
-func connectRDPManager(life, setup context.Context, path string, dial func(context.Context) (net.Conn, error), pin *Identity) (net.Conn, error) {
+func connectRDPManager(life, setup context.Context, path string, dial func(context.Context) (net.Conn, error), pin *Identity, proxy bool) (net.Conn, error) {
 	// The public gateway must never run as root or the sandbox's worker UID.
 	if os.Geteuid() == 0 || os.Geteuid() == 65534 || rdpManagerDirectory(path) != nil {
 		return nil, errNative
@@ -356,7 +360,11 @@ func connectRDPManager(life, setup context.Context, path string, dial func(conte
 		return nil, errNative
 	}
 	defer nameFile.Close()
-	if writeRDPPacket(conn, managerStart, transport, childInput, childOutput, certFile, nameFile) != nil || expectRDPPacket(conn, managerActive) != nil || !stop() || conn.SetDeadline(time.Time{}) != nil {
+	start := managerStart
+	if proxy {
+		start = managerStartProxy
+	}
+	if writeRDPPacket(conn, start, transport, childInput, childOutput, certFile, nameFile) != nil || expectRDPPacket(conn, managerActive) != nil || !stop() || conn.SetDeadline(time.Time{}) != nil {
 		_ = in.Close()
 		_ = out.Close()
 		return nil, errNative
