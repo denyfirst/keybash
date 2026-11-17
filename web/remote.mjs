@@ -69,6 +69,13 @@ export async function nameSession(kind){
   document.title=`${row.name} · ${kind}`;document.getElementById('tab-name').textContent=row.name;
  }catch{}
 }
+// How this account's desktops open on a scaled screen, kept with the account
+// on the server ("auto", "smooth" or "sharp"); the page stores nothing itself.
+export async function savePicture(picture){
+ const session=await json('/api/session');if(session.stage!=='ready'||!/^[A-Za-z0-9_-]{43}$/.test(session.csrf??''))throw new Error('session refused');
+ const response=await fetch('/api/preferences/picture',{method:'POST',headers:{'Content-Type':'application/json','X-Keybash-Request':'1','X-Keybash-CSRF':session.csrf},body:JSON.stringify({picture}),credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)});
+ if(response.status!==204)throw new Error('refused');
+}
 export async function remoteProof(){
  const record=document.body.dataset.connection;if(!/^[a-f0-9]{32}$/.test(record??''))throw new Error('invalid connection');
  const session=await json('/api/session');if(session.stage!=='ready'||!/^[A-Za-z0-9_-]{43}$/.test(session.csrf??''))throw new Error('session refused');

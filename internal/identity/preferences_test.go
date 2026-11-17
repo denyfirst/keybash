@@ -3,6 +3,7 @@ package identity
 import (
 	"bytes"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,6 +83,69 @@ func TestLookIsKeptWithTheAccountAndArrivesWithThePage(t *testing.T) {
 	}
 }
 
+// How an account's desktops open on a scaled screen is kept with the account
+// too, chosen as one fixed word, and reaches only its desktop pages' body tag.
+// Choosing it keeps the look, and choosing the look keeps it.
+func TestDesktopPictureIsKeptWithTheAccountAndArrivesWithTheDesktop(t *testing.T) {
+	l, store, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	body := regexp.MustCompile(`<body[^>]*>`)
+	desktop := func(client *custodyClient) string {
+		t.Helper()
+		found := body.FindAllString(client.expect("GET", "/remote/rdp/"+record, "", 200).Body.String(), -1)
+		if len(found) != 1 {
+			t.Fatalf("the desktop page has %d body tags", len(found))
+		}
+		return found[0]
+	}
+	picture := func(word string, status int) {
+		t.Helper()
+		c.expect("POST", "/api/preferences/picture", inputJSON(map[string]string{"picture": word}), status)
+	}
+	if got := desktop(c); strings.Contains(got, "data-picture") {
+		t.Fatalf("a new account's desktop arrived with a picture: %s", got)
+	}
+	c.expect("POST", "/api/preferences", inputJSON(map[string]string{"theme": "dark", "menu": "collapsed"}), 204)
+	picture("sharp", 204)
+	if got := desktop(c); strings.Count(got, `data-picture="sharp"`) != 1 {
+		t.Fatalf("sharp arrived as %s", got)
+	}
+	if got := store.preferencesOf(mustLookup(t, store, "alice").ID); got != (preferences{Theme: "dark", Menu: "collapsed", Picture: "sharp"}) {
+		t.Fatalf("choosing the picture changed the look: %+v", got)
+	}
+	c.expect("POST", "/api/preferences", inputJSON(map[string]string{"theme": "light", "menu": "open"}), 204)
+	if got := desktop(c); strings.Count(got, `data-picture="sharp"`) != 1 {
+		t.Fatalf("choosing the look lost the picture: %s", got)
+	}
+	// Anything but one exact word changes nothing.
+	for _, bad := range []string{
+		`{"picture":"Sharp"}`, `{"picture":""}`, `{"picture":"none"}`, `{"picture":"sharp\" onload=\"x"}`, `{"picture":1}`, `{"picture":null}`,
+		`{"picture":"smooth","theme":"dark"}`, `{"picture":"smooth","picture":"sharp"}`, `{"picture":"smooth"} {}`, `{}`, `[]`, ``,
+	} {
+		c.expect("POST", "/api/preferences/picture", bad, 400)
+	}
+	if got := desktop(c); strings.Count(got, `data-picture="sharp"`) != 1 {
+		t.Fatalf("a refused word changed the picture: %s", got)
+	}
+	// Only a ready session of this account, with its proof, chooses.
+	proof := c.csrf
+	c.csrf = "wrong"
+	picture("smooth", 403)
+	c.csrf = proof
+	(&custodyClient{t: t, l: l}).expect("POST", "/api/preferences/picture", inputJSON(map[string]string{"picture": "smooth"}), 401)
+	picture("smooth", 204)
+	if got := desktop(c); strings.Count(got, `data-picture="smooth"`) != 1 || strings.Contains(got, "sharp") {
+		t.Fatalf("smooth arrived as %s", got)
+	}
+	// Auto leaves the choice to the page again.
+	picture("auto", 204)
+	if got := desktop(c); strings.Contains(got, "data-picture") {
+		t.Fatalf("auto arrived as %s", got)
+	}
+	if got := store.preferencesOf(mustLookup(t, store, "alice").ID); got != (preferences{Theme: "light"}) {
+		t.Fatalf("auto left %+v", got)
+	}
+}
+
 // The look is a sealed record under the account's own name: it reads for that
 // account only, refuses to be written over when it cannot be read, travels
 // in a backup, and goes when the account goes.
@@ -93,7 +157,7 @@ func TestLookRecordIsSealedOwnedAndGoesWithTheAccount(t *testing.T) {
 		t.Fatal("fixture second account refused")
 	}
 	bob, _ := s.lookup("bob")
-	for _, bad := range []preferences{{Theme: "Dark"}, {Theme: "system"}, {Menu: "open"}, {Theme: `dark" x="`}} {
+	for _, bad := range []preferences{{Theme: "Dark"}, {Theme: "system"}, {Menu: "open"}, {Theme: `dark" x="`}, {Picture: "Sharp"}, {Picture: "auto"}, {Picture: `sharp" x="`}} {
 		if s.setPreferences(alice.ID, bad) == nil {
 			t.Fatalf("%+v was saved", bad)
 		}

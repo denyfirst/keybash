@@ -58,7 +58,12 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		mime = "text/html; charset=utf-8"
 		// Mark the body tag whatever else it carries. A page that cannot be
 		// marked would fall back to the lab login, so it is refused instead.
-		marked := bytes.Replace(data, []byte("<body"), []byte(`<body data-owned-remote="`+html.EscapeString(protocol)+`" data-connection="`+html.EscapeString(record)+`"`), 1)
+		mark := `<body data-owned-remote="` + html.EscapeString(protocol) + `" data-connection="` + html.EscapeString(record) + `"`
+		// A desktop opens with the account's chosen picture, one fixed word.
+		if picture := l.store.preferencesOf(s.owner).Picture; protocol == "rdp" && (picture == "smooth" || picture == "sharp") {
+			mark += ` data-picture="` + picture + `"`
+		}
+		marked := bytes.Replace(data, []byte("<body"), []byte(mark), 1)
 		if bytes.Equal(marked, data) {
 			refuse(w, 503)
 			return true

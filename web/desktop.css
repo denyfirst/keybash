@@ -34,6 +34,10 @@
 .menu-list { display: grid; gap: 0.15rem; min-width: 16.5rem; padding: 0.35rem; }
 .menu-list button span, .menu-list button small { white-space: nowrap; }
 #size[hidden] { display: none; }
+/* The picture choice, apart from the sizes under a thin rule. */
+.menu-group { display: grid; gap: 0.15rem; margin-top: 0.25rem; padding-top: 0.35rem; border-top: 1px solid var(--term-rule); }
+.menu-group[hidden] { display: none; }
+.menu-heading { padding: 0.25rem 0.7rem 0.2rem; font-size: 0.7rem; font-weight: 600; color: var(--term-faint); white-space: nowrap; }
 .session .menu-list button:not(.secondary):not(.ghost) {
   display: flex;
   align-items: baseline;
