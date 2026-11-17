@@ -175,9 +175,9 @@ func openRDPImage(c ManagerConfig) (*os.File, error) {
 	return f, nil
 }
 
-func rdpSandboxArgs(parent string, c ManagerConfig) []string {
+func rdpSandboxArgs(parent string, c ManagerConfig, proxy bool) []string {
 	u, g := strconv.FormatUint(uint64(c.WorkerUID), 10), strconv.FormatUint(uint64(c.WorkerGID), 10)
-	return []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
+	args := []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
 		"--hostname", "keybash-rdp-worker", "--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP",
 		"--clearenv", "--setenv", "GOMAXPROCS", "2", "--setenv", "GOMEMLIMIT", "64MiB", "--setenv", "GOTRACEBACK", "none",
 		"--ro-bind", c.Runtime, "/",
@@ -187,6 +187,25 @@ func rdpSandboxArgs(parent string, c ManagerConfig) []string {
 		"--dir", "/run/keybash", "--perms", "0444", "--ro-bind-data", "6", "/run/keybash/approved.pem", "--perms", "0444", "--ro-bind-data", "7", "/run/keybash/name",
 		"--proc", "/proc", "--dev", "/dev", "--perms", "1777", "--tmpfs", "/tmp", "--remount-ro", "/", "--chdir", "/",
 		"--seccomp", "5", "--", "/setpriv", "--reuid=" + u, "--regid=" + g, "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "/worker", parent, u, g}
+	// The one fixed word that has the worker start the proxy instead of guacd.
+	if proxy {
+		args = append(args, "proxy")
+	}
+	return args
+}
+
+// rdpProxyPath is where the runtime holds Keybash's RDP proxy, when it holds it.
+const rdpProxyPath = "opt/keybash-rdp/bin/keybash-rdp-proxy"
+
+// runtimeHasProxy says whether the approved runtime holds the proxy: a
+// regular, executable, root-owned file inside it, never a link.
+func runtimeHasProxy(c ManagerConfig) bool {
+	info, err := os.Lstat(filepath.Join(c.Runtime, rdpProxyPath))
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 || info.Mode().Perm()&0o022 != 0 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Uid == 0
 }
 
 // This is a denylist, not a syscall allowlist. The private network deliberately
@@ -212,9 +231,9 @@ func rdpSeccomp() []byte {
 	return raw.Bytes()
 }
 
-func startRDPProcess(life context.Context, parent string, c ManagerConfig, transport, image, filter, input, output, cert, name *os.File) (context.Context, context.CancelFunc, <-chan struct{}, error) {
+func startRDPProcess(life context.Context, parent string, c ManagerConfig, proxy bool, transport, image, filter, input, output, cert, name *os.File) (context.Context, context.CancelFunc, <-chan struct{}, error) {
 	ctx, cancel := context.WithCancel(life)
-	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", rdpSandboxArgs(parent, c)...) // #nosec G204 -- fixed root tool and validated operator configuration; no IPC commands or credentials.
+	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", rdpSandboxArgs(parent, c, proxy)...) // #nosec G204 -- fixed root tool and validated operator configuration; no IPC commands or credentials.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
 	cmd.ExtraFiles = []*os.File{transport, image, filter, cert, name}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, io.Discard

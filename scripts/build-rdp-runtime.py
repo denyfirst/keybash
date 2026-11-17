@@ -13,6 +13,9 @@ import subprocess
 parser = argparse.ArgumentParser()
 parser.add_argument("--prefix", type=Path, required=True)
 parser.add_argument("--output", type=Path, required=True)
+# Keybash's RDP proxy, built by scripts/build-rdp-proxy.sh; without it the
+# runtime serves guacd desktops only and the manager refuses proxy leases.
+parser.add_argument("--proxy", type=Path)
 args = parser.parse_args()
 prefix, output = args.prefix.resolve(strict=True), args.output
 if not output.is_absolute() or output.exists() or output != output.resolve():
@@ -36,6 +39,8 @@ def copy(source, destination):
 
 
 copy(prefix / "sbin/guacd", "/opt/keybash-rdp/sbin/guacd")
+if args.proxy:
+    copy(args.proxy.resolve(strict=True), "/opt/keybash-rdp/bin/keybash-rdp-proxy")
 for source in sorted((prefix / "lib").rglob("*.so*")):
     if source.is_file() and (source.name.startswith(("libguac", "libfreerdp3", "libwinpr3")) or source.parent.name == "freerdp3"):
         copy(source, "/opt/keybash-rdp/" + source.relative_to(prefix).as_posix())

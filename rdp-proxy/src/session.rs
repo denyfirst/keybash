@@ -175,19 +175,29 @@ where
         .await
         .map_err(|_| Fail::End(Ended::Unreachable))?;
     tcp.set_nodelay(true).map_err(|_| Fail::End(Ended::Unreachable))?;
-    let mut connector = ClientConnector::new(windows_config(&setup), "127.0.0.1:0".parse().map_err(|_| REFUSED)?);
+    // Nothing about the account crosses the network before TLS. IronRDP puts
+    // the user name in the X.224 request as a routing cookie, so the request
+    // is made by a connector that has no user name; the connector with the
+    // credentials then follows the same confirmation, and its own request is
+    // never sent.
+    let local = "127.0.0.1:0".parse().map_err(|_| REFUSED)?;
+    let mut nameless = ClientConnector::new(crate::config::connector_config(), local);
     let mut framed = ironrdp_tokio::TokioFramed::new(tcp);
     let mut buf = WriteBuf::new();
-    connector.step_no_input(&mut buf).map_err(|_| REFUSED)?;
+    nameless.step_no_input(&mut buf).map_err(|_| REFUSED)?;
     framed
         .write_all(buf.filled())
         .await
         .map_err(|_| Fail::End(Ended::Unreachable))?;
-    let hint = connector.next_pdu_hint().ok_or(REFUSED)?;
+    let hint = nameless.next_pdu_hint().ok_or(REFUSED)?;
     let confirm = framed
         .read_by_hint(hint)
         .await
         .map_err(|_| Fail::End(Ended::Unreachable))?;
+    let mut connector = ClientConnector::new(windows_config(&setup), local);
+    let mut unsent = WriteBuf::new();
+    connector.step_no_input(&mut unsent).map_err(|_| REFUSED)?;
+    drop(unsent);
     buf.clear();
     connector.step(&confirm, None, &mut buf).map_err(|_| REFUSED)?;
     let X224(nego::ConnectionConfirm::Response {
@@ -449,6 +459,48 @@ mod tests {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => panic!("{e}"),
                 Err(_) => panic!("no desktop within 30 seconds"),
+            }
+        });
+    }
+
+    /// What reaches Windows before TLS carries no account material: not the
+    /// user name, not the domain, not the password.
+    #[test]
+    fn nothing_about_the_account_crosses_before_tls() {
+        run_async(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listen");
+            let target = listener.local_addr().expect("addr");
+            let peer = async move {
+                let (mut s, _) = listener.accept().await.expect("accept");
+                let mut head = [0u8; 4];
+                s.read_exact(&mut head).await.expect("TPKT");
+                let mut body = vec![0u8; usize::from(u16::from_be_bytes([head[2], head[3]])) - 4];
+                s.read_exact(&mut body).await.expect("X.224");
+                body
+            };
+            let (mut to_proxy, mut proxy_in) = duplex(64 * 1024);
+            let (mut proxy_out, _from) = duplex(64 * 1024);
+            let (_, request) = rdcleanpath_request_from_browser();
+            frame::write(&mut to_proxy, Kind::Browser, &request)
+                .await
+                .expect("write");
+            let setup = crate::setup::parse(&crate::setup::encode(
+                "kb-account-name",
+                "KB-DOMAIN",
+                "kb-secret-word",
+                false,
+            ))
+            .expect("setup");
+            let trust = Trust {
+                certificate: crate::pin::tests::certificate_der(),
+                name: Name::ExactLeaf,
+            };
+            let (_, sent) = tokio::join!(run(&mut proxy_in, &mut proxy_out, setup, &trust, target), peer);
+            for secret in ["kb-account-name", "KB-DOMAIN", "kb-secret-word", "mstshash"] {
+                assert!(
+                    !sent.windows(secret.len()).any(|w| w == secret.as_bytes()),
+                    "{secret} crossed before TLS: {sent:?}"
+                );
             }
         });
     }

@@ -50,7 +50,9 @@ the server name from `/run/keybash/name`, as FreeRDP does now.
    fields are ignored: the target and the access are the gateway's. A
    preconnection blob is refused.
 2. The proxy sends Windows its own X.224 request (TLS, CredSSP, CredSSP with
-   early user authorization), and Windows must select NLA. It then completes
+   early user authorization), and Windows must select NLA. The request carries
+   no routing cookie: nothing about the account (user name, domain, password)
+   crosses the network before TLS. It then completes
    TLS 1.2 or 1.3 with its own verifier (`rdp-proxy/src/pin.rs`):
    - the leaf certificate must be byte for byte the pinned one, inside its
      validity dates, or the session ends as "certificate changed" before any
@@ -121,8 +123,21 @@ Decision).
     Server 2025 (NLA with HYBRID_EX, TLS 1.3). It runs against any NLA server
     named in `KEYBASH_PROXY_TEST`; 2b adds the FreeRDP sample server in CI.
 - **2b.** The worker starts the proxy instead of guacd for a desktop that
-  asks for it. The gateway relays browser frames to it, with today's byte and
-  rate budgets. End reasons are wired. The native and service labs cover it.
+  asks for it:
+  - the gateway asks the manager with a second fixed lease packet
+    (`start-proxy/v1`), and the manager refuses it unless the approved runtime
+    holds the proxy (`/opt/keybash-rdp/bin/keybash-rdp-proxy`, bound into the
+    runtime inventory like every other file);
+  - the manager passes the worker one fixed word, and the worker keeps every
+    check it makes for guacd, then starts the proxy on the same bridge, with
+    its own pipes and an empty environment;
+  - `rdplab.ManagerWorker.OpenBrowserRDP` sends the setup frame and returns a
+    stream of whole messages, with the proxy's end code as the pages' word.
+    The clipboard stays off until 2c;
+  - `build-stage.sh --with-rdp-proxy` builds the proxy into the runtime;
+  - the native lab runs the proxy in the sandbox against the FreeRDP sample
+    server with NLA.
+  The gateway's relay to the browser comes with the page in step 3.
 - **2c.** The `drdynvc` allowlist with display-control bounds, then the text
   clipboard filter.
 

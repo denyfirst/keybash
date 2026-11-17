@@ -335,13 +335,17 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 	if os.Getenv("KEYBASH_MANAGED_MODE") == "preflight" {
 		setup, stop := context.WithTimeout(ctx, 10*time.Second)
 		defer stop()
-		connection, e := connectRDPManager(ctx, setup, path, dial, pin)
+		connection, e := connectRDPManager(ctx, setup, path, dial, pin, false)
 		if e != nil {
 			t.Fatal("public-only managed preflight refused")
 		}
 		if connection.Close() != nil {
 			t.Fatal("public-only preflight revocation failed")
 		}
+		return
+	}
+	if mode := os.Getenv("KEYBASH_MANAGED_MODE"); strings.HasPrefix(mode, "proxy") {
+		nativeProxyChild(t, ctx, path, dial, pin, mode)
 		return
 	}
 	s, e := (ManagerWorker{SocketPath: path}).openDial(ctx, dial, pin, "synthetic-user", "Synthetic-managed-NLA-password", 0, 0, 0)

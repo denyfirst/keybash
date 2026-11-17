@@ -91,8 +91,9 @@ func finishRDPSetup(c *rdpConnection, setup context.Context) error {
 
 // RunNativeWorker never accepts a command, path, destination or environment
 // from its input. Read-only sealed mounts supply only pinned public trust.
-// Credentials pass verbatim through private pipes to the native library.
-func RunNativeWorker(parentNS string, uid, gid uint32) error {
+// Credentials pass verbatim through private pipes to the native library, or,
+// with proxy, to Keybash's RDP proxy in its place.
+func RunNativeWorker(parentNS string, uid, gid uint32, proxy bool) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if uid < 1 || gid < 1 || uid > 2147483647 || gid > 2147483647 || uid == 65534 || gid == 65534 || os.Getuid() != int(uid) || os.Geteuid() != int(uid) || os.Getgid() != int(gid) || os.Getegid() != int(gid) {
@@ -171,6 +172,9 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 		return errNative
 	}
 	defer bridge.Close()
+	if proxy {
+		return runProxy(bridge, target)
+	}
 	guacd := exec.Command("/opt/keybash-rdp/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error")
 	// Two malloc arenas instead of glibc's one per thread: each reserves 64 MiB
 	// of address space against RLIMIT_AS and keeps freed image buffers
@@ -220,6 +224,36 @@ func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	case <-done:
 	}
 	return nil // private PID namespace/manager kill owns all remaining descendants
+}
+
+// runProxy starts Keybash's RDP proxy where guacd would run: it reaches Windows
+// through the same loopback bridge, and speaks to the gateway on the worker's
+// own standard input and output, which it inherits. It gets no argument and an
+// empty environment; the readiness mark is written before the gateway sends it
+// anything, so the proxy never writes before it.
+func runProxy(bridge net.Listener, target net.Conn) error {
+	proxy := exec.Command("/opt/keybash-rdp/bin/keybash-rdp-proxy")
+	proxy.Env = []string{}
+	proxy.Stdin, proxy.Stdout, proxy.Stderr = os.Stdin, os.Stdout, io.Discard
+	proxy.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	if proxy.Start() != nil {
+		return errNative
+	}
+	done := make(chan struct{})
+	go func() { _ = proxy.Wait(); close(done) }()
+	defer func() { _ = proxy.Process.Kill(); <-done }()
+	go func() {
+		local, e := bridge.Accept()
+		_ = bridge.Close()
+		if e == nil {
+			relayRDP(local, target)
+		}
+	}()
+	if _, e := io.WriteString(os.Stdout, rdpWorkerReady); e != nil {
+		return errNative
+	}
+	<-done
+	return nil
 }
 
 // A raw RDP byte pipe has no lifetime total: TCP flow control and the bounded

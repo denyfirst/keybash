@@ -34,7 +34,11 @@ CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/keybash-rdp-worker" ./cmd/key
 for bin in keybash keybash-ssh-manager keybash-ssh-worker keybash-service-check keybash-service-plan keybash-rdp-manager; do
   CGO_ENABLED=0 go build -trimpath -o "${prefix}/bin/${bin}" "./cmd/${bin}"
 done
-LD_LIBRARY_PATH="${normal_prefix}/lib" python3 scripts/build-rdp-runtime.py --prefix "${normal_prefix}" --output "${prefix}/runtime-stage"
+# Keybash's RDP proxy, with the toolchain IronRDP pins, for the proxy tests.
+rustup toolchain install 1.94.1 --profile minimal
+sh scripts/build-rdp-proxy.sh "${lab}/proxy"
+LD_LIBRARY_PATH="${normal_prefix}/lib" python3 scripts/build-rdp-runtime.py --prefix "${normal_prefix}" --output "${prefix}/runtime-stage" \
+  --proxy "${lab}/proxy/keybash-rdp-proxy"
 go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}/bin/lab.test"
 preflight_failed=0
