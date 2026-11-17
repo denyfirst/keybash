@@ -50,7 +50,9 @@ the server name from `/run/keybash/name`, as FreeRDP does now.
    fields are ignored: the target and the access are the gateway's. A
    preconnection blob is refused.
 2. The proxy sends Windows its own X.224 request (TLS, CredSSP, CredSSP with
-   early user authorization), and Windows must select NLA. It then completes
+   early user authorization), and Windows must select NLA. The request carries
+   no routing cookie: nothing about the account (user name, domain, password)
+   crosses the network before TLS. It then completes
    TLS 1.2 or 1.3 with its own verifier (`rdp-proxy/src/pin.rs`):
    - the leaf certificate must be byte for byte the pinned one, inside its
      validity dates, or the session ends as "certificate changed" before any
