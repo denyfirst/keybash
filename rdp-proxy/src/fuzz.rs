@@ -131,6 +131,23 @@ fn chunk(message: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A channel message as it goes in its PDU: chunked on static channels, as
+/// it is on the I/O channel.
+fn wrap(channel: u16, message: &[u8]) -> Vec<u8> {
+    if channel == IO {
+        message.to_vec()
+    } else {
+        chunk(message)
+    }
+}
+
+/// A browser's Client Info, with someone else's name, a password and both
+/// cookies, which the proxy writes again.
+fn client_info_seed() -> Vec<u8> {
+    use ironrdp_pdu::rdp::client_info::ClientInfoFlags;
+    crate::channels::tests::client_info("", "", ClientInfoFlags::MOUSE | ClientInfoFlags::UNICODE, true)
+}
+
 fn connect_response() -> Vec<u8> {
     use ironrdp_pdu::gcc::{
         ConferenceCreateResponse, RdpVersion, ServerCoreData, ServerCoreOptionalData, ServerGccBlocks,
@@ -215,6 +232,7 @@ fn corpus() -> Vec<(bool, u16, Vec<u8>)> {
     let mut create_other = vec![0x10, 9];
     create_other.extend_from_slice(b"rdpdr_dvc\0");
     vec![
+        (false, IO, client_info_seed()),
         (true, DRDYNVC, vec![0x50, 0x00, 0x03, 0x00]),
         (false, DRDYNVC, vec![0x50, 0x00, 0x03, 0x00]),
         (true, DRDYNVC, create_graphics),
@@ -248,11 +266,19 @@ fn check_instead(pdus: &[Vec<u8>]) {
     for pdu in pdus {
         assert!(pdu.len() <= MAX_PDU, "a PDU over the limit passed");
         let X224(message) = decode::<X224<mcs::McsMessage<'_>>>(pdu).expect("what passes decodes");
-        let data = match message {
-            mcs::McsMessage::SendDataIndication(d) => d.user_data,
-            mcs::McsMessage::SendDataRequest(d) => d.user_data,
+        let (channel, data) = match message {
+            mcs::McsMessage::SendDataIndication(d) => (d.channel_id, d.user_data),
+            mcs::McsMessage::SendDataRequest(d) => (d.channel_id, d.user_data),
             _ => panic!("only channel data is written again"),
         };
+        if channel == IO {
+            // The Client Info, written again for the account, with no password.
+            let info = decode::<ironrdp_pdu::rdp::ClientInfoPdu>(&data).expect("a Client Info");
+            assert_eq!(info.client_info.credentials.username, "kb-user");
+            assert!(info.client_info.credentials.password.is_empty());
+            assert!(info.client_info.password_cookie.is_none());
+            continue;
+        }
         assert!(data.len() <= 8 + 1600, "a chunk over 1600 bytes");
         let total = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         assert!(
@@ -270,7 +296,7 @@ fn channel_checks_survive_mutated_desktops() {
     let corpus = corpus();
     let (mut passed, mut refused) = (0usize, 0usize);
     for _ in 0..rounds() {
-        let mut c = Channels::new(vec!["drdynvc".into(), "cliprdr".into()], true);
+        let mut c = Channels::new(vec!["drdynvc".into(), "cliprdr".into()], true).for_account("kb-user", "KB");
         assert_eq!(c.server_pdu(Action::X224, &connect_response()), Ok(Pass::Unchanged));
         let attach = encode_vec(&X224(mcs::McsMessage::AttachUserConfirm(mcs::AttachUserConfirm {
             result: 0,
@@ -281,7 +307,7 @@ fn channel_checks_survive_mutated_desktops() {
         // A valid prefix of random length, then mutations.
         let prefix = rng.below(corpus.len() + 1);
         for (from_server, channel, payload) in &corpus[..prefix] {
-            let pdu = send_data(*from_server, *channel, chunk(payload));
+            let pdu = send_data(*from_server, *channel, wrap(*channel, payload));
             let pass = if *from_server {
                 c.server_pdu(Action::X224, &pdu)
             } else {
@@ -294,11 +320,11 @@ fn channel_checks_survive_mutated_desktops() {
             let from_server = if rng.chance(8) { !from_server } else { *from_server };
             let pdu = match rng.below(4) {
                 // Inside the channel message, so the deeper parsers see it.
-                0 | 1 => send_data(from_server, *channel, chunk(&mutate(&mut rng, payload))),
+                0 | 1 => send_data(from_server, *channel, wrap(*channel, &mutate(&mut rng, payload))),
                 // The chunk header and the message.
-                2 => send_data(from_server, *channel, mutate(&mut rng, &chunk(payload))),
+                2 => send_data(from_server, *channel, mutate(&mut rng, &wrap(*channel, payload))),
                 // The whole PDU.
-                _ => mutate(&mut rng, &send_data(from_server, *channel, chunk(payload))),
+                _ => mutate(&mut rng, &send_data(from_server, *channel, wrap(*channel, payload))),
             };
             let action = if rng.chance(16) { Action::FastPath } else { Action::X224 };
             let result = if from_server {
@@ -417,7 +443,7 @@ fn the_splitter_survives_broken_streams() {
     let mut rng = Rng(0x6B65_7962_6173_6804);
     let seeds: Vec<Vec<u8>> = corpus()
         .into_iter()
-        .map(|(from_server, channel, payload)| send_data(from_server, channel, chunk(&payload)))
+        .map(|(from_server, channel, payload)| send_data(from_server, channel, wrap(channel, &payload)))
         .chain([vec![0x00, 0x05, 1, 2, 3], vec![0x00, 0x82, 0x00, 1, 2, 3]])
         .collect();
     for _ in 0..rounds() {

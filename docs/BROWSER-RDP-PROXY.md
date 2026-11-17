@@ -96,6 +96,15 @@ The proxy relays both ways and checks what it passes on
   browser asked for. Only the I/O and user channels, `drdynvc` and, when the
   account allows the clipboard, `cliprdr` carry data; the browser may join no
   other.
+- The browser's Client Info, its first message on the I/O channel, is written
+  again before it reaches Windows:
+  - it names the account the proxy signed in with, with no password and no
+    redirection cookie in the password's place, so the page cannot sign in
+    as anyone else through Keybash;
+  - it carries no auto-reconnect cookie, so the page cannot reach a session
+    the proxy did not sign in for;
+  - a program to run instead of the desktop, a working folder or RemoteApp
+    ends the session as "refused". Today's guacd path never asks for them.
 - `drdynvc` chunks must come in order, uncompressed, and a message is at most
   16 MiB.
 - Anything malformed, oversized or out of order ends the session as
@@ -185,5 +194,9 @@ Decision).
     overflow too, and whatever passes stays within its bounds.
   - CI runs 3,000 rounds of each; `KEYBASH_FUZZ_ROUNDS` runs more. They are
     ordinary tests on stable Rust, with no new dependency.
+- **2e.** The Client Info written again (above). Until then the proxy passed
+  it as the browser wrote it. Against the test VM's Windows Server 2025, the
+  desktop, display control and the clipboard round trip came up with it
+  written again.
 
 Step 3 then brings the page.

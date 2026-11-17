@@ -125,6 +125,7 @@ where
     // Everything up to the checked Connect Initial has a deadline: a browser,
     // or a server, that stalls the handshake cannot hold a worker.
     let clipboard = setup.clipboard;
+    let (user, domain) = (setup.user.clone(), setup.domain.clone());
     let handshake = tokio::time::timeout(HANDSHAKE_WAIT, handshake(gateway_in, gateway_out, setup, trust, target));
     let (tls, checked, names, rest) = match handshake.await {
         Ok(Ok(ready)) => ready,
@@ -139,7 +140,7 @@ where
     // The relay: whole PDUs each way, each checked against the channels
     // before it passes (crate::channels). Both directions run in this one
     // task, so they share the state without locks.
-    let channels = RefCell::new(Channels::new(names, clipboard));
+    let channels = RefCell::new(Channels::new(names, clipboard).for_account(&user, &domain));
     let mut browser = Splitter::default();
     if let Err(fail) = pass_browser_bytes(&rest, &mut browser, &channels, &mut to_windows).await {
         return fail;
