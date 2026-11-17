@@ -18,10 +18,27 @@ type preferences struct {
 	Theme string `json:"theme,omitempty"`
 	// Menu is "" (the menu shows its names) or "collapsed" (its icons only).
 	Menu string `json:"menu,omitempty"`
+	// Picture is how a desktop opens on a scaled screen: "" (the page picks by
+	// the screen), "smooth" (100%, enlarged by the browser) or "sharp" (the
+	// screen's own pixels and scale).
+	Picture string `json:"picture,omitempty"`
 }
 
 func (p preferences) valid() bool {
-	return (p.Theme == "" || p.Theme == "light" || p.Theme == "dark") && (p.Menu == "" || p.Menu == "collapsed")
+	return (p.Theme == "" || p.Theme == "light" || p.Theme == "dark") && (p.Menu == "" || p.Menu == "collapsed") &&
+		(p.Picture == "" || p.Picture == "smooth" || p.Picture == "sharp")
+}
+
+// pictureInput reads the word a desktop page sends: "auto", "smooth" or
+// "sharp". Nothing else is accepted.
+func pictureInput(word string) (string, bool) {
+	switch word {
+	case "auto":
+		return "", true
+	case "smooth", "sharp":
+		return word, true
+	}
+	return "", false
 }
 
 // preferenceInput reads the words a page sends: "system", "light" or "dark",
@@ -84,12 +101,25 @@ func (s *Store) preferencesOf(owner string) preferences {
 // setPreferences saves an account's choices, resealed at the next revision.
 // A record that cannot be read is refused rather than written over.
 func (s *Store) setPreferences(owner string, p preferences) error {
-	if !validID(owner) || !p.valid() {
+	if !p.valid() {
+		return errRefused
+	}
+	return s.changePreferences(owner, func(old *preferences) { *old = p })
+}
+
+// changePreferences changes some of an account's choices and keeps the rest,
+// read and written in one transaction.
+func (s *Store) changePreferences(owner string, change func(*preferences)) error {
+	if !validID(owner) {
 		return errRefused
 	}
 	return s.update(func(tx *bolt.Tx) error {
-		_, revision, e := s.preference(tx, owner)
+		p, revision, e := s.preference(tx, owner)
 		if e != nil {
+			return errRefused
+		}
+		change(&p)
+		if !p.valid() {
 			return errRefused
 		}
 		b, e := tx.CreateBucketIfNotExists(preferenceBucket)

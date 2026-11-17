@@ -14,6 +14,18 @@ export function nearestScale(ratio) {
   return desktopScales.reduce((best, s) => Math.abs(s - ratio) < Math.abs(best - ratio) ? s : best, 1);
 }
 
+// On a scaled screen the person picks the picture. "sharp": the screen's own
+// pixels and scale, as above. "smooth": the desktop at 100% in CSS pixels,
+// enlarged by the browser: the same size on screen, softer text, and a quarter
+// of the pixels at 200%, so it moves faster. With no choice yet the page picks
+// smooth on the sharpest screens (175% and up), where the saving is largest.
+export function pictureScale(picture, ratio) {
+  const sharp = nearestScale(ratio);
+  if (picture === 'sharp') return sharp;
+  if (picture === 'smooth') return 1;
+  return sharp >= 1.75 ? 1 : sharp;
+}
+
 // Device pixels for a space of w by h CSS pixels at scale: the width a multiple
 // of 4 (guacd opens a desktop at its width rounded down to that, so a page
 // asking for 1706 got 1704 and never asked again) and the height even, at
@@ -70,7 +82,7 @@ export function startSizeField(w, h, scale) {
 
 // One instance belongs to one desktop. No timers/polling read the OS clipboard,
 // and text the remote copied reaches this computer's clipboard only on a click.
-export function workspaceControls({ $, live, client, send, resetKeyboard }) {
+export function workspaceControls({ $, live, client, send, resetKeyboard, picture = '', savePicture = async () => {}, reopen = () => {} }) {
   const encoder = new TextEncoder();
   let enabled = false, remoteText = '', generation = 0, resizeTimer, lastSize = '', screen = 'fit', copyAsked = 0;
   const buttons = ['screen', 'copy', 'paste'];
@@ -146,6 +158,21 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
     $('size').hidden = size !== 'fit';
     closeMenu(); resize(); $('desktop').focus();
   }
+  // Picture: only a scaled screen has a choice. Windows keeps a session's
+  // scale, so a new choice is saved and the desktop opens again with it.
+  const ratio = () => window.devicePixelRatio || 1;
+  const shown = () => pictureScale(picture, ratio()) === 1 ? 'smooth' : 'sharp';
+  function showPicture() {
+    $('picture-group').hidden = nearestScale(ratio()) === 1;
+    for (const item of menu.querySelectorAll('[data-picture]')) item.setAttribute('aria-checked', String(item.dataset.picture === shown()));
+  }
+  async function choosePicture(next) {
+    closeMenu();
+    if (next === shown()) { $('desktop').focus(); return; }
+    try { await savePicture(next); } catch { if (usable()) $('notice').textContent = 'The picture could not be changed. Try again.'; return; }
+    picture = next; showPicture();
+    reopen();
+  }
   function requestSize() {
     if (!usable()) return;
     // Fit asks the remote for exactly the space the desktop has here.
@@ -160,12 +187,18 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
   toggle.addEventListener('click', () => {
     if (!usable()) return;
     if (!menu.hidden) { closeMenu(); return; }
+    showPicture();
     menu.hidden = false; toggle.setAttribute('aria-expanded', 'true');
-    (menu.querySelector('[aria-checked="true"]') ?? menu.querySelector('[data-size]')).focus();
+    (menu.querySelector('[data-size][aria-checked="true"]') ?? menu.querySelector('[data-size]')).focus();
   });
-  menu.addEventListener('click', event => { const item = event.target.closest('[data-size]'); if (item && usable()) choose(item.dataset.size); });
+  menu.addEventListener('click', event => {
+    if (!usable()) return;
+    const item = event.target.closest('[data-size]'), look = event.target.closest('[data-picture]');
+    if (item) choose(item.dataset.size);
+    else if (look) void choosePicture(look.dataset.picture);
+  });
   menu.addEventListener('keydown', event => {
-    const items = [...menu.querySelectorAll('[data-size]')], at = items.indexOf(document.activeElement);
+    const items = [...menu.querySelectorAll('[data-size],[data-picture]')].filter(item => !item.closest('[hidden]')), at = items.indexOf(document.activeElement);
     if (event.key === 'Escape') { event.preventDefault(); closeMenu(); toggle.focus(); }
     else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
   });
@@ -235,9 +268,9 @@ export function workspaceControls({ $, live, client, send, resetKeyboard }) {
       return undefined;
     },
     // The size the desktop opens at: the space it has, before anything connects,
-    // in device pixels with the DPI of the screen's scale ("2880x1800@192").
+    // in device pixels with the DPI of the chosen picture's scale ("2880x1800@192").
     startSize() {
-      scale = nearestScale(window.devicePixelRatio || 1);
+      scale = pictureScale(picture, ratio());
       const [w, h] = deviceSize($('desktop').clientWidth, $('desktop').clientHeight);
       lastSize = `${w}x${h}`;
       return startSizeField(w, h, scale);

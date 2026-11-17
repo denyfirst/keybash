@@ -1,6 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopScales, nearestScale, scaledSize, startSizeField, rateLimiter, pastePacer, windowsLines, pointerCursor } from './desktop-workspace.mjs';
+import { desktopScales, nearestScale, pictureScale, scaledSize, startSizeField, rateLimiter, pastePacer, windowsLines, pointerCursor } from './desktop-workspace.mjs';
+
+test('the picture: sharp is the screen\'s scale, smooth is 100%, and with no choice smooth from 175% up', () => {
+  for (const [ratio, sharp] of [[1, 1], [1.25, 1.25], [1.5, 1.5], [1.75, 1.75], [2, 2], [2.625, 2], [NaN, 1]]) {
+    assert.equal(pictureScale('sharp', ratio), sharp, `sharp at ${ratio}`);
+    assert.equal(pictureScale('smooth', ratio), 1, `smooth at ${ratio}`);
+    assert.equal(pictureScale('', ratio), sharp >= 1.75 ? 1 : sharp, `no choice at ${ratio}`);
+    // Only the two words choose; anything else is no choice.
+    assert.equal(pictureScale('Sharp', ratio), pictureScale('', ratio), `other words at ${ratio}`);
+  }
+  // A 4K screen at 200% with no choice opens at 100%: a quarter of the pixels.
+  assert.equal(startSizeField(...scaledSize(1920, 1040, pictureScale('', 2)), pictureScale('', 2)), '1920x1040');
+  assert.equal(startSizeField(...scaledSize(1920, 1040, pictureScale('sharp', 2)), pictureScale('sharp', 2)), '3840x2080@192');
+});
 
 test("Windows' pointer becomes the browser's own at the desktop's scale", () => {
   // At 200% the desktop is shown at half size: the image is a 2x image and

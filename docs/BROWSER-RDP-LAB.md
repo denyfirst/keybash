@@ -197,6 +197,27 @@ more network bandwidth for lossless pictures. Evidence:
 `TestNativeRDPScaledDesktopTellsWindowsItsScale`, `native/scale_test.c` and
 `web/desktop-workspace.test.mjs`.
 
+### Smooth or Sharp (2026-11-17)
+
+Four times the pixels cost speed as well. In ADR 0008's step 2 a 200% desktop
+moved at 36 frames a second where a 100% one moved at 62. On a scaled screen
+the person therefore chooses the picture in the Screen menu:
+
+- Sharp: the screen's own pixels and scale, as above;
+- Smooth: the desktop at 100% in CSS pixels, which the browser enlarges. It is
+  the same size on screen, with softer text and a quarter of the pixels at 200%.
+
+With no choice made, the page picks Smooth at 175% and 200%, where the saving
+is largest, and Sharp below. A 100% screen has nothing to choose, so the menu
+shows no choice.
+
+Windows keeps a session's scale, so a new choice is saved and the desktop opens
+again with it. It is kept with the account on the server, like the look, as
+one of three fixed words (`auto`, `smooth`, `sharp`). It only picks a size the
+bounds above already allow. Evidence:
+`TestDesktopPictureIsKeptWithTheAccountAndArrivesWithTheDesktop` and
+`web/desktop-workspace.test.mjs`.
+
 ## Graphics pipeline (2026-11-16)
 
 A managed desktop now connects with the RDP graphics pipeline (MS-RDPEGFX,

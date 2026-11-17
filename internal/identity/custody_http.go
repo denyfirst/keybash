@@ -399,7 +399,27 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 400)
 			return
 		}
-		if l.store.setPreferences(owner, p) != nil {
+		// The desktop picture is chosen on its own page and kept.
+		if l.store.changePreferences(owner, func(old *preferences) { old.Theme, old.Menu = p.Theme, p.Menu }) != nil {
+			refuse(w, 503)
+			return
+		}
+		w.WriteHeader(204)
+		return
+	}
+	if r.URL.Path == "/api/preferences/picture" && r.Method == "POST" {
+		// How this account's desktops open on a scaled screen. Like the look,
+		// it reaches no server and changes no security: it only picks one of
+		// the sizes the desktop bounds already allow.
+		owner := s.owner
+		l.mu.Unlock()
+		fields, ok := readFields(w, r, 64, "picture")
+		picture, valid := pictureInput(fields["picture"])
+		if !ok || !valid {
+			refuse(w, 400)
+			return
+		}
+		if l.store.changePreferences(owner, func(old *preferences) { old.Picture = picture }) != nil {
 			refuse(w, 503)
 			return
 		}

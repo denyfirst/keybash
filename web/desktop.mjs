@@ -1,6 +1,6 @@
 import { Guacamole } from './vendor/guacamole.mjs';
 import { workspaceControls, rateLimiter, pointerCursor } from './desktop-workspace.mjs';
-import { ownedRemote, remoteProof, remoteErrorMessage, identityChangedMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
+import { ownedRemote, remoteProof, savePicture, remoteErrorMessage, identityChangedMessage, endedMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 let client, keyboard, socket, pendingMouse, mouseFrame, stopped = true, retired = false;
@@ -9,7 +9,12 @@ let sendWorkspace;
 const chrome = sessionChrome();
 const controls = workspaceControls({ $,
   live: () => !stopped, client: () => client,
-  send: (...values) => sendWorkspace?.(...values), resetKeyboard: () => keyboard?.reset()
+  send: (...values) => sendWorkspace?.(...values), resetKeyboard: () => keyboard?.reset(),
+  // The account's picture arrives with the page; a new one is saved there and
+  // an owned desktop opens again with it.
+  picture: ['smooth', 'sharp'].includes(document.body.dataset.picture) ? document.body.dataset.picture : '',
+  savePicture: ownedRemote ? savePicture : async () => {},
+  reopen: () => { if (ownedRemote) location.reload(); else $('notice').textContent = 'The new picture is used when the desktop opens again.'; }
 });
 // Windows' pointer is the browser's own pointer: the image guacd sends becomes
 // the CSS cursor, so it moves with the hand at once. Drawn as a picture in the
