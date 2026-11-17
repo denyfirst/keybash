@@ -68,6 +68,12 @@ uses the build from step 3.
     signing with a private key. The browser client holds no private key, and
     Keybash's proxy does TLS and NLA itself, so the browser never uses RDP
     standard security. It is reviewed in the script.
+  - On 17 November RUSTSEC-2026-0543 marked `chrono` unmaintained
+    (informational, no known flaw). IronRDP's web crate links it only to
+    switch on its `wasmbind` feature, and nothing in the lock depends on it
+    or calls it, so none of its code is reachable in the module. It is
+    reviewed in the script until IronRDP drops it; upstream master still had
+    it that day.
   - The proxy in step 2 compiles other crates, so it gets its own list and
     its own review.
 - Weighed and left: npm's web-client packages and wasm-pack. Keybash writes

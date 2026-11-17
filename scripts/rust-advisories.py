@@ -22,6 +22,13 @@ REVIEWED = {
     # with Windows itself. The proxy holds none either: it signs in with NTLM,
     # and Windows' TLS signature is checked with ring (rdp-proxy/src/pin.rs).
     "RUSTSEC-2023-0071": "rsa",
+    # chrono (unmaintained, informational: no known flaw, no fixed release).
+    # IronRDP's web crate links it only to switch on its wasmbind feature
+    # (`extern crate chrono as _`); nothing in IronRDP's lock depends on it or
+    # calls it, so none of its code is reachable in the browser module. Drop
+    # this line when IronRDP drops the crate (the freshness check watches its
+    # releases).
+    "RUSTSEC-2026-0543": "chrono",
 }
 
 
