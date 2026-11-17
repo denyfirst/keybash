@@ -1,7 +1,7 @@
 # 0008 — Which path video takes: guacd's output, or a browser RDP client behind a proxy
 
-Date: 2026-11-16. Status: proposed. The maintainer chooses after the
-prototype below.
+Date: 2026-11-16. Status: accepted on 17 November 2026. The maintainer chose
+D after the prototype below (see Decision).
 
 ## Context
 
@@ -233,6 +233,60 @@ What D still needs before users:
 - the 4:4:4 combination, for servers that send the second view.
 
 The choice between B and D stays with the maintainer.
+
+## Decision (17 November 2026)
+
+The maintainer chose D. B is not built.
+
+- The desktop runs in the browser:
+  - IronRDP is compiled to WebAssembly;
+  - the graphics pipeline is drawn on the GPU;
+  - H.264 is decoded by WebCodecs.
+- Keybash's RDP worker becomes a credential-injecting proxy.
+  - It keeps today's boundary: the manager hands it the guarded TCP connection, the pinned certificate and the credential.
+  - It completes TLS and NLA with Windows itself. The browser never receives the password or the Windows-side TLS keys.
+  - It is written in Rust on IronRDP's connector and sspi, as the lab proxy was, and runs in the existing sandbox.
+- The proxy relays RDP between the two sides and enforces policy itself:
+  - only the channels Keybash allows are joined or opened: graphics, display control, input, and the clipboard when it is allowed;
+  - drives, printers, smart cards, audio input, USB and every other channel are refused;
+  - every message it forwards has a bounded length;
+  - the session ends on revocation, the idle limit or sign-out, as today.
+- The rule from ADR 0007 that the browser parses only pictures Keybash made is replaced:
+  - the browser parses Windows' RDP and graphics data in IronRDP's memory-safe WebAssembly;
+  - it decodes H.264 in its own sandboxed video decoder.
+  - `SECURITY-INVARIANTS.md` changes in the first pull request that ships this.
+- No change on Windows is required.
+  - Windows' default is the lossless codecs. In step 2 that gave 32 whole frames a second at both scales, pixel-exact.
+  - H.264 and 60 frames a second are each server administrator's choice (`AVC444ModePreferred`, `DWMFRAMEINTERVAL`).
+  - Keybash shows which codec a desktop uses and explains the two settings. It does not change Windows itself, which would need administrator rights on the server and widen what stored credentials are used for.
+- On scaled screens the user chooses the picture, and the choice is kept per browser:
+  - "Smooth", the default, asks Windows for the desktop in CSS pixels at 100% and lets the browser enlarge it on the GPU. The desktop is the same size on screen, with softer text and a quarter of the pixels at 200%. In step 2 that meant the 100% numbers at 200%: 62 instead of 36 frames a second with H.264, 37 instead of 24 lossless, and about half the latency.
+  - "Sharp" asks for the screen's own pixels and scale, as since PR 76.
+- Keybash carries the IronRDP changes as a pinned commit plus its own patch, as it does for guacd and FreeRDP. Offering them upstream is the maintainer's choice.
+- guacd and FreeRDP stay as the fallback until D covers what they do today, and then leave the runtime.
+
+Order of work. Each step is one or more pull requests with its own evidence.
+
+0. Smooth and Sharp on today's desktop page, Smooth by default. The choice carries over to D.
+1. The toolchain:
+   - a pinned Rust toolchain and wasm-bindgen;
+   - IronRDP's pinned commit with Keybash's patch, built in CI and in the stage build;
+   - the dependency, licence and freshness checks covering all of them.
+2. The proxy worker:
+   - TLS with the pinned certificate, NLA with the stored credential, and the security-protocol rewrite;
+   - the channel policy, the bounds and revocation;
+   - fuzzed parsers, and native CI tests against the FreeRDP sample server the native lab already uses.
+3. The desktop page on IronRDP:
+   - the GPU renderer;
+   - the session bar: the clipboard with today's limits and review, Ctrl+Alt+Del, resize, fullscreen, Smooth and Sharp;
+   - the end reasons, and a connect timeout with a clear message.
+4. The switch:
+   - D becomes the default after the maintainer's test on the Windows VM;
+   - guacd stays selectable per server for one release, then leaves.
+5. Then:
+   - the 4:4:4 combination, for servers that send the second view;
+   - the codec shown on the page;
+   - a guide for H.264 and 60 frames a second on the Servers page.
 
 ## References
 
