@@ -37,6 +37,17 @@ the workflow builds it first and runs the binary.
 | guacamole-server | the same script | the highest plain version tag on GitHub |
 | Node.js | `ci.yml` | the highest LTS release in Node's index |
 | pnpm, Playwright, xterm | `ci.yml`, `web/package.json` | the npm registry's `latest` |
+| IronRDP | `scripts/build-ironrdp-web.sh` | the highest plain `ironrdp-v` tag on GitHub |
+| cargo-audit | `ci.yml` | the highest non-pre-release `cargo-audit/v` release on GitHub |
+
+IronRDP is pinned to a commit on its master, after the release named in the
+script, because its browser build's graphics pipeline exists only there. A
+new `ironrdp-v` release means the pin has fallen behind a release, and the
+commit moves to one that contains it. The Rust toolchain and wasm-bindgen are
+not watched on their own: they are the versions IronRDP pins at that commit
+(its `rust-toolchain.toml` and `Cargo.lock`), and the build script refuses any
+other. CI's `cargo audit` checks the locked crates against RustSec on every
+pull request.
 
 ## What the check trusts
 

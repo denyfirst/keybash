@@ -44,6 +44,9 @@ type Pin struct {
 	Version string // plain dotted numbers, without a "v" or "go" prefix
 	Source  Source
 	Key     string // module path, owner/repo or package name, per Source
+	// Prefix comes before the version in a repository that tags several
+	// products, as "ironrdp-v" in "ironrdp-v0.17.0"; other tags are ignored.
+	Prefix string
 }
 
 var versionPattern = regexp.MustCompile(`^[0-9]{1,6}(\.[0-9]{1,6}){1,3}$`)
@@ -86,6 +89,7 @@ func versionPart(parts []string, i int) int {
 const (
 	goModFile      = "go.mod"
 	nativeFile     = "scripts/build-native-runtime.sh"
+	ironrdpFile    = "scripts/build-ironrdp-web.sh"
 	ciWorkflow     = ".github/workflows/ci.yml"
 	freshWorkflow  = ".github/workflows/freshness.yml"
 	webPackageFile = "web/package.json"
@@ -99,6 +103,11 @@ var (
 	nodeURL     = regexp.MustCompile(`nodejs\.org/dist/v([^/\s]+)/`)
 	pnpmURL     = regexp.MustCompile(`(?:/pnpm|exe\.linux-x64)-([^/\s]+)\.tgz`)
 	goInstall   = regexp.MustCompile(`(?m)^[ \t]*go install (\S+)@(v\S+)[ \t]*$`) // commands, not comments
+	// The newest IronRDP release the pinned commit contains, and cargo-audit
+	// as CI installs it. wasm-bindgen-cli is not watched: it must equal the
+	// version in IronRDP's Cargo.lock, which the build script checks.
+	ironrdpRelease = regexp.MustCompile(`newest release, ironrdp-v([0-9][0-9.]*[0-9])`)
+	cargoAudit     = regexp.MustCompile(`cargo install --locked cargo-audit --version (\S+)`)
 )
 
 // Pins reads every pinned version from the repository at root. A pin that
@@ -158,6 +167,15 @@ func Pins(root fs.FS) ([]Pin, error) {
 		return nil, err
 	}
 
+	ironrdp, err := read(ironrdpFile)
+	if err != nil {
+		return nil, err
+	}
+	if err := agreed(ironrdpFile, ironrdp, ironrdpRelease, "IronRDP", GitHubTag, "Devolutions/IronRDP"); err != nil {
+		return nil, err
+	}
+	pins[len(pins)-1].Prefix = "ironrdp-v"
+
 	ci, err := read(ciWorkflow)
 	if err != nil {
 		return nil, err
@@ -168,6 +186,10 @@ func Pins(root fs.FS) ([]Pin, error) {
 	if err := agreed(ciWorkflow, ci, pnpmURL, "pnpm", NPM, "pnpm"); err != nil {
 		return nil, err
 	}
+	if err := agreed(ciWorkflow, ci, cargoAudit, "cargo-audit", GitHubRelease, "rustsec/rustsec"); err != nil {
+		return nil, err
+	}
+	pins[len(pins)-1].Prefix = "cargo-audit/v"
 	for _, file := range []string{ciWorkflow, freshWorkflow} {
 		text, err := read(file)
 		if errors.Is(err, fs.ErrNotExist) && file != ciWorkflow {
@@ -347,12 +369,28 @@ func (u Upstream) Newest(ctx context.Context, pin Pin) (string, error) {
 		}
 		var tags []string
 		for _, r := range releases {
-			if !r.Draft && !r.Prerelease {
-				tags = append(tags, r.Tag)
+			if !r.Draft && !r.Prerelease && strings.HasPrefix(r.Tag, pin.Prefix) {
+				tags = append(tags, strings.TrimPrefix(r.Tag, pin.Prefix))
 			}
 		}
 		return highest(tags)
 	case GitHubTag:
+		if pin.Prefix != "" {
+			// Only this product's tags, however many the others have.
+			var refs []struct {
+				Ref string `json:"ref"`
+			}
+			if err := u.getJSON(ctx, u.GitHub+"/repos/"+pin.Key+"/git/matching-refs/tags/"+url.PathEscape(pin.Prefix), true, &refs); err != nil {
+				return "", err
+			}
+			names := make([]string, 0, len(refs))
+			for _, r := range refs {
+				if name, ok := strings.CutPrefix(r.Ref, "refs/tags/"+pin.Prefix); ok {
+					names = append(names, name)
+				}
+			}
+			return highest(names)
+		}
 		var tags []struct {
 			Name string `json:"name"`
 		}

@@ -1,0 +1,941 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 78982920f2e99518f0151b658a070fcb32d4f835..0b24bdf294b474d9f8326d5ea547a0cd2e959ab6 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3940,6 +3940,7 @@ dependencies = [
+  "ironrdp",
+  "ironrdp-cliprdr-format",
+  "ironrdp-core 0.3.1",
++ "ironrdp-egfx",
+  "ironrdp-futures",
+  "ironrdp-pdu",
+  "ironrdp-propertyset",
+diff --git a/crates/ironrdp-egfx/src/client.rs b/crates/ironrdp-egfx/src/client.rs
+index 173596a49527461d198c37b0c326cac378080214..91f36c35e0cc0386dcbd551ea8df8c33240b54ee 100644
+--- a/crates/ironrdp-egfx/src/client.rs
++++ b/crates/ironrdp-egfx/src/client.rs
+@@ -500,6 +500,9 @@ pub struct GraphicsPipelineClient {
+     cache_import_attempted: bool,
+     /// Keys of the last `CacheImportOffer`, in offer order, until its reply arrives.
+     offered_cache_keys: Option<Vec<u64>>,
++    /// Set when the handler renders: AVC420 and AVC444 to advertise, and every H.264 or
++    /// Alpha update goes to `on_unhandled_pdu` undecoded.
++    handler_rendering: Option<(bool, bool)>,
+ }
+ 
+ impl GraphicsPipelineClient {
+@@ -537,9 +540,21 @@ impl GraphicsPipelineClient {
+             persistent_cache: None,
+             cache_import_attempted: false,
+             offered_cache_keys: None,
++            handler_rendering: None,
+         }
+     }
+ 
++    /// Let the handler render every surface command itself, as a browser drawing on GPU
++    /// canvases does: the compositor keeps no pixels, and AVC420, AVC444 and Alpha updates
++    /// reach `on_unhandled_pdu` undecoded, for the handler to decode (with WebCodecs, say).
++    /// `avc420` and `avc444` say which H.264 modes to advertise.
++    #[must_use]
++    pub fn with_handler_rendering(mut self, avc420: bool, avc444: bool) -> Self {
++        self.handler_rendering = Some((avc420, avc444));
++        self.compositor.disable();
++        self
++    }
++
+     /// Keep the bitmap cache across sessions in `store` ([MS-RDPEGFX] [3.3.1.5]).
+     ///
+     /// Once the server confirms capabilities, the client offers the stored entries in a
+@@ -1184,6 +1199,12 @@ impl GraphicsPipelineClient {
+         }
+ 
+         let result = match pdu.codec_id {
++            Codec1Type::Avc420 | Codec1Type::Alpha | Codec1Type::Avc444 | Codec1Type::Avc444v2
++                if self.handler_rendering.is_some() =>
++            {
++                self.handler.on_unhandled_pdu(&GfxPdu::WireToSurface1(pdu));
++                return Ok(());
++            }
+             Codec1Type::Avc420 => self.decode_avc420(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data),
+             Codec1Type::ClearCodec => {
+                 self.decode_clearcodec(pdu.surface_id, &pdu.destination_rectangle, &pdu.bitmap_data)
+@@ -2076,11 +2097,14 @@ impl DvcProcessor for GraphicsPipelineClient {
+ 
+         // Keep only the sets this client can honor: AVC420 needs a decoder, and AVC444
+         // needs one returning the YUV planes the two views are combined from.
+-        let avc420 = self.h264_decoder.is_some();
+-        let avc444 = self
+-            .h264_decoder
+-            .as_ref()
+-            .is_some_and(|decoder| decoder.supports_yuv420());
++        let (avc420, avc444) = self.handler_rendering.unwrap_or_else(|| {
++            (
++                self.h264_decoder.is_some(),
++                self.h264_decoder
++                    .as_ref()
++                    .is_some_and(|decoder| decoder.supports_yuv420()),
++            )
++        });
+         let mut caps: Vec<CapabilitySet> = self
+             .handler
+             .capabilities()
+diff --git a/crates/ironrdp-egfx/src/compositor.rs b/crates/ironrdp-egfx/src/compositor.rs
+index 00a0216456c90b4c4313453c7ed80ee5583bd60c..f0690afc095feaa36135c1d4ed523c6eced5c1cd 100644
+--- a/crates/ironrdp-egfx/src/compositor.rs
++++ b/crates/ironrdp-egfx/src/compositor.rs
+@@ -233,6 +233,8 @@ pub(crate) struct Compositor {
+     small_bitmap_cache: bool,
+     /// Window deltas from completed frames, awaiting drain.
+     ready_windows: Vec<WindowUpdate>,
++    /// The handler renders every surface command itself, so no pixels are kept here.
++    disabled: bool,
+ }
+ 
+ impl Compositor {
+@@ -241,6 +243,15 @@ impl Compositor {
+         *self = Self {
+             output_width: self.output_width,
+             output_height: self.output_height,
++            disabled: self.disabled,
++            ..Self::default()
++        };
++    }
++
++    /// Keeps no pixels from now on: the handler renders every surface command itself.
++    pub(crate) fn disable(&mut self) {
++        *self = Self {
++            disabled: true,
+             ..Self::default()
+         };
+     }
+@@ -279,6 +290,9 @@ impl Compositor {
+     /// reset, so dropping them here leaves those regions black until something
+     /// forces a fresh upload.
+     pub(crate) fn reset(&mut self, width: u32, height: u32) {
++        if self.disabled {
++            return;
++        }
+         self.output_width = u16::try_from(width).unwrap_or(u16::MAX);
+         self.output_height = u16::try_from(height).unwrap_or(u16::MAX);
+         self.surfaces.clear();
+@@ -337,6 +351,9 @@ impl Compositor {
+ 
+     /// Release a charge taken by [`Self::charge`].
+     pub(crate) fn release(&mut self, len: usize) {
++        if self.disabled {
++            return;
++        }
+         // Saturating rather than wrapping: an accounting slip must not underflow
+         // into a huge budget that disables the limit entirely.
+         self.allocated_bytes = self.allocated_bytes.saturating_sub(len);
+@@ -348,6 +365,9 @@ impl Compositor {
+     /// or the reservation would exceed the budget. A reset releases every reservation, so the owner
+     /// drops these buffers then; otherwise it returns the bytes with [`Self::release`].
+     pub(crate) fn reserve_for_surface(&mut self, id: u16, len: usize) -> bool {
++        if self.disabled {
++            return true;
++        }
+         self.surfaces.contains_key(&id) && self.charge(len)
+     }
+ 
+@@ -357,6 +377,9 @@ impl Compositor {
+     /// allocated; subsequent commands targeting them become no-ops (the metadata
+     /// tracked by the client is unaffected).
+     pub(crate) fn create_surface(&mut self, id: u16, width: u16, height: u16) {
++        if self.disabled {
++            return;
++        }
+         if width == 0 || height == 0 || width > MAX_SURFACE_DIM || height > MAX_SURFACE_DIM {
+             return;
+         }
+@@ -387,6 +410,9 @@ impl Compositor {
+ 
+     /// Handle `DeleteSurface`.
+     pub(crate) fn delete_surface(&mut self, id: u16) {
++        if self.disabled {
++            return;
++        }
+         if let Some(surface) = self.surfaces.remove(&id) {
+             self.release(surface.data.len());
+         }
+@@ -395,6 +421,9 @@ impl Compositor {
+     /// Handle `MapSurfaceToOutput`: record the mapping and make the surface's
+     /// current contents visible at `(origin_x, origin_y)`.
+     pub(crate) fn map_surface(&mut self, id: u16, origin_x: u32, origin_y: u32) {
++        if self.disabled {
++            return;
++        }
+         let Some((width, height)) = self.surfaces.get(&id).map(|surface| (surface.width, surface.height)) else {
+             return;
+         };
+@@ -412,6 +441,9 @@ impl Compositor {
+         target_width: u32,
+         target_height: u32,
+     ) {
++        if self.disabled {
++            return;
++        }
+         let mapping = OutputMapping {
+             origin: (origin_x, origin_y),
+             target_width,
+@@ -438,6 +470,9 @@ impl Compositor {
+     /// the earlier association, as FreeRDP's client does when it refuses an oversized
+     /// mapping, leaves the surface visible until the server maps it again.
+     pub(crate) fn map_surface_to_window(&mut self, id: u16, window_id: u64, mapped: (u32, u32), target: (u32, u32)) {
++        if self.disabled {
++            return;
++        }
+         let Some(surface) = self.surfaces.get_mut(&id) else {
+             return;
+         };
+@@ -463,6 +498,9 @@ impl Compositor {
+     /// `rgba` is expected to be `dest.width() * dest.height() * 4` bytes; short or
+     /// long buffers are handled defensively by the row-wise blit.
+     pub(crate) fn apply_bitmap(&mut self, surface_id: u16, dest: &ExclusiveRectangle, rgba: &[u8]) {
++        if self.disabled {
++            return;
++        }
+         let x = dest.left;
+         let y = dest.top;
+         let w = dest.right.saturating_sub(dest.left);
+@@ -494,6 +532,9 @@ impl Compositor {
+         dest: &ExclusiveRectangle,
+         stream: &[u8],
+     ) -> Result<Option<(ExclusiveRectangle, Vec<u8>)>, AlphaDecodeError> {
++        if self.disabled {
++            return Ok(None);
++        }
+         let x = dest.left;
+         let y = dest.top;
+         let w = dest.right.saturating_sub(dest.left);
+@@ -537,6 +578,9 @@ impl Compositor {
+ 
+     /// Fill each rectangle of a surface with a solid, opaque color (`SolidFill`).
+     pub(crate) fn solid_fill(&mut self, surface_id: u16, color: &Color, rects: &[ExclusiveRectangle]) {
++        if self.disabled {
++            return;
++        }
+         let px = [color.r, color.g, color.b, 0xFF];
+         for rect in rects {
+             let x = rect.left;
+@@ -561,6 +605,9 @@ impl Compositor {
+         src_rect: &ExclusiveRectangle,
+         dst_points: &[Point],
+     ) {
++        if self.disabled {
++            return;
++        }
+         // Read the source region into an owned tile first, so a scroll within one
+         // surface (src_id == dst_id) reads pre-move pixels and never aliases.
+         let Some(src) = self.surfaces.get(&src_id) else {
+@@ -600,6 +647,9 @@ impl Compositor {
+         cache_key: u64,
+         src_rect: &ExclusiveRectangle,
+     ) {
++        if self.disabled {
++            return;
++        }
+         // Size the tile in a scope that ends the surface borrow, so the budget calls
+         // below can take `&mut self` while the charge still precedes the allocation.
+         let (w, h) = {
+@@ -656,6 +706,9 @@ impl Compositor {
+         height: u16,
+         data: Vec<u8>,
+     ) -> bool {
++        if self.disabled {
++            return false;
++        }
+         if width == 0 || height == 0 || pixel_data_len(width, height) != Some(data.len()) {
+             return false;
+         }
+@@ -694,6 +747,9 @@ impl Compositor {
+ 
+     /// Every cached tile, most recently used first, for saving to the persistent cache.
+     pub(crate) fn cache_entries(&self) -> Vec<CachedBitmap<'_>> {
++        if self.disabled {
++            return Vec::new();
++        }
+         let mut tiles: Vec<&CachedTile> = self.cache.values().collect();
+         tiles.sort_by_key(|tile| core::cmp::Reverse(tile.last_used));
+         tiles
+@@ -715,6 +771,9 @@ impl Compositor {
+     /// Render a cached tile onto a surface at each destination point
+     /// (`CacheToSurface`).
+     pub(crate) fn cache_to_surface(&mut self, cache_slot: u16, surface_id: u16, dst_points: &[Point]) {
++        if self.disabled {
++            return;
++        }
+         let now = self.tick();
+         let Some(tile) = self.cache.get_mut(&cache_slot) else {
+             return;
+@@ -738,6 +797,9 @@ impl Compositor {
+ 
+     /// Evict a cache slot (`EvictCacheEntry`).
+     pub(crate) fn evict_cache_entry(&mut self, cache_slot: u16) {
++        if self.disabled {
++            return;
++        }
+         if let Some(tile) = self.cache.remove(&cache_slot) {
+             self.release(tile.data.len());
+         }
+@@ -749,6 +811,9 @@ impl Compositor {
+     /// deleted or remapped mid-frame contributes nothing: its output region is
+     /// repainted by whatever maps there next.
+     pub(crate) fn end_frame(&mut self) {
++        if self.disabled {
++            return;
++        }
+         let frame = core::mem::take(&mut self.frame);
+         // Released before materializing so the pixel copies can spend the budget the
+         // metadata was holding.
+@@ -760,6 +825,9 @@ impl Compositor {
+ 
+     /// Take all committed output updates, leaving the pending set empty.
+     pub(crate) fn drain_output(&mut self) -> Vec<OutputUpdate> {
++        if self.disabled {
++            return Vec::new();
++        }
+         let drained = core::mem::take(&mut self.ready);
+         let released = drained.iter().map(|update| update.data.len()).sum();
+         self.release(released);
+@@ -768,6 +836,9 @@ impl Compositor {
+ 
+     /// Take all committed window updates, leaving the pending set empty.
+     pub(crate) fn drain_window_updates(&mut self) -> Vec<WindowUpdate> {
++        if self.disabled {
++            return Vec::new();
++        }
+         let drained = core::mem::take(&mut self.ready_windows);
+         let released = drained.iter().map(|update| update.data.len()).sum();
+         self.release(released);
+diff --git a/crates/ironrdp-web/Cargo.toml b/crates/ironrdp-web/Cargo.toml
+index 9adcbb440921ca969e7a378709c8aebd1bc08101..6322393ccfbcd443a0832724811cad696d1329f8 100644
+--- a/crates/ironrdp-web/Cargo.toml
++++ b/crates/ironrdp-web/Cargo.toml
+@@ -40,6 +40,7 @@ ironrdp = { path = "../ironrdp", features = [
+ ] }
+ ironrdp-core.path = "../ironrdp-core"
+ ironrdp-cliprdr-format.path = "../ironrdp-cliprdr-format"
++ironrdp-egfx.path = "../ironrdp-egfx"
+ ironrdp-futures.path = "../ironrdp-futures"
+ ironrdp-pdu.path = "../ironrdp-pdu"
+ ironrdp-rdcleanpath.path = "../ironrdp-rdcleanpath"
+diff --git a/crates/ironrdp-web/src/gfx.rs b/crates/ironrdp-web/src/gfx.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..a353b9be0ca0418721894259f21286c19297daee
+--- /dev/null
++++ b/crates/ironrdp-web/src/gfx.rs
+@@ -0,0 +1,454 @@
++//! Keybash: the graphics pipeline, drawn by the page on the GPU.
++//!
++//! The pipeline client parses and decompresses the channel and decodes the bitmap codecs
++//! (planar, ClearCodec, RemoteFX and its progressive form). This handler turns every surface
++//! command into a compact record, in order. After each received frame the session hands the
++//! batch to the page's `__keybashGfx.apply`, which draws on GPU canvases and decodes Windows'
++//! H.264 with WebCodecs, so video reaches the screen without passing through the CPU.
++//!
++//! Record layout, little endian: one op byte, then the fields its writer below puts.
++
++use std::collections::BTreeMap;
++use std::sync::{Arc, Mutex, PoisonError};
++
++use ironrdp_core::{Decode as _, ReadCursor};
++use ironrdp_egfx::client::{BitmapUpdate, GraphicsPipelineHandler, Surface};
++use ironrdp_egfx::pdu::{
++    Avc420BitmapStream, Avc444BitmapStream, CacheToSurfacePdu, CapabilitiesV8Flags, CapabilitiesV10Flags,
++    CapabilitiesV81Flags, CapabilitiesV103Flags, CapabilitiesV104Flags, CapabilitiesV107Flags, CapabilitySet,
++    Codec1Type, EvictCacheEntryPdu, GfxPdu, MapSurfaceToScaledOutputPdu, PixelFormat, SolidFillPdu,
++    SurfaceToCachePdu, SurfaceToSurfacePdu, avc_to_annex_b, is_avc_format,
++};
++use ironrdp_pdu::geometry::ExclusiveRectangle;
++use tracing::{info, warn};
++
++const OP_RESET: u8 = 1;
++const OP_CREATE: u8 = 2;
++const OP_DELETE: u8 = 3;
++const OP_MAP: u8 = 4;
++const OP_FILL: u8 = 5;
++const OP_COPY: u8 = 6;
++const OP_TO_CACHE: u8 = 7;
++const OP_FROM_CACHE: u8 = 8;
++const OP_EVICT: u8 = 9;
++const OP_BITMAP: u8 = 10;
++const OP_AVC420: u8 = 11;
++const OP_AVC444: u8 = 12;
++const OP_END_FRAME: u8 = 13;
++const OP_MAP_SCALED: u8 = 14;
++const OP_NOTE: u8 = 15;
++const OP_CLOSE: u8 = 16;
++const OP_ALPHA: u8 = 17;
++
++/// Which H.264 the client offers Windows.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum GfxVideo {
++    /// Version 10 capabilities: Windows chooses AVC444 or AVC420 for the whole screen.
++    Avc444,
++    /// Version 8.1: AVC420 where Windows sees video, the lossless codecs elsewhere.
++    Avc420,
++    /// No H.264: RemoteFX progressive, ClearCodec and planar only.
++    Off,
++}
++
++impl GfxVideo {
++    pub(crate) fn from_name(name: &str) -> Option<Self> {
++        match name {
++            "avc444" => Some(Self::Avc444),
++            "avc420" => Some(Self::Avc420),
++            "off" => Some(Self::Off),
++            _ => None,
++        }
++    }
++
++    /// AVC420 and AVC444 to advertise.
++    pub(crate) fn avc(self) -> (bool, bool) {
++        match self {
++            Self::Avc444 => (true, true),
++            Self::Avc420 => (true, false),
++            Self::Off => (false, false),
++        }
++    }
++}
++
++/// Records waiting for the page, and whether the pipeline is drawing the screen.
++#[derive(Default)]
++pub(crate) struct GfxQueue {
++    pub(crate) records: Vec<u8>,
++    pub(crate) active: bool,
++}
++
++pub(crate) type SharedGfxQueue = Arc<Mutex<GfxQueue>>;
++
++pub(crate) fn take_records(queue: &SharedGfxQueue) -> (Vec<u8>, bool) {
++    let mut queue = queue.lock().unwrap_or_else(PoisonError::into_inner);
++    (core::mem::take(&mut queue.records), queue.active)
++}
++
++pub(crate) struct PageRenderer {
++    queue: SharedGfxQueue,
++    video: GfxVideo,
++    /// Surfaces without alpha get opaque pixels, as `put_image_data` stores alpha as given.
++    opaque: BTreeMap<u16, bool>,
++}
++
++impl PageRenderer {
++    pub(crate) fn new(queue: SharedGfxQueue, video: GfxVideo) -> Self {
++        Self {
++            queue,
++            video,
++            opaque: BTreeMap::new(),
++        }
++    }
++
++    fn write(&self, f: impl FnOnce(&mut Writer<'_>)) {
++        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
++        f(&mut Writer(&mut queue.records));
++    }
++
++    fn note(&self, text: &str) {
++        info!(text, "graphics pipeline");
++        self.write(|w| {
++            w.u8(OP_NOTE);
++            w.bytes(text.as_bytes());
++        });
++    }
++}
++
++struct Writer<'a>(&'a mut Vec<u8>);
++
++impl Writer<'_> {
++    fn u8(&mut self, v: u8) {
++        self.0.push(v);
++    }
++    fn u16(&mut self, v: u16) {
++        self.0.extend_from_slice(&v.to_le_bytes());
++    }
++    fn u32(&mut self, v: u32) {
++        self.0.extend_from_slice(&v.to_le_bytes());
++    }
++    fn rect(&mut self, r: &ExclusiveRectangle) {
++        self.u16(r.left);
++        self.u16(r.top);
++        self.u16(r.right);
++        self.u16(r.bottom);
++    }
++    fn rects(&mut self, rects: &[ExclusiveRectangle]) {
++        self.u16(u16::try_from(rects.len()).unwrap_or(u16::MAX));
++        for r in rects.iter().take(usize::from(u16::MAX)) {
++            self.rect(r);
++        }
++    }
++    /// A u32 length, then the bytes.
++    fn bytes(&mut self, data: &[u8]) {
++        self.u32(u32::try_from(data.len()).unwrap_or(u32::MAX));
++        self.0.extend_from_slice(data);
++    }
++    /// H.264 as an Annex B byte stream, which WebCodecs reads without a description.
++    fn h264(&mut self, data: &[u8]) {
++        if is_avc_format(data) {
++            self.bytes(&avc_to_annex_b(data));
++        } else {
++            self.bytes(data);
++        }
++    }
++    fn avc420(&mut self, stream: &Avc420BitmapStream<'_>) {
++        self.rects(&stream.rectangles);
++        self.h264(stream.data);
++    }
++}
++
++impl GraphicsPipelineHandler for PageRenderer {
++    fn capabilities(&self) -> Vec<CapabilitySet> {
++        match self.video {
++            GfxVideo::Avc444 => vec![
++                CapabilitySet::V10_7 {
++                    flags: CapabilitiesV107Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_6 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_5 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_4 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10_3 {
++                    flags: CapabilitiesV103Flags::empty(),
++                },
++                CapabilitySet::V10_2 {
++                    flags: CapabilitiesV10Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V10 {
++                    flags: CapabilitiesV10Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V8_1 {
++                    flags: CapabilitiesV81Flags::AVC420_ENABLED | CapabilitiesV81Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V8 {
++                    flags: CapabilitiesV8Flags::SMALL_CACHE,
++                },
++            ],
++            GfxVideo::Avc420 => vec![
++                CapabilitySet::V8_1 {
++                    flags: CapabilitiesV81Flags::AVC420_ENABLED | CapabilitiesV81Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V8 {
++                    flags: CapabilitiesV8Flags::SMALL_CACHE,
++                },
++            ],
++            GfxVideo::Off => vec![
++                CapabilitySet::V10_7 {
++                    flags: CapabilitiesV107Flags::SMALL_CACHE | CapabilitiesV107Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V10_6 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE | CapabilitiesV104Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V10_5 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE | CapabilitiesV104Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V10_4 {
++                    flags: CapabilitiesV104Flags::SMALL_CACHE | CapabilitiesV104Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V10_3 {
++                    flags: CapabilitiesV103Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V10_2 {
++                    flags: CapabilitiesV10Flags::SMALL_CACHE | CapabilitiesV10Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V10 {
++                    flags: CapabilitiesV10Flags::SMALL_CACHE | CapabilitiesV10Flags::AVC_DISABLED,
++                },
++                CapabilitySet::V8_1 {
++                    flags: CapabilitiesV81Flags::SMALL_CACHE,
++                },
++                CapabilitySet::V8 {
++                    flags: CapabilitiesV8Flags::SMALL_CACHE,
++                },
++            ],
++        }
++    }
++
++    fn on_capabilities_confirmed(&mut self, caps: &CapabilitySet) {
++        self.queue.lock().unwrap_or_else(PoisonError::into_inner).active = true;
++        self.note(&format!("confirmed {caps:?}, offered {:?}", self.video));
++    }
++
++    fn on_reset_graphics(&mut self, width: u32, height: u32) {
++        self.opaque.clear();
++        self.write(|w| {
++            w.u8(OP_RESET);
++            w.u32(width);
++            w.u32(height);
++        });
++    }
++
++    fn on_reset_graphics_rejected(&mut self, width: u32, height: u32) {
++        self.note(&format!("reset to {width}x{height} rejected"));
++    }
++
++    fn on_surface_created(&mut self, surface: &Surface) {
++        let opaque = surface.pixel_format == PixelFormat::XRgb;
++        self.opaque.insert(surface.id, opaque);
++        self.write(|w| {
++            w.u8(OP_CREATE);
++            w.u16(surface.id);
++            w.u16(surface.width);
++            w.u16(surface.height);
++            w.u8(u8::from(!opaque));
++        });
++    }
++
++    fn on_surface_deleted(&mut self, surface_id: u16) {
++        self.opaque.remove(&surface_id);
++        self.write(|w| {
++            w.u8(OP_DELETE);
++            w.u16(surface_id);
++        });
++    }
++
++    fn on_surface_mapped(&mut self, surface_id: u16, origin_x: u32, origin_y: u32) {
++        self.write(|w| {
++            w.u8(OP_MAP);
++            w.u16(surface_id);
++            w.u32(origin_x);
++            w.u32(origin_y);
++        });
++    }
++
++    fn on_map_surface_to_scaled_output(&mut self, pdu: &MapSurfaceToScaledOutputPdu) {
++        self.write(|w| {
++            w.u8(OP_MAP_SCALED);
++            w.u16(pdu.surface_id);
++            w.u32(pdu.output_origin_x);
++            w.u32(pdu.output_origin_y);
++            w.u32(pdu.target_width);
++            w.u32(pdu.target_height);
++        });
++    }
++
++    fn on_bitmap_updated(&mut self, update: &BitmapUpdate) {
++        let opaque = self.opaque.get(&update.surface_id).copied().unwrap_or(true);
++        let expected = usize::from(update.width) * usize::from(update.height) * 4;
++        if update.data.len() != expected {
++            warn!(len = update.data.len(), expected, "Bitmap update of the wrong size dropped");
++            return;
++        }
++        self.write(|w| {
++            w.u8(OP_BITMAP);
++            w.u16(update.surface_id);
++            w.rect(&update.destination_rectangle);
++            let start = w.0.len() + 4;
++            w.bytes(&update.data);
++            if opaque {
++                for alpha in w.0[start..].iter_mut().skip(3).step_by(4) {
++                    *alpha = 0xFF;
++                }
++            }
++        });
++    }
++
++    fn on_frame_complete(&mut self, frame_id: u32) {
++        self.write(|w| {
++            w.u8(OP_END_FRAME);
++            w.u32(frame_id);
++        });
++    }
++
++    fn on_close(&mut self) {
++        self.opaque.clear();
++        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
++        queue.active = false;
++        queue.records.push(OP_CLOSE);
++    }
++
++    fn on_solid_fill(&mut self, pdu: &SolidFillPdu) {
++        self.write(|w| {
++            w.u8(OP_FILL);
++            w.u16(pdu.surface_id);
++            w.u8(pdu.fill_pixel.r);
++            w.u8(pdu.fill_pixel.g);
++            w.u8(pdu.fill_pixel.b);
++            w.u8(pdu.fill_pixel.xa);
++            w.rects(&pdu.rectangles);
++        });
++    }
++
++    fn on_surface_to_surface(&mut self, pdu: &SurfaceToSurfacePdu) {
++        self.write(|w| {
++            w.u8(OP_COPY);
++            w.u16(pdu.source_surface_id);
++            w.u16(pdu.destination_surface_id);
++            w.rect(&pdu.source_rectangle);
++            w.u16(u16::try_from(pdu.destination_points.len()).unwrap_or(u16::MAX));
++            for point in pdu.destination_points.iter().take(usize::from(u16::MAX)) {
++                w.u16(point.x);
++                w.u16(point.y);
++            }
++        });
++    }
++
++    fn on_surface_to_cache(&mut self, pdu: &SurfaceToCachePdu) {
++        self.write(|w| {
++            w.u8(OP_TO_CACHE);
++            w.u16(pdu.surface_id);
++            w.u16(pdu.cache_slot);
++            w.rect(&pdu.source_rectangle);
++        });
++    }
++
++    fn on_cache_to_surface(&mut self, pdu: &CacheToSurfacePdu) {
++        self.write(|w| {
++            w.u8(OP_FROM_CACHE);
++            w.u16(pdu.cache_slot);
++            w.u16(pdu.surface_id);
++            w.u16(u16::try_from(pdu.destination_points.len()).unwrap_or(u16::MAX));
++            for point in pdu.destination_points.iter().take(usize::from(u16::MAX)) {
++                w.u16(point.x);
++                w.u16(point.y);
++            }
++        });
++    }
++
++    fn on_evict_cache_entry(&mut self, pdu: &EvictCacheEntryPdu) {
++        self.write(|w| {
++            w.u8(OP_EVICT);
++            w.u16(pdu.cache_slot);
++        });
++    }
++
++    fn on_unhandled_pdu(&mut self, pdu: &GfxPdu) {
++        let GfxPdu::WireToSurface1(wire) = pdu else {
++            self.note(&format!("unhandled {}", pdu_name(pdu)));
++            return;
++        };
++        let mut cursor = ReadCursor::new(&wire.bitmap_data);
++        match wire.codec_id {
++            Codec1Type::Avc420 => match Avc420BitmapStream::decode(&mut cursor) {
++                Ok(stream) => self.write(|w| {
++                    w.u8(OP_AVC420);
++                    w.u16(wire.surface_id);
++                    w.rect(&wire.destination_rectangle);
++                    w.avc420(&stream);
++                }),
++                Err(error) => warn!(%error, "AVC420 stream dropped"),
++            },
++            Codec1Type::Avc444 | Codec1Type::Avc444v2 => match Avc444BitmapStream::decode(&mut cursor) {
++                Ok(stream) => self.write(|w| {
++                    w.u8(OP_AVC444);
++                    w.u16(wire.surface_id);
++                    w.u8(u8::from(wire.codec_id == Codec1Type::Avc444v2));
++                    w.u8(stream.encoding.bits());
++                    w.rect(&wire.destination_rectangle);
++                    w.avc420(&stream.stream1);
++                    match &stream.stream2 {
++                        Some(stream2) => {
++                            w.u8(1);
++                            w.avc420(stream2);
++                        }
++                        None => w.u8(0),
++                    }
++                }),
++                Err(error) => warn!(%error, "AVC444 stream dropped"),
++            },
++            Codec1Type::Alpha => self.write(|w| {
++                w.u8(OP_ALPHA);
++                w.u16(wire.surface_id);
++                w.rect(&wire.destination_rectangle);
++                w.bytes(&wire.bitmap_data);
++            }),
++            other => self.note(&format!("unhandled codec {other:?}")),
++        }
++    }
++}
++
++fn pdu_name(pdu: &GfxPdu) -> String {
++    let debug = format!("{pdu:?}");
++    debug.split(['(', ' ', '{']).next().unwrap_or("?").to_owned()
++}
++
++/// Gives the page a batch of records. When the page is behind, it returns a promise that
++/// settles once it caught up, and the session reads nothing more until then, so Windows
++/// slows down instead of the page falling further behind.
++pub(crate) async fn hand_to_page(canvas: &web_sys::HtmlCanvasElement, records: &[u8]) -> anyhow::Result<()> {
++    use anyhow::anyhow;
++    use wasm_bindgen::{JsCast as _, JsValue};
++
++    let page = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__keybashGfx"))
++        .map_err(|error| anyhow!("no page renderer: {error:?}"))?;
++    let apply = js_sys::Reflect::get(&page, &JsValue::from_str("apply"))
++        .map_err(|error| anyhow!("no page renderer: {error:?}"))?
++        .dyn_into::<js_sys::Function>()
++        .map_err(|_| anyhow!("the page renderer has no apply function"))?;
++    let bytes = js_sys::Uint8Array::from(records);
++    let result = apply
++        .call2(&page, canvas, &bytes)
++        .map_err(|error| anyhow!("page renderer failed: {error:?}"))?;
++    if let Some(promise) = result.dyn_ref::<js_sys::Promise>() {
++        wasm_bindgen_futures::JsFuture::from(promise.clone())
++            .await
++            .map_err(|error| anyhow!("page renderer failed: {error:?}"))?;
++    }
++    Ok(())
++}
+diff --git a/crates/ironrdp-web/src/lib.rs b/crates/ironrdp-web/src/lib.rs
+index 4ed6dd5ac770b56727041d8f03f57a5bf9a47e85..2ebbb90503682113fcf91b81335f61ebaac926ef 100644
+--- a/crates/ironrdp-web/src/lib.rs
++++ b/crates/ironrdp-web/src/lib.rs
+@@ -20,6 +20,7 @@ mod canvas;
+ mod clipboard;
+ mod cursor;
+ mod error;
++mod gfx;
+ mod image;
+ mod input;
+ mod network_client;
+diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
+index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b0297da93 100644
+--- a/crates/ironrdp-web/src/session.rs
++++ b/crates/ironrdp-web/src/session.rs
+@@ -9,6 +9,7 @@ use crate::canvas::Canvas;
+ use crate::clipboard;
+ use crate::clipboard::{ClipboardData, FileMetadata, WasmClipboard, WasmClipboardBackend, WasmClipboardBackendMessage};
+ use crate::error::IronError;
++use crate::gfx::{GfxVideo, PageRenderer, SharedGfxQueue};
+ use crate::image::extract_partial_image;
+ use crate::input::InputTransaction;
+ use crate::network_client::WasmNetworkClient;
+@@ -41,6 +42,7 @@ use ironrdp::rdpsnd::client::{NoopRdpsndBackend, Rdpsnd};
+ use ironrdp::session::image::DecodedImage;
+ use ironrdp::session::{ActiveStageBuilder, ActiveStageOutput, GracefulDisconnectReason};
+ use ironrdp_core::WriteBuf;
++use ironrdp_egfx::client::GraphicsPipelineClient;
+ use ironrdp_futures::{FramedWrite, single_sequence_step_read};
+ use rgb::AsPixels as _;
+ use tap::prelude::*;
+@@ -103,6 +105,7 @@ struct SessionBuilderInner {
+     enable_server_pointer: bool,
+     legacy_graphics: bool,
+     outbound_message_size_limit: Option<usize>,
++    gfx_video: Option<GfxVideo>,
+     performance_flags: Option<PerformanceFlags>,
+     desktop_scale_factor: Option<u32>,
+     color_depth: Option<u32>,
+@@ -155,6 +158,7 @@ impl Default for SessionBuilderInner {
+             enable_server_pointer: true,
+             legacy_graphics: false,
+             outbound_message_size_limit: None,
++            gfx_video: None,
+             performance_flags: None,
+             desktop_scale_factor: None,
+             color_depth: None,
+@@ -314,6 +318,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             };
+             |enable_server_pointer: bool| { self.0.borrow_mut().enable_server_pointer = enable_server_pointer };
+             |legacy_graphics: bool| { self.0.borrow_mut().legacy_graphics = legacy_graphics };
++            |gfx_video: String| { self.0.borrow_mut().gfx_video = GfxVideo::from_name(&gfx_video) };
+             |outbound_message_size_limit: f64| {
+                 let limit = if outbound_message_size_limit >= 0.0 && outbound_message_size_limit <= f64::from(u32::MAX) {
+                     #[expect(clippy::as_conversions, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+@@ -646,6 +651,9 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+         }
+ 
+         let use_display_control = self.0.borrow().use_display_control;
++        let gfx_video = self.0.borrow().gfx_video;
++        let gfx_queue = gfx_video.map(|_| SharedGfxQueue::default());
++        config.support_dyn_vc_gfx_protocol = gfx_video.is_some();
+ 
+         let (connection_result, ws) = connect(ConnectParams {
+             ws,
+@@ -662,6 +670,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             printer_driver_name,
+             computer_name: client_name.clone(),
+             use_display_control,
++            gfx: gfx_video.zip(gfx_queue.clone()),
+             audio_backend: audio_playback_callback
+                 .is_some()
+                 .then(|| crate::audio::WasmAudioBackend::new(input_events_tx.clone())),
+@@ -687,6 +696,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             set_cursor_style_callback_context,
+             audio_playback_callback,
+             monitor_layout_callback,
++            gfx_queue,
+ 
+             input_events_rx: RefCell::new(Some(input_events_rx)),
+             rdp_reader: RefCell::new(Some(rdp_reader)),
+@@ -832,6 +842,7 @@ pub(crate) struct Session {
+     set_cursor_style_callback_context: JsValue,
+     audio_playback_callback: Option<js_sys::Function>,
+     monitor_layout_callback: Option<js_sys::Function>,
++    gfx_queue: Option<SharedGfxQueue>,
+ 
+     // Consumed when `run` is called
+     input_events_rx: RefCell<Option<mpsc::UnboundedReceiver<RdpInputEvent>>>,
+@@ -1197,6 +1208,16 @@ impl iron_remote_desktop::Session for Session {
+                 }
+             };
+ 
++            // The page draws the graphics pipeline; the decoded image only serves updates outside it.
++            let mut gfx_active = false;
++            if let Some(queue) = &self.gfx_queue {
++                let (records, active) = crate::gfx::take_records(queue);
++                gfx_active = active;
++                if !records.is_empty() {
++                    crate::gfx::hand_to_page(&self.render_canvas, &records).await?;
++                }
++            }
++
+             for out in outputs {
+                 match out {
+                     ActiveStageOutput::ResponseFrame(frame) => {
+@@ -1205,6 +1226,9 @@ impl iron_remote_desktop::Session for Session {
+                             .context("Send frame to writer task")?;
+                     }
+                     ActiveStageOutput::GraphicsUpdate(region) => {
++                        if gfx_active {
++                            continue;
++                        }
+                         let region = extract_partial_image(&image, region, &mut draw_buffer);
+                         gui.draw(draw_buffer.filled_mut(), region)
+                             .context("draw updated region")?;
+@@ -1883,6 +1907,7 @@ struct ConnectParams {
+     /// `computer_name` when constructing the `Rdpdr` processor.
+     computer_name: String,
+     use_display_control: bool,
++    gfx: Option<(GfxVideo, SharedGfxQueue)>,
+     audio_backend: Option<crate::audio::WasmAudioBackend>,
+ }
+ 
+@@ -1977,6 +2002,7 @@ async fn connect(
+         printer_driver_name,
+         computer_name,
+         use_display_control,
++        gfx,
+         audio_backend,
+     }: ConnectParams,
+ ) -> Result<(connector::ConnectionResult, WebSocket), IronError> {
+@@ -2001,11 +2027,23 @@ async fn connect(
+         computer_name,
+     );
+ 
++    let mut dynamic_channels = gfx.map(|(video, queue)| {
++        let (avc420, avc444) = video.avc();
++        DrdynvcClient::new().with_dynamic_channel(
++            GraphicsPipelineClient::new(Box::new(PageRenderer::new(queue, video)), None)
++                .with_handler_rendering(avc420, avc444),
++        )
++    });
+     if use_display_control {
+-        connector.attach_static_channel(
+-            DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
++        dynamic_channels = Some(
++            dynamic_channels
++                .unwrap_or_else(DrdynvcClient::new)
++                .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
+         );
+     }
++    if let Some(dynamic_channels) = dynamic_channels {
++        connector.attach_static_channel(dynamic_channels);
++    }
+ 
+     let kerberos_config = url::Url::parse(kdc_proxy_url.unwrap_or_default().as_str())
+         .ok()
