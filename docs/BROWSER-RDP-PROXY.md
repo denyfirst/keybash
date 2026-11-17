@@ -174,5 +174,16 @@ Decision).
   - The gateway still sends the setup with the clipboard off. Step 3 turns it
     on with the page, whose clipboard runs only on the person's own copy and
     paste.
+- **2d.** Randomised tests of every parser the proxy runs on bytes it does not
+  control (`rdp-proxy/src/fuzz.rs`): the PDU splitter, the channel checks on
+  whole desktops, the clipboard with messages cut at random, the Connect
+  Initial check, the setup and pipe frames, and the trust files.
+  - Each is fed mutations of real messages, after a valid start so the deeper
+    states are reached, and plain noise. The seeds are fixed, so a failure
+    repeats.
+  - The rule for each: no panic, which release builds raise on integer
+    overflow too, and whatever passes stays within its bounds.
+  - CI runs 3,000 rounds of each; `KEYBASH_FUZZ_ROUNDS` runs more. They are
+    ordinary tests on stable Rust, with no new dependency.
 
 Step 3 then brings the page.

@@ -11,6 +11,8 @@ mod channels;
 mod clipboard;
 mod config;
 mod frame;
+#[cfg(test)]
+mod fuzz;
 mod pin;
 mod policy;
 mod session;
