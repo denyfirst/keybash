@@ -46,10 +46,13 @@ def audit(vulnerabilities=(), **warnings):
     return {"vulnerabilities": {"list": list(vulnerabilities)}, "warnings": {k: list(v) for k, v in warnings.items()}}
 
 
-compiled = [("rsa", "0.10.0-rc.18"), ("paste", "1.0.15")]
+compiled = [("rsa", "0.10.0-rc.18"), ("paste", "1.0.15"), ("chrono", "0.4.45")]
 cases = {
     "a vulnerability on a crate never built": (audit([entry("RUSTSEC-2026-0512", "hickory-proto", "0.25.2")]), 0),
     "the reviewed rsa advisory": (audit([entry("RUSTSEC-2023-0071", "rsa", "0.10.0-rc.18")]), 0),
+    "the reviewed chrono advisory": (audit(unmaintained=[entry("RUSTSEC-2026-0543", "chrono", "0.4.45")]), 0),
+    "a new chrono advisory": (audit([entry("RUSTSEC-2027-0003", "chrono", "0.4.45")]), 1),
+    "the chrono review on another crate": (audit(unmaintained=[entry("RUSTSEC-2026-0543", "paste", "1.0.15")]), 1),
     "a new rsa advisory": (audit([entry("RUSTSEC-2027-0001", "rsa", "0.10.0-rc.18")]), 1),
     "the reviewed ID on another crate": (audit([entry("RUSTSEC-2023-0071", "paste", "1.0.15")]), 1),
     "an unmaintained compiled crate": (audit(unmaintained=[entry("RUSTSEC-2024-0436", "paste", "1.0.15")]), 1),
