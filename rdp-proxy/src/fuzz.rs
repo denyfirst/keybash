@@ -478,7 +478,9 @@ fn the_splitter_survives_broken_streams() {
 #[test]
 fn setup_frames_and_trust_files_survive_mutations() {
     let mut rng = Rng(0x6B65_7962_6173_6805);
-    let setup = crate::setup::encode("kb-user", "KB", "kb-password", true);
+    // A password made by the generator: a test value, never a fixed secret.
+    let password: String = (0..16).map(|_| char::from(b'a' + rng.byte() % 26)).collect();
+    let setup = crate::setup::encode("kb-user", "KB", &password, true);
     let frame = {
         let mut f = vec![2u8];
         f.extend_from_slice(&5u32.to_le_bytes());
