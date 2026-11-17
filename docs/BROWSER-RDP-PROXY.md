@@ -52,8 +52,7 @@ the server name from `/run/keybash/name`, as FreeRDP does now.
 2. The proxy sends Windows its own X.224 request (TLS, CredSSP, CredSSP with
    early user authorization), and Windows must select NLA. The request carries
    no routing cookie: nothing about the account (user name, domain, password)
-   crosses the network before TLS. It then completes
-   TLS 1.2 or 1.3 with its own verifier (`rdp-proxy/src/pin.rs`):
+   crosses the network before TLS. It then completes TLS 1.2 or 1.3 with its own verifier (`rdp-proxy/src/pin.rs`):
    - the leaf certificate must be byte for byte the pinned one, inside its
      validity dates, or the session ends as "certificate changed" before any
      credential is sent;
@@ -88,21 +87,29 @@ hold a worker.
 
 ## After the handshake
 
-The proxy relays both ways and checks what it passes on. Until 2c lands, the
-relay is bounded only by the 64 KiB frames, TCP flow control and the session's
-own limits.
+The proxy relays both ways and checks what it passes on
+(`rdp-proxy/src/channels.rs`):
 
-- Every TPKT and fast-path PDU is framed and bounded. A malformed or oversized
-  one ends the session as "refused".
-- On `drdynvc`, Windows' create requests are answered by the proxy itself
-  unless the channel is allowed:
+- Every TPKT and fast-path PDU is framed and bounded (at most 65,535 bytes, at
+  least its own header) and checked whole before it passes.
+- Windows' MCS Connect Response must number exactly the static channels the
+  browser asked for. Only the I/O and user channels and `drdynvc` carry data;
+  the browser may join no other.
+- `drdynvc` chunks must come in order, uncompressed, and a message is at most
+  16 MiB.
+- Anything malformed, oversized or out of order ends the session as
+  "refused".
+- On `drdynvc`, Windows may ask for any dynamic channel, but the browser may
+  open only these two:
   - `Microsoft::Windows::RDS::Graphics`;
-  - `Microsoft::Windows::RDS::DisplayControl`, whose monitor layouts must be
-    within the bounds.
-  A refused channel never reaches the browser, and any data for it ends the
-  session.
+  - `Microsoft::Windows::RDS::DisplayControl`, whose monitor layouts must be one
+    primary monitor at the origin, within the desktop bounds, whole in one PDU.
+  The browser's page registers nothing else, so it refuses the rest itself. If
+  it opens another channel anyway, or data arrives on a channel that is not
+  open, the session ends. Soft-sync, which needs the UDP transport, is refused.
 - On `cliprdr`, only text, within today's limits (32 KiB, the same pacing).
-  File lists, file contents and other formats are dropped.
+  File lists, file contents and other formats are dropped. Until that filter
+  exists, the proxy refuses `cliprdr` (2c, below).
 - Revocation, the idle limit and sign-out end the session as they do now.
   The gateway closes the pipes, and the manager ends the worker.
 
@@ -140,5 +147,11 @@ Decision).
   The gateway's relay to the browser comes with the page in step 3.
 - **2c.** The `drdynvc` allowlist with display-control bounds, then the text
   clipboard filter.
+  - The first part is done. Unit tests cover each rule. An end-to-end test plays
+    a whole desktop with IronRDP's own session code: it passed against the test
+    VM's Windows Server 2025, where display control opened, a 1280 by 720 layout
+    passed, and 3840 by 2160 at 100% ended the session.
+  - The clipboard stays off: the proxy refuses `cliprdr` even when the account
+    allows it, until its text filter exists.
 
 Step 3 then brings the page.
