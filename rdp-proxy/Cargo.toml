@@ -1,0 +1,28 @@
+[package]
+name = "keybash-rdp-proxy"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "AGPL-3.0-only"
+publish = false
+description = "Keybash's credential-injecting RDP proxy (ADR 0008, docs/BROWSER-RDP-PROXY.md)"
+
+# IronRDP at the commit scripts/build-ironrdp-web.sh pins; cargo checks the
+# commit, and Cargo.lock fixes every other crate.
+[dependencies]
+ironrdp-connector = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-core = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1", features = ["std"] }
+ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1", features = ["std"] }
+ironrdp-rdcleanpath = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+# TLS with Windows accepts only the pinned certificate (src/pin.rs), with
+# ring for its cryptography; no platform roots, no key log, no resumption.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+tokio = { version = "1", default-features = false, features = ["rt", "io-util", "io-std", "net", "time", "macros"] }
+zeroize = "1"
+
+[profile.release]
+# Integer overflow is a refusal, never a wrap, in release builds too.
+overflow-checks = true
+codegen-units = 1
