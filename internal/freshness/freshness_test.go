@@ -26,13 +26,22 @@ func TestPinsFromTheRepository(t *testing.T) {
 	}
 	for _, name := range []string{"Go", "golang.org/x/crypto", "golang.org/x/sys", "go.etcd.io/bbolt",
 		"FreeRDP", "guacamole-server", "Node.js", "pnpm", "staticcheck", "gosec", "govulncheck",
-		"actionlint", "playwright", "@xterm/xterm", "@xterm/addon-webgl"} {
+		"actionlint", "playwright", "@xterm/xterm", "@xterm/addon-webgl", "IronRDP", "cargo-audit"} {
 		if _, ok := found[name]; !ok {
 			t.Errorf("the check no longer watches %s", name)
 		}
 	}
 	if got := found["staticcheck"].Key; got != "honnef.co/go/tools" {
 		t.Errorf("staticcheck is looked up as %q, want its module", got)
+	}
+	if p := found["IronRDP"]; p.Key != "Devolutions/IronRDP" || p.Prefix != "ironrdp-v" || p.Source != GitHubTag {
+		t.Errorf("IronRDP is looked up as %+v", p)
+	}
+	if p := found["cargo-audit"]; p.Key != "rustsec/rustsec" || p.Prefix != "cargo-audit/v" || p.Source != GitHubRelease {
+		t.Errorf("cargo-audit is looked up as %+v", p)
+	}
+	if _, ok := found["wasm-bindgen-cli"]; ok {
+		t.Error("wasm-bindgen-cli is watched on its own, but it must follow IronRDP's Cargo.lock")
 	}
 }
 
@@ -42,8 +51,11 @@ func repo() fstest.MapFS {
 		"scripts/build-native-runtime.sh": {Data: []byte("https://github.com/FreeRDP/FreeRDP/releases/download/3.33.1/freerdp-3.33.1.tar.gz\n" +
 			"https://archive.apache.org/dist/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz\n" +
 			"https://downloads.apache.org/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz\n")},
+		"scripts/build-ironrdp-web.sh": {Data: []byte("# IronRDP's master after its newest release, ironrdp-v0.17.0. The browser\n")},
 		".github/workflows/ci.yml": {Data: []byte("https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.xz\n" +
 			"https://registry.npmjs.org/@pnpm/exe.linux-x64/-/exe.linux-x64-12.18.0.tgz\n" +
+			"          cargo install --locked wasm-bindgen-cli --version 0.2.129 --root x\n" +
+			"          cargo install --locked cargo-audit --version 0.23.0 --root x\n" +
 			"          # `go install tool@version` reads the tool's go.mod\n" +
 			"          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2\n")},
 		"web/package.json": {Data: []byte(`{"devDependencies": {"playwright": "1.65.0"}}`)},
@@ -52,7 +64,7 @@ func repo() fstest.MapFS {
 
 func TestPinsRefuseAFileWhoseFormatChanged(t *testing.T) {
 	pins, err := Pins(repo())
-	if err != nil || len(pins) != 8 {
+	if err != nil || len(pins) != 10 {
 		t.Fatalf("pins %+v, %v", pins, err)
 	}
 	for _, p := range pins {
@@ -72,6 +84,13 @@ func TestPinsRefuseAFileWhoseFormatChanged(t *testing.T) {
 		},
 		"range in package.json": func(f fstest.MapFS) {
 			f["web/package.json"].Data = []byte(`{"devDependencies": {"playwright": "^1.65.0"}}`)
+		},
+		"IronRDP script gone": func(f fstest.MapFS) { delete(f, "scripts/build-ironrdp-web.sh") },
+		"IronRDP release gone": func(f fstest.MapFS) {
+			f["scripts/build-ironrdp-web.sh"].Data = []byte("# master\n")
+		},
+		"cargo-audit gone": func(f fstest.MapFS) {
+			f[".github/workflows/ci.yml"].Data = bytes.Replace(f[".github/workflows/ci.yml"].Data, []byte("cargo-audit --version"), []byte("cargo-deny --version"), 1)
 		},
 		"no go line": func(f fstest.MapFS) {
 			f["go.mod"].Data = bytes.Replace(f["go.mod"].Data, []byte("go 1.27.4"), nil, 1)
@@ -150,6 +169,9 @@ func TestCheckAgainstAFakeUpstream(t *testing.T) {
 		"/gh/repos/apache/guacamole-server/tags":      `[{"name":"1.7.0-RC1"},{"name":"1.5.5"},{"name":"1.6.0"}]`,
 		"/node/index.json":                            `[{"version":"v27.1.0","lts":false},{"version":"v24.22.3","lts":"Krypton"},{"version":"v26.13.2","lts":"Lithium"}]`,
 		"/npm/@xterm%2Fxterm/latest":                  `{"version":"6.0.0"}`,
+		// Other products' tags and releases in the same repository are not this pin's.
+		"/gh/repos/Devolutions/IronRDP/git/matching-refs/tags/ironrdp-v": `[{"ref":"refs/tags/ironrdp-v0.9.1"},{"ref":"refs/tags/ironrdp-v0.17.0"},{"ref":"refs/tags/ironrdp-v0.18.0-rc.1"},{"ref":"refs/tags/ironrdp-vmconnect-v0.1.0"}]`,
+		"/gh/repos/rustsec/rustsec/releases":                             `[{"tag_name":"rustsec/v0.99.0"},{"tag_name":"0.99.0"},{"tag_name":"cargo-audit/v0.24.0","prerelease":true},{"tag_name":"cargo-audit/v0.23.0"},{"tag_name":"cargo-lock/v11.0.0"}]`,
 	})
 	pins := []Pin{
 		{Name: "Go", Version: "1.27.4", Source: GoToolchain},
@@ -158,6 +180,8 @@ func TestCheckAgainstAFakeUpstream(t *testing.T) {
 		{Name: "guacamole-server", Version: "1.5.5", Source: GitHubTag, Key: "apache/guacamole-server"},
 		{Name: "Node.js", Version: "26.13.1", Source: NodeLTS},
 		{Name: "@xterm/xterm", Version: "6.0.0", Source: NPM, Key: "@xterm/xterm"},
+		{Name: "IronRDP", Version: "0.17.0", Source: GitHubTag, Key: "Devolutions/IronRDP", Prefix: "ironrdp-v"},
+		{Name: "cargo-audit", Version: "0.22.2", Source: GitHubRelease, Key: "rustsec/rustsec", Prefix: "cargo-audit/v"},
 	}
 	want := map[string]struct {
 		newest string
@@ -165,6 +189,7 @@ func TestCheckAgainstAFakeUpstream(t *testing.T) {
 	}{
 		"Go": {"1.27.5", true}, "toml": {"1.6.0", false}, "FreeRDP": {"3.33.1", false},
 		"guacamole-server": {"1.6.0", true}, "Node.js": {"26.13.2", true}, "@xterm/xterm": {"6.0.0", false},
+		"IronRDP": {"0.17.0", false}, "cargo-audit": {"0.23.0", true},
 	}
 	for _, r := range Check(context.Background(), u, pins) {
 		if r.Err != nil {

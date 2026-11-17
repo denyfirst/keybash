@@ -23,6 +23,57 @@ way round. Test-only tools (Playwright, Node.js, pnpm) are not shipped. For the
 planned H.264 encoder, AGPL-3.0 admits OpenH264 (BSD-2-Clause), FFmpeg (LGPL)
 and x264 (GPL-2.0-or-later); patents are a separate review in that decision.
 
+## IronRDP browser client build (2026-11-17)
+
+Step 1 of ADR 0008's order of work. Nothing here ships yet: the desktop page
+uses the build from step 3.
+
+- Source: IronRDP (Devolutions, MIT OR Apache-2.0) at commit
+  `fe9608b2abbeb98fd680645ced72d210a2e050c1` on master, 718 commits after its
+  newest release `ironrdp-v0.17.0` (July 2026). The browser build's graphics
+  pipeline client exists only on master. The script fetches that commit by its
+  full hash and checks the result.
+- Keybash's patch, `ironrdp/graphics-pipeline.diff`, is the change measured in
+  ADR 0008's step 2:
+  - `ironrdp-egfx` gains a handler-rendering mode. Its CPU compositor keeps no
+    pixels, and H.264 and alpha updates go to the handler undecoded;
+  - `ironrdp-web` gains a renderer that hands each frame's surface commands to
+    the page in one batch;
+  - 597 lines added, 7 changed. IronRDP's clippy lints pass for the browser
+    target, and `ironrdp-egfx`'s 68 tests pass.
+- Toolchain: Rust 1.94.1, which IronRDP's `rust-toolchain.toml` names, and
+  wasm-bindgen 0.2.129, which its `Cargo.lock` holds. The script refuses any
+  other version of either. Its flags are IronRDP's own release flags for the
+  browser build, plus a path rewrite. wasm-opt is not used.
+- Crates come from crates.io into a private, empty Cargo home and are checked
+  against the lock's checksums. The build then runs offline.
+- `scripts/rust-licences.py` walks the browser crate's dependency graph for
+  its target: normal and build dependencies, not dev ones. That is 388 crates,
+  a superset of the 261 compiled, because `cargo metadata` unifies features
+  across IronRDP's workspace. Each SPDX expression must be satisfiable from
+  licences that combine into AGPL-3.0. A crate without one stops the build
+  until reviewed, and the list goes beside the output (`CRATES.txt`).
+- CI builds twice in different directories and compares every byte, and runs
+  `ironrdp-egfx`'s tests once.
+- Advisories:
+  - The build records every crate cargo really compiled (`BUILT.txt`).
+  - `cargo audit` reads IronRDP's whole lock, which also holds its native
+    tools and tests. `scripts/rust-advisories.py` fails on any advisory of any
+    kind on a compiled crate, unless the script names it with the reason it
+    does not apply.
+  - On 17 November the lock had 18 vulnerabilities and 15 warnings: in
+    hickory (DNS), zstd, libz-sys, rsa, and five unmaintained crates. Of these
+    the browser build compiles only `rsa` 0.10.0-rc.18, whose RUSTSEC-2023-0071
+    (the Marvin timing attack, no fixed release) needs RSA decryption or
+    signing with a private key. The browser client holds no private key, and
+    Keybash's proxy does TLS and NLA itself, so the browser never uses RDP
+    standard security. It is reviewed in the script.
+  - The proxy in step 2 compiles other crates, so it gets its own list and
+    its own review.
+- Weighed and left: npm's web-client packages and wasm-pack. Keybash writes
+  its own page around the module (step 3). wasm-bindgen's output alone needs
+  neither, nor their dependency trees.
+
 ## OTP and QR in the standard library (2026-11-01)
 
 `github.com/pquerna/otp` and `github.com/boombuler/barcode` (a 2019
