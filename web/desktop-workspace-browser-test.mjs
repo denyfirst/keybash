@@ -55,6 +55,8 @@ try{
   // Screen size from the bar's own menu.
   await page.locator('#screen').click();await page.locator('#screen-menu').waitFor();
   assert.equal(await page.locator('#screen-menu [data-size="fit"]').getAttribute('aria-checked'),'true');
+  // A 100% screen has no picture to choose.
+  assert.equal(await page.locator('#picture-group').isHidden(),true,'a 100% screen offered a picture choice');
   await page.locator('#screen-menu [data-size="1280x720"]').click();
   await page.locator('#screen-menu').waitFor({state:'hidden'});
   await page.waitForFunction(()=>document.getElementById('size').textContent==='1280 × 720',undefined,{timeout:10000});
