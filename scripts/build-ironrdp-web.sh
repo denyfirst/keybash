@@ -60,13 +60,17 @@ if test "${tests}" = yes; then
   # Keybash's patch changes the pipeline client, whose own tests run natively.
   env -u RUSTFLAGS cargo test --locked --offline -p ironrdp-egfx
 fi
-cargo build --locked --offline --release --target wasm32-unknown-unknown -p ironrdp-web
+# cargo's own record of every crate it compiled, for the advisory check.
+cargo build --locked --offline --release --target wasm32-unknown-unknown -p ironrdp-web \
+  --message-format=json-render-diagnostics > "${work}/build.json"
+python3 "${repo}/scripts/rust-advisories.py" built < "${work}/build.json" > "${work}/built.txt"
 mkdir -m 0755 -- "${out}"
 wasm-bindgen --target web --no-typescript --out-dir "${out}" \
   "${CARGO_TARGET_DIR}/wasm32-unknown-unknown/release/ironrdp_web.wasm"
 cp "${src}/LICENSE-MIT" "${out}/IRONRDP-LICENSE-MIT"
 cp "${src}/LICENSE-APACHE" "${out}/IRONRDP-LICENSE-APACHE"
 cp "${work}/crates.txt" "${out}/CRATES.txt"
+cp "${work}/built.txt" "${out}/BUILT.txt"
 cp "${src}/Cargo.lock" "${out}/Cargo.lock"
 cd "${out}"
 sha256sum -- * > "${work}/SHA256SUMS"

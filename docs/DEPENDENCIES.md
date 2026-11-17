@@ -47,14 +47,29 @@ uses the build from step 3.
   browser build, plus a path rewrite. wasm-opt is not used.
 - Crates come from crates.io into a private, empty Cargo home and are checked
   against the lock's checksums. The build then runs offline.
-- `scripts/rust-licences.py` walks every crate the browser build compiles
-  (normal and build dependencies, not dev ones). Each SPDX expression must be
-  satisfiable from licences that combine into AGPL-3.0. A crate without one
-  stops the build until reviewed, and the list goes beside the output
-  (`CRATES.txt`).
-- CI builds twice in different directories and compares every byte, runs
-  `ironrdp-egfx`'s tests once, and runs `cargo audit --deny warnings` on the
-  patched lock.
+- `scripts/rust-licences.py` walks the browser crate's dependency graph for
+  its target: normal and build dependencies, not dev ones. That is 388 crates,
+  a superset of the 261 compiled, because `cargo metadata` unifies features
+  across IronRDP's workspace. Each SPDX expression must be satisfiable from
+  licences that combine into AGPL-3.0. A crate without one stops the build
+  until reviewed, and the list goes beside the output (`CRATES.txt`).
+- CI builds twice in different directories and compares every byte, and runs
+  `ironrdp-egfx`'s tests once.
+- Advisories:
+  - The build records every crate cargo really compiled (`BUILT.txt`).
+  - `cargo audit` reads IronRDP's whole lock, which also holds its native
+    tools and tests. `scripts/rust-advisories.py` fails on any advisory of any
+    kind on a compiled crate, unless the script names it with the reason it
+    does not apply.
+  - On 17 November the lock had 18 vulnerabilities and 15 warnings: in
+    hickory (DNS), zstd, libz-sys, rsa, and five unmaintained crates. Of these
+    the browser build compiles only `rsa` 0.10.0-rc.18, whose RUSTSEC-2023-0071
+    (the Marvin timing attack, no fixed release) needs RSA decryption or
+    signing with a private key. The browser client holds no private key, and
+    Keybash's proxy does TLS and NLA itself, so the browser never uses RDP
+    standard security. It is reviewed in the script.
+  - The proxy in step 2 compiles other crates, so it gets its own list and
+    its own review.
 - Weighed and left: npm's web-client packages and wasm-pack. Keybash writes
   its own page around the module (step 3). wasm-bindgen's output alone needs
   neither, nor their dependency trees.

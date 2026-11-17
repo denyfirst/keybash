@@ -252,10 +252,15 @@ jobs:
           diff -r "${RUNNER_TEMP}/a/out" "${RUNNER_TEMP}/b/out"
           ls -l "${RUNNER_TEMP}/a/out"
 
-      - name: Check the locked crates for known vulnerabilities
+      - name: Check the compiled crates for known advisories
         run: |
           set -eu
-          cargo audit --deny warnings --file "${RUNNER_TEMP}/a/out/Cargo.lock"
+          python3 scripts/rust-advisories-test.py
+          # IronRDP's lock also holds its native tools and tests. Any advisory
+          # on a crate this build compiled fails, unless reviewed in the script.
+          # The report itself is checked: an empty or unreadable one fails too.
+          cargo audit --json --file "${RUNNER_TEMP}/a/out/Cargo.lock" > "${RUNNER_TEMP}/audit.json" || true
+          python3 scripts/rust-advisories.py check --built "${RUNNER_TEMP}/a/out/BUILT.txt" "${RUNNER_TEMP}/audit.json"
 
   commit-signatures:
     name: Commit signatures
