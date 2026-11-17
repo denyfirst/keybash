@@ -13,6 +13,7 @@
 *.diff
 # Keybash's maintained change to IronRDP (scripts/build-ironrdp-web.sh).
 !/ironrdp/*.diff
+/rdp-proxy/target/
 coverage.html
 node_modules/
 go.work

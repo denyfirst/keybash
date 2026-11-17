@@ -17,9 +17,10 @@ import sys
 # Advisory ID -> the crate it was reviewed for, with the reason beside it.
 REVIEWED = {
     # rsa (the Marvin timing attack, no fixed release): it needs RSA
-    # decryption or signing with a private key. The browser client holds no
-    # private key, and Keybash's proxy does TLS and NLA with Windows itself, so
-    # the browser never uses RDP standard security either.
+    # decryption or signing with a private key. The browser client holds none,
+    # and never uses RDP standard security, since the proxy does TLS and NLA
+    # with Windows itself. The proxy holds none either: it signs in with NTLM,
+    # and Windows' TLS signature is checked with ring (rdp-proxy/src/pin.rs).
     "RUSTSEC-2023-0071": "rsa",
 }
 

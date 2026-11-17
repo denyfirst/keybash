@@ -109,6 +109,9 @@ def main():
             if any(kind["kind"] in (None, "build") for kind in dep["dep_kinds"]):
                 pending.append(dep["pkg"])
     refused, rows = [], []
+    # The package itself is Keybash's own code or the crate being built for it;
+    # the rule is for what it pulls in.
+    seen.discard(roots[0])
     for id in seen:
         package = packages[id]
         licence = package.get("license") or ""

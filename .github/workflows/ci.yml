@@ -262,6 +262,51 @@ jobs:
           cargo audit --json --file "${RUNNER_TEMP}/a/out/Cargo.lock" > "${RUNNER_TEMP}/audit.json" || true
           python3 scripts/rust-advisories.py check --built "${RUNNER_TEMP}/a/out/BUILT.txt" "${RUNNER_TEMP}/audit.json"
 
+  rdp-proxy:
+    name: RDP proxy
+    runs-on: ubuntu-24.04
+    # Two release builds, the tests and the tools: about 20 minutes.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact event commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            fetch -q --depth 1 origin "${GITHUB_SHA}"
+          unset auth
+          git checkout -q FETCH_HEAD
+
+      - name: Install the pinned Rust toolchain and cargo-audit outside the repository
+        run: |
+          set -eu
+          rustup toolchain install 1.94.1 --profile minimal --component clippy,rustfmt
+          tools="${RUNNER_TEMP}/keybash-rust-tools"
+          export RUSTUP_TOOLCHAIN=1.94.1
+          cargo install --locked cargo-audit --version 0.23.0 --root "${tools}"
+          echo "${tools}/bin" >> "${GITHUB_PATH}"
+
+      - name: Test, then build twice in different directories and compare the bytes
+        run: |
+          set -eu
+          mkdir "${RUNNER_TEMP}/a" "${RUNNER_TEMP}/b"
+          sh scripts/build-rdp-proxy.sh "${RUNNER_TEMP}/a/out" --with-tests
+          sh scripts/build-rdp-proxy.sh "${RUNNER_TEMP}/b/out"
+          diff -r "${RUNNER_TEMP}/a/out" "${RUNNER_TEMP}/b/out"
+          ls -l "${RUNNER_TEMP}/a/out"
+
+      - name: Check the compiled crates for known advisories
+        run: |
+          set -eu
+          cargo audit --json --file rdp-proxy/Cargo.lock > "${RUNNER_TEMP}/audit.json" || true
+          python3 scripts/rust-advisories.py check --built "${RUNNER_TEMP}/a/out/BUILT.txt" "${RUNNER_TEMP}/audit.json"
+
   commit-signatures:
     name: Commit signatures
     if: github.event_name == 'pull_request'
