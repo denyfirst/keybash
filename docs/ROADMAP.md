@@ -129,6 +129,11 @@ In order:
    by measurement, since an encoder reads only Keybash's own pixels.
 7. **Watch:** IronRDP as a memory-safe replacement for FreeRDP once its client
    graphics pipeline is ready for production.
+8. **ADR 0008, accepted 17 November: D.** The desktop runs in the browser as
+   IronRDP in WebAssembly, drawn on the GPU with H.264 through WebCodecs, behind
+   Keybash's credential-injecting proxy. This replaces 6's default and 7's
+   watch. The order of work is in the ADR, starting with a Smooth/Sharp
+   picture choice for scaled screens.
 
 The QOI-style picture draft (ADR 0006) is set aside: the gateway is no longer
 the bottleneck.
