@@ -33,3 +33,4 @@ ironrdp-session = { git = "https://github.com/Devolutions/IronRDP.git", rev = "f
 ironrdp-dvc = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
 ironrdp-displaycontrol = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
 ironrdp-graphics = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-cliprdr = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }

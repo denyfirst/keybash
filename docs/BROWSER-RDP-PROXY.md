@@ -93,8 +93,9 @@ The proxy relays both ways and checks what it passes on
 - Every TPKT and fast-path PDU is framed and bounded (at most 65,535 bytes, at
   least its own header) and checked whole before it passes.
 - Windows' MCS Connect Response must number exactly the static channels the
-  browser asked for. Only the I/O and user channels and `drdynvc` carry data;
-  the browser may join no other.
+  browser asked for. Only the I/O and user channels, `drdynvc` and, when the
+  account allows the clipboard, `cliprdr` carry data; the browser may join no
+  other.
 - `drdynvc` chunks must come in order, uncompressed, and a message is at most
   16 MiB.
 - Anything malformed, oversized or out of order ends the session as
@@ -107,9 +108,21 @@ The proxy relays both ways and checks what it passes on
   The browser's page registers nothing else, so it refuses the rest itself. If
   it opens another channel anyway, or data arrives on a channel that is not
   open, the session ends. Soft-sync, which needs the UDP transport, is refused.
-- On `cliprdr`, only text, within today's limits (32 KiB, the same pacing).
-  File lists, file contents and other formats are dropped. Until that filter
-  exists, the proxy refuses `cliprdr` (2c, below).
+- On `cliprdr`, only text, within the gateway's own limits
+  (`rdp-proxy/src/clipboard.rs`). Every clipboard message is gathered whole,
+  checked and written again in chunks; nothing passes as it came:
+  - capabilities keep only long format names, so neither side offers files or
+    locks;
+  - a format list keeps only Unicode text (`CF_UNICODETEXT`);
+  - a side may ask only for Unicode text, at most 64 requests waiting, and data
+    passes only to a side that asked;
+  - data passes only from a side whose latest list offered text, as valid text
+    of at most 32 KiB in UTF-8, cut at its first NUL, and paced as the gateway
+    paces it (a burst of 128 transfers, then one a second, each way). Text that
+    fails any of these reaches the asker as a failure, and the session goes on.
+    A response over 64 KiB is counted, never kept;
+  - file contents, locks and anything else end the session; the browser's
+    temporary directory, which is only for files, never reaches Windows.
 - Revocation, the idle limit and sign-out end the session as they do now.
   The gateway closes the pipes, and the manager ends the worker.
 
@@ -140,7 +153,7 @@ Decision).
     its own pipes and an empty environment;
   - `rdplab.ManagerWorker.OpenBrowserRDP` sends the setup frame and returns a
     stream of whole messages, with the proxy's end code as the pages' word.
-    The clipboard stays off until 2c;
+    The clipboard stays off until the page arrives in step 3;
   - `build-stage.sh --with-rdp-proxy` builds the proxy into the runtime;
   - the native lab runs the proxy in the sandbox against the FreeRDP sample
     server with NLA.
@@ -151,7 +164,15 @@ Decision).
     a whole desktop with IronRDP's own session code: it passed against the test
     VM's Windows Server 2025, where display control opened, a 1280 by 720 layout
     passed, and 3840 by 2160 at 100% ended the session.
-  - The clipboard stays off: the proxy refuses `cliprdr` even when the account
-    allows it, until its text filter exists.
+  - The clipboard filter is the second part. Unit tests check each rule against
+    IronRDP's own clipboard encoder and decoder. Against the test VM's Windows
+    Server 2025, a desktop with IronRDP's clipboard client got long names only
+    and had its text offer accepted. A command on the desktop read the
+    browser's text (Windows asked for it) and wrote it back with " back"
+    added; Windows' format lists reached the browser holding only Unicode
+    text, and the paste returned "Keybash clipboard: héllo 🙂 back".
+  - The gateway still sends the setup with the clipboard off. Step 3 turns it
+    on with the page, whose clipboard runs only on the person's own copy and
+    paste.
 
 Step 3 then brings the page.

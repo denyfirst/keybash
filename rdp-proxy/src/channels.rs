@@ -1,15 +1,27 @@
 //! What crosses the proxy after the handshake (docs/BROWSER-RDP-PROXY.md,
 //! 2c): every PDU framed and bounded, the static channels Windows numbered,
-//! and on `drdynvc` only the dynamic channels Keybash allows, opened by the
-//! browser itself. Anything else ends the session as "refused".
+//! on `drdynvc` only the dynamic channels Keybash allows, opened by the
+//! browser itself, and on `cliprdr` only text (crate::clipboard). Anything
+//! else ends the session as "refused".
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use ironrdp_core::decode;
 use ironrdp_pdu::x224::{X224, X224Data};
 use ironrdp_pdu::{Action, find_size, mcs};
 
+use crate::clipboard::Clipboard;
 use crate::policy::{Refusal, desktop_allowed};
+
+/// What goes on in place of a PDU that passed its checks.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Pass {
+    Unchanged,
+    /// These PDUs instead, possibly none: a clipboard message is gathered
+    /// whole and written again.
+    Instead(Vec<Vec<u8>>),
+}
 
 /// The largest PDU passed: a TPKT's own limit; fast-path is smaller still.
 pub const MAX_PDU: usize = 65_535;
@@ -85,6 +97,8 @@ pub struct Channels {
     io: Option<u16>,
     user: Option<u16>,
     drdynvc: Option<u16>,
+    cliprdr: Option<u16>,
+    clip: Clipboard,
     dvc: HashMap<u32, Dvc>,
     from_server: Chunks,
     from_browser: Chunks,
@@ -98,6 +112,8 @@ impl Channels {
             io: None,
             user: None,
             drdynvc: None,
+            cliprdr: None,
+            clip: Clipboard::default(),
             dvc: HashMap::new(),
             from_server: Chunks::default(),
             from_browser: Chunks::default(),
@@ -105,12 +121,12 @@ impl Channels {
     }
 
     /// Checks one PDU from Windows before it goes to the browser.
-    pub fn server_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<(), Refusal> {
+    pub fn server_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<Pass, Refusal> {
         if action == Action::FastPath {
-            return Ok(()); // output updates; they carry no channel data
+            return Ok(Pass::Unchanged); // output updates; they carry no channel data
         }
         if self.io.is_none() {
-            return self.connect_response(pdu);
+            return self.connect_response(pdu).map(|()| Pass::Unchanged);
         }
         match decode::<X224<mcs::McsMessage<'_>>>(pdu)
             .map_err(|_| Refusal("MCS from Windows"))?
@@ -118,14 +134,22 @@ impl Channels {
         {
             mcs::McsMessage::AttachUserConfirm(confirm) => {
                 self.user = Some(confirm.initiator_id);
-                Ok(())
+                Ok(Pass::Unchanged)
             }
-            mcs::McsMessage::ChannelJoinConfirm(_) | mcs::McsMessage::DisconnectProviderUltimatum(_) => Ok(()),
+            mcs::McsMessage::ChannelJoinConfirm(_) | mcs::McsMessage::DisconnectProviderUltimatum(_) => {
+                Ok(Pass::Unchanged)
+            }
             mcs::McsMessage::SendDataIndication(data) => {
                 if Some(data.channel_id) == self.io || Some(data.channel_id) == self.user {
-                    Ok(())
+                    Ok(Pass::Unchanged)
                 } else if Some(data.channel_id) == self.drdynvc {
-                    self.svc(true, &data.user_data)
+                    self.svc(true, &data.user_data).map(|()| Pass::Unchanged)
+                } else if Some(data.channel_id) == self.cliprdr {
+                    let now = Instant::now();
+                    let pdus = self
+                        .clip
+                        .chunk(true, data.initiator_id, data.channel_id, &data.user_data, now)?;
+                    Ok(Pass::Instead(pdus))
                 } else {
                     Err(Refusal("data on a channel not allowed"))
                 }
@@ -135,9 +159,9 @@ impl Channels {
     }
 
     /// Checks one PDU from the browser before it goes to Windows.
-    pub fn browser_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<(), Refusal> {
+    pub fn browser_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<Pass, Refusal> {
         if action == Action::FastPath {
-            return Ok(()); // input events
+            return Ok(Pass::Unchanged); // input events
         }
         match decode::<X224<mcs::McsMessage<'_>>>(pdu)
             .map_err(|_| Refusal("MCS from the browser"))?
@@ -145,20 +169,26 @@ impl Channels {
         {
             mcs::McsMessage::ErectDomainRequest(_)
             | mcs::McsMessage::AttachUserRequest(_)
-            | mcs::McsMessage::DisconnectProviderUltimatum(_) => Ok(()),
+            | mcs::McsMessage::DisconnectProviderUltimatum(_) => Ok(Pass::Unchanged),
             mcs::McsMessage::ChannelJoinRequest(join) => {
-                let known = [self.io, self.user, self.drdynvc];
+                let known = [self.io, self.user, self.drdynvc, self.cliprdr];
                 if known.contains(&Some(join.channel_id)) {
-                    Ok(())
+                    Ok(Pass::Unchanged)
                 } else {
                     Err(Refusal("joining a channel not allowed"))
                 }
             }
             mcs::McsMessage::SendDataRequest(data) => {
                 if Some(data.channel_id) == self.io || Some(data.channel_id) == self.user {
-                    Ok(())
+                    Ok(Pass::Unchanged)
                 } else if Some(data.channel_id) == self.drdynvc {
-                    self.svc(false, &data.user_data)
+                    self.svc(false, &data.user_data).map(|()| Pass::Unchanged)
+                } else if Some(data.channel_id) == self.cliprdr {
+                    let now = Instant::now();
+                    let pdus = self
+                        .clip
+                        .chunk(false, data.initiator_id, data.channel_id, &data.user_data, now)?;
+                    Ok(Pass::Instead(pdus))
                 } else {
                     Err(Refusal("data on a channel not allowed"))
                 }
@@ -180,8 +210,7 @@ impl Channels {
         for (name, &id) in self.names.iter().zip(&network.channel_ids) {
             match name.as_str() {
                 "drdynvc" => self.drdynvc = Some(id),
-                // The clipboard joins only once its contents are filtered.
-                "cliprdr" if self.clipboard => return Err(Refusal("clipboard not filtered yet")),
+                "cliprdr" if self.clipboard => self.cliprdr = Some(id),
                 _ => return Err(Refusal("static channel not allowed")),
             }
         }
@@ -374,11 +403,15 @@ mod tests {
     }
 
     fn server(c: &mut Channels, pdu: Vec<u8>) -> Result<(), Refusal> {
-        c.server_pdu(Action::X224, &send_data(true, 1004, chunk(&pdu)))
+        let pass = c.server_pdu(Action::X224, &send_data(true, 1004, chunk(&pdu)))?;
+        assert_eq!(pass, Pass::Unchanged, "drdynvc passes as it came");
+        Ok(())
     }
 
     fn browser(c: &mut Channels, pdu: Vec<u8>) -> Result<(), Refusal> {
-        c.browser_pdu(Action::X224, &send_data(false, 1004, chunk(&pdu)))
+        let pass = c.browser_pdu(Action::X224, &send_data(false, 1004, chunk(&pdu)))?;
+        assert_eq!(pass, Pass::Unchanged, "drdynvc passes as it came");
+        Ok(())
     }
 
     /// Windows' Connect Response numbering `ids` for the requested channels.
@@ -434,8 +467,38 @@ mod tests {
                 "{names:?} {ids:?}"
             );
         }
-        // The clipboard waits for its filter, even when the account allows it.
+        // With the clipboard allowed, cliprdr is numbered, may be joined, and
+        // its messages go through the clipboard filter, gathered and written
+        // again. Without it, the same number is refused.
         let mut c = Channels::new(vec!["drdynvc".into(), "cliprdr".into()], true);
+        c.server_pdu(Action::X224, &connect_response(vec![1004, 1005]))
+            .expect("drdynvc and cliprdr");
+        let ready = vec![1, 0, 0, 0, 0, 0, 0, 0];
+        let pass = c
+            .server_pdu(Action::X224, &send_data(true, 1005, chunk(&ready)))
+            .expect("monitor ready");
+        assert_eq!(pass, Pass::Instead(vec![send_data(true, 1005, chunk(&ready))]));
+        c.user = Some(1002);
+        let join = encode_vec(&X224(mcs::McsMessage::ChannelJoinRequest(mcs::ChannelJoinRequest {
+            initiator_id: 1002,
+            channel_id: 1005,
+        })))
+        .expect("join");
+        assert_eq!(c.browser_pdu(Action::X224, &join), Ok(Pass::Unchanged));
+        assert!(
+            c.browser_pdu(Action::X224, &send_data(false, 1005, chunk(&ready)))
+                .is_err(),
+            "monitor ready from the browser"
+        );
+        let mut c = Channels::new(vec!["drdynvc".into()], false);
+        c.server_pdu(Action::X224, &connect_response(vec![1004]))
+            .expect("drdynvc");
+        assert!(
+            c.server_pdu(Action::X224, &send_data(true, 1005, chunk(&ready)))
+                .is_err()
+        );
+        // Without the clipboard, cliprdr is never numbered, even if asked for.
+        let mut c = Channels::new(vec!["drdynvc".into(), "cliprdr".into()], false);
         assert!(c.server_pdu(Action::X224, &connect_response(vec![1004, 1005])).is_err());
         // Anything else first is refused.
         let mut c = Channels::new(vec![], false);

@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod channels;
+mod clipboard;
 mod config;
 mod frame;
 mod pin;
