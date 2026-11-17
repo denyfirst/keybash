@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+mod channels;
 mod config;
 mod frame;
 mod pin;

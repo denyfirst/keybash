@@ -42,7 +42,14 @@ fn channel_allowed(name: &str, clipboard: bool) -> bool {
 ///   channel numbers Windows answers with.
 /// - No monitor layout (one monitor, the desktop size), no redirection, no
 ///   UDP transport: those blocks are removed.
-pub fn connect_initial(tpkt: &[u8], selected: nego::SecurityProtocol, clipboard: bool) -> Result<Vec<u8>, Refusal> {
+///
+/// Returns the PDU for Windows and the static channel names, in order and in
+/// lower case, which Windows' Connect Response numbers in the same order.
+pub fn connect_initial(
+    tpkt: &[u8],
+    selected: nego::SecurityProtocol,
+    clipboard: bool,
+) -> Result<(Vec<u8>, Vec<String>), Refusal> {
     if tpkt.len() > MAX_CONNECT_INITIAL {
         return Err(Refusal("Connect Initial too large"));
     }
@@ -85,7 +92,8 @@ pub fn connect_initial(tpkt: &[u8], selected: nego::SecurityProtocol, clipboard:
 
     initial.conference_create_request = ConferenceCreateRequest::new(blocks).map_err(|_| Refusal("encode"))?;
     let body = encode_vec(&initial).map_err(|_| Refusal("encode"))?;
-    encode_vec(&X224(X224Data { data: Cow::Owned(body) })).map_err(|_| Refusal("encode"))
+    let pdu = encode_vec(&X224(X224Data { data: Cow::Owned(body) })).map_err(|_| Refusal("encode"))?;
+    Ok((pdu, seen))
 }
 
 #[cfg(test)]
@@ -229,7 +237,8 @@ pub(crate) mod tests {
     #[test]
     fn windows_hears_its_protocol_and_the_rest_is_unchanged() {
         let sent = browser_connect_initial(1600, 900, 100);
-        let out = connect_initial(&sent, nego::SecurityProtocol::HYBRID_EX, false).expect("allowed");
+        let (out, names) = connect_initial(&sent, nego::SecurityProtocol::HYBRID_EX, false).expect("allowed");
+        assert!(names.is_empty(), "the test browser asks for no channel");
         let (before, after) = (blocks_of(&sent), blocks_of(&out));
         assert_eq!(
             after.core.optional_data.server_selected_protocol,
@@ -323,7 +332,7 @@ pub(crate) mod tests {
             for flip in [0x01u8, 0x80, 0xff] {
                 let mut bad = base.clone();
                 bad[i] ^= flip;
-                if let Ok(out) = connect_initial(&bad, nego::SecurityProtocol::HYBRID, false) {
+                if let Ok((out, _)) = connect_initial(&bad, nego::SecurityProtocol::HYBRID, false) {
                     let b = blocks_of(&out);
                     assert_eq!(
                         b.core.optional_data.server_selected_protocol,

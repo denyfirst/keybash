@@ -14,6 +14,9 @@ use ironrdp_tokio::FramedWrite as _;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 
+use std::cell::RefCell;
+
+use crate::channels::{Channels, Splitter};
 use crate::frame::{self, Ended, FrameError, Kind};
 use crate::policy;
 use crate::setup::Setup;
@@ -22,6 +25,7 @@ use crate::setup::Setup;
 const MAX_REQUEST: usize = 16 * 1024;
 
 /// The pinned certificate (DER) and the name Windows is known by.
+#[derive(Clone)]
 pub struct Trust {
     pub certificate: Vec<u8>,
     pub name: crate::pin::Name,
@@ -120,28 +124,47 @@ where
 {
     // Everything up to the checked Connect Initial has a deadline: a browser,
     // or a server, that stalls the handshake cannot hold a worker.
+    let clipboard = setup.clipboard;
     let handshake = tokio::time::timeout(HANDSHAKE_WAIT, handshake(gateway_in, gateway_out, setup, trust, target));
-    let (tls, checked, rest) = match handshake.await {
+    let (tls, checked, names, rest) = match handshake.await {
         Ok(Ok(ready)) => ready,
         Ok(Err(fail)) => return fail,
         Err(_) => return REFUSED,
     };
     let (mut from_windows, mut to_windows) = tokio::io::split(tls);
-    for bytes in [&checked, &rest] {
-        if to_windows.write_all(bytes).await.is_err() {
-            return Fail::End(Ended::Remote);
-        }
-    }
-    if to_windows.flush().await.is_err() {
+    if to_windows.write_all(&checked).await.is_err() {
         return Fail::End(Ended::Remote);
     }
 
-    // The relay. Step 2c checks the channels' contents here; until then each
-    // direction is bounded by the frame limit and TCP flow control.
-    tokio::select! {
-        fail = upstream(gateway_in, &mut to_windows) => fail,
-        fail = downstream(&mut from_windows, gateway_out) => fail,
+    // The relay: whole PDUs each way, each checked against the channels
+    // before it passes (crate::channels). Both directions run in this one
+    // task, so they share the state without locks.
+    let channels = RefCell::new(Channels::new(names, clipboard));
+    let mut browser = Splitter::default();
+    if let Err(fail) = pass_browser_bytes(&rest, &mut browser, &channels, &mut to_windows).await {
+        return fail;
     }
+    tokio::select! {
+        fail = upstream(gateway_in, &mut to_windows, &mut browser, &channels) => fail,
+        fail = downstream(&mut from_windows, gateway_out, &channels) => fail,
+    }
+}
+
+/// Splits browser bytes into PDUs, checks each, and sends the ones that pass.
+async fn pass_browser_bytes<W: AsyncWrite + Unpin>(
+    bytes: &[u8],
+    splitter: &mut Splitter,
+    channels: &RefCell<Channels>,
+    windows: &mut W,
+) -> Result<(), Fail> {
+    let pdus = splitter.push(bytes).map_err(|_| REFUSED)?;
+    for (action, pdu) in &pdus {
+        channels.borrow_mut().browser_pdu(*action, pdu).map_err(|_| REFUSED)?;
+    }
+    for (_, pdu) in &pdus {
+        windows.write_all(pdu).await.map_err(|_| Fail::End(Ended::Remote))?;
+    }
+    windows.flush().await.map_err(|_| Fail::End(Ended::Remote))
 }
 
 /// The handshake must finish within this long, from the browser's first byte.
@@ -150,10 +173,15 @@ const HANDSHAKE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 #[cfg(test)]
 const HANDSHAKE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
-type Ready = (tokio_rustls::client::TlsStream<TcpStream>, Vec<u8>, Vec<u8>);
+type Ready = (
+    tokio_rustls::client::TlsStream<TcpStream>,
+    Vec<u8>,
+    Vec<String>,
+    Vec<u8>,
+);
 
-/// Returns TLS with Windows after NLA, the checked Connect Initial, and any
-/// browser bytes that came after it.
+/// Returns TLS with Windows after NLA, the checked Connect Initial, the static
+/// channel names it asks for, and any browser bytes that came after it.
 async fn handshake<R, W>(
     gateway_in: &mut R,
     gateway_out: &mut W,
@@ -284,16 +312,21 @@ where
         browser_bytes(gateway_in, &mut inbuf, policy::MAX_CONNECT_INITIAL).await?;
     }
     let first: Vec<u8> = inbuf.drain(..total).collect();
-    let checked = policy::connect_initial(&first, selected, clipboard).map_err(|_| REFUSED)?;
-    Ok((tls, checked, inbuf))
+    let (checked, names) = policy::connect_initial(&first, selected, clipboard).map_err(|_| REFUSED)?;
+    Ok((tls, checked, names, inbuf))
 }
 
-async fn upstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(gateway: &mut R, windows: &mut W) -> Fail {
+async fn upstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    gateway: &mut R,
+    windows: &mut W,
+    splitter: &mut Splitter,
+    channels: &RefCell<Channels>,
+) -> Fail {
     loop {
         match frame::read(gateway).await {
             Ok((Kind::Browser, payload)) => {
-                if windows.write_all(&payload).await.is_err() || windows.flush().await.is_err() {
-                    return Fail::End(Ended::Remote);
+                if let Err(fail) = pass_browser_bytes(&payload, splitter, channels, windows).await {
+                    return fail;
                 }
             }
             Ok(_) => return REFUSED,
@@ -302,15 +335,32 @@ async fn upstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(gateway: &mut R, 
     }
 }
 
-async fn downstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(windows: &mut R, gateway: &mut W) -> Fail {
+async fn downstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    windows: &mut R,
+    gateway: &mut W,
+    channels: &RefCell<Channels>,
+) -> Fail {
     let mut chunk = vec![0u8; 32 * 1024];
+    let mut splitter = Splitter::default();
+    let mut out = Vec::new();
     loop {
-        match windows.read(&mut chunk).await {
+        let n = match windows.read(&mut chunk).await {
             Ok(0) | Err(_) => return Fail::End(Ended::Remote),
-            Ok(n) => {
-                if frame::write(gateway, Kind::Desktop, &chunk[..n]).await.is_err() {
-                    return Fail::Quiet;
-                }
+            Ok(n) => n,
+        };
+        let Ok(pdus) = splitter.push(&chunk[..n]) else {
+            return REFUSED;
+        };
+        out.clear();
+        for (action, pdu) in &pdus {
+            if channels.borrow_mut().server_pdu(*action, pdu).is_err() {
+                return REFUSED;
+            }
+            out.extend_from_slice(pdu);
+        }
+        for part in out.chunks(frame::MAX_PAYLOAD) {
+            if frame::write(gateway, Kind::Desktop, part).await.is_err() {
+                return Fail::Quiet;
             }
         }
     }
@@ -632,6 +682,201 @@ mod tests {
                     assert_eq!(fail, Fail::End(Ended::Refused), "{what}");
                 }
             }
+        });
+    }
+
+    /// The NLA server named in `KEYBASH_PROXY_TEST`, if any (see above).
+    fn live_server() -> Option<(Trust, Setup, SocketAddr)> {
+        let spec = std::env::var("KEYBASH_PROXY_TEST").ok()?;
+        let parts: Vec<&str> = spec.split(',').collect();
+        let [address, certificate, name, secret] = parts.as_slice() else {
+            panic!("KEYBASH_PROXY_TEST must be address,certificate,name,secret-file");
+        };
+        let pem = std::fs::read(certificate).expect("certificate file");
+        let trust = Trust {
+            certificate: crate::pin::certificate(&pem).expect("one certificate"),
+            name: crate::pin::name(name.as_bytes()).expect("name"),
+        };
+        let secret = std::fs::read_to_string(secret).expect("secret file");
+        let (user, password) = secret.trim_end_matches('\n').split_once('\n').expect("two lines");
+        let setup = crate::setup::parse(&crate::setup::encode(user, "", password, false)).expect("setup");
+        Some((trust, setup, address.parse().expect("address")))
+    }
+
+    /// A whole desktop through the proxy: the browser opens `drdynvc` with
+    /// display control, Windows offers its dynamic channels, the browser opens
+    /// display control and refuses the rest, and every PDU passes the checks.
+    /// A monitor layout inside the bounds passes; one outside them ends the
+    /// session as "refused".
+    #[test]
+    fn dynamic_channels_and_display_layouts_follow_the_rules() {
+        use ironrdp_displaycontrol::client::DisplayControlClient;
+        use ironrdp_dvc::DrdynvcClient;
+        use ironrdp_session::{ActiveStageBuilder, ActiveStageOutput};
+
+        let Some((trust, setup, target)) = live_server() else {
+            eprintln!("KEYBASH_PROXY_TEST unset: no NLA server to reach");
+            return;
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let local = tokio::task::LocalSet::new();
+        local.block_on(&runtime, async move {
+            let (mut to_proxy, mut proxy_in) = duplex(256 * 1024);
+            let (mut proxy_out, mut from_proxy) = duplex(256 * 1024);
+            let proxy =
+                tokio::task::spawn_local(
+                    async move { run(&mut proxy_in, &mut proxy_out, setup, &trust, target).await },
+                );
+
+            let mut connector = ClientConnector::new(
+                crate::policy::tests::browser_config(1600, 900, 100),
+                "127.0.0.1:0".parse().expect("addr"),
+            );
+            connector.attach_static_channel(
+                DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
+            );
+            let mut buf = WriteBuf::new();
+            connector.step_no_input(&mut buf).expect("X.224 request");
+            let request = RDCleanPathPdu::new_request(buf.filled().to_vec(), "x".into(), "x".into(), None)
+                .and_then(|pdu| pdu.to_der())
+                .expect("request");
+            frame::write(&mut to_proxy, Kind::Browser, &request)
+                .await
+                .expect("request");
+            let (_, payload) = frame::read(&mut from_proxy).await.expect("response");
+            let Ok(RDCleanPathMessage::Response {
+                x224_connection_response,
+                server_cert_chain,
+                ..
+            }) = RDCleanPathPdu::from_der(&payload)
+                .map_err(|_| ())
+                .and_then(|p| p.into_message().map_err(|_| ()))
+            else {
+                panic!("not an RDCleanPath response");
+            };
+            buf.clear();
+            connector
+                .step(x224_connection_response.as_bytes(), None, &mut buf)
+                .expect("confirm");
+            let should = ironrdp_tokio::skip_connect_begin(&mut connector);
+            let upgraded = ironrdp_tokio::mark_as_upgraded(should, &mut connector);
+            let key = crate::pin::public_key(server_cert_chain[0].as_bytes()).expect("key");
+
+            // The page's own pumps: raw RDP one side, frames the other.
+            let (client, pump) = duplex(256 * 1024);
+            let ended = std::rc::Rc::new(std::cell::Cell::new(None::<u8>));
+            let seen = std::rc::Rc::clone(&ended);
+            let (mut pump_r, mut pump_w) = tokio::io::split(pump);
+            tokio::task::spawn_local(async move {
+                let mut chunk = vec![0u8; 16 * 1024];
+                while let Ok(n) = pump_r.read(&mut chunk).await {
+                    if n == 0 || frame::write(&mut to_proxy, Kind::Browser, &chunk[..n]).await.is_err() {
+                        break;
+                    }
+                }
+            });
+            tokio::task::spawn_local(async move {
+                loop {
+                    match frame::read(&mut from_proxy).await {
+                        Ok((Kind::Desktop, payload)) => {
+                            if pump_w.write_all(&payload).await.is_err() {
+                                break;
+                            }
+                        }
+                        Ok((Kind::Ended, code)) => {
+                            seen.set(code.first().copied());
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+            });
+
+            let mut framed = ironrdp_tokio::TokioFramed::new(client);
+            let mut no_network = NoNetwork;
+            let outcome = ironrdp_tokio::connect_finalize(
+                upgraded,
+                connector,
+                &mut framed,
+                &mut no_network,
+                ServerName::from("x"),
+                key,
+                None,
+            )
+            .await
+            .expect("connection sequence");
+            let ironrdp_connector::ConnectionOutcome::Connected(result) = outcome else {
+                panic!("redirected");
+            };
+            let mut image = ironrdp_session::image::DecodedImage::new(
+                ironrdp_graphics::image_processing::PixelFormat::RgbA32,
+                1600,
+                900,
+            );
+            let mut stage = ActiveStageBuilder {
+                static_channels: result.static_channels,
+                user_channel_id: result.user_channel_id,
+                io_channel_id: result.io_channel_id,
+                message_channel_id: result.message_channel_id,
+                share_id: result.share_id,
+                compression_type: result.compression_type,
+                enable_server_pointer: result.enable_server_pointer,
+                pointer_software_rendering: result.pointer_software_rendering,
+            }
+            .build();
+
+            // Run the session until display control is ready, then a while.
+            let mut layout_sent = false;
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+            let mut quiet_until = None;
+            loop {
+                assert!(!proxy.is_finished(), "the proxy ended a valid session");
+                if tokio::time::Instant::now() > deadline {
+                    panic!("display control never became ready");
+                }
+                if let Some(until) = quiet_until
+                    && tokio::time::Instant::now() > until
+                {
+                    break;
+                }
+                if !layout_sent && stage.display_control_capabilities().is_some() {
+                    let frame = stage
+                        .encode_resize(1280, 720, Some(100), None)
+                        .expect("ready")
+                        .expect("encode");
+                    framed.write_all(&frame).await.expect("layout");
+                    layout_sent = true;
+                    quiet_until = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(3));
+                }
+                let Ok(read) = tokio::time::timeout(std::time::Duration::from_millis(200), framed.read_pdu()).await
+                else {
+                    continue;
+                };
+                let (action, frame) = read.expect("read");
+                for out in stage.process(&mut image, action, &frame, None).expect("process") {
+                    if let ActiveStageOutput::ResponseFrame(frame) = out {
+                        framed.write_all(&frame).await.expect("response");
+                    }
+                }
+            }
+            assert!(!proxy.is_finished(), "the proxy ended after a layout inside the bounds");
+
+            // Twice the full-HD width at 100%: the proxy must end it.
+            let frame = stage
+                .encode_resize(3840, 2160, Some(100), None)
+                .expect("ready")
+                .expect("encode");
+            framed.write_all(&frame).await.expect("layout");
+            let fail = tokio::time::timeout(std::time::Duration::from_secs(5), proxy)
+                .await
+                .expect("the proxy let a layout outside the bounds pass")
+                .expect("proxy task");
+            assert_eq!(fail, Fail::End(Ended::Refused));
+            let _ = ended.get();
         });
     }
 }

@@ -26,3 +26,10 @@ zeroize = "1"
 # Integer overflow is a refusal, never a wrap, in release builds too.
 overflow-checks = true
 codegen-units = 1
+
+# Only the end-to-end tests, which play the browser's whole session.
+[dev-dependencies]
+ironrdp-session = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-dvc = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-displaycontrol = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-graphics = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
