@@ -504,7 +504,7 @@ mod tests {
             let proxy = run(&mut proxy_in, &mut proxy_out, setup, &trust, target);
             let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
                 tokio::select! {
-                    fail = proxy => Err(format!("the proxy ended first: {fail:?}")),
+                    fail = proxy => Err(format!("the proxy ended first: {}", fail_word(&fail))),
                     r = browser(&mut to_proxy, &mut from_proxy) => r,
                 }
             })
@@ -515,6 +515,19 @@ mod tests {
                 Err(_) => panic!("no desktop within 30 seconds"),
             }
         });
+    }
+
+    /// A fixed word for how the proxy ended, for test messages: the end
+    /// itself is never printed.
+    fn fail_word(fail: &Fail) -> &'static str {
+        match fail {
+            Fail::Quiet => "quietly",
+            Fail::End(Ended::Credentials) => "credentials",
+            Fail::End(Ended::Unreachable) => "unreachable",
+            Fail::End(Ended::CertificateChanged) => "certificate changed",
+            Fail::End(Ended::Refused) => "refused",
+            Fail::End(Ended::Remote) => "remote ended",
+        }
     }
 
     /// What reaches Windows before TLS carries no account material: not the
@@ -538,24 +551,23 @@ mod tests {
             frame::write(&mut to_proxy, Kind::Browser, &request)
                 .await
                 .expect("write");
-            let setup = crate::setup::parse(&crate::setup::encode(
-                "kb-account-name",
-                "KB-DOMAIN",
-                "kb-secret-word",
-                false,
-            ))
-            .expect("setup");
+            let password = crate::setup::tests::test_password(13, 14, false);
+            let setup = crate::setup::parse(&crate::setup::encode("kb-account-name", "KB-DOMAIN", &password, false))
+                .expect("setup");
             let trust = Trust {
                 certificate: crate::pin::tests::certificate_der(),
                 name: Name::ExactLeaf,
             };
             let (_, sent) = tokio::join!(run(&mut proxy_in, &mut proxy_out, setup, &trust, target), peer);
-            for secret in ["kb-account-name", "KB-DOMAIN", "kb-secret-word", "mstshash"] {
-                assert!(
-                    !sent.windows(secret.len()).any(|w| w == secret.as_bytes()),
-                    "{secret} crossed before TLS: {sent:?}"
-                );
+            let crossed = |text: &[u8]| sent.windows(text.len()).any(|w| w == text);
+            for (what, text) in [
+                ("the user name", &b"kb-account-name"[..]),
+                ("the domain", b"KB-DOMAIN"),
+                ("the routing cookie", b"mstshash"),
+            ] {
+                assert!(!crossed(text), "{what} crossed before TLS: {sent:?}");
             }
+            assert!(!crossed(password.as_bytes()), "the password crossed before TLS");
         });
     }
 
@@ -585,7 +597,8 @@ mod tests {
             frame::write(&mut to_proxy, Kind::Browser, &request)
                 .await
                 .expect("write");
-            let setup = crate::setup::parse(&crate::setup::encode("u", "", "never-sent", false)).expect("setup");
+            let password = crate::setup::tests::test_password(11, 12, false);
+            let setup = crate::setup::parse(&crate::setup::encode("u", "", &password, false)).expect("setup");
             let trust = Trust {
                 certificate: crate::pin::tests::certificate_der(),
                 name: Name::ExactLeaf,
@@ -604,7 +617,8 @@ mod tests {
                 frame::write(&mut to_proxy, Kind::Browser, &request)
                     .await
                     .expect("write");
-                let setup = crate::setup::parse(&crate::setup::encode("u", "", "p", false)).expect("setup");
+                let password = crate::setup::tests::test_password(12, 8, false);
+                let setup = crate::setup::parse(&crate::setup::encode("u", "", &password, false)).expect("setup");
                 let trust = Trust {
                     certificate: crate::pin::tests::certificate_der(),
                     name: Name::ExactLeaf,
@@ -662,7 +676,8 @@ mod tests {
                         .await
                         .expect("write");
                     drop(to_proxy);
-                    let setup = crate::setup::parse(&crate::setup::encode("u", "", "p", false)).expect("setup");
+                    let password = crate::setup::tests::test_password(12, 8, false);
+                    let setup = crate::setup::parse(&crate::setup::encode("u", "", &password, false)).expect("setup");
                     let trust = Trust {
                         certificate: crate::pin::tests::certificate_der(),
                         name: Name::ExactLeaf,
@@ -680,7 +695,8 @@ mod tests {
                 };
                 assert!(
                     matches!(fail, Fail::End(Ended::Refused) | Fail::Quiet),
-                    "{what}: {fail:?}"
+                    "{what}: {}",
+                    fail_word(&fail)
                 );
                 if what != "cut short" {
                     assert_eq!(fail, Fail::End(Ended::Refused), "{what}");

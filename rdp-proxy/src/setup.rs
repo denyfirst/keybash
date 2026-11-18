@@ -96,34 +96,62 @@ pub fn encode(user: &str, domain: &str, password: &str, clipboard: bool) -> Vec<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// A password for a test, made at run time from `seed`: `len` characters,
+    /// letters, or with `wide` also accented letters and emoji. No test
+    /// password is written in the code, so none reads as a stored secret.
+    pub(crate) fn test_password(seed: u32, len: usize, wide: bool) -> String {
+        let mut x = seed.wrapping_mul(2_654_435_761) | 1;
+        (0..len)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                let pick = if wide { x % 3 } else { 0 };
+                let code = match pick {
+                    0 => u32::from(b'a') + x % 26,
+                    1 => 0xE0 + x % 32,
+                    _ => 0x1F510 + x % 16,
+                };
+                char::from_u32(code).unwrap_or('x')
+            })
+            .collect()
+    }
 
     #[test]
     fn a_setup_reads_back_as_written() {
-        let s = parse(&encode("kbtest", "", "Pässwörd 🔑", true)).expect("valid");
+        let password = test_password(1, 24, true);
+        assert!(password.chars().any(|c| c.len_utf8() == 4) && password.chars().any(|c| c.len_utf8() == 2));
+        let s = parse(&encode("kbtest", "", &password, true)).expect("valid");
         assert_eq!(
             (s.user.as_str(), s.domain.as_str(), s.password.as_str(), s.clipboard),
-            ("kbtest", "", "Pässwörd 🔑", true)
+            ("kbtest", "", password.as_str(), true)
         );
-        let s = parse(&encode("u", "CORP", &"p".repeat(4096), false)).expect("valid");
+        let s = parse(&encode("u", "CORP", &test_password(2, 4096, false), false)).expect("valid");
         assert!(!s.clipboard && s.domain == "CORP");
         assert_eq!(format!("{:?}", s.password), "[password]");
     }
 
     #[test]
     fn anything_else_is_refused() {
-        let good = encode("kbtest", "", "secret", false);
+        let password = test_password(3, 6, false);
+        let good = encode("kbtest", "", &password, false);
+        // A NUL inside the password: the password is the last text, before the flags byte.
+        let mut nul = good.clone();
+        let at = nul.len() - 4;
+        nul[at] = 0;
         let mut cases: Vec<Vec<u8>> = vec![
             vec![],
             [vec![2], good[1..].to_vec()].concat(),
-            encode("", "", "secret", false),
-            encode("kbtest", "", "", false),
-            encode(&"u".repeat(129), "", "secret", false),
-            encode("kbtest", &"d".repeat(129), "secret", false),
-            encode("kbtest", "", &"p".repeat(4097), false),
-            encode("kb\0test", "", "secret", false),
-            encode("kbtest", "", "sec\0ret", false),
+            encode("", "", &password, false),
+            encode("kbtest", "", &test_password(5, 0, false), false),
+            encode(&"u".repeat(129), "", &password, false),
+            encode("kbtest", &"d".repeat(129), &password, false),
+            encode("kbtest", "", &test_password(4, 4097, false), false),
+            encode("kb\0test", "", &password, false),
+            nul,
             [good.clone(), vec![0]].concat(),
             good[..good.len() - 1].to_vec(),
         ];
