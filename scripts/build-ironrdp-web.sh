@@ -9,7 +9,7 @@
 set -eu
 # IronRDP's master after its newest release, ironrdp-v0.17.0. The browser
 # build's graphics pipeline exists only on master.
-commit=fe9608b2abbeb98fd680645ced72d210a2e050c1
+commit=abfc97b299f04622cb7860f344a35bbea9bd4361
 # The toolchain IronRDP's own rust-toolchain.toml names at that commit, and
 # the wasm-bindgen its Cargo.lock holds: the CLI must match the library.
 rust=1.94.1
