@@ -1,15 +1,27 @@
 //! What crosses the proxy after the handshake (docs/BROWSER-RDP-PROXY.md,
 //! 2c): every PDU framed and bounded, the static channels Windows numbered,
-//! and on `drdynvc` only the dynamic channels Keybash allows, opened by the
-//! browser itself. Anything else ends the session as "refused".
+//! on `drdynvc` only the dynamic channels Keybash allows, opened by the
+//! browser itself, and on `cliprdr` only text (crate::clipboard). Anything
+//! else ends the session as "refused".
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use ironrdp_core::decode;
 use ironrdp_pdu::x224::{X224, X224Data};
 use ironrdp_pdu::{Action, find_size, mcs};
 
+use crate::clipboard::Clipboard;
 use crate::policy::{Refusal, desktop_allowed};
+
+/// What goes on in place of a PDU that passed its checks.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Pass {
+    Unchanged,
+    /// These PDUs instead, possibly none: a clipboard message is gathered
+    /// whole and written again.
+    Instead(Vec<Vec<u8>>),
+}
 
 /// The largest PDU passed: a TPKT's own limit; fast-path is smaller still.
 pub const MAX_PDU: usize = 65_535;
@@ -85,9 +97,15 @@ pub struct Channels {
     io: Option<u16>,
     user: Option<u16>,
     drdynvc: Option<u16>,
+    cliprdr: Option<u16>,
+    clip: Clipboard,
     dvc: HashMap<u32, Dvc>,
     from_server: Chunks,
     from_browser: Chunks,
+    /// The account the proxy signed in with: user name and domain.
+    account: Option<(String, Option<String>)>,
+    /// Whether the browser's Client Info has passed, written again.
+    client_info: bool,
 }
 
 impl Channels {
@@ -98,19 +116,31 @@ impl Channels {
             io: None,
             user: None,
             drdynvc: None,
+            cliprdr: None,
+            clip: Clipboard::default(),
             dvc: HashMap::new(),
             from_server: Chunks::default(),
             from_browser: Chunks::default(),
+            account: None,
+            client_info: false,
         }
     }
 
+    /// The account the browser's Client Info will name. Without one, the
+    /// Client Info is refused.
+    pub fn for_account(mut self, user: &str, domain: &str) -> Self {
+        let domain = (!domain.is_empty()).then(|| domain.to_owned());
+        self.account = Some((user.to_owned(), domain));
+        self
+    }
+
     /// Checks one PDU from Windows before it goes to the browser.
-    pub fn server_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<(), Refusal> {
+    pub fn server_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<Pass, Refusal> {
         if action == Action::FastPath {
-            return Ok(()); // output updates; they carry no channel data
+            return Ok(Pass::Unchanged); // output updates; they carry no channel data
         }
         if self.io.is_none() {
-            return self.connect_response(pdu);
+            return self.connect_response(pdu).map(|()| Pass::Unchanged);
         }
         match decode::<X224<mcs::McsMessage<'_>>>(pdu)
             .map_err(|_| Refusal("MCS from Windows"))?
@@ -118,14 +148,22 @@ impl Channels {
         {
             mcs::McsMessage::AttachUserConfirm(confirm) => {
                 self.user = Some(confirm.initiator_id);
-                Ok(())
+                Ok(Pass::Unchanged)
             }
-            mcs::McsMessage::ChannelJoinConfirm(_) | mcs::McsMessage::DisconnectProviderUltimatum(_) => Ok(()),
+            mcs::McsMessage::ChannelJoinConfirm(_) | mcs::McsMessage::DisconnectProviderUltimatum(_) => {
+                Ok(Pass::Unchanged)
+            }
             mcs::McsMessage::SendDataIndication(data) => {
                 if Some(data.channel_id) == self.io || Some(data.channel_id) == self.user {
-                    Ok(())
+                    Ok(Pass::Unchanged)
                 } else if Some(data.channel_id) == self.drdynvc {
-                    self.svc(true, &data.user_data)
+                    self.svc(true, &data.user_data).map(|()| Pass::Unchanged)
+                } else if Some(data.channel_id) == self.cliprdr {
+                    let now = Instant::now();
+                    let pdus = self
+                        .clip
+                        .chunk(true, data.initiator_id, data.channel_id, &data.user_data, now)?;
+                    Ok(Pass::Instead(pdus))
                 } else {
                     Err(Refusal("data on a channel not allowed"))
                 }
@@ -135,9 +173,9 @@ impl Channels {
     }
 
     /// Checks one PDU from the browser before it goes to Windows.
-    pub fn browser_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<(), Refusal> {
+    pub fn browser_pdu(&mut self, action: Action, pdu: &[u8]) -> Result<Pass, Refusal> {
         if action == Action::FastPath {
-            return Ok(()); // input events
+            return Ok(Pass::Unchanged); // input events
         }
         match decode::<X224<mcs::McsMessage<'_>>>(pdu)
             .map_err(|_| Refusal("MCS from the browser"))?
@@ -145,26 +183,75 @@ impl Channels {
         {
             mcs::McsMessage::ErectDomainRequest(_)
             | mcs::McsMessage::AttachUserRequest(_)
-            | mcs::McsMessage::DisconnectProviderUltimatum(_) => Ok(()),
+            | mcs::McsMessage::DisconnectProviderUltimatum(_) => Ok(Pass::Unchanged),
             mcs::McsMessage::ChannelJoinRequest(join) => {
-                let known = [self.io, self.user, self.drdynvc];
+                let known = [self.io, self.user, self.drdynvc, self.cliprdr];
                 if known.contains(&Some(join.channel_id)) {
-                    Ok(())
+                    Ok(Pass::Unchanged)
                 } else {
                     Err(Refusal("joining a channel not allowed"))
                 }
             }
             mcs::McsMessage::SendDataRequest(data) => {
-                if Some(data.channel_id) == self.io || Some(data.channel_id) == self.user {
-                    Ok(())
+                if Some(data.channel_id) == self.io && !self.client_info {
+                    self.client_info(data.initiator_id, data.channel_id, &data.user_data)
+                } else if Some(data.channel_id) == self.io || Some(data.channel_id) == self.user {
+                    Ok(Pass::Unchanged)
                 } else if Some(data.channel_id) == self.drdynvc {
-                    self.svc(false, &data.user_data)
+                    self.svc(false, &data.user_data).map(|()| Pass::Unchanged)
+                } else if Some(data.channel_id) == self.cliprdr {
+                    let now = Instant::now();
+                    let pdus = self
+                        .clip
+                        .chunk(false, data.initiator_id, data.channel_id, &data.user_data, now)?;
+                    Ok(Pass::Instead(pdus))
                 } else {
                     Err(Refusal("data on a channel not allowed"))
                 }
             }
             _ => Err(Refusal("MCS from the browser")),
         }
+    }
+
+    /// The browser's Client Info (MS-RDPBCGR 2.2.1.11), its first message on
+    /// the I/O channel, written again:
+    /// - it names the account the proxy signed in with, with no password and
+    ///   no redirection cookie in the password's place;
+    /// - it carries no auto-reconnect cookie, so it cannot reach a session
+    ///   the proxy did not sign in for;
+    /// - a program instead of the desktop, a working folder or RemoteApp
+    ///   ends the session, as today's guacd path never asks for them.
+    fn client_info(&mut self, initiator: u16, channel: u16, data: &[u8]) -> Result<Pass, Refusal> {
+        use ironrdp_pdu::rdp::ClientInfoPdu;
+        use ironrdp_pdu::rdp::client_info::{ClientInfoFlags, Credentials};
+        use ironrdp_pdu::rdp::headers::BasicSecurityHeaderFlags;
+
+        let (user, domain) = self.account.clone().ok_or(Refusal("no account for the Client Info"))?;
+        let mut pdu = decode::<ClientInfoPdu>(data).map_err(|_| Refusal("Client Info"))?;
+        let info = &mut pdu.client_info;
+        if pdu.security_header.flags != BasicSecurityHeaderFlags::INFO_PKT
+            || !info.alternate_shell.is_empty()
+            || !info.work_dir.is_empty()
+            || info.flags.contains(ClientInfoFlags::RAIL)
+        {
+            return Err(Refusal("Client Info asks for more than the desktop"));
+        }
+        info.credentials = Credentials {
+            username: user,
+            password: String::new(),
+            domain,
+        };
+        info.password_cookie = None;
+        info.extra_info.optional_data = without_reconnect_cookie(&info.extra_info.optional_data);
+        let written = ironrdp_core::encode_vec(&pdu).map_err(|_| Refusal("Client Info"))?;
+        let out = ironrdp_core::encode_vec(&X224(mcs::McsMessage::SendDataRequest(mcs::SendDataRequest {
+            initiator_id: initiator,
+            channel_id: channel,
+            user_data: std::borrow::Cow::Owned(written),
+        })))
+        .map_err(|_| Refusal("Client Info"))?;
+        self.client_info = true;
+        Ok(Pass::Instead(vec![out]))
     }
 
     /// Windows' MCS Connect Response numbers the channels the browser asked
@@ -180,8 +267,7 @@ impl Channels {
         for (name, &id) in self.names.iter().zip(&network.channel_ids) {
             match name.as_str() {
                 "drdynvc" => self.drdynvc = Some(id),
-                // The clipboard joins only once its contents are filtered.
-                "cliprdr" if self.clipboard => return Err(Refusal("clipboard not filtered yet")),
+                "cliprdr" if self.clipboard => self.cliprdr = Some(id),
                 _ => return Err(Refusal("static channel not allowed")),
             }
         }
@@ -284,6 +370,26 @@ impl Channels {
     }
 }
 
+/// The Client Info's optional fields, in their fixed order, up to and without
+/// the auto-reconnect cookie.
+fn without_reconnect_cookie(
+    old: &ironrdp_pdu::rdp::client_info::ExtendedClientOptionalInfo,
+) -> ironrdp_pdu::rdp::client_info::ExtendedClientOptionalInfo {
+    let start = ironrdp_pdu::rdp::client_info::ExtendedClientOptionalInfo::builder();
+    let Some(timezone) = old.timezone() else {
+        return start.build();
+    };
+    let next = start.timezone(timezone.clone());
+    let Some(id) = old.session_id() else {
+        return next.build();
+    };
+    let next = next.session_id(id);
+    let Some(flags) = old.performance_flags() else {
+        return next.build();
+    };
+    next.performance_flags(flags).build()
+}
+
 /// A display-control monitor layout from the browser (MS-RDPEDISP 2.2.2.2):
 /// one primary monitor at the origin, within the desktop bounds.
 fn display_layout(pdu: &[u8]) -> Result<(), Refusal> {
@@ -313,7 +419,7 @@ fn display_layout(pdu: &[u8]) -> Result<(), Refusal> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ironrdp_core::encode_vec;
     use std::borrow::Cow;
@@ -374,11 +480,15 @@ mod tests {
     }
 
     fn server(c: &mut Channels, pdu: Vec<u8>) -> Result<(), Refusal> {
-        c.server_pdu(Action::X224, &send_data(true, 1004, chunk(&pdu)))
+        let pass = c.server_pdu(Action::X224, &send_data(true, 1004, chunk(&pdu)))?;
+        assert_eq!(pass, Pass::Unchanged, "drdynvc passes as it came");
+        Ok(())
     }
 
     fn browser(c: &mut Channels, pdu: Vec<u8>) -> Result<(), Refusal> {
-        c.browser_pdu(Action::X224, &send_data(false, 1004, chunk(&pdu)))
+        let pass = c.browser_pdu(Action::X224, &send_data(false, 1004, chunk(&pdu)))?;
+        assert_eq!(pass, Pass::Unchanged, "drdynvc passes as it came");
+        Ok(())
     }
 
     /// Windows' Connect Response numbering `ids` for the requested channels.
@@ -434,8 +544,38 @@ mod tests {
                 "{names:?} {ids:?}"
             );
         }
-        // The clipboard waits for its filter, even when the account allows it.
+        // With the clipboard allowed, cliprdr is numbered, may be joined, and
+        // its messages go through the clipboard filter, gathered and written
+        // again. Without it, the same number is refused.
         let mut c = Channels::new(vec!["drdynvc".into(), "cliprdr".into()], true);
+        c.server_pdu(Action::X224, &connect_response(vec![1004, 1005]))
+            .expect("drdynvc and cliprdr");
+        let ready = vec![1, 0, 0, 0, 0, 0, 0, 0];
+        let pass = c
+            .server_pdu(Action::X224, &send_data(true, 1005, chunk(&ready)))
+            .expect("monitor ready");
+        assert_eq!(pass, Pass::Instead(vec![send_data(true, 1005, chunk(&ready))]));
+        c.user = Some(1002);
+        let join = encode_vec(&X224(mcs::McsMessage::ChannelJoinRequest(mcs::ChannelJoinRequest {
+            initiator_id: 1002,
+            channel_id: 1005,
+        })))
+        .expect("join");
+        assert_eq!(c.browser_pdu(Action::X224, &join), Ok(Pass::Unchanged));
+        assert!(
+            c.browser_pdu(Action::X224, &send_data(false, 1005, chunk(&ready)))
+                .is_err(),
+            "monitor ready from the browser"
+        );
+        let mut c = Channels::new(vec!["drdynvc".into()], false);
+        c.server_pdu(Action::X224, &connect_response(vec![1004]))
+            .expect("drdynvc");
+        assert!(
+            c.server_pdu(Action::X224, &send_data(true, 1005, chunk(&ready)))
+                .is_err()
+        );
+        // Without the clipboard, cliprdr is never numbered, even if asked for.
+        let mut c = Channels::new(vec!["drdynvc".into(), "cliprdr".into()], false);
         assert!(c.server_pdu(Action::X224, &connect_response(vec![1004, 1005])).is_err());
         // Anything else first is refused.
         let mut c = Channels::new(vec![], false);
@@ -575,5 +715,129 @@ mod tests {
         // Fast-path passes both ways.
         c.server_pdu(Action::FastPath, &[0, 3, 0]).expect("output");
         c.browser_pdu(Action::FastPath, &[0, 3, 0]).expect("input");
+    }
+
+    /// A Client Info as a browser could write it: someone else's name, a
+    /// password, and optionally an auto-reconnect cookie.
+    pub(crate) fn client_info(
+        shell: &str,
+        dir: &str,
+        flags: ironrdp_pdu::rdp::client_info::ClientInfoFlags,
+        cookie: bool,
+    ) -> Vec<u8> {
+        use ironrdp_pdu::rdp::client_info::{
+            AddressFamily, ClientInfo, CompressionType, Credentials, ExtendedClientInfo, ExtendedClientOptionalInfo,
+            OptionalSystemTime, PasswordCookie, PerformanceFlags, TimezoneInfo,
+        };
+        use ironrdp_pdu::rdp::headers::{BasicSecurityHeader, BasicSecurityHeaderFlags};
+        let timezone = TimezoneInfo {
+            bias: -240,
+            standard_name: "Azerbaijan Standard Time".into(),
+            standard_date: OptionalSystemTime(None),
+            standard_bias: 0,
+            daylight_name: String::new(),
+            daylight_date: OptionalSystemTime(None),
+            daylight_bias: 0,
+        };
+        let optional = ExtendedClientOptionalInfo::builder()
+            .timezone(timezone)
+            .session_id(0)
+            .performance_flags(PerformanceFlags::DISABLE_WALLPAPER);
+        let optional = if cookie {
+            optional.reconnect_cookie([7; 28]).build()
+        } else {
+            optional.build()
+        };
+        let pdu = ironrdp_pdu::rdp::ClientInfoPdu {
+            security_header: BasicSecurityHeader {
+                flags: BasicSecurityHeaderFlags::INFO_PKT,
+            },
+            client_info: ClientInfo {
+                credentials: Credentials {
+                    username: "someone-else".into(),
+                    password: "not-for-windows".into(),
+                    domain: Some("ELSEWHERE".into()),
+                },
+                // Invalid as text, so it decodes as a redirection cookie.
+                password_cookie: cookie.then(|| PasswordCookie(vec![0x00, 0xD8, 0x41, 0x00])),
+                code_page: 0,
+                flags,
+                compression_type: CompressionType::K8,
+                alternate_shell: shell.into(),
+                work_dir: dir.into(),
+                extra_info: ExtendedClientInfo {
+                    address_family: AddressFamily::from_u16(2),
+                    address: "127.0.0.1".into(),
+                    dir: "C:\\Windows\\System32\\mstscax.dll".into(),
+                    optional_data: optional,
+                },
+            },
+        };
+        encode_vec(&pdu).expect("client info")
+    }
+
+    fn written_client_info(pass: Result<Pass, Refusal>) -> ironrdp_pdu::rdp::ClientInfoPdu {
+        let Ok(Pass::Instead(pdus)) = pass else {
+            panic!("the Client Info was not written again: {pass:?}");
+        };
+        assert_eq!(pdus.len(), 1);
+        let X224(mcs::McsMessage::SendDataRequest(data)) = decode::<X224<mcs::McsMessage<'_>>>(&pdus[0]).expect("mcs")
+        else {
+            panic!("not channel data");
+        };
+        assert_eq!((data.initiator_id, data.channel_id), (1002, 1003));
+        decode::<ironrdp_pdu::rdp::ClientInfoPdu>(&data.user_data).expect("client info")
+    }
+
+    #[test]
+    fn the_client_info_names_the_account_and_asks_for_nothing_more() {
+        use ironrdp_pdu::rdp::client_info::{ClientInfoFlags, PerformanceFlags};
+        let normal = ClientInfoFlags::MOUSE | ClientInfoFlags::UNICODE | ClientInfoFlags::DISABLE_CTRL_ALT_DEL;
+        let first = |c: &mut Channels, pdu: Vec<u8>| c.browser_pdu(Action::X224, &send_data(false, 1003, pdu));
+
+        // Written again: the account, no password, no cookie; the rest kept.
+        let mut c = connected().for_account("kb-user", "KB");
+        let sent = decode::<ironrdp_pdu::rdp::ClientInfoPdu>(&client_info("", "", normal, true)).expect("decodes");
+        assert!(
+            sent.client_info.password_cookie.is_some(),
+            "the test sends a redirection cookie"
+        );
+        assert!(sent.client_info.extra_info.optional_data.reconnect_cookie().is_some());
+        let written = written_client_info(first(&mut c, client_info("", "", normal, true)));
+        let info = written.client_info;
+        assert_eq!(info.credentials.username, "kb-user");
+        assert_eq!(info.credentials.domain.as_deref(), Some("KB"));
+        assert_eq!(info.credentials.password, "");
+        assert!(info.password_cookie.is_none());
+        assert!(info.extra_info.optional_data.reconnect_cookie().is_none());
+        assert_eq!(info.extra_info.optional_data.timezone().map(|t| t.bias), Some(-240));
+        assert_eq!(
+            info.extra_info.optional_data.performance_flags(),
+            Some(PerformanceFlags::DISABLE_WALLPAPER)
+        );
+        assert_eq!(info.flags, normal);
+        // Only the first: later I/O data passes as it came.
+        assert_eq!(first(&mut c, vec![1, 2, 3]), Ok(Pass::Unchanged));
+
+        // An empty domain is none.
+        let mut c = connected().for_account("kb-user", "");
+        let written = written_client_info(first(&mut c, client_info("", "", normal, false)));
+        assert_eq!(written.client_info.credentials.domain, None);
+
+        // A program instead of the desktop, a working folder, RemoteApp,
+        // anything that is not a Client Info, or no account: refused.
+        for bad in [
+            client_info("cmd.exe", "", normal, false),
+            client_info("", "C:\\", normal, false),
+            client_info("", "", normal | ClientInfoFlags::RAIL, false),
+            vec![1, 2, 3],
+        ] {
+            let mut c = connected().for_account("kb-user", "");
+            assert!(first(&mut c, bad).is_err());
+        }
+        let mut other_header = client_info("", "", normal, false);
+        other_header[0] |= 0x08; // SEC_ENCRYPT beside SEC_INFO_PKT (0x0040)
+        assert!(first(&mut connected().for_account("kb-user", ""), other_header).is_err());
+        assert!(first(&mut connected(), client_info("", "", normal, false)).is_err());
     }
 }

@@ -16,7 +16,7 @@ use tokio::net::TcpStream;
 
 use std::cell::RefCell;
 
-use crate::channels::{Channels, Splitter};
+use crate::channels::{Channels, Pass, Splitter};
 use crate::frame::{self, Ended, FrameError, Kind};
 use crate::policy;
 use crate::setup::Setup;
@@ -125,6 +125,7 @@ where
     // Everything up to the checked Connect Initial has a deadline: a browser,
     // or a server, that stalls the handshake cannot hold a worker.
     let clipboard = setup.clipboard;
+    let (user, domain) = (setup.user.clone(), setup.domain.clone());
     let handshake = tokio::time::timeout(HANDSHAKE_WAIT, handshake(gateway_in, gateway_out, setup, trust, target));
     let (tls, checked, names, rest) = match handshake.await {
         Ok(Ok(ready)) => ready,
@@ -139,7 +140,7 @@ where
     // The relay: whole PDUs each way, each checked against the channels
     // before it passes (crate::channels). Both directions run in this one
     // task, so they share the state without locks.
-    let channels = RefCell::new(Channels::new(names, clipboard));
+    let channels = RefCell::new(Channels::new(names, clipboard).for_account(&user, &domain));
     let mut browser = Splitter::default();
     if let Err(fail) = pass_browser_bytes(&rest, &mut browser, &channels, &mut to_windows).await {
         return fail;
@@ -158,12 +159,14 @@ async fn pass_browser_bytes<W: AsyncWrite + Unpin>(
     windows: &mut W,
 ) -> Result<(), Fail> {
     let pdus = splitter.push(bytes).map_err(|_| REFUSED)?;
+    let mut out = Vec::new();
     for (action, pdu) in &pdus {
-        channels.borrow_mut().browser_pdu(*action, pdu).map_err(|_| REFUSED)?;
+        match channels.borrow_mut().browser_pdu(*action, pdu).map_err(|_| REFUSED)? {
+            Pass::Unchanged => out.extend_from_slice(pdu),
+            Pass::Instead(instead) => instead.iter().for_each(|p| out.extend_from_slice(p)),
+        }
     }
-    for (_, pdu) in &pdus {
-        windows.write_all(pdu).await.map_err(|_| Fail::End(Ended::Remote))?;
-    }
+    windows.write_all(&out).await.map_err(|_| Fail::End(Ended::Remote))?;
     windows.flush().await.map_err(|_| Fail::End(Ended::Remote))
 }
 
@@ -353,10 +356,11 @@ async fn downstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         };
         out.clear();
         for (action, pdu) in &pdus {
-            if channels.borrow_mut().server_pdu(*action, pdu).is_err() {
-                return REFUSED;
+            match channels.borrow_mut().server_pdu(*action, pdu) {
+                Ok(Pass::Unchanged) => out.extend_from_slice(pdu),
+                Ok(Pass::Instead(instead)) => instead.iter().for_each(|p| out.extend_from_slice(p)),
+                Err(_) => return REFUSED,
             }
-            out.extend_from_slice(pdu);
         }
         for part in out.chunks(frame::MAX_PAYLOAD) {
             if frame::write(gateway, Kind::Desktop, part).await.is_err() {
@@ -712,7 +716,7 @@ mod tests {
     fn dynamic_channels_and_display_layouts_follow_the_rules() {
         use ironrdp_displaycontrol::client::DisplayControlClient;
         use ironrdp_dvc::DrdynvcClient;
-        use ironrdp_session::{ActiveStageBuilder, ActiveStageOutput};
+        use ironrdp_session::ActiveStageOutput;
 
         let Some((trust, setup, target)) = live_server() else {
             eprintln!("KEYBASH_PROXY_TEST unset: no NLA server to reach");
@@ -725,13 +729,6 @@ mod tests {
             .expect("runtime");
         let local = tokio::task::LocalSet::new();
         local.block_on(&runtime, async move {
-            let (mut to_proxy, mut proxy_in) = duplex(256 * 1024);
-            let (mut proxy_out, mut from_proxy) = duplex(256 * 1024);
-            let proxy =
-                tokio::task::spawn_local(
-                    async move { run(&mut proxy_in, &mut proxy_out, setup, &trust, target).await },
-                );
-
             let mut connector = ClientConnector::new(
                 crate::policy::tests::browser_config(1600, 900, 100),
                 "127.0.0.1:0".parse().expect("addr"),
@@ -739,95 +736,12 @@ mod tests {
             connector.attach_static_channel(
                 DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
             );
-            let mut buf = WriteBuf::new();
-            connector.step_no_input(&mut buf).expect("X.224 request");
-            let request = RDCleanPathPdu::new_request(buf.filled().to_vec(), "x".into(), "x".into(), None)
-                .and_then(|pdu| pdu.to_der())
-                .expect("request");
-            frame::write(&mut to_proxy, Kind::Browser, &request)
-                .await
-                .expect("request");
-            let (_, payload) = frame::read(&mut from_proxy).await.expect("response");
-            let Ok(RDCleanPathMessage::Response {
-                x224_connection_response,
-                server_cert_chain,
-                ..
-            }) = RDCleanPathPdu::from_der(&payload)
-                .map_err(|_| ())
-                .and_then(|p| p.into_message().map_err(|_| ()))
-            else {
-                panic!("not an RDCleanPath response");
-            };
-            buf.clear();
-            connector
-                .step(x224_connection_response.as_bytes(), None, &mut buf)
-                .expect("confirm");
-            let should = ironrdp_tokio::skip_connect_begin(&mut connector);
-            let upgraded = ironrdp_tokio::mark_as_upgraded(should, &mut connector);
-            let key = crate::pin::public_key(server_cert_chain[0].as_bytes()).expect("key");
-
-            // The page's own pumps: raw RDP one side, frames the other.
-            let (client, pump) = duplex(256 * 1024);
-            let ended = std::rc::Rc::new(std::cell::Cell::new(None::<u8>));
-            let seen = std::rc::Rc::clone(&ended);
-            let (mut pump_r, mut pump_w) = tokio::io::split(pump);
-            tokio::task::spawn_local(async move {
-                let mut chunk = vec![0u8; 16 * 1024];
-                while let Ok(n) = pump_r.read(&mut chunk).await {
-                    if n == 0 || frame::write(&mut to_proxy, Kind::Browser, &chunk[..n]).await.is_err() {
-                        break;
-                    }
-                }
-            });
-            tokio::task::spawn_local(async move {
-                loop {
-                    match frame::read(&mut from_proxy).await {
-                        Ok((Kind::Desktop, payload)) => {
-                            if pump_w.write_all(&payload).await.is_err() {
-                                break;
-                            }
-                        }
-                        Ok((Kind::Ended, code)) => {
-                            seen.set(code.first().copied());
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-            });
-
-            let mut framed = ironrdp_tokio::TokioFramed::new(client);
-            let mut no_network = NoNetwork;
-            let outcome = ironrdp_tokio::connect_finalize(
-                upgraded,
-                connector,
-                &mut framed,
-                &mut no_network,
-                ServerName::from("x"),
-                key,
-                None,
-            )
-            .await
-            .expect("connection sequence");
-            let ironrdp_connector::ConnectionOutcome::Connected(result) = outcome else {
-                panic!("redirected");
-            };
+            let (proxy, mut framed, mut stage) = live_desktop(connector, setup, trust, target).await;
             let mut image = ironrdp_session::image::DecodedImage::new(
                 ironrdp_graphics::image_processing::PixelFormat::RgbA32,
                 1600,
                 900,
             );
-            let mut stage = ActiveStageBuilder {
-                static_channels: result.static_channels,
-                user_channel_id: result.user_channel_id,
-                io_channel_id: result.io_channel_id,
-                message_channel_id: result.message_channel_id,
-                share_id: result.share_id,
-                compression_type: result.compression_type,
-                enable_server_pointer: result.enable_server_pointer,
-                pointer_software_rendering: result.pointer_software_rendering,
-            }
-            .build();
 
             // Run the session until display control is ready, then a while.
             let mut layout_sent = false;
@@ -876,7 +790,322 @@ mod tests {
                 .expect("the proxy let a layout outside the bounds pass")
                 .expect("proxy task");
             assert_eq!(fail, Fail::End(Ended::Refused));
-            let _ = ended.get();
+        });
+    }
+
+    type LiveFramed = ironrdp_tokio::TokioFramed<tokio::io::DuplexStream>;
+
+    /// Connects `connector`, its static channels attached, to the live server
+    /// through the proxy, as the page will: RDCleanPath, then raw RDP in
+    /// frames. Runs in a `LocalSet`; returns the proxy's task, the browser's
+    /// stream and its active stage.
+    async fn live_desktop(
+        mut connector: ClientConnector,
+        setup: Setup,
+        trust: Trust,
+        target: SocketAddr,
+    ) -> (tokio::task::JoinHandle<Fail>, LiveFramed, ironrdp_session::ActiveStage) {
+        use ironrdp_session::ActiveStageBuilder;
+
+        let (mut to_proxy, mut proxy_in) = duplex(256 * 1024);
+        let (mut proxy_out, mut from_proxy) = duplex(256 * 1024);
+        let proxy =
+            tokio::task::spawn_local(async move { run(&mut proxy_in, &mut proxy_out, setup, &trust, target).await });
+        let mut buf = WriteBuf::new();
+        connector.step_no_input(&mut buf).expect("X.224 request");
+        let request = RDCleanPathPdu::new_request(buf.filled().to_vec(), "x".into(), "x".into(), None)
+            .and_then(|pdu| pdu.to_der())
+            .expect("request");
+        frame::write(&mut to_proxy, Kind::Browser, &request)
+            .await
+            .expect("request");
+        let (_, payload) = frame::read(&mut from_proxy).await.expect("response");
+        let Ok(RDCleanPathMessage::Response {
+            x224_connection_response,
+            server_cert_chain,
+            ..
+        }) = RDCleanPathPdu::from_der(&payload)
+            .map_err(|_| ())
+            .and_then(|p| p.into_message().map_err(|_| ()))
+        else {
+            panic!("not an RDCleanPath response");
+        };
+        buf.clear();
+        connector
+            .step(x224_connection_response.as_bytes(), None, &mut buf)
+            .expect("confirm");
+        let should = ironrdp_tokio::skip_connect_begin(&mut connector);
+        let upgraded = ironrdp_tokio::mark_as_upgraded(should, &mut connector);
+        let key = crate::pin::public_key(server_cert_chain[0].as_bytes()).expect("key");
+
+        // The page's own pumps: raw RDP one side, frames the other.
+        let (client, pump) = duplex(256 * 1024);
+        let (mut pump_r, mut pump_w) = tokio::io::split(pump);
+        tokio::task::spawn_local(async move {
+            let mut chunk = vec![0u8; 16 * 1024];
+            while let Ok(n) = pump_r.read(&mut chunk).await {
+                if n == 0 || frame::write(&mut to_proxy, Kind::Browser, &chunk[..n]).await.is_err() {
+                    break;
+                }
+            }
+        });
+        tokio::task::spawn_local(async move {
+            while let Ok((Kind::Desktop, payload)) = frame::read(&mut from_proxy).await {
+                if pump_w.write_all(&payload).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let mut framed = ironrdp_tokio::TokioFramed::new(client);
+        let mut no_network = NoNetwork;
+        let outcome = ironrdp_tokio::connect_finalize(
+            upgraded,
+            connector,
+            &mut framed,
+            &mut no_network,
+            ServerName::from("x"),
+            key,
+            None,
+        )
+        .await
+        .expect("connection sequence");
+        let ironrdp_connector::ConnectionOutcome::Connected(result) = outcome else {
+            panic!("redirected");
+        };
+        let stage = ActiveStageBuilder {
+            static_channels: result.static_channels,
+            user_channel_id: result.user_channel_id,
+            io_channel_id: result.io_channel_id,
+            message_channel_id: result.message_channel_id,
+            share_id: result.share_id,
+            compression_type: result.compression_type,
+            enable_server_pointer: result.enable_server_pointer,
+            pointer_software_rendering: result.pointer_software_rendering,
+        }
+        .build();
+        (proxy, framed, stage)
+    }
+
+    /// What IronRDP's clipboard client heard, as a page's backend would.
+    #[derive(Debug, Default)]
+    struct Heard {
+        format_list_asked: bool,
+        negotiated: Option<ironrdp_cliprdr::pdu::ClipboardGeneralCapabilityFlags>,
+        list_accepted: Option<bool>,
+        remote_formats: Vec<Vec<u32>>,
+        asked_for_data: Vec<u32>,
+        data: Vec<Option<String>>,
+        files_or_locks: usize,
+    }
+    ironrdp_core::impl_as_any!(Heard);
+
+    impl ironrdp_cliprdr::backend::CliprdrBackend for Heard {
+        fn temporary_directory(&self) -> &str {
+            "C:\\keybash-test"
+        }
+        fn client_capabilities(&self) -> ironrdp_cliprdr::pdu::ClipboardGeneralCapabilityFlags {
+            // Ask for everything; the proxy must leave long names only.
+            ironrdp_cliprdr::pdu::ClipboardGeneralCapabilityFlags::all()
+        }
+        fn on_ready(&mut self) {}
+        fn on_request_format_list(&mut self) {
+            self.format_list_asked = true;
+        }
+        fn on_format_list_response(&mut self, ok: bool) {
+            self.list_accepted = Some(ok);
+        }
+        fn on_process_negotiated_capabilities(
+            &mut self,
+            capabilities: ironrdp_cliprdr::pdu::ClipboardGeneralCapabilityFlags,
+        ) {
+            self.negotiated = Some(capabilities);
+        }
+        fn on_remote_copy(&mut self, formats: &[ironrdp_cliprdr::pdu::ClipboardFormat]) {
+            self.remote_formats
+                .push(formats.iter().map(|f| f.id().value()).collect());
+        }
+        fn on_format_data_request(&mut self, request: ironrdp_cliprdr::pdu::FormatDataRequest) {
+            self.asked_for_data.push(request.format.value());
+        }
+        fn on_format_data_response(&mut self, response: ironrdp_cliprdr::pdu::FormatDataResponse<'_>) {
+            self.data
+                .push((!response.is_error()).then(|| response.to_unicode_string().unwrap_or_default()));
+        }
+        fn on_file_contents_request(&mut self, _: ironrdp_cliprdr::pdu::FileContentsRequest) {
+            self.files_or_locks += 1;
+        }
+        fn on_file_contents_response(&mut self, _: ironrdp_cliprdr::pdu::FileContentsResponse<'_>) {
+            self.files_or_locks += 1;
+        }
+        fn on_lock(&mut self, _: ironrdp_cliprdr::pdu::LockDataId) {
+            self.files_or_locks += 1;
+        }
+        fn on_unlock(&mut self, _: ironrdp_cliprdr::pdu::LockDataId) {
+            self.files_or_locks += 1;
+        }
+    }
+
+    /// The clipboard against Windows through the proxy, with the account's
+    /// clipboard allowed: capabilities come back with long names only, the
+    /// browser's text offer is accepted, its temporary directory never reaches
+    /// Windows, and text pasted on the desktop crosses both ways when Windows
+    /// asks for it. Nothing about files or locks reaches the browser.
+    #[test]
+    fn clipboard_text_crosses_and_nothing_else() {
+        use ironrdp_cliprdr::CliprdrClient;
+        use ironrdp_cliprdr::pdu::{ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags};
+        use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
+        use ironrdp_session::ActiveStageOutput;
+
+        let Some((trust, mut setup, target)) = live_server() else {
+            eprintln!("KEYBASH_PROXY_TEST unset: no NLA server to reach");
+            return;
+        };
+        setup.clipboard = true;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let local = tokio::task::LocalSet::new();
+        local.block_on(&runtime, async move {
+            let mut connector = ClientConnector::new(
+                crate::policy::tests::browser_config(1600, 900, 100),
+                "127.0.0.1:0".parse().expect("addr"),
+            );
+            connector.attach_static_channel(CliprdrClient::new(Box::new(Heard::default())));
+            let (proxy, mut framed, mut stage) = live_desktop(connector, setup, trust, target).await;
+            let mut image = ironrdp_session::image::DecodedImage::new(
+                ironrdp_graphics::image_processing::PixelFormat::RgbA32,
+                1600,
+                900,
+            );
+            // The page offers this text. On the desktop, Win+R runs a command that
+            // reads the clipboard (Windows asks the browser for the text) and
+            // writes it back with " back" (Windows offers text). The page then
+            // pastes it.
+            let text = "Keybash clipboard: héllo 🙂";
+            let command =
+                "powershell -NoProfile -WindowStyle Hidden -Command \"Set-Clipboard ((Get-Clipboard -Raw) + ' back')\"";
+            let key = |code: u8, flags: KeyboardFlags| FastPathInputEvent::KeyboardEvent(flags, code);
+            let win_r = vec![
+                key(0x5B, KeyboardFlags::EXTENDED),
+                key(0x13, KeyboardFlags::empty()),
+                key(0x13, KeyboardFlags::RELEASE),
+                key(0x5B, KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE),
+            ];
+            let escape = vec![key(0x01, KeyboardFlags::empty()), key(0x01, KeyboardFlags::RELEASE)];
+            let enter = vec![key(0x1C, KeyboardFlags::empty()), key(0x1C, KeyboardFlags::RELEASE)];
+            let units: Vec<u16> = command.encode_utf16().collect();
+            let typing: Vec<Vec<FastPathInputEvent>> = units
+                .chunks(8)
+                .map(|part| {
+                    part.iter()
+                        .flat_map(|&unit| {
+                            [
+                                FastPathInputEvent::UnicodeKeyboardEvent(KeyboardFlags::empty(), unit),
+                                FastPathInputEvent::UnicodeKeyboardEvent(KeyboardFlags::RELEASE, unit),
+                            ]
+                        })
+                        .collect()
+                })
+                .collect();
+            let mut keys = std::collections::VecDeque::new();
+
+            let (mut copied, mut typed, mut pasted, mut answered) = (false, false, false, 0);
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(45);
+            let mut quiet_until = None;
+            loop {
+                assert!(!proxy.is_finished(), "the proxy ended a valid session");
+                let now = tokio::time::Instant::now();
+                if quiet_until.is_some_and(|until| now > until) {
+                    break;
+                }
+                let client = stage.get_svc_processor_mut::<CliprdrClient>().expect("cliprdr");
+                let heard = client.downcast_backend::<Heard>().expect("backend");
+                assert!(
+                    now < deadline,
+                    "the clipboard never came back: {heard:?}, typed {typed}, answered {answered}, pasted {pasted}"
+                );
+                let (asked, accepted, requests) =
+                    (heard.format_list_asked, heard.list_accepted, heard.asked_for_data.len());
+                let offered = heard.remote_formats.last().is_some_and(|formats| formats.contains(&13));
+                let back = heard.data.iter().flatten().any(|data| data.contains(" back"));
+                let messages = if asked && !copied {
+                    copied = true;
+                    Some(client.initiate_copy(&[ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)]))
+                } else if requests > answered {
+                    answered += 1;
+                    Some(client.submit_format_data(ironrdp_cliprdr::pdu::FormatDataResponse::new_unicode_string(text)))
+                } else if offered && answered > 0 && !pasted {
+                    pasted = true;
+                    Some(client.initiate_paste(ClipboardFormatId::CF_UNICODETEXT))
+                } else {
+                    None
+                };
+                if let Some(messages) = messages {
+                    let frame = stage
+                        .process_svc_processor_messages(messages.expect("clipboard message"))
+                        .expect("encode");
+                    framed.write_all(&frame).await.expect("clipboard");
+                }
+                if accepted == Some(true) && !typed {
+                    // As a person would: close whatever dialog is open, Win+R,
+                    // type in short bursts, then Enter.
+                    typed = true;
+                    let at = |ms: u64| now + std::time::Duration::from_millis(ms);
+                    keys.push_back((at(3000), escape.clone()));
+                    keys.push_back((at(3500), win_r.clone()));
+                    for (i, part) in typing.iter().enumerate() {
+                        keys.push_back((at(5500 + 150 * i as u64), part.clone()));
+                    }
+                    keys.push_back((at(5500 + 150 * typing.len() as u64 + 1000), enter.clone()));
+                }
+                if keys.front().is_some_and(|(at, _)| now >= *at)
+                    && let Some((_, events)) = keys.pop_front()
+                {
+                    for out in stage.process_fastpath_input(&mut image, &events).expect("input") {
+                        if let ActiveStageOutput::ResponseFrame(frame) = out {
+                            framed.write_all(&frame).await.expect("input");
+                        }
+                    }
+                }
+                if back && quiet_until.is_none() {
+                    quiet_until = Some(now + std::time::Duration::from_secs(2));
+                }
+                let Ok(read) = tokio::time::timeout(std::time::Duration::from_millis(200), framed.read_pdu()).await
+                else {
+                    continue;
+                };
+                let (action, frame) = read.expect("read");
+                for out in stage.process(&mut image, action, &frame, None).expect("process") {
+                    if let ActiveStageOutput::ResponseFrame(frame) = out {
+                        framed.write_all(&frame).await.expect("response");
+                    }
+                }
+            }
+            assert!(!proxy.is_finished(), "the proxy ended a valid clipboard");
+            let client = stage.get_svc_processor_mut::<CliprdrClient>().expect("cliprdr");
+            let heard = client.downcast_backend::<Heard>().expect("backend");
+            eprintln!("{heard:?}");
+            assert_eq!(
+                heard.negotiated,
+                Some(ClipboardGeneralCapabilityFlags::USE_LONG_FORMAT_NAMES)
+            );
+            assert_eq!(heard.list_accepted, Some(true));
+            assert!(!heard.asked_for_data.is_empty(), "Windows read the browser's text");
+            assert!(heard.asked_for_data.iter().all(|&id| id == 13), "only text asked for");
+            assert!(
+                heard
+                    .remote_formats
+                    .iter()
+                    .all(|formats| formats.is_empty() || formats == &[13]),
+                "Windows offers text alone"
+            );
+            assert_eq!(heard.files_or_locks, 0);
+            let pasted = heard.data.iter().flatten().find(|data| data.contains(" back"));
+            assert_eq!(pasted.map(|data| data.trim_end()), Some(&*format!("{text} back")));
         });
     }
 }
