@@ -252,6 +252,14 @@ jobs:
           diff -r "${RUNNER_TEMP}/a/out" "${RUNNER_TEMP}/b/out"
           ls -l "${RUNNER_TEMP}/a/out"
 
+      - name: Check that the vendored module is this build
+        run: |
+          set -eu
+          python3 scripts/vendor-ironrdp-web-test.py
+          # web/vendor/ironrdp must be byte for byte what was just built from
+          # the pinned source and the patch, with a manifest of that pin.
+          python3 scripts/vendor-ironrdp-web.py --check "${RUNNER_TEMP}/a/out"
+
       - name: Check the compiled crates for known advisories
         run: |
           set -eu

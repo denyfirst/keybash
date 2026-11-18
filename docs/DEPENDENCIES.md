@@ -45,8 +45,15 @@ uses the build from step 3.
     pixels, and H.264 and alpha updates go to the handler undecoded;
   - `ironrdp-web` gains a renderer that hands each frame's surface commands to
     the page in one batch;
-  - 597 lines added, 7 changed. IronRDP's clippy lints pass for the browser
-    target, and `ironrdp-egfx`'s 68 tests pass.
+  - 607 lines added, 14 removed (597 and 7 before the move to `abfc97b`,
+    where the web session's dynamic channels also take upstream's camera
+    channels). IronRDP's clippy lints pass for the browser target, and
+    `ironrdp-egfx`'s 68 tests pass.
+- The built module is vendored in `web/vendor/ironrdp/`
+  (`scripts/vendor-ironrdp-web.py`), with IronRDP's licences, the crate list
+  and a manifest of the pin. CI rebuilds it and fails unless the vendored
+  bytes are that build's. On 18 November `ironrdp_web_bg.wasm` is 6,355,724
+  bytes (SHA-256 `aec9cbad…`) and `ironrdp_web.js` 71,831 bytes.
 - Toolchain: Rust 1.94.1, which IronRDP's `rust-toolchain.toml` names, and
   wasm-bindgen 0.2.129, which its `Cargo.lock` holds. The script refuses any
   other version of either. Its flags are IronRDP's own release flags for the

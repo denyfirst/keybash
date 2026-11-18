@@ -1,0 +1,14 @@
+{
+  "project": "IronRDP browser client (ironrdp-web), with Keybash's patch",
+  "commit": "abfc97b299f04622cb7860f344a35bbea9bd4361",
+  "patch_sha256": "4f762deb7753297329b2b69c651f98098bb97c2edf8ef9dbbacaf77f06a44cb8",
+  "rust": "1.94.1",
+  "wasm_bindgen": "0.2.129",
+  "files": {
+    "ironrdp_web.js": "007a20bb48c2cf045c800f18bdeb692d5b358bf427b560e835721c4b4f24fa65",
+    "ironrdp_web_bg.wasm": "aec9cbada821ed30178d7368a53b30cf16f9152c5cb13c74988a0e017beaa529",
+    "IRONRDP-LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "IRONRDP-LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "CRATES.txt": "1340f5fdd2f957d0e566ad399d4977065aeb15753adb1a74aef3e07630602918"
+  }
+}

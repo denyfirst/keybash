@@ -4,3 +4,5 @@
 *.yml text eol=lf
 *.sh text eol=lf
 *.ps1 text eol=lf
+# IronRDP's vendored browser client: exact bytes, as CI rebuilds and compares them.
+/web/vendor/ironrdp/** -text

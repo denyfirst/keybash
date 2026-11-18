@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -29,6 +30,7 @@ import (
 	"github.com/denyfirst/keybash/internal/sshkey"
 	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
+	"github.com/denyfirst/keybash/web"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/ssh"
 )
@@ -310,6 +312,37 @@ func TestOwnedRemotePageCarriesItsConnection(t *testing.T) {
 		t.Fatalf("owned page body tag is not marked for its connection: %s", tag)
 	}
 	c.expect("GET", "/remote/ssh/"+record, "", 404)
+}
+
+// IronRDP's browser client is served exactly as vendored, with the type a
+// browser compiles WebAssembly from, and only to a signed-in session. Its
+// manifest, crate list and licences are not served, and the desktop page's
+// policy stays without 'wasm-unsafe-eval' until the page loads the module
+// (BROWSER-RDP-PAGE.md, 3d).
+func TestTheIronRDPModuleIsServedExactlyAsVendored(t *testing.T) {
+	l, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	for path, kind := range map[string]string{
+		"/vendor/ironrdp/ironrdp_web.js":      "text/javascript; charset=utf-8",
+		"/vendor/ironrdp/ironrdp_web_bg.wasm": "application/wasm",
+	} {
+		w := c.expect("GET", path, "", 200)
+		want, e := web.Assets.ReadFile(strings.TrimPrefix(path, "/"))
+		if e != nil || w.Header().Get("Content-Type") != kind || !bytes.Equal(w.Body.Bytes(), want) {
+			t.Fatalf("%s was served as %q, %d bytes", path, w.Header().Get("Content-Type"), w.Body.Len())
+		}
+		signedOut := custodyClient{t: t, l: l}
+		if signedOut.call("GET", path, "").Code == 200 {
+			t.Fatalf("%s served without a session", path)
+		}
+	}
+	for _, path := range []string{"/vendor/ironrdp/manifest.json", "/vendor/ironrdp/CRATES.txt", "/vendor/ironrdp/IRONRDP-LICENSE-MIT", "/vendor/ironrdp/", "/vendor/ironrdp/ironrdp_web_bg.wasm/"} {
+		if c.call("GET", path, "").Code == 200 {
+			t.Fatalf("%s became public", path)
+		}
+	}
+	if policy := c.expect("GET", "/remote/rdp/"+record, "", 200).Header().Get("Content-Security-Policy"); strings.Contains(policy, "wasm") {
+		t.Fatalf("the desktop page allows WebAssembly before it loads it: %s", policy)
+	}
 }
 
 func TestOwnedRemoteConstructorAndMalformedRequests(t *testing.T) {
