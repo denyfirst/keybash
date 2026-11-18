@@ -199,4 +199,4 @@ Decision).
   desktop, display control and the clipboard round trip came up with it
   written again.
 
-Step 3 then brings the page.
+Step 3 brings the page (`BROWSER-RDP-PAGE.md`).

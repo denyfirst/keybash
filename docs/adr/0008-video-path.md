@@ -264,7 +264,8 @@ The maintainer chose D. B is not built.
   - "Sharp" asks for the screen's own pixels and scale, as since PR 76.
   - With no choice made, Smooth at 175% and 200%, where the saving is largest, and Sharp below.
 - Keybash carries the IronRDP changes as a pinned commit plus its own patch, as it does for guacd and FreeRDP. Offering them upstream is the maintainer's choice.
-- guacd and FreeRDP stay as the fallback until D covers what they do today, and then leave the runtime.
+- guacd and FreeRDP leave the runtime once D covers what they do today.
+  - Update, 18 November: Keybash has no users yet; it is given to people only once everything is finished. So D replaces guacd and FreeRDP outright, with no per-server choice and no release where both run. They leave as soon as the IronRDP page passes the maintainer's test on the Windows VM.
 
 Order of work. Each step is one or more pull requests with its own evidence.
 
@@ -277,13 +278,14 @@ Order of work. Each step is one or more pull requests with its own evidence.
    - TLS with the pinned certificate, NLA with the stored credential, and the security-protocol rewrite;
    - the channel policy, the bounds and revocation;
    - fuzzed parsers, and native CI tests against the FreeRDP sample server the native lab already uses.
-3. The desktop page on IronRDP:
+   - Done 18 November (PRs 85, 86, 87, 89), with the browser's Client Info written again (2e).
+3. The desktop page on IronRDP (`docs/BROWSER-RDP-PAGE.md`):
    - the GPU renderer;
    - the session bar: the clipboard with today's limits and review, Ctrl+Alt+Del, resize, fullscreen, Smooth and Sharp;
    - the end reasons, and a connect timeout with a clear message.
-4. The switch:
-   - D becomes the default after the maintainer's test on the Windows VM;
-   - guacd stays selectable per server for one release, then leaves.
+4. The switch, folded into step 3 (the update above):
+   - the IronRDP page replaces today's desktop page directly;
+   - after the maintainer's test on the Windows VM, guacd, FreeRDP and everything only they use leave.
 5. Then:
    - the 4:4:4 combination, for servers that send the second view;
    - the codec shown on the page;
