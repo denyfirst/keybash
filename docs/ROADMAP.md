@@ -134,6 +134,9 @@ In order:
    Keybash's credential-injecting proxy. This replaces 6's default and 7's
    watch. The order of work is in the ADR, starting with a Smooth/Sharp
    picture choice for scaled screens.
+   - 18 November: the proxy (step 2) is done. The page (step 3,
+     `BROWSER-RDP-PAGE.md`) replaces guacd and FreeRDP outright, since Keybash
+     has no users yet; they leave once the page passes the maintainer's test.
 
 The QOI-style picture draft (ADR 0006) is set aside: the gateway is no longer
 the bottleneck.
