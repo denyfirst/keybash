@@ -175,10 +175,12 @@ func (s *ProxyStream) Close() error {
 }
 
 // OpenBrowserRDP starts the proxy for a desktop whose RDP client runs in the
-// browser (ADR 0008, D). The pin is enforced by the proxy's own TLS before
-// CredSSP, as the native worker enforces it. The clipboard stays off until
-// the proxy filters its contents (docs/BROWSER-RDP-PROXY.md, 2c).
-func (w ManagerWorker) OpenBrowserRDP(ctx context.Context, request identity.RDPRequest) (*ProxyStream, error) {
+// browser (ADR 0008, D); the gateway's desktop socket relays to it
+// (identity.BrowserRDPWorker). The pin is enforced by the proxy's own TLS
+// before CredSSP, as the native worker enforces it. The proxy filters the
+// clipboard (docs/BROWSER-RDP-PROXY.md, 2c); it stays off until the desktop
+// page that acts only on the person's own copy and paste exists (3d).
+func (w ManagerWorker) OpenBrowserRDP(ctx context.Context, request identity.RDPRequest) (terminalweb.MessageStream, error) {
 	if request.Target == nil {
 		return nil, errNative
 	}
@@ -186,8 +188,14 @@ func (w ManagerWorker) OpenBrowserRDP(ctx context.Context, request identity.RDPR
 	if err != nil || !pin.boundTo(request.Target) {
 		return nil, errNative
 	}
-	return w.openBrowserDial(ctx, request.Target.DialContext, pin, request.Username, request.Password)
+	stream, err := w.openBrowserDial(ctx, request.Target.DialContext, pin, request.Username, request.Password)
+	if err != nil {
+		return nil, err // never a typed nil inside the interface
+	}
+	return stream, nil
 }
+
+var _ identity.BrowserRDPWorker = ManagerWorker{}
 
 // browserSetup checks the credentials as newNativePlan does, then makes the
 // setup frame, with the clipboard off.

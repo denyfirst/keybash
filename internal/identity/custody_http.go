@@ -152,6 +152,10 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		l.remoteSocket(w, r)
 		return
 	}
+	if r.URL.Path == "/api/remote/desktop" {
+		l.remoteDesktop(w, r)
+		return
+	}
 	// Read bounded bodies before taking the account/session mutex. A slow
 	// client must not hold logout, expiry or another user's authentication.
 	if r.Method != "GET" {

@@ -107,10 +107,19 @@ guacd and FreeRDP use leaves, each part in its own pull request:
 - **3b.** The module: the pin moved to IronRDP master `abfc97b` (PR 92), then
   the vendored files and manifest, CI's byte check, and serving them. No page
   uses them yet, so the CSP waits for 3d.
-- **3c.** The gateway's desktop endpoint, with tests for each check
-  (refusals, malformed and oversized first messages, a reused lease, a wrong
-  CSRF part, capacity), relaying to a test proxy, and in the native lab
-  through the real proxy in its sandbox.
+- **3c.** The gateway's desktop endpoint, `/api/remote/desktop`
+  (`internal/identity/remote_desktop.go`):
+  - today's admission checks, and the page's proof read strictly from the
+    RDCleanPath request (`internal/rdcleanpath`, whose encoding is byte for
+    byte IronRDP's);
+  - the request forwarded with an empty destination and token;
+  - `terminalweb.RelayMessages`: whole binary messages, today's input budget,
+    a 10-second write limit, and endings as WebSocket closes. Codes 4001 to
+    4011 carry the reason's word, and 4020 a changed certificate;
+  - only fast-path input (keys, mouse) counts as activity for the idle limit.
+  Tested against a test proxy. The real proxy's own path through the worker
+  sandbox is the native lab's (2b); the whole path meets Windows with the
+  page in 3d.
 - **3d.** The page: IronRDP in place of guacd on the desktop page, with the
   session bar, the clipboard, the end reasons, the timeout and the CSP's
   `'wasm-unsafe-eval'`. Browser tests
