@@ -10,11 +10,11 @@ description = "Keybash's credential-injecting RDP proxy (ADR 0008, docs/BROWSER-
 # IronRDP at the commit scripts/build-ironrdp-web.sh pins; cargo checks the
 # commit, and Cargo.lock fixes every other crate.
 [dependencies]
-ironrdp-connector = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
-ironrdp-core = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1", features = ["std"] }
-ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1", features = ["std"] }
-ironrdp-rdcleanpath = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
-ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-connector = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }
+ironrdp-core = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361", features = ["std"] }
+ironrdp-pdu = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361", features = ["std"] }
+ironrdp-rdcleanpath = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }
+ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }
 # TLS with Windows accepts only the pinned certificate (src/pin.rs), with
 # ring for its cryptography; no platform roots, no key log, no resumption.
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
@@ -29,8 +29,8 @@ codegen-units = 1
 
 # Only the end-to-end tests, which play the browser's whole session.
 [dev-dependencies]
-ironrdp-session = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
-ironrdp-dvc = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
-ironrdp-displaycontrol = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
-ironrdp-graphics = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
-ironrdp-cliprdr = { git = "https://github.com/Devolutions/IronRDP.git", rev = "fe9608b2abbeb98fd680645ced72d210a2e050c1" }
+ironrdp-session = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }
+ironrdp-dvc = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }
+ironrdp-displaycontrol = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }
+ironrdp-graphics = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }
+ironrdp-cliprdr = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361" }

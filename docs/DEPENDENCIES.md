@@ -29,10 +29,16 @@ Step 1 of ADR 0008's order of work. Nothing here ships yet: the desktop page
 uses the build from step 3.
 
 - Source: IronRDP (Devolutions, MIT OR Apache-2.0) at commit
-  `fe9608b2abbeb98fd680645ced72d210a2e050c1` on master, 718 commits after its
-  newest release `ironrdp-v0.17.0` (July 2026). The browser build's graphics
-  pipeline client exists only on master. The script fetches that commit by its
-  full hash and checks the result.
+  `abfc97b299f04622cb7860f344a35bbea9bd4361` on master (17 November 2026),
+  733 commits after its newest release `ironrdp-v0.17.0` (July 2026). The
+  browser build's graphics pipeline client exists only on master. The script
+  fetches that commit by its full hash and checks the result.
+  - 18 November: moved from `fe9608b2ab` (15 November) to master's head, 15
+    commits later: fixes to the graphics pipeline's acknowledgements across a
+    reset, a clean end after a shutdown request, and the web client's client
+    name and keyboard layout. Keybash's patch was replayed on it, with one
+    conflict in the web session's dynamic channels resolved by keeping both
+    sides.
 - Keybash's patch, `ironrdp/graphics-pipeline.diff`, is the change measured in
   ADR 0008's step 2:
   - `ironrdp-egfx` gains a handler-rendering mode. Its CPU compositor keeps no

@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 78982920f2e99518f0151b658a070fcb32d4f835..0b24bdf294b474d9f8326d5ea547a0cd2e959ab6 100644
+index ab946ba4140bb039fa93b7f7c5aa742bd290a71f..62e34c6c5f35a991e670240cb98c365ecba3f04a 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -3940,6 +3940,7 @@ dependencies = [
@@ -309,7 +309,7 @@ index 00a0216456c90b4c4313453c7ed80ee5583bd60c..f0690afc095feaa36135c1d4ed523c6e
          let released = drained.iter().map(|update| update.data.len()).sum();
          self.release(released);
 diff --git a/crates/ironrdp-web/Cargo.toml b/crates/ironrdp-web/Cargo.toml
-index 9adcbb440921ca969e7a378709c8aebd1bc08101..6322393ccfbcd443a0832724811cad696d1329f8 100644
+index d4d15d97c17deda6004508a7886de78c4290c6d7..7eebb9121837b048beca62589c064306f88fb3bd 100644
 --- a/crates/ironrdp-web/Cargo.toml
 +++ b/crates/ironrdp-web/Cargo.toml
 @@ -40,6 +40,7 @@ ironrdp = { path = "../ironrdp", features = [
@@ -781,10 +781,10 @@ index 0000000000000000000000000000000000000000..a353b9be0ca0418721894259f21286c1
 +    Ok(())
 +}
 diff --git a/crates/ironrdp-web/src/lib.rs b/crates/ironrdp-web/src/lib.rs
-index 4ed6dd5ac770b56727041d8f03f57a5bf9a47e85..2ebbb90503682113fcf91b81335f61ebaac926ef 100644
+index 495de215fb36d95bf957a5ebe7a23e50a4c60f4d..f0100e8a733d341371246f8c20b911d10c095da2 100644
 --- a/crates/ironrdp-web/src/lib.rs
 +++ b/crates/ironrdp-web/src/lib.rs
-@@ -20,6 +20,7 @@ mod canvas;
+@@ -21,6 +21,7 @@ mod canvas;
  mod clipboard;
  mod cursor;
  mod error;
@@ -793,7 +793,7 @@ index 4ed6dd5ac770b56727041d8f03f57a5bf9a47e85..2ebbb90503682113fcf91b81335f61eb
  mod input;
  mod network_client;
 diff --git a/crates/ironrdp-web/src/session.rs b/crates/ironrdp-web/src/session.rs
-index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b0297da93 100644
+index eabbda115b5dcfa57e690c6c09e4ae7ba5c22a71..74b57c78e4852d4eb344fb63ae00f9bc19b22a29 100644
 --- a/crates/ironrdp-web/src/session.rs
 +++ b/crates/ironrdp-web/src/session.rs
 @@ -9,6 +9,7 @@ use crate::canvas::Canvas;
@@ -812,7 +812,7 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
  use ironrdp_futures::{FramedWrite, single_sequence_step_read};
  use rgb::AsPixels as _;
  use tap::prelude::*;
-@@ -103,6 +105,7 @@ struct SessionBuilderInner {
+@@ -105,6 +107,7 @@ struct SessionBuilderInner {
      enable_server_pointer: bool,
      legacy_graphics: bool,
      outbound_message_size_limit: Option<usize>,
@@ -820,7 +820,7 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
      performance_flags: Option<PerformanceFlags>,
      desktop_scale_factor: Option<u32>,
      color_depth: Option<u32>,
-@@ -155,6 +158,7 @@ impl Default for SessionBuilderInner {
+@@ -160,6 +163,7 @@ impl Default for SessionBuilderInner {
              enable_server_pointer: true,
              legacy_graphics: false,
              outbound_message_size_limit: None,
@@ -828,7 +828,7 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
              performance_flags: None,
              desktop_scale_factor: None,
              color_depth: None,
-@@ -314,6 +318,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+@@ -329,6 +333,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
              };
              |enable_server_pointer: bool| { self.0.borrow_mut().enable_server_pointer = enable_server_pointer };
              |legacy_graphics: bool| { self.0.borrow_mut().legacy_graphics = legacy_graphics };
@@ -836,7 +836,7 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
              |outbound_message_size_limit: f64| {
                  let limit = if outbound_message_size_limit >= 0.0 && outbound_message_size_limit <= f64::from(u32::MAX) {
                      #[expect(clippy::as_conversions, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-@@ -646,6 +651,9 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+@@ -681,6 +686,9 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
          }
  
          let use_display_control = self.0.borrow().use_display_control;
@@ -844,9 +844,9 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
 +        let gfx_queue = gfx_video.map(|_| SharedGfxQueue::default());
 +        config.support_dyn_vc_gfx_protocol = gfx_video.is_some();
  
-         let (connection_result, ws) = connect(ConnectParams {
-             ws,
-@@ -662,6 +670,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+         // Camera redirection (RDPECAM) when a callback takes the capture requests.
+         let camera_callback = self.0.borrow().camera_callback.clone();
+@@ -711,6 +719,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
              printer_driver_name,
              computer_name: client_name.clone(),
              use_display_control,
@@ -854,23 +854,23 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
              audio_backend: audio_playback_callback
                  .is_some()
                  .then(|| crate::audio::WasmAudioBackend::new(input_events_tx.clone())),
-@@ -687,6 +696,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
-             set_cursor_style_callback_context,
-             audio_playback_callback,
+@@ -739,6 +748,7 @@ impl iron_remote_desktop::SessionBuilder for SessionBuilder {
+             camera_callback,
+             camera,
              monitor_layout_callback,
 +            gfx_queue,
  
              input_events_rx: RefCell::new(Some(input_events_rx)),
              rdp_reader: RefCell::new(Some(rdp_reader)),
-@@ -832,6 +842,7 @@ pub(crate) struct Session {
-     set_cursor_style_callback_context: JsValue,
-     audio_playback_callback: Option<js_sys::Function>,
+@@ -891,6 +901,7 @@ pub(crate) struct Session {
+     /// Takes the frames JS pushes with `camera_sample`, when the camera is on.
+     camera: Option<crate::camera::CameraSink>,
      monitor_layout_callback: Option<js_sys::Function>,
 +    gfx_queue: Option<SharedGfxQueue>,
  
      // Consumed when `run` is called
      input_events_rx: RefCell<Option<mpsc::UnboundedReceiver<RdpInputEvent>>>,
-@@ -1197,6 +1208,16 @@ impl iron_remote_desktop::Session for Session {
+@@ -1267,6 +1278,16 @@ impl iron_remote_desktop::Session for Session {
                  }
              };
  
@@ -887,7 +887,7 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
              for out in outputs {
                  match out {
                      ActiveStageOutput::ResponseFrame(frame) => {
-@@ -1205,6 +1226,9 @@ impl iron_remote_desktop::Session for Session {
+@@ -1275,6 +1296,9 @@ impl iron_remote_desktop::Session for Session {
                              .context("Send frame to writer task")?;
                      }
                      ActiveStageOutput::GraphicsUpdate(region) => {
@@ -897,26 +897,35 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
                          let region = extract_partial_image(&image, region, &mut draw_buffer);
                          gui.draw(draw_buffer.filled_mut(), region)
                              .context("draw updated region")?;
-@@ -1883,6 +1907,7 @@ struct ConnectParams {
+@@ -1962,6 +1986,7 @@ struct ConnectParams {
      /// `computer_name` when constructing the `Rdpdr` processor.
      computer_name: String,
      use_display_control: bool,
 +    gfx: Option<(GfxVideo, SharedGfxQueue)>,
      audio_backend: Option<crate::audio::WasmAudioBackend>,
+     camera_channels: Option<crate::camera::CameraChannels>,
  }
- 
-@@ -1977,6 +2002,7 @@ async fn connect(
+@@ -2057,6 +2082,7 @@ async fn connect(
          printer_driver_name,
          computer_name,
          use_display_control,
 +        gfx,
          audio_backend,
+         camera_channels,
      }: ConnectParams,
- ) -> Result<(connector::ConnectionResult, WebSocket), IronError> {
-@@ -2001,11 +2027,23 @@ async fn connect(
+@@ -2082,15 +2108,30 @@ async fn connect(
          computer_name,
      );
  
+-    if use_display_control || camera_channels.is_some() {
+-        let mut drdynvc = DrdynvcClient::new();
+-        if use_display_control {
+-            drdynvc = drdynvc.with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
+-        }
+-        if let Some((enumeration, device)) = camera_channels {
+-            drdynvc = drdynvc.with_dynamic_channel(enumeration).with_listener(device);
+-        }
+-        connector.attach_static_channel(drdynvc);
 +    let mut dynamic_channels = gfx.map(|(video, queue)| {
 +        let (avc420, avc444) = video.avc();
 +        DrdynvcClient::new().with_dynamic_channel(
@@ -924,18 +933,23 @@ index 89bbd9c4d057cca2a86706590b8155c4d2382b2c..d9f0a7be4064697e1a4728f66d59e75b
 +                .with_handler_rendering(avc420, avc444),
 +        )
 +    });
-     if use_display_control {
--        connector.attach_static_channel(
--            DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
++    if use_display_control {
 +        dynamic_channels = Some(
 +            dynamic_channels
 +                .unwrap_or_else(DrdynvcClient::new)
 +                .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new()))),
-         );
-     }
++        );
++    }
++    if let Some((enumeration, device)) = camera_channels {
++        dynamic_channels = Some(
++            dynamic_channels
++                .unwrap_or_else(DrdynvcClient::new)
++                .with_dynamic_channel(enumeration)
++                .with_listener(device),
++        );
++    }
 +    if let Some(dynamic_channels) = dynamic_channels {
 +        connector.attach_static_channel(dynamic_channels);
-+    }
+     }
  
      let kerberos_config = url::Url::parse(kdc_proxy_url.unwrap_or_default().as_str())
-         .ok()
