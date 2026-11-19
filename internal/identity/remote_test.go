@@ -317,11 +317,9 @@ func TestOwnedRemotePageCarriesItsConnection(t *testing.T) {
 
 // IronRDP's browser client is served exactly as vendored, with the type a
 // browser compiles WebAssembly from, and only to a signed-in session. Its
-// manifest, crate list and licences are not served, and the desktop page's
-// policy stays without 'wasm-unsafe-eval' until the page loads the module
-// (BROWSER-RDP-PAGE.md, 3d).
+// manifest, crate list and licences are not served.
 func TestTheIronRDPModuleIsServedExactlyAsVendored(t *testing.T) {
-	l, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	l, _, c, _, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	for path, kind := range map[string]string{
 		"/vendor/ironrdp/ironrdp_web.js":      "text/javascript; charset=utf-8",
 		"/vendor/ironrdp/ironrdp_web_bg.wasm": "application/wasm",
@@ -341,8 +339,27 @@ func TestTheIronRDPModuleIsServedExactlyAsVendored(t *testing.T) {
 			t.Fatalf("%s became public", path)
 		}
 	}
-	if policy := c.expect("GET", "/remote/rdp/"+record, "", 200).Header().Get("Content-Security-Policy"); strings.Contains(policy, "wasm") {
-		t.Fatalf("the desktop page allows WebAssembly before it loads it: %s", policy)
+}
+
+// The desktop page is the IronRDP page (BROWSER-RDP-PAGE.md, 3d), and only its
+// policy lets WebAssembly compile: 'wasm-unsafe-eval' and nothing else is
+// added, and no script may be evaluated. Its scripts are served from the
+// gateway alone.
+func TestOnlyTheDesktopPageMayCompileWebAssembly(t *testing.T) {
+	_, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	w := c.expect("GET", "/remote/rdp/"+record, "", 200)
+	policy := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "; script-src 'self' 'wasm-unsafe-eval'; ") || strings.Count(policy, "unsafe-eval") != 1 || strings.Contains(policy, "'unsafe-eval'") {
+		t.Fatalf("the desktop page's policy: %s", policy)
+	}
+	if !strings.Contains(w.Body.String(), `<script type="module" src="/remote-desktop.mjs"></script>`) || strings.Contains(w.Body.String(), "guacamole") {
+		t.Fatal("the desktop page is not the IronRDP page")
+	}
+	for _, path := range []string{"/remote-desktop.mjs", "/remote-desktop-input.mjs", "/remote-desktop-gfx.mjs", "/vendor/ironrdp/ironrdp_web.js", "/app.mjs"} {
+		w := c.expect("GET", path, "", 200)
+		if w.Header().Get("Content-Type") != "text/javascript; charset=utf-8" || strings.Contains(w.Header().Get("Content-Security-Policy"), "wasm") {
+			t.Fatalf("%s was served as %q with %q", path, w.Header().Get("Content-Type"), w.Header().Get("Content-Security-Policy"))
+		}
 	}
 }
 

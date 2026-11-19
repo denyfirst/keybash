@@ -25,9 +25,10 @@ const endings={
  'not-responding':'The remote side stopped responding, so this session ended.',
  refused:'Keybash ended this session because the server sent something it does not accept.'
 };
+export function endingMessage(word){return typeof word==='string'&&Object.hasOwn(endings,word)?endings[word]:null;}
 export function endedMessage(data){
  const match=typeof data==='string'&&data.length<=64?/^\{"type":"ended","reason":"([a-z-]{1,16})"\}$/.exec(data):null;
- return match&&Object.hasOwn(endings,match[1])?endings[match[1]]:null;
+ return match?endingMessage(match[1]):null;
 }
 export function remoteErrorMessage(error){if(error?.code==='capacity')return 'The server is at its session limit. Close an open session, or try again in a moment.';if(error?.code==='rate')return 'Too many connection attempts. Wait a moment and try again.';return 'The connection was refused. If your session ended, sign in again.';}
 // Full screen also asks the browser for the keyboard where it can (Chrome,

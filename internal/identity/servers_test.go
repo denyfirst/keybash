@@ -532,7 +532,9 @@ func TestServerAccessListDecidesWhoConnects(t *testing.T) {
 	if json.Unmarshal(bob.expect("POST", "/api/connections", connect, 200).Body.Bytes(), &record) != nil || !validID(record.ID) {
 		t.Fatal("a listed person could not connect")
 	}
-	bob.expect("GET", "/remote/ssh/"+record.ID, "", 200)
+	if policy := bob.expect("GET", "/remote/ssh/"+record.ID, "", 200).Header().Get("Content-Security-Policy"); !strings.Contains(policy, "; script-src 'self'; ") {
+		t.Fatalf("a terminal page may compile WebAssembly: %s", policy)
+	}
 	trust := func() string {
 		t.Helper()
 		var rows []struct{ ID, Trust string }
