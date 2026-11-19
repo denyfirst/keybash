@@ -3,6 +3,7 @@ package web
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"math"
 	"os"
 	"regexp"
@@ -385,4 +386,36 @@ func topLevel(list string) []string {
 		}
 	}
 	return append(out, strings.TrimSpace(list[start:]))
+}
+
+// IronRDP's browser client is embedded exactly as its manifest records, and
+// the manifest names exactly the vendored files. scripts/vendor-ironrdp-web.py
+// checks those against CI's build of the pinned source (BROWSER-RDP-PAGE.md).
+func TestTheIronRDPModuleIsEmbeddedAsItsManifestRecords(t *testing.T) {
+	var manifest struct {
+		Commit string            `json:"commit"`
+		Files  map[string]string `json:"files"`
+	}
+	data, err := Assets.ReadFile("vendor/ironrdp/manifest.json")
+	if err != nil || json.Unmarshal(data, &manifest) != nil {
+		t.Fatalf("the IronRDP manifest is missing or unreadable: %v", err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(manifest.Commit) || len(manifest.Files) == 0 {
+		t.Fatalf("the IronRDP manifest names no full commit or no files: %q", manifest.Commit)
+	}
+	entries, err := Assets.ReadDir("vendor/ironrdp")
+	if err != nil || len(entries) != len(manifest.Files)+1 {
+		t.Fatalf("vendor/ironrdp holds %d entries for %d files", len(entries), len(manifest.Files))
+	}
+	for name, digest := range manifest.Files {
+		file, err := Assets.ReadFile("vendor/ironrdp/" + name)
+		sum := sha256.Sum256(file)
+		if err != nil || hex.EncodeToString(sum[:]) != digest {
+			t.Fatalf("%s is not the file the manifest records", name)
+		}
+	}
+	wasm, _ := Assets.ReadFile("vendor/ironrdp/ironrdp_web_bg.wasm")
+	if !strings.HasPrefix(string(wasm), "\x00asm\x01\x00\x00\x00") {
+		t.Fatal("the vendored module is not WebAssembly version 1")
+	}
 }

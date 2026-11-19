@@ -10,7 +10,10 @@ import (
 )
 
 func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bool {
-	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop.mjs": "desktop.mjs", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
+	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop.mjs": "desktop.mjs", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs",
+		// IronRDP's browser client, exactly as vendored and checked against
+		// CI's build (scripts/vendor-ironrdp-web.py, BROWSER-RDP-PAGE.md).
+		"/vendor/ironrdp/ironrdp_web.js": "vendor/ironrdp/ironrdp_web.js", "/vendor/ironrdp/ironrdp_web_bg.wasm": "vendor/ironrdp/ironrdp_web_bg.wasm"}
 	file := assets[r.URL.Path]
 	protocol := ""
 	record := ""
@@ -53,6 +56,10 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 	mime := "text/javascript; charset=utf-8"
 	if strings.HasSuffix(file, ".css") {
 		mime = "text/css; charset=utf-8"
+	}
+	if strings.HasSuffix(file, ".wasm") {
+		// The type browsers compile WebAssembly from as it streams in.
+		mime = "application/wasm"
 	}
 	if strings.HasSuffix(file, ".html") {
 		mime = "text/html; charset=utf-8"

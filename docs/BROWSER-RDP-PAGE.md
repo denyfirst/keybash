@@ -27,22 +27,29 @@ the desktop on the GPU. H.264 is decoded by the browser's own decoder
   Keybash's patch (Rust 1.94.1, wasm-bindgen 0.2.129): `ironrdp_web.js` and
   `ironrdp_web_bg.wasm`. CI already builds it twice and compares the bytes,
   and checks licences and advisories on what it compiles.
-- The two files are vendored into `web/vendor/ironrdp/`, with a manifest:
+- `scripts/vendor-ironrdp-web.py` vendors the two files into
+  `web/vendor/ironrdp/`, with IronRDP's licences, the build's crate list
+  (`CRATES.txt`) and a manifest:
   - IronRDP's commit;
   - the patch's SHA-256;
   - the toolchain;
   - each file's SHA-256.
-  The gateway embeds them like every other asset.
+  The gateway embeds them like every other asset, and serves only the two
+  files the page loads, to a signed-in session, the WebAssembly as
+  `application/wasm`. Git keeps their bytes exactly (`.gitattributes`).
 - **The vendored bytes must equal the build.** CI rebuilds the module and
-  fails unless the result is byte for byte what is vendored. A changed module
-  can only arrive through the pinned source and the patch.
+  fails unless the result is byte for byte what is vendored
+  (`vendor-ironrdp-web.py --check`). A changed module can only arrive through
+  the pinned source and the patch. A Go test checks the embedded files
+  against the manifest.
 - Before the module is vendored, the pin moves to IronRDP's newest commit,
   if its changes pass the same checks. The freshness check keeps watching
   IronRDP's releases.
-- The desktop page's Content Security Policy gains `'wasm-unsafe-eval'` in
-  `script-src`, and nothing else. WebAssembly needs it to compile; it does
-  not allow evaluating JavaScript. Other pages keep their policy. `connect-src`
-  stays the gateway's own origin.
+- When the page loads the module (3d), and not before, the desktop page's
+  Content Security Policy gains `'wasm-unsafe-eval'` in `script-src`, and
+  nothing else. WebAssembly needs it to compile; it does not allow evaluating
+  JavaScript. Other pages keep their policy. `connect-src` stays the gateway's
+  own origin.
 
 ## Connecting
 
@@ -97,14 +104,15 @@ guacd and FreeRDP use leaves, each part in its own pull request:
 ## Order of pull requests
 
 - **3a.** This design and the ADR's update.
-- **3b.** The module: the pin update if any, the vendored files and manifest,
-  CI's byte check, serving them, and the desktop page's CSP. No page uses
-  them yet.
+- **3b.** The module: the pin moved to IronRDP master `abfc97b` (PR 92), then
+  the vendored files and manifest, CI's byte check, and serving them. No page
+  uses them yet, so the CSP waits for 3d.
 - **3c.** The gateway's desktop endpoint, with tests for each check
   (refusals, malformed and oversized first messages, a reused lease, a wrong
   CSRF part, capacity), relaying to a test proxy, and in the native lab
   through the real proxy in its sandbox.
 - **3d.** The page: IronRDP in place of guacd on the desktop page, with the
-  session bar, the clipboard, the end reasons and the timeout. Browser tests
+  session bar, the clipboard, the end reasons, the timeout and the CSP's
+  `'wasm-unsafe-eval'`. Browser tests
   for the page's rules, and the maintainer's test on the Windows VM.
 - **3e.** guacd, FreeRDP and what only they use leave.

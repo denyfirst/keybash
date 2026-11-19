@@ -5,7 +5,8 @@
 # CI builds it twice in different directories and compares the results.
 #   build-ironrdp-web.sh NEW_ABSOLUTE_OUTPUT [--with-tests]
 # Needs git, rustup with the pinned toolchain and its wasm32 target,
-# wasm-bindgen at the version below, and python3.
+# wasm-bindgen-cli at the version below, built by `cargo install --locked` as
+# CI builds it (a prebuilt binary is refused, see below), and python3.
 set -eu
 # IronRDP's master after its newest release, ironrdp-v0.17.0. The browser
 # build's graphics pipeline exists only on master.
@@ -67,6 +68,18 @@ python3 "${repo}/scripts/rust-advisories.py" built < "${work}/build.json" > "${w
 mkdir -m 0755 -- "${out}"
 wasm-bindgen --target web --no-typescript --out-dir "${out}" \
   "${CARGO_TARGET_DIR}/wasm32-unknown-unknown/release/ironrdp_web.wasm"
+# wasm-bindgen writes its own build into the module's producers record. It
+# must read exactly the pinned version, as `cargo install --locked` builds the
+# CLI (CI does): a prebuilt binary adds its git hash, and its module would
+# differ from CI's by those bytes, so vendored bytes could never match.
+python3 -I - "${out}/ironrdp_web_bg.wasm" "${bindgen}" <<'PY'
+import sys
+data = open(sys.argv[1], "rb").read()
+version = sys.argv[2].encode()
+want = b"\x0cwasm-bindgen" + bytes([len(version)]) + version
+if data.count(b"\x0cwasm-bindgen") != 1 or want not in data:
+    raise SystemExit(f"wasm-bindgen must be {sys.argv[2]} built by `cargo install --locked`, as CI builds it")
+PY
 cp "${src}/LICENSE-MIT" "${out}/IRONRDP-LICENSE-MIT"
 cp "${src}/LICENSE-APACHE" "${out}/IRONRDP-LICENSE-APACHE"
 cp "${work}/crates.txt" "${out}/CRATES.txt"
