@@ -29,6 +29,26 @@ REVIEWED = {
     # this line when IronRDP drops the crate (the freshness check watches its
     # releases).
     "RUSTSEC-2026-0543": "chrono",
+    # heapless 0.7.17 (nine "unsound" advisories of 18 November 2026, fixed
+    # only from 0.9.4). It comes only through iso7816 0.1.4, which winscard
+    # (sspi's smart-card emulation) uses, and iso7816 requires heapless 0.7, so
+    # no update can reach a fixed release. Each advisory names the functions
+    # affected: spsc, index_map, deque, history_buf, sorted_linked_list and the
+    # pools, and Vec's IntoIter drop when an element's own drop panics.
+    # iso7816 uses only heapless::Vec<u8, N> (new, try_from, writing bytes); a
+    # u8 has no drop, so none of these is reached. And neither the proxy nor
+    # the page signs in with a smart card: the proxy uses NTLM with the stored
+    # password, the page no CredSSP at all. Drop these lines when sspi or
+    # iso7816 moves to heapless 0.9.4 or later.
+    "RUSTSEC-2026-0574": "heapless",
+    "RUSTSEC-2026-0575": "heapless",
+    "RUSTSEC-2026-0576": "heapless",
+    "RUSTSEC-2026-0577": "heapless",
+    "RUSTSEC-2026-0578": "heapless",
+    "RUSTSEC-2026-0579": "heapless",
+    "RUSTSEC-2026-0580": "heapless",
+    "RUSTSEC-2026-0581": "heapless",
+    "RUSTSEC-2026-0582": "heapless",
 }
 
 

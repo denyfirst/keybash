@@ -52,12 +52,19 @@ uses the build from step 3.
 - The built module is vendored in `web/vendor/ironrdp/`
   (`scripts/vendor-ironrdp-web.py`), with IronRDP's licences, the crate list
   and a manifest of the pin. CI rebuilds it and fails unless the vendored
-  bytes are that build's. On 18 November `ironrdp_web_bg.wasm` is 6,355,724
-  bytes (SHA-256 `aec9cbad…`) and `ironrdp_web.js` 71,831 bytes.
+  bytes are that build's. On 19 November `ironrdp_web_bg.wasm` is 6,355,712
+  bytes (SHA-256 `ee732622…`, as CI builds it) and `ironrdp_web.js` 71,831 bytes.
 - Toolchain: Rust 1.94.1, which IronRDP's `rust-toolchain.toml` names, and
   wasm-bindgen 0.2.129, which its `Cargo.lock` holds. The script refuses any
   other version of either. Its flags are IronRDP's own release flags for the
   browser build, plus a path rewrite. wasm-opt is not used.
+  - wasm-bindgen writes its own build into the module's producers record. A
+    prebuilt binary adds its git hash (`0.2.129 (165586f85)`), so its module
+    differs from CI's by 12 bytes. The script therefore requires the record to
+    read exactly `0.2.129`, as `cargo install --locked` builds the CLI, which
+    CI does. Found on 19 November: a module vendored from a prebuilt binary
+    did not match CI's build. Rebuilt with the CI-built CLI on the test VM, it
+    was byte for byte CI's.
 - Crates come from crates.io into a private, empty Cargo home and are checked
   against the lock's checksums. The build then runs offline.
 - `scripts/rust-licences.py` walks the browser crate's dependency graph for
@@ -87,6 +94,17 @@ uses the build from step 3.
     or calls it, so none of its code is reachable in the module. It is
     reviewed in the script until IronRDP drops it; upstream master still had
     it that day.
+  - On 18 November nine "unsound" advisories (RUSTSEC-2026-0574 to 0582)
+    covered `heapless` before 0.9.4. The proxy compiles 0.7.17, only through
+    `iso7816` 0.1.4, which `sspi`'s smart-card emulation (`winscard`) uses.
+    `iso7816` requires 0.7, so no update reaches a fixed release. The
+    advisories name the functions affected:
+    - queues, maps, deques, history buffers, sorted lists and the pools;
+    - `Vec`'s `IntoIter` drop, when an element's own drop panics.
+    `iso7816` uses only `heapless::Vec<u8, N>`, and a `u8` has no drop. Nor
+    does anything sign in with a smart card: the proxy uses NTLM with the
+    stored password, and the page uses no CredSSP. They are reviewed in the
+    script until `sspi` or `iso7816` moves on.
   - The proxy in step 2 compiles other crates, so it gets its own list and
     its own review.
 - Weighed and left: npm's web-client packages and wasm-pack. Keybash writes
