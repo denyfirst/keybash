@@ -52,12 +52,19 @@ uses the build from step 3.
 - The built module is vendored in `web/vendor/ironrdp/`
   (`scripts/vendor-ironrdp-web.py`), with IronRDP's licences, the crate list
   and a manifest of the pin. CI rebuilds it and fails unless the vendored
-  bytes are that build's. On 18 November `ironrdp_web_bg.wasm` is 6,355,724
-  bytes (SHA-256 `aec9cbad…`) and `ironrdp_web.js` 71,831 bytes.
+  bytes are that build's. On 19 November `ironrdp_web_bg.wasm` is 6,355,712
+  bytes (SHA-256 `ee732622…`, as CI builds it) and `ironrdp_web.js` 71,831 bytes.
 - Toolchain: Rust 1.94.1, which IronRDP's `rust-toolchain.toml` names, and
   wasm-bindgen 0.2.129, which its `Cargo.lock` holds. The script refuses any
   other version of either. Its flags are IronRDP's own release flags for the
   browser build, plus a path rewrite. wasm-opt is not used.
+  - wasm-bindgen writes its own build into the module's producers record. A
+    prebuilt binary adds its git hash (`0.2.129 (165586f85)`), so its module
+    differs from CI's by 12 bytes. The script therefore requires the record to
+    read exactly `0.2.129`, as `cargo install --locked` builds the CLI, which
+    CI does. Found on 19 November: a module vendored from a prebuilt binary
+    did not match CI's build. Rebuilt with the CI-built CLI on the test VM, it
+    was byte for byte CI's.
 - Crates come from crates.io into a private, empty Cargo home and are checked
   against the lock's checksums. The build then runs offline.
 - `scripts/rust-licences.py` walks the browser crate's dependency graph for
