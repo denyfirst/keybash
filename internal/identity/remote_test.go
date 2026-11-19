@@ -43,7 +43,8 @@ type fixtureRDPWorker struct {
 	started  chan struct{}
 	release  chan struct{}
 	closed   chan struct{}
-	once     sync.Once // closed is closed once, however many desktops a test opens
+	once     sync.Once             // closed is closed once, however many desktops a test opens
+	messages chan *fixtureMessages // each browser desktop opened, for the test to inspect
 	expected string
 }
 
@@ -108,7 +109,7 @@ func remoteFixtureWithLimits(t *testing.T, origin string, limits sessionlimits.L
 	store, _, _ := bootstrapped(t)
 	_, _, codes := enrollFixture(t, store, "alice", time.Now())
 	target := remoteTargetFixture(t)
-	worker := &fixtureRDPWorker{expected: "Synthetic remote password", closed: make(chan struct{})}
+	worker := &fixtureRDPWorker{expected: "Synthetic remote password", closed: make(chan struct{}), messages: make(chan *fixtureMessages, 4)}
 	l, e := NewRemoteLabWithLimits(origin, store, []RemoteTarget{target}, nil, worker, limits)
 	if e != nil {
 		t.Fatal("remote constructor refused")
