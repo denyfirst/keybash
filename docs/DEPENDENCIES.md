@@ -87,6 +87,17 @@ uses the build from step 3.
     or calls it, so none of its code is reachable in the module. It is
     reviewed in the script until IronRDP drops it; upstream master still had
     it that day.
+  - On 18 November nine "unsound" advisories (RUSTSEC-2026-0574 to 0582)
+    covered `heapless` before 0.9.4. The proxy compiles 0.7.17, only through
+    `iso7816` 0.1.4, which `sspi`'s smart-card emulation (`winscard`) uses.
+    `iso7816` requires 0.7, so no update reaches a fixed release. The
+    advisories name the functions affected:
+    - queues, maps, deques, history buffers, sorted lists and the pools;
+    - `Vec`'s `IntoIter` drop, when an element's own drop panics.
+    `iso7816` uses only `heapless::Vec<u8, N>`, and a `u8` has no drop. Nor
+    does anything sign in with a smart card: the proxy uses NTLM with the
+    stored password, and the page uses no CredSSP. They are reviewed in the
+    script until `sspi` or `iso7816` moves on.
   - The proxy in step 2 compiles other crates, so it gets its own list and
     its own review.
 - Weighed and left: npm's web-client packages and wasm-pack. Keybash writes
