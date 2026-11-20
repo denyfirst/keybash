@@ -59,9 +59,8 @@ func (c *rdpConnection) Close() error {
 		return errNative
 	}
 }
-func (c *rdpConnection) LocalAddr() net.Addr           { return &net.UnixAddr{Net: "unix", Name: "private-rdp"} }
-func (c *rdpConnection) RemoteAddr() net.Addr          { return c.LocalAddr() }
-func (c *rdpConnection) leaseContext() context.Context { return c.ctx }
+func (c *rdpConnection) LocalAddr() net.Addr  { return &net.UnixAddr{Net: "unix", Name: "private-rdp"} }
+func (c *rdpConnection) RemoteAddr() net.Addr { return c.LocalAddr() }
 func (c *rdpConnection) SetDeadline(t time.Time) error {
 	if c.SetReadDeadline(t) != nil || c.SetWriteDeadline(t) != nil {
 		return errNative
