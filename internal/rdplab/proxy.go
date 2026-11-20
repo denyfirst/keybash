@@ -177,9 +177,10 @@ func (s *ProxyStream) Close() error {
 // OpenBrowserRDP starts the proxy for a desktop whose RDP client runs in the
 // browser (ADR 0008, D); the gateway's desktop socket relays to it
 // (identity.BrowserRDPWorker). The pin is enforced by the proxy's own TLS
-// before CredSSP, as the native worker enforces it. The proxy filters the
-// clipboard (docs/BROWSER-RDP-PROXY.md, 2c); it stays off until the desktop
-// page that acts only on the person's own copy and paste exists (3d).
+// before CredSSP, as the native worker enforces it. The clipboard is on: the
+// proxy keeps it to bounded text (docs/BROWSER-RDP-PROXY.md, 2c), and the
+// desktop page acts only on the person's own copy and paste
+// (docs/BROWSER-RDP-PAGE.md, 3d).
 func (w ManagerWorker) OpenBrowserRDP(ctx context.Context, request identity.RDPRequest) (terminalweb.MessageStream, error) {
 	if request.Target == nil {
 		return nil, errNative
@@ -198,12 +199,12 @@ func (w ManagerWorker) OpenBrowserRDP(ctx context.Context, request identity.RDPR
 var _ identity.BrowserRDPWorker = ManagerWorker{}
 
 // browserSetup checks the credentials as newNativePlan does, then makes the
-// setup frame, with the clipboard off.
+// setup frame, with the clipboard on.
 func browserSetup(pin *Identity, user, password string) ([]byte, error) {
 	if _, err := newNativePlan(pin, user, password); err != nil {
 		return nil, errNative
 	}
-	return proxySetupPayload(user, "", password, false)
+	return proxySetupPayload(user, "", password, true)
 }
 
 // Only package _test.go callers can replace this guarded dial for a fixture.
