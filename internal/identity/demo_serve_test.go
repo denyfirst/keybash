@@ -92,14 +92,14 @@ func TestInteractiveDemoServe(t *testing.T) {
 	if err != nil {
 		t.Fatal("demo signer failed")
 	}
-	desktop := remoteTargetFixture(t)
-	desktop.Name = "Desktop demo (simulation, not Windows)"
-	terminal := desktop
+	// The terminal only: the desktop page runs IronRDP, which needs a real
+	// RDP server (the test VM), not a simulation.
+	terminal := remoteTargetFixture(t)
 	terminal.ID, terminal.Name, terminal.Protocol = strings.Repeat("b", 32), "Linux SSH UI demo (simulation)", "ssh"
 	terminal.Identity = signer.PublicKey().Marshal()
 	worker := &demoWorker{}
 	origin := "https://" + address
-	lab, err := NewRemoteLab(origin, store, []RemoteTarget{terminal, desktop}, worker, worker)
+	lab, err := NewRemoteLab(origin, store, []RemoteTarget{terminal}, worker, nil)
 	if err != nil {
 		t.Fatal("demo admission failed")
 	}
@@ -130,7 +130,6 @@ func TestInteractiveDemoServe(t *testing.T) {
 		record Credential
 	}{
 		{terminal, Credential{Name: "Linux SSH · UI simulation", Kind: "ssh-key", Username: "synthetic-user", Secret: string(pem.EncodeToMemory(block))}},
-		{desktop, Credential{Name: "Desktop · UI simulation (not Windows)", Kind: "password", Username: "synthetic-user", Secret: demoRemotePassword}},
 	} {
 		if validateCredential(&sample.record) != nil {
 			t.Fatal("demo credential refused")
@@ -156,6 +155,6 @@ func TestInteractiveDemoServe(t *testing.T) {
 	fmt.Printf("MFA seed (add it to an authenticator by hand): %s\n", seed)
 	fmt.Printf("One-time recovery codes (instead of an MFA code, each once):\n  %s\n", strings.Join(recovery, "\n  "))
 	fmt.Printf("The certificate was made for this run; accept the browser warning for this address only.\n")
-	fmt.Printf("This is a simulation: there is no real Linux shell or Windows. It stops with Ctrl+C or after an hour.\n\n")
+	fmt.Printf("This is a simulation: there is no real Linux shell. It stops with Ctrl+C or after an hour.\n\n")
 	<-ctx.Done()
 }
