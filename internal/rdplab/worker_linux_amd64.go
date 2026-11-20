@@ -91,9 +91,9 @@ func finishRDPSetup(c *rdpConnection, setup context.Context) error {
 
 // RunNativeWorker never accepts a command, path, destination or environment
 // from its input. Read-only sealed mounts supply only pinned public trust.
-// Credentials pass verbatim through private pipes to the native library, or,
-// with proxy, to Keybash's RDP proxy in its place.
-func RunNativeWorker(parentNS string, uid, gid uint32, proxy bool) error {
+// Credentials pass verbatim through private pipes to Keybash's RDP proxy, the
+// one program it starts.
+func RunNativeWorker(parentNS string, uid, gid uint32) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if uid < 1 || gid < 1 || uid > 2147483647 || gid > 2147483647 || uid == 65534 || gid == 65534 || os.Getuid() != int(uid) || os.Geteuid() != int(uid) || os.Getgid() != int(gid) || os.Getegid() != int(gid) {
@@ -126,8 +126,7 @@ func RunNativeWorker(parentNS string, uid, gid uint32, proxy bool) error {
 		return errNative
 	}
 	// RLIMIT_NPROC counts every task of the one worker UID, desktops and SSH
-	// sessions together: guacd and FreeRDP need about 30 threads per desktop,
-	// so 128 ran out at four. The slice's TasksMax bounds them all.
+	// sessions together; the slice's TasksMax bounds them all.
 	for _, limit := range []struct {
 		kind  int
 		value uint64
@@ -137,7 +136,7 @@ func RunNativeWorker(parentNS string, uid, gid uint32, proxy bool) error {
 		}
 	}
 	// Only descriptor 3 is an external capability. It must not leak through
-	// exec to guacd or any of its native children.
+	// exec to the proxy.
 	unix.CloseOnExec(3)
 	for fd := 4; fd <= 7; fd++ {
 		// bwrap may already have consumed its filter FD; Go can reuse that
@@ -172,65 +171,15 @@ func RunNativeWorker(parentNS string, uid, gid uint32, proxy bool) error {
 		return errNative
 	}
 	defer bridge.Close()
-	if proxy {
-		return runProxy(bridge, target)
-	}
-	guacd := exec.Command("/opt/keybash-rdp/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error")
-	// Two malloc arenas instead of glibc's one per thread: each reserves 64 MiB
-	// of address space against RLIMIT_AS and keeps freed image buffers
-	// resident, so guacd's footprint followed the host's processor count.
-	guacd.Env = []string{"LD_LIBRARY_PATH=/opt/keybash-rdp/lib", "OPENSSL_MODULES=/opt/keybash-rdp/ossl-modules", "HOME=/tmp", "LANG=C.UTF-8", "WLOG_LEVEL=OFF", "MALLOC_ARENA_MAX=2"}
-	guacd.Stdout, guacd.Stderr = io.Discard, io.Discard
-	guacd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-	if guacd.Start() != nil {
-		return errNative
-	}
-	done := make(chan struct{})
-	go func() { _ = guacd.Wait(); close(done) }()
-	defer func() { _ = guacd.Process.Kill(); <-done }()
-	go func() {
-		local, e := bridge.Accept()
-		_ = bridge.Close()
-		if e == nil {
-			relayRDP(local, target)
-		}
-	}()
-	var guac net.Conn
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		guac, e = net.DialTimeout("tcp4", "127.0.0.1:4822", 50*time.Millisecond)
-		if e == nil {
-			break
-		}
-		select {
-		case <-done:
-			return errNative
-		default:
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if guac == nil {
-		return errNative
-	}
-	defer guac.Close()
-	if _, e = io.WriteString(os.Stdout, rdpWorkerReady); e != nil {
-		return errNative
-	}
-	finished := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(guac, os.Stdin); _ = guac.Close(); finished <- struct{}{} }()
-	go func() { _, _ = io.Copy(os.Stdout, guac); _ = guac.Close(); finished <- struct{}{} }()
-	select {
-	case <-finished:
-	case <-done:
-	}
-	return nil // private PID namespace/manager kill owns all remaining descendants
+	return runProxy(bridge, target)
 }
 
-// runProxy starts Keybash's RDP proxy where guacd would run: it reaches Windows
-// through the same loopback bridge, and speaks to the gateway on the worker's
-// own standard input and output, which it inherits. It gets no argument and an
-// empty environment; the readiness mark is written before the gateway sends it
-// anything, so the proxy never writes before it.
+// runProxy starts Keybash's RDP proxy: it reaches the server through the
+// loopback bridge, and speaks to the gateway on the worker's own standard
+// input and output, which it inherits. It gets no argument and an empty
+// environment; the readiness mark is written before the gateway sends it
+// anything, so the proxy never writes before it. The private PID namespace and
+// the manager's kill own anything it leaves.
 func runProxy(bridge net.Listener, target net.Conn) error {
 	proxy := exec.Command("/opt/keybash-rdp/bin/keybash-rdp-proxy")
 	proxy.Env = []string{}

@@ -220,7 +220,7 @@ impl Channels {
     /// - it carries no auto-reconnect cookie, so it cannot reach a session
     ///   the proxy did not sign in for;
     /// - a program instead of the desktop, a working folder or RemoteApp
-    ///   ends the session, as today's guacd path never asks for them.
+    ///   ends the session; the desktop page never asks for them.
     fn client_info(&mut self, initiator: u16, channel: u16, data: &[u8]) -> Result<Pass, Refusal> {
         use ironrdp_pdu::rdp::ClientInfoPdu;
         use ironrdp_pdu::rdp::client_info::{ClientInfoFlags, Credentials};

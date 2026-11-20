@@ -50,30 +50,6 @@ type RDPRequest struct {
 	Username, Password string
 }
 
-// desktopDPIs are Windows' own display scales as the DPI a desktop reports:
-// 100% (96, the default), 125, 150, 175 and 200%. Only the native lab's guacd
-// desktop sizes itself by them, until step 3e3 removes it; the browser
-// desktop's sizes are the RDP proxy's to check.
-var desktopDPIs = []int{96, 120, 144, 168, 192}
-
-// DesktopBounds is the largest desktop the native lab's guacd desktop opens at
-// dpi: full HD at 96, full HD times the scale above it. ok is false for any
-// DPI but Windows' scales.
-func DesktopBounds(dpi int) (width, height int, ok bool) {
-	if !slices.Contains(desktopDPIs, dpi) {
-		return 0, 0, false
-	}
-	return 1920 * dpi / 96, 1080 * dpi / 96, true
-}
-
-// DesktopSize reports whether the native lab's guacd desktop may open at, or
-// resize to, width by height at dpi: even, at least 200 by 200, within
-// DesktopBounds.
-func DesktopSize(width, height, dpi int) bool {
-	mw, mh, ok := DesktopBounds(dpi)
-	return ok && width >= 200 && width <= mw && height >= 200 && height <= mh && width%2 == 0 && height%2 == 0
-}
-
 func (RDPRequest) Format(w fmt.State, _ rune) {
 	_, _ = io.WriteString(w, "[authorized RDP request redacted]")
 }

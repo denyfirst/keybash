@@ -214,7 +214,7 @@ func TestNativeRDPSystemdServiceBoundary(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	address, _ := nativePeerWithInput(t, ctx, prefix, rdpCert, "Synthetic-managed-NLA-password")
+	address := testPeer(t, ctx, prefix, rdpCert, "Synthetic-managed-NLA-password")
 	catalog, _ := json.Marshal(map[string]any{"version": 1, "protected_networks": []string{"10.99.0.0/16"}, "targets": []any{map[string]any{"id": strings.Repeat("b", 32), "name": "Synthetic service RDP", "protocol": "rdp", "hostname": "synthetic-rdp.invalid", "port": 3389, "addresses": []string{"10.44.0.3"}, "rdp_certificate": base64.StdEncoding.EncodeToString(pin.der)}}})
 	if os.WriteFile("/etc/keybash/targets.json", catalog, 0644) != nil {
 		t.Fatal("public fixture catalog failed")
@@ -316,6 +316,6 @@ func TestNativeRDPSystemdServiceBoundary(t *testing.T) {
 	run("/usr/bin/systemctl", "reset-failed", "keybash-rdp-manager.service")
 	run("/usr/bin/systemctl", "start", "keybash-gateway.service")
 	managerReady()
-	runManagedGateway(t, fixture, address, pin, "positive", 65533)
+	runManagedGateway(t, fixture, address, pin, "proxy", 65533)
 	t.Log("Actual installed RDP/gateway units: NLA, worker identity/cgroup, aggregate bounds, refusal, restart and descendant revocation passed")
 }

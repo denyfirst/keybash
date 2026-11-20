@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,7 +28,26 @@ const (
 	proxyMaxPayload      = 64 * 1024
 )
 
-var errProxyClosed = errors.New("rdp proxy closed")
+var (
+	errNative      = errors.New("RDP manager refused")
+	errProxyClosed = errors.New("rdp proxy closed")
+)
+
+// credentialsAllowed is what may reach a proxy at all: an identity with its
+// certificate and name, a user name of letters, digits and "._-@" of at most
+// 128 bytes, and a password of valid UTF-8 without NUL of at most 4096 bytes.
+func credentialsAllowed(pin *Identity, user, password string) bool {
+	if pin == nil || len(pin.der) == 0 || pin.roots == nil || pin.name == "" ||
+		len(user) == 0 || len(user) > 128 || len(password) == 0 || len(password) > 4096 || !utf8.ValidString(password) || strings.ContainsRune(password, 0) {
+		return false
+	}
+	for _, c := range user {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._-@", c)) {
+			return false
+		}
+	}
+	return true
+}
 
 func writeProxyFrame(w io.Writer, kind byte, payload []byte) error {
 	if len(payload) > proxyMaxPayload || kind < proxySetup || kind > proxyEnded {
@@ -66,7 +86,7 @@ func readProxyFrame(r io.Reader) (byte, []byte, error) {
 }
 
 // proxySetupPayload is setup format 1: version, user, domain, password, flags.
-// The credential rules are newNativePlan's, so both paths accept the same.
+// browserSetup checks the credentials before it.
 func proxySetupPayload(user, domain, password string, clipboard bool) ([]byte, error) {
 	if len(user) == 0 || len(user) > 128 || len(domain) > 128 || len(password) == 0 || len(password) > 4096 {
 		return nil, errNative
@@ -176,8 +196,8 @@ func (s *ProxyStream) Close() error {
 
 // OpenBrowserRDP starts the proxy for a desktop whose RDP client runs in the
 // browser (ADR 0008, D); the gateway's desktop socket relays to it
-// (identity.RDPWorker). The pin is enforced by the proxy's own TLS
-// before CredSSP, as the native worker enforces it. The clipboard is on: the
+// (identity.RDPWorker). The pin is enforced by the proxy's own TLS before
+// CredSSP (rdp-proxy/src/pin.rs). The clipboard is on: the
 // proxy keeps it to bounded text (docs/BROWSER-RDP-PROXY.md, 2c), and the
 // desktop page acts only on the person's own copy and paste
 // (docs/BROWSER-RDP-PAGE.md, 3d).
@@ -198,10 +218,10 @@ func (w ManagerWorker) OpenBrowserRDP(ctx context.Context, request identity.RDPR
 
 var _ identity.RDPWorker = ManagerWorker{}
 
-// browserSetup checks the credentials as newNativePlan does, then makes the
+// browserSetup checks the credentials (credentialsAllowed), then makes the
 // setup frame, with the clipboard on.
 func browserSetup(pin *Identity, user, password string) ([]byte, error) {
-	if _, err := newNativePlan(pin, user, password); err != nil {
+	if !credentialsAllowed(pin, user, password) {
 		return nil, errNative
 	}
 	return proxySetupPayload(user, "", password, true)
@@ -219,7 +239,7 @@ func (w ManagerWorker) openBrowserDial(ctx context.Context, dial func(context.Co
 	defer clear(payload)
 	setup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	raw, err := connectRDPManager(ctx, setup, w.SocketPath, dial, pin, true)
+	raw, err := connectRDPManager(ctx, setup, w.SocketPath, dial, pin)
 	if err != nil {
 		return nil, errNative
 	}

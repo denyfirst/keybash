@@ -61,8 +61,9 @@ func TestProxyFramesMatchTheProxyAndRefuseTheRest(t *testing.T) {
 	}
 }
 
-// The setup frame is the proxy's format 1, with newNativePlan's rules.
-func TestProxySetupIsFormatOneWithTheNativeRules(t *testing.T) {
+// The setup frame is the proxy's format 1, with its own bounds; browserSetup
+// adds credentialsAllowed before it.
+func TestProxySetupIsFormatOneWithItsOwnBounds(t *testing.T) {
 	got, err := proxySetupPayload("kbtest", "", "Pässwörd", true)
 	want := []byte{1, 6, 0, 'k', 'b', 't', 'e', 's', 't', 0, 0, 10, 0}
 	want = append(append(want, "Pässwörd"...), 1)
@@ -172,11 +173,11 @@ func TestProxyStreamCloseUnblocksReadsAndWrites(t *testing.T) {
 	}
 }
 
-// Credentials outside the native rules, and a missing context or dial, never
+// Credentials outside credentialsAllowed, and a missing context or dial, never
 // reach a manager.
 func TestOpenBrowserRDPRefusesBeforeAnyManager(t *testing.T) {
 	pin := &Identity{name: "server.test", der: []byte{1}, roots: x509.NewCertPool()}
-	if _, err := newNativePlan(pin, "u", "p"); err != nil {
+	if !credentialsAllowed(pin, "u", "p") {
 		t.Fatal("the fixture identity itself is refused")
 	}
 	dial := func(context.Context) (net.Conn, error) { t.Fatal("dialled"); return nil, nil }
@@ -185,8 +186,8 @@ func TestOpenBrowserRDPRefusesBeforeAnyManager(t *testing.T) {
 	cancel()
 	for name, try := range map[string]func() (*ProxyStream, error){
 		"no user": func() (*ProxyStream, error) { return w.openBrowserDial(context.Background(), dial, pin, "", "p") },
-		// Only newNativePlan refuses this one: the setup frame's own rules allow it.
-		"user outside the native characters": func() (*ProxyStream, error) {
+		// Only credentialsAllowed refuses this one: the setup frame's own bounds allow it.
+		"user outside the allowed characters": func() (*ProxyStream, error) {
 			return w.openBrowserDial(context.Background(), dial, pin, "kb test", "p")
 		},
 		"long password": func() (*ProxyStream, error) {
@@ -201,10 +202,10 @@ func TestOpenBrowserRDPRefusesBeforeAnyManager(t *testing.T) {
 	}
 }
 
-// The setup frame carries only credentials the native path would accept, and
+// The setup frame carries only credentials credentialsAllowed accepts, and
 // turns the clipboard on: the desktop page asks for it (cliprdr), and the
 // proxy refuses a channel the setup did not allow.
-func TestBrowserSetupHasTheNativeRules(t *testing.T) {
+func TestBrowserSetupHasTheCredentialRules(t *testing.T) {
 	pin := &Identity{name: "server.test", der: []byte{1}, roots: x509.NewCertPool()}
 	got, err := browserSetup(pin, "synthetic-user", "p")
 	if err != nil || got[len(got)-1] != 1 {

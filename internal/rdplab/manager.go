@@ -1,18 +1,13 @@
 package rdplab
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"net"
 	"strconv"
-	"time"
 
-	"github.com/denyfirst/keybash/internal/identity"
 	"github.com/denyfirst/keybash/internal/sessionlimits"
 	"github.com/denyfirst/keybash/internal/targetguard"
-	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
 // ManagerConfig is trusted offline operator configuration, never IPC input.
@@ -35,22 +30,9 @@ func (c ManagerConfig) valid() bool {
 		c.MaxSessions >= 1 && c.MaxSessions <= sessionlimits.MaxTotal
 }
 
+// ManagerWorker opens desktops through the RDP manager at SocketPath: each one
+// is Keybash's RDP proxy in its own sandbox (OpenBrowserRDP).
 type ManagerWorker struct{ SocketPath string }
-
-// OpenRDP opens the native lab's guacd desktop at the lab's own size. The
-// gateway no longer reaches it: desktops open in the browser through the RDP
-// proxy (OpenBrowserRDP). It stays for the native lab until step 3e3 removes
-// guacd and FreeRDP.
-func (w ManagerWorker) OpenRDP(ctx context.Context, request identity.RDPRequest) (terminalweb.Stream, error) {
-	if request.Target == nil {
-		return nil, errNative
-	}
-	pin, err := identityFor(request.Target, request.Certificate)
-	if err != nil {
-		return nil, errNative
-	}
-	return w.open(ctx, request.Target, pin, request.Username, request.Password, 0, 0, 0)
-}
 
 // identityFor takes the rules from the target, never from the certificate: a
 // server at a literal address is identified by its exact certificate, a server
@@ -60,46 +42,6 @@ func identityFor(target *targetguard.NamedTarget, certificate []byte) (*Identity
 		return NewExactIdentity(certificate)
 	}
 	return NewIdentity(target.Hostname(), certificate)
-}
-
-func (w ManagerWorker) open(ctx context.Context, target *targetguard.NamedTarget, pin *Identity, user, password string, width, height, dpi int) (terminalweb.Stream, error) {
-	if !pin.boundTo(target) {
-		return nil, errNative
-	}
-	return w.openDial(ctx, target.DialContext, pin, user, password, width, height, dpi)
-}
-
-// managedPlan is what a managed desktop runs: the workspace profile at the
-// page's size and DPI (0 for the lab's 1024 by 768 at 96), refused outside
-// the bounds; a DPI without a size is refused too.
-func managedPlan(pin *Identity, user, password string, width, height, dpi int) (nativePlan, error) {
-	plan, err := newNativePlan(pin, user, password)
-	if err != nil || (width != 0 || height != 0 || dpi != 0) && !desktopSize(width, height, dpi) {
-		return nativePlan{}, errNative
-	}
-	plan.workspace = true
-	plan.width, plan.height, plan.dpi = width, height, dpi
-	return plan, nil
-}
-
-// Only package _test.go callers can replace this guarded dial for a fixture.
-func (w ManagerWorker) openDial(ctx context.Context, dial func(context.Context) (net.Conn, error), pin *Identity, user, password string, width, height, dpi int) (terminalweb.Stream, error) {
-	plan, err := managedPlan(pin, user, password, width, height, dpi)
-	if ctx == nil || ctx.Err() != nil || dial == nil || err != nil {
-		return nil, errNative
-	}
-	setup, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	raw, err := connectRDPManager(ctx, setup, w.SocketPath, dial, pin, false)
-	if err != nil {
-		return nil, errNative
-	}
-	native, err := nativeConnect(ctx, raw, plan)
-	if err != nil {
-		_ = raw.Close()
-		return nil, errNative
-	}
-	return newViewerStream(native).startKeepAlive(), nil
 }
 
 func (ManagerConfig) Format(w fmt.State, _ rune) {

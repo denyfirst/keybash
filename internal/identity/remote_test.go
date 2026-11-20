@@ -890,31 +890,6 @@ func TestOwnedRemoteSessionsEndWithTheirReason(t *testing.T) {
 	})
 }
 
-// The native lab's guacd desktop sizes itself by Windows' scales, never past
-// full HD times the scale, until step 3e3 removes it.
-func TestDesktopBoundsAreWindowsScales(t *testing.T) {
-	for dpi, want := range map[int][2]int{96: {1920, 1080}, 120: {2400, 1350}, 144: {2880, 1620}, 168: {3360, 1890}, 192: {3840, 2160}} {
-		if w, h, ok := DesktopBounds(dpi); !ok || w != want[0] || h != want[1] || !DesktopSize(w, h, dpi) || DesktopSize(w+2, h, dpi) || DesktopSize(w, h+2, dpi) {
-			t.Fatalf("bounds at %d DPI: %dx%d %v", dpi, w, h, ok)
-		}
-	}
-	for _, size := range [][3]int{{200, 200, 96}, {1600, 900, 96}, {2880, 1800, 192}} {
-		if !DesktopSize(size[0], size[1], size[2]) {
-			t.Fatalf("%v refused", size)
-		}
-	}
-	for _, size := range [][3]int{{1601, 900, 96}, {1600, 901, 96}, {198, 900, 96}, {1600, 198, 96}, {1922, 1080, 96}, {2880, 1800, 144}} {
-		if DesktopSize(size[0], size[1], size[2]) {
-			t.Fatalf("%v accepted", size)
-		}
-	}
-	for _, dpi := range []int{0, 72, 95, 97, 100, 110, 200, 240, 288, 384} {
-		if _, _, ok := DesktopBounds(dpi); ok || DesktopSize(1600, 900, dpi) {
-			t.Fatalf("%d DPI accepted", dpi)
-		}
-	}
-}
-
 // The terminal socket opens terminals only. Its proof is exactly the page's
 // CSRF value and lease, so the size the guacd page once sent opens nothing
 // and leaves the lease unused; a desktop's lease is used up there without

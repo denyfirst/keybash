@@ -2,11 +2,10 @@
 //! validity dates, and proven by the handshake signature made with its key.
 //!
 //! The certificate's fixed rules (not a CA, server use, key strength, the name)
-//! were checked when it was approved (`internal/rdpcert`); the native worker's
-//! `native/identity.c` holds the same line. IronRDP's own callback verifier is
-//! not used: it asks the callback only after platform-root validation fails,
-//! so a publicly trusted certificate would bypass the pin, and the sandbox has
-//! no root store at all.
+//! were checked when it was approved (`internal/rdpcert`). IronRDP's own
+//! callback verifier is not used: it asks the callback only after platform-root
+//! validation fails, so a publicly trusted certificate would bypass the pin, and
+//! the sandbox has no root store at all.
 
 use std::sync::Arc;
 
@@ -34,7 +33,7 @@ pub enum Name {
 
 impl Name {
     /// The name the server is addressed by in TLS and CredSSP. A literal
-    /// address is reached through the bridge, as FreeRDP reaches it now.
+    /// address is reached through the worker's loopback bridge.
     pub fn host(&self) -> &str {
         match self {
             Name::Dns(name) => name,

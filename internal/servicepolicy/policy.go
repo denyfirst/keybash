@@ -97,7 +97,7 @@ func Render(c Config) (map[string]string, error) {
 		network = "IPAddressDeny=0.0.0.0/0 ::/0\nIPAddressAllow=" + strings.Join(append(allowed, strings.Split(c.TargetNetworks, ",")...), " ") + "\n"
 	}
 	// OOMPolicy=continue: when the slice runs out of memory the kernel kills
-	// the largest process, which is one desktop's guacd or one SSH worker, and
+	// the largest process, which is one desktop's proxy or one SSH worker, and
 	// only that session ends. With kill, systemd killed the whole manager with
 	// it: every desktop, and the gateway bound to it, stayed down.
 	common := `Slice=keybash.slice

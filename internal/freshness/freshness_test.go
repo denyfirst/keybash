@@ -25,7 +25,7 @@ func TestPinsFromTheRepository(t *testing.T) {
 		found[p.Name] = p
 	}
 	for _, name := range []string{"Go", "golang.org/x/crypto", "golang.org/x/sys", "go.etcd.io/bbolt",
-		"FreeRDP", "guacamole-server", "Node.js", "pnpm", "staticcheck", "gosec", "govulncheck",
+		"Node.js", "pnpm", "staticcheck", "gosec", "govulncheck",
 		"actionlint", "playwright", "@xterm/xterm", "@xterm/addon-webgl", "IronRDP", "cargo-audit"} {
 		if _, ok := found[name]; !ok {
 			t.Errorf("the check no longer watches %s", name)
@@ -47,10 +47,7 @@ func TestPinsFromTheRepository(t *testing.T) {
 
 func repo() fstest.MapFS {
 	return fstest.MapFS{
-		"go.mod": {Data: []byte("module example\n\ngo 1.27.4\n\nrequire (\n\tgolang.org/x/crypto v0.59.0\n\tgolang.org/x/text v0.44.0 // indirect\n)\n")},
-		"scripts/build-native-runtime.sh": {Data: []byte("https://github.com/FreeRDP/FreeRDP/releases/download/3.33.1/freerdp-3.33.1.tar.gz\n" +
-			"https://archive.apache.org/dist/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz\n" +
-			"https://downloads.apache.org/guacamole/1.6.0/source/guacamole-server-1.6.0.tar.gz\n")},
+		"go.mod":                       {Data: []byte("module example\n\ngo 1.27.4\n\nrequire (\n\tgolang.org/x/crypto v0.59.0\n\tgolang.org/x/text v0.44.0 // indirect\n)\n")},
 		"scripts/build-ironrdp-web.sh": {Data: []byte("# IronRDP's master after its newest release, ironrdp-v0.17.0. The browser\n")},
 		".github/workflows/ci.yml": {Data: []byte("https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.xz\n" +
 			"https://registry.npmjs.org/@pnpm/exe.linux-x64/-/exe.linux-x64-12.18.0.tgz\n" +
@@ -64,7 +61,7 @@ func repo() fstest.MapFS {
 
 func TestPinsRefuseAFileWhoseFormatChanged(t *testing.T) {
 	pins, err := Pins(repo())
-	if err != nil || len(pins) != 10 {
+	if err != nil || len(pins) != 8 {
 		t.Fatalf("pins %+v, %v", pins, err)
 	}
 	for _, p := range pins {
@@ -76,8 +73,8 @@ func TestPinsRefuseAFileWhoseFormatChanged(t *testing.T) {
 		"Node.js URL gone": func(f fstest.MapFS) {
 			f[".github/workflows/ci.yml"].Data = bytes.Replace(f[".github/workflows/ci.yml"].Data, []byte("nodejs.org"), []byte("example.org"), 1)
 		},
-		"two guacamole versions": func(f fstest.MapFS) {
-			f["scripts/build-native-runtime.sh"].Data = bytes.Replace(f["scripts/build-native-runtime.sh"].Data, []byte("guacamole/1.6.0/source"), []byte("guacamole/1.6.1/source"), 1)
+		"two Node.js versions": func(f fstest.MapFS) {
+			f[".github/workflows/ci.yml"].Data = append(f[".github/workflows/ci.yml"].Data, "https://nodejs.org/dist/v26.13.2/node-v26.13.2-linux-x64.tar.xz\n"...)
 		},
 		"pre-release pin": func(f fstest.MapFS) {
 			f["go.mod"].Data = bytes.Replace(f["go.mod"].Data, []byte("v0.59.0"), []byte("v0.60.0-rc.1"), 1)
@@ -165,8 +162,8 @@ func TestCheckAgainstAFakeUpstream(t *testing.T) {
 	u, tokens := fakeUpstream(t, map[string]string{
 		"/dl": `[{"version":"go1.28rc1","stable":false},{"version":"go1.26.12","stable":true},{"version":"go1.27.5","stable":true}]`,
 		"/proxy/github.com/!burnt!sushi/toml/@latest": `{"Version":"v1.6.0"}`,
-		"/gh/repos/FreeRDP/FreeRDP/releases":          `[{"tag_name":"3.34.0","prerelease":true},{"tag_name":"2.11.9"},{"tag_name":"3.33.1"}]`,
-		"/gh/repos/apache/guacamole-server/tags":      `[{"name":"1.7.0-RC1"},{"name":"1.5.5"},{"name":"1.6.0"}]`,
+		"/gh/repos/example/released/releases":         `[{"tag_name":"3.34.0","prerelease":true},{"tag_name":"2.11.9"},{"tag_name":"3.33.1"}]`,
+		"/gh/repos/example/tagged/tags":               `[{"name":"1.7.0-RC1"},{"name":"1.5.5"},{"name":"1.6.0"}]`,
 		"/node/index.json":                            `[{"version":"v27.1.0","lts":false},{"version":"v24.22.3","lts":"Krypton"},{"version":"v26.13.2","lts":"Lithium"}]`,
 		"/npm/@xterm%2Fxterm/latest":                  `{"version":"6.0.0"}`,
 		// Other products' tags and releases in the same repository are not this pin's.
@@ -176,8 +173,8 @@ func TestCheckAgainstAFakeUpstream(t *testing.T) {
 	pins := []Pin{
 		{Name: "Go", Version: "1.27.4", Source: GoToolchain},
 		{Name: "toml", Version: "1.6.0", Source: GoModule, Key: "github.com/BurntSushi/toml"},
-		{Name: "FreeRDP", Version: "3.33.1", Source: GitHubRelease, Key: "FreeRDP/FreeRDP"},
-		{Name: "guacamole-server", Version: "1.5.5", Source: GitHubTag, Key: "apache/guacamole-server"},
+		{Name: "released", Version: "3.33.1", Source: GitHubRelease, Key: "example/released"},
+		{Name: "tagged", Version: "1.5.5", Source: GitHubTag, Key: "example/tagged"},
 		{Name: "Node.js", Version: "26.13.1", Source: NodeLTS},
 		{Name: "@xterm/xterm", Version: "6.0.0", Source: NPM, Key: "@xterm/xterm"},
 		{Name: "IronRDP", Version: "0.17.0", Source: GitHubTag, Key: "Devolutions/IronRDP", Prefix: "ironrdp-v"},
@@ -187,8 +184,8 @@ func TestCheckAgainstAFakeUpstream(t *testing.T) {
 		newest string
 		behind bool
 	}{
-		"Go": {"1.27.5", true}, "toml": {"1.6.0", false}, "FreeRDP": {"3.33.1", false},
-		"guacamole-server": {"1.6.0", true}, "Node.js": {"26.13.2", true}, "@xterm/xterm": {"6.0.0", false},
+		"Go": {"1.27.5", true}, "toml": {"1.6.0", false}, "released": {"3.33.1", false},
+		"tagged": {"1.6.0", true}, "Node.js": {"26.13.2", true}, "@xterm/xterm": {"6.0.0", false},
 		"IronRDP": {"0.17.0", false}, "cargo-audit": {"0.23.0", true},
 	}
 	for _, r := range Check(context.Background(), u, pins) {

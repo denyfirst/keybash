@@ -88,7 +88,6 @@ func versionPart(parts []string, i int) int {
 // fine; every other expected pin must be found.
 const (
 	goModFile      = "go.mod"
-	nativeFile     = "scripts/build-native-runtime.sh"
 	ironrdpFile    = "scripts/build-ironrdp-web.sh"
 	ciWorkflow     = ".github/workflows/ci.yml"
 	freshWorkflow  = ".github/workflows/freshness.yml"
@@ -98,8 +97,6 @@ const (
 var (
 	goLine      = regexp.MustCompile(`(?m)^go (\S+)$`)
 	requireLine = regexp.MustCompile(`(?m)^\t(\S+) (v\S+)$`)
-	freeRDPURL  = regexp.MustCompile(`releases/download/([^/\s]+)/freerdp-`)
-	guacamole   = regexp.MustCompile(`/guacamole/([^/\s]+)/source/guacamole-server-`)
 	nodeURL     = regexp.MustCompile(`nodejs\.org/dist/v([^/\s]+)/`)
 	pnpmURL     = regexp.MustCompile(`(?:/pnpm|exe\.linux-x64)-([^/\s]+)\.tgz`)
 	goInstall   = regexp.MustCompile(`(?m)^[ \t]*go install (\S+)@(v\S+)[ \t]*$`) // commands, not comments
@@ -154,17 +151,6 @@ func Pins(root fs.FS) ([]Pin, error) {
 			return nil, fmt.Errorf("%s: %s: %w", goModFile, m[1], err)
 		}
 		pins = append(pins, Pin{Name: m[1], File: goModFile, Version: v, Source: GoModule, Key: m[1]})
-	}
-
-	native, err := read(nativeFile)
-	if err != nil {
-		return nil, err
-	}
-	if err := agreed(nativeFile, native, freeRDPURL, "FreeRDP", GitHubRelease, "FreeRDP/FreeRDP"); err != nil {
-		return nil, err
-	}
-	if err := agreed(nativeFile, native, guacamole, "guacamole-server", GitHubTag, "apache/guacamole-server"); err != nil {
-		return nil, err
 	}
 
 	ironrdp, err := read(ironrdpFile)

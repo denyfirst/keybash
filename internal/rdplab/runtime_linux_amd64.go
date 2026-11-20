@@ -60,7 +60,7 @@ func RuntimeInventory(path string) ([32]byte, error) {
 	}
 	h := sha256.New()
 	count, total := 0, int64(0)
-	required := map[string]bool{"opt/keybash-rdp/sbin/guacd": false, "opt/keybash-rdp/lib/libguac-client-rdp.so": false, "opt/keybash-rdp/ossl-modules/legacy.so": false, "lib64/ld-linux-x86-64.so.2": false, "setpriv": false, "worker": false, "run/keybash/approved.pem": false, "run/keybash/name": false}
+	required := map[string]bool{rdpProxyPath: false, "lib64/ld-linux-x86-64.so.2": false, "setpriv": false, "worker": false, "run/keybash/approved.pem": false, "run/keybash/name": false}
 	directories := map[string]bool{"proc": false, "dev": false, "tmp": false, "run/keybash": false}
 	err := filepath.WalkDir(path, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -175,9 +175,9 @@ func openRDPImage(c ManagerConfig) (*os.File, error) {
 	return f, nil
 }
 
-func rdpSandboxArgs(parent string, c ManagerConfig, proxy bool) []string {
+func rdpSandboxArgs(parent string, c ManagerConfig) []string {
 	u, g := strconv.FormatUint(uint64(c.WorkerUID), 10), strconv.FormatUint(uint64(c.WorkerGID), 10)
-	args := []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
+	return []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session",
 		"--hostname", "keybash-rdp-worker", "--cap-drop", "ALL", "--cap-add", "CAP_SETUID", "--cap-add", "CAP_SETGID", "--cap-add", "CAP_SETPCAP",
 		"--clearenv", "--setenv", "GOMAXPROCS", "2", "--setenv", "GOMEMLIMIT", "64MiB", "--setenv", "GOTRACEBACK", "none",
 		"--ro-bind", c.Runtime, "/",
@@ -187,14 +187,10 @@ func rdpSandboxArgs(parent string, c ManagerConfig, proxy bool) []string {
 		"--dir", "/run/keybash", "--perms", "0444", "--ro-bind-data", "6", "/run/keybash/approved.pem", "--perms", "0444", "--ro-bind-data", "7", "/run/keybash/name",
 		"--proc", "/proc", "--dev", "/dev", "--perms", "1777", "--tmpfs", "/tmp", "--remount-ro", "/", "--chdir", "/",
 		"--seccomp", "5", "--", "/setpriv", "--reuid=" + u, "--regid=" + g, "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "/worker", parent, u, g}
-	// The one fixed word that has the worker start the proxy instead of guacd.
-	if proxy {
-		args = append(args, "proxy")
-	}
-	return args
 }
 
-// rdpProxyPath is where the runtime holds Keybash's RDP proxy, when it holds it.
+// rdpProxyPath is where the runtime holds Keybash's RDP proxy, which every
+// desktop runs; the inventory requires it.
 const rdpProxyPath = "opt/keybash-rdp/bin/keybash-rdp-proxy"
 
 // runtimeHasProxy says whether the approved runtime holds the proxy: a
@@ -231,9 +227,9 @@ func rdpSeccomp() []byte {
 	return raw.Bytes()
 }
 
-func startRDPProcess(life context.Context, parent string, c ManagerConfig, proxy bool, transport, image, filter, input, output, cert, name *os.File) (context.Context, context.CancelFunc, <-chan struct{}, error) {
+func startRDPProcess(life context.Context, parent string, c ManagerConfig, transport, image, filter, input, output, cert, name *os.File) (context.Context, context.CancelFunc, <-chan struct{}, error) {
 	ctx, cancel := context.WithCancel(life)
-	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", rdpSandboxArgs(parent, c, proxy)...) // #nosec G204 -- fixed root tool and validated operator configuration; no IPC commands or credentials.
+	cmd := exec.CommandContext(ctx, "/usr/bin/bwrap", rdpSandboxArgs(parent, c)...) // #nosec G204 -- fixed root tool and validated operator configuration; no IPC commands or credentials.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
 	cmd.ExtraFiles = []*os.File{transport, image, filter, cert, name}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, io.Discard

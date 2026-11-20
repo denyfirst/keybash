@@ -42,8 +42,8 @@ func CloseCode(r Reason) (websocket.StatusCode, bool) {
 	return code, ok
 }
 
-// Desktop messages a browser may send each second: the same budget as the
-// guacd path's input (inputFramesPerSecond, inputBytesPerSecond). A dragged
+// Desktop messages a browser may send each second: the same budget as a
+// terminal's input (inputFramesPerSecond, inputBytesPerSecond). A dragged
 // window sends input and graphics acknowledgements each display frame.
 const (
 	desktopMessagesPerSecond = inputFramesPerSecond

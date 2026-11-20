@@ -48,9 +48,8 @@ for tool in systemctl systemd-sysusers systemd-analyze getent sha256sum install 
   command -v "${tool}" >/dev/null 2>&1 || refuse "missing ${tool}"
 done
 # The aggregate CPU limit leaves one processor to the host and gives Keybash the
-# rest, at least two and at most the plan's 6400%. A desktop at 200% keeps more
-# than two busy while it scrolls (the gateway rebuilds every picture and guacd
-# encodes it), so a fixed 200% throttled it on every larger machine.
+# rest, at least two and at most the plan's 6400%. A fixed 200% throttled the
+# desktops of every larger machine while they scrolled.
 if test "${cpu}" = auto; then
   processors="$(nproc)" || refuse 'nproc failed'
   case "${processors}" in '' | *[!0-9]*) refuse 'nproc gave no number' ;; esac

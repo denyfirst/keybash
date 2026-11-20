@@ -10,10 +10,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,17 +32,17 @@ var browserRDCleanPathRequest = func() []byte {
 	return b
 }()
 
-// nativeProxyChild runs as the unprivileged gateway: it opens a browser desktop
+// nativeProxyChild runs as the unprivileged gateway: it opens a desktop
 // through the manager and the sandboxed proxy, and sends what a browser sends.
-func nativeProxyChild(t *testing.T, ctx context.Context, path string, dial func(context.Context) (net.Conn, error), pin *Identity, mode string) {
+func nativeProxyChild(t *testing.T, ctx context.Context, cancel context.CancelFunc, path string, dial func(context.Context) (net.Conn, error), dialed *bool, pin *Identity, mode string) {
 	password := "Synthetic-managed-NLA-password"
 	if mode == "proxy-wrong-password" {
 		password = "Not-the-synthetic-password"
 	}
 	s, err := (ManagerWorker{SocketPath: path}).openBrowserDial(ctx, dial, pin, "synthetic-user", password)
-	if mode == "proxy-unavailable" {
-		if s != nil || err == nil {
-			t.Fatal("a runtime without the proxy started one")
+	if mode == "wrong-peer" {
+		if s != nil || err == nil || *dialed {
+			t.Fatal("a wrong gateway peer obtained launch authority")
 		}
 		return
 	}
@@ -54,7 +55,7 @@ func nativeProxyChild(t *testing.T, ctx context.Context, path string, dial func(
 	}
 	answer, err := s.ReadMessage()
 	switch mode {
-	case "proxy":
+	case "proxy", "service":
 		// The proxy answers only after TLS with the pinned certificate and NLA.
 		if err != nil || len(answer) < 2 || answer[0] != 0x30 || !bytes.Contains(answer, pin.der) {
 			t.Fatalf("no RDCleanPath response with the pinned certificate (reason %q)", s.Reason())
@@ -63,12 +64,36 @@ func nativeProxyChild(t *testing.T, ctx context.Context, path string, dial func(
 		if err == nil || s.Reason() != terminalweb.ReasonCredentials {
 			t.Fatalf("a wrong password ended as %q", s.Reason())
 		}
+		return
 	case "proxy-refusal":
 		if err == nil || s.Reason() != terminalweb.ReasonRefused {
-			t.Fatalf("another certificate ended as %q", s.Reason())
+			t.Fatalf("a refused server ended as %q", s.Reason())
 		}
+		return
 	default:
 		t.Fatalf("unknown proxy mode %q", mode)
+	}
+	if mode == "service" {
+		fmt.Fprintln(os.Stdout, "KB_SERVICE_READY")
+		var ack [1]byte
+		if _, e := io.ReadFull(os.Stdin, ack[:]); e != nil || ack[0] != 1 {
+			t.Fatal("service parent acknowledgement failed")
+		}
+		if m, e := s.ReadMessage(); e == nil || len(m) != 0 {
+			t.Fatal("manager stop retained desktop output")
+		}
+		if s.WriteMessage([]byte{0x04, 0x02, 0x00}) == nil {
+			t.Fatal("manager stop retained desktop input")
+		}
+	}
+	// Revocation: the lease's context ends, and nothing more crosses.
+	cancel()
+	_ = s.Close()
+	if m, e := s.ReadMessage(); e == nil || len(m) != 0 {
+		t.Fatal("revoked desktop output escaped")
+	}
+	if s.WriteMessage([]byte{0x04, 0x02, 0x00}) == nil {
+		t.Fatal("revoked desktop input escaped")
 	}
 }
 
@@ -93,17 +118,20 @@ func serveNativeManager(t *testing.T, ctx context.Context, c ManagerConfig) {
 	t.Fatal("native manager socket unavailable")
 }
 
-// The proxy runs in the worker's sandbox in guacd's place and meets the
-// synthetic NLA peer through the guarded transport: the right password gets
-// the RDCleanPath answer with the pinned certificate, a wrong one ends as
-// "credentials", another certificate ends before any credential, and a
-// runtime without the proxy refuses the lease.
+// Every desktop is Keybash's RDP proxy in the worker's sandbox, meeting the
+// test peer (IronRDP's own server) through the guarded transport:
+//   - the right password gets the RDCleanPath answer with the pinned
+//     certificate, by name and by Windows' own certificate pinned exactly, and
+//     revocation ends it;
+//   - a wrong password ends as "credentials";
+//   - a gateway that is not the configured one gets nothing, and nothing is
+//     dialled;
+//   - a server showing another certificate, one past or before its dates, an
+//     old TLS version, or a protocol other than NLA, ends as "refused" before
+//     any credential leaves the proxy.
 func TestNativeRDPManagerProxyMeetsNLAInTheSandbox(t *testing.T) {
 	c := nativeManagerFixture(t)
-	if !runtimeHasProxy(c) {
-		t.Fatal("the native lab runtime lacks the proxy")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	serveNativeManager(t, ctx, c)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -115,31 +143,63 @@ func TestNativeRDPManagerProxyMeetsNLAInTheSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	address, _ := nativePeerWithInput(t, ctx, nativePrefix(t), cert, "Synthetic-managed-NLA-password")
+	address := testPeer(t, ctx, nativePrefix(t), cert, "Synthetic-managed-NLA-password")
+	runManagedGateway(t, c, address, pin, "wrong-peer", 65532)
 	runManagedGateway(t, c, address, pin, "proxy", 65533)
 	runManagedGateway(t, c, address, pin, "proxy-wrong-password", 65533)
-	changed, _ := labCertificate(t, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(779) }, key)
-	refusal, noCredentials := nativeTLSRefusalPeer(t, changed, tls.VersionTLS12, 2)
-	runManagedGateway(t, c, refusal, pin, "proxy-refusal", 65533)
-	select {
-	case err := <-noCredentials:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal("the proxy's TLS refusal lacked evidence")
-	}
 
-	// The same runtime without the proxy: the lease is refused.
-	bare := nativeManagerFixture(t)
-	if os.Remove(filepath.Join(bare.Runtime, rdpProxyPath)) != nil || runtimeHasProxy(bare) {
-		t.Fatal("proxy removal fixture failed")
-	}
-	digest, err := RuntimeInventory(bare.Runtime)
+	windows := windowsCertificate(t, key, nil)
+	exact, err := NewExactIdentity(windows.Certificate[0])
 	if err != nil {
-		t.Fatal("runtime without the proxy refused by inventory")
+		t.Fatal(err)
 	}
-	bare.RuntimeDigest = digest
-	serveNativeManager(t, ctx, bare)
-	runManagedGateway(t, bare, address, pin, "proxy-unavailable", 65533)
+	runManagedGateway(t, c, testPeer(t, ctx, nativePrefix(t), windows, "Synthetic-managed-NLA-password"), exact, "proxy", 65533)
+
+	expired := func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Minute) }
+	notYet := func(c *x509.Certificate) { c.NotBefore = time.Now().Add(time.Hour) }
+	for _, refusal := range []struct {
+		name     string
+		pin      *Identity
+		shown    tls.Certificate
+		version  uint16
+		selected byte
+	}{
+		{"changed", pin, firstCertificate(labCertificate(t, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(778) }, key)), tls.VersionTLS12, 2},
+		{"expired", nil, firstCertificate(labCertificate(t, expired, key)), tls.VersionTLS12, 2},
+		{"not yet valid", nil, firstCertificate(labCertificate(t, notYet, key)), tls.VersionTLS12, 2},
+		{"TLS 1.1", pin, cert, tls.VersionTLS11, 2},
+		{"TLS without NLA", pin, cert, tls.VersionTLS12, 1},
+		{"plain RDP", pin, cert, tls.VersionTLS12, 0},
+		{"exact, renewed", exact, windowsCertificate(t, key, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(779) }), tls.VersionTLS12, 2},
+		{"exact, expired", nil, windowsCertificate(t, key, expired), tls.VersionTLS12, 2},
+	} {
+		identity := refusal.pin
+		if identity == nil {
+			// The server shows exactly what is pinned; only its dates are wrong,
+			// which the constructors would refuse first: the proxy's own rules
+			// are what refuse here.
+			name := "synthetic-rdp.invalid"
+			if refusal.name == "exact, expired" {
+				name = exactLeaf
+			}
+			identity = rawIdentity(t, name, refusal.shown.Certificate[0])
+		}
+		address, noCredentials := nativeTLSRefusalPeer(t, refusal.shown, refusal.version, refusal.selected)
+		output, failed := tryManagedGateway(c, address, identity, "proxy-refusal", 65533)
+		// The peer's evidence first: whether anything after TLS left the proxy.
+		select {
+		case err := <-noCredentials:
+			if err != nil {
+				t.Fatalf("%s: %v", refusal.name, err)
+			}
+		case <-ctx.Done():
+			t.Fatalf("%s: the refusal lacked evidence", refusal.name)
+		}
+		if failed != nil {
+			t.Fatalf("%s: managed gateway failed: %s", refusal.name, output)
+		}
+	}
 }
+
+// firstCertificate keeps labCertificate's certificate and drops its digest.
+func firstCertificate(cert tls.Certificate, _ [32]byte) tls.Certificate { return cert }
