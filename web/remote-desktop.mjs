@@ -4,7 +4,7 @@
 // user name or a password. It acts only on what the person does.
 import init, { setup, SessionBuilder, DesktopSize, Extension, InputTransaction, DeviceEvent, ClipboardData, RotationUnit } from './vendor/ironrdp/ironrdp_web.js';
 import { createRenderer } from './remote-desktop-gfx.mjs';
-import { scanCode, sendsRepeat, ctrlAltDel, ctrlV, mouseButton, desktopPoint, wheelPixels, wheelStep, pointerPNG, closeReason } from './remote-desktop-input.mjs';
+import { scanCode, sendsRepeat, modifierChanges, ctrlAltDel, ctrlV, mouseButton, desktopPoint, wheelPixels, wheelStep, pointerPNG, closeReason } from './remote-desktop-input.mjs';
 import { pictureScale, scaledSize, nearestScale, pointerCursor, pastePacer, windowsLines } from './desktop-workspace.mjs';
 import { inspectPaste } from './paste.mjs';
 import { remoteProof, savePicture, remoteErrorMessage, identityChangedMessage, endingMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
@@ -70,6 +70,13 @@ function releaseAll() {
   down.clear();
   if (live) try { session.releaseAllInputs(); } catch {}
 }
+// Windows' modifiers brought in line with the event's own (modifierChanges).
+function matched(event) {
+  const { press, release } = modifierChanges(event, down), events = [];
+  for (const code of release) { down.delete(code); events.push(DeviceEvent.keyReleased(scanCode(code))); }
+  for (const code of press) { down.add(code); events.push(DeviceEvent.keyPressed(scanCode(code))); }
+  return events;
+}
 desktop.addEventListener('focus', () => { lockSync = true; });
 desktop.addEventListener('blur', releaseAll);
 let copyAsked = 0;
@@ -86,16 +93,18 @@ desktop.addEventListener('keydown', event => {
   // seconds, come to this computer.
   if (ctrl && code === 'KeyC') copyAsked = Date.now();
   event.preventDefault();
-  const scan = scanCode(code);
-  if (scan === null || (event.repeat && !sendsRepeat(code))) return;
+  const scan = scanCode(code), before = matched(event);
+  if (scan === null || (event.repeat && !sendsRepeat(code))) { if (before.length) send(...before); return; }
   down.add(code);
-  send(DeviceEvent.keyPressed(scan));
+  send(...before, DeviceEvent.keyPressed(scan));
 });
 desktop.addEventListener('keyup', event => {
-  if (!live || !down.has(event.code)) return;
+  if (!live) return;
+  const before = matched(event);
+  if (!down.has(event.code)) { if (before.length) send(...before); return; }
   event.preventDefault();
   down.delete(event.code);
-  send(DeviceEvent.keyReleased(scanCode(event.code)));
+  send(...before, DeviceEvent.keyReleased(scanCode(event.code)));
 });
 
 // The pointer: moves at most once a display frame, the wheel likewise.
@@ -117,9 +126,9 @@ function button(event, pressed) {
   if (!live || id === null) return;
   event.preventDefault();
   cancelAnimationFrame(moveFrame); moveFrame = 0; pendingMove = null;
-  const p = where(event);
+  const p = where(event), before = matched(event);
   const press = pressed ? DeviceEvent.mouseButtonPressed(id) : DeviceEvent.mouseButtonReleased(id);
-  if (p) send(DeviceEvent.mouseMove(p.x, p.y), press); else send(press);
+  send(...before, ...(p ? [DeviceEvent.mouseMove(p.x, p.y)] : []), press);
 }
 canvas.addEventListener('pointerdown', event => {
   if (!live) return;
@@ -387,6 +396,9 @@ async function finish(fallback) {
   if (sockets.size) await Promise.race([closeArrived, new Promise(resolve => setTimeout(resolve, 1000))]);
   for (const socket of sockets) socket.close();
   renderer.close();
+  // Nothing of the remote screen stays on the page once the session is over.
+  canvas.width = 0; canvas.height = 0;
+  canvas.style.width = '0'; canvas.style.height = '0';
   const word = ending ? closeReason(ending.code, ending.reason) : null;
   const message = userEnded ? '' : word === 'identity-changed' ? identityChangedMessage : (word && endingMessage(word)) || fallback;
   if (message) $('notice').textContent = message;
@@ -402,12 +414,14 @@ async function finish(fallback) {
   chrome.end();
 }
 
-// H.264 through the browser's own decoder when it has one; otherwise Windows
-// uses its other codecs.
+// H.264 through the browser's own decoder when it has one, offered as in ADR
+// 0008's step 2: Windows chooses 4:4:4 or 4:2:0 for the whole screen, where
+// its administrator turned H.264 on, and its lossless codecs otherwise.
+// Offered alone, the older 4:2:0 mode was never used by Windows Server 2025.
 async function video() {
   try {
     if (typeof VideoDecoder !== 'function') return 'off';
-    return (await VideoDecoder.isConfigSupported({ codec: 'avc1.640028', optimizeForLatency: true })).supported ? 'avc420' : 'off';
+    return (await VideoDecoder.isConfigSupported({ codec: 'avc1.640028', optimizeForLatency: true })).supported ? 'avc444' : 'off';
   } catch {
     return 'off';
   }

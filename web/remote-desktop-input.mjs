@@ -49,6 +49,26 @@ export function sendsRepeat(code) {
   return !held.has(code);
 }
 
+// Shift, Ctrl, Alt and the Windows key as each event says they are, against
+// what Windows was told (held: the codes pressed there). A modifier held when
+// the desktop got focus, or carried by an event with no press of its own, is
+// pressed first; one let go elsewhere is let go. The event's own modifier key
+// is left to the event.
+const modifiers = [
+  ['shiftKey', ['ShiftLeft', 'ShiftRight']], ['ctrlKey', ['ControlLeft', 'ControlRight']],
+  ['altKey', ['AltLeft', 'AltRight']], ['metaKey', ['MetaLeft', 'MetaRight', 'OSLeft', 'OSRight']]
+];
+export function modifierChanges(event, held) {
+  const press = [], release = [];
+  for (const [flag, codes] of modifiers) {
+    if (codes.includes(event.code)) continue;
+    const down = codes.filter(code => held.has(code));
+    if (event[flag] === true && down.length === 0) press.push(codes[0]);
+    else if (event[flag] === false) release.push(...down);
+  }
+  return { press, release };
+}
+
 // Ctrl+Alt+Del and Ctrl+V, as Windows' own client sends them.
 export const ctrlAltDel = [0x1d, 0x38, 0xe053];
 export const ctrlV = [0x1d, 0x2f];

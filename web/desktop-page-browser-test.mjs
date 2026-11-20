@@ -30,6 +30,8 @@ const notice = async words => {
   await page.locator('#notice').filter({ hasText: words }).waitFor({ timeout: 30000 });
   assert.equal(await page.locator('#status').textContent(), 'Session ended');
   assert.equal(await page.locator('#reconnect').isVisible(), true);
+  // Nothing of the remote screen stays: an unused canvas is 300 by 150.
+  assert.deepEqual(await page.evaluate(() => { const c = document.getElementById('screen-canvas'); return [c.width, c.height]; }), [0, 0]);
 };
 let stage = 'open';
 try {

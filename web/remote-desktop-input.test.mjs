@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scanCode, sendsRepeat, ctrlAltDel, ctrlV, mouseButton, desktopPoint, wheelPixels, wheelStep, pointerPNG, maxPointerBytes, closeReason } from './remote-desktop-input.mjs';
+import { scanCode, sendsRepeat, modifierChanges, ctrlAltDel, ctrlV, mouseButton, desktopPoint, wheelPixels, wheelStep, pointerPNG, maxPointerBytes, closeReason } from './remote-desktop-input.mjs';
 
 test('keys go as the scan codes Windows knows, and unknown keys not at all', () => {
   for (const [code, scan] of [['Escape', 0x01], ['Digit1', 0x02], ['Digit0', 0x0b], ['KeyQ', 0x10], ['KeyA', 0x1e], ['KeyZ', 0x2c], ['KeyM', 0x32],
@@ -37,6 +37,22 @@ test('a held modifier or lock key is pressed once, other keys repeat', () => {
   for (const code of ['KeyA', 'Backspace', 'ArrowDown', 'Space', 'Delete']) assert.equal(sendsRepeat(code), true, code);
   assert.deepEqual(ctrlAltDel, [0x1d, 0x38, 0xe053]);
   assert.deepEqual(ctrlV, [0x1d, 0x2f]);
+});
+
+test('Windows\' modifiers follow what each event says', () => {
+  const none = { shiftKey: false, ctrlKey: false, altKey: false, metaKey: false };
+  // A shifted key with no Shift press of its own (held before focus came).
+  assert.deepEqual(modifierChanges({ ...none, code: 'KeyH', shiftKey: true }, new Set()), { press: ['ShiftLeft'], release: [] });
+  // Shift already pressed on either side: nothing more.
+  assert.deepEqual(modifierChanges({ ...none, code: 'KeyH', shiftKey: true }, new Set(['ShiftRight'])), { press: [], release: [] });
+  // Ctrl and Alt let go elsewhere are let go on Windows, both sides.
+  assert.deepEqual(modifierChanges({ ...none, code: 'KeyA' }, new Set(['ControlLeft', 'ControlRight', 'AltLeft', 'KeyA'])), { press: [], release: ['ControlLeft', 'ControlRight', 'AltLeft'] });
+  // The event's own modifier is the event's: Shift's keyup does not release itself twice.
+  assert.deepEqual(modifierChanges({ ...none, code: 'ShiftLeft' }, new Set(['ShiftLeft'])), { press: [], release: [] });
+  assert.deepEqual(modifierChanges({ ...none, code: 'ControlLeft', ctrlKey: true, altKey: true }, new Set()), { press: ['AltLeft'], release: [] });
+  // The Windows key under either name, and an event without the flags changes nothing.
+  assert.deepEqual(modifierChanges({ ...none, code: 'KeyE' }, new Set(['OSLeft'])), { press: [], release: ['OSLeft'] });
+  assert.deepEqual(modifierChanges({ code: 'KeyE' }, new Set(['ShiftLeft'])), { press: [], release: [] });
 });
 
 test('only the five mouse buttons IronRDP knows are sent', () => {
