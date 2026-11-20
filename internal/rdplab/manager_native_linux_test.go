@@ -158,14 +158,21 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	}
 }
 
-func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Identity, mode string, uid uint32, during ...func()) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
-	defer cancel()
+// managedGateway is the gateway child: this test binary, as the gateway's or
+// another UID, opening one desktop through the manager in the given mode.
+func managedGateway(ctx context.Context, c ManagerConfig, address string, pin *Identity, mode string, uid uint32) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=70s") // #nosec G204 -- this exact compiled fixture and fixed selector.
 	cmd.Dir = "/tmp"
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGED_SOCKET=" + c.SocketPath, "KEYBASH_MANAGED_ADDRESS=" + address, "KEYBASH_MANAGED_PIN=" + base64.StdEncoding.EncodeToString(pin.der), "KEYBASH_MANAGED_NAME=" + pin.name, "KEYBASH_MANAGED_MODE=" + mode}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: c.GatewayGID, Groups: []uint32{c.GatewayGID}}}
+	return cmd
+}
+
+func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Identity, mode string, uid uint32, during ...func()) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+	cmd := managedGateway(ctx, c, address, pin, mode, uid)
 	if len(during) > 0 {
 		output := &rdpServiceOutput{ready: make(chan struct{})}
 		cmd.Stdout, cmd.Stderr = output, output
@@ -207,11 +214,7 @@ func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Ident
 func tryManagedGateway(c ManagerConfig, address string, pin *Identity, mode string, uid uint32) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=70s") // #nosec G204 -- this exact compiled fixture and fixed selector.
-	cmd.Dir = "/tmp"
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGED_SOCKET=" + c.SocketPath, "KEYBASH_MANAGED_ADDRESS=" + address, "KEYBASH_MANAGED_PIN=" + base64.StdEncoding.EncodeToString(pin.der), "KEYBASH_MANAGED_NAME=" + pin.name, "KEYBASH_MANAGED_MODE=" + mode}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: c.GatewayGID, Groups: []uint32{c.GatewayGID}}}
-	return cmd.CombinedOutput()
+	return managedGateway(ctx, c, address, pin, mode, uid).CombinedOutput()
 }
 
 type rdpServiceOutput struct {
