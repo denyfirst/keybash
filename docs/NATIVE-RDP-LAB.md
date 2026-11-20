@@ -62,6 +62,27 @@ password. The normal lab then runs again in full. A refusal timeout alone fails.
 These are synthetic peer tests, not Windows interoperability: the proxy's live
 tests against Windows and the maintainer's tests on the test VM cover that.
 
+## The whole desktop path
+
+`TestNativeRDPDesktopFromThePageToThePeer` (step 3e4 of
+`BROWSER-RDP-PAGE.md`) runs everything a person's desktop crosses, each part as
+the service runs it:
+
+- the gateway as its own UID, serving a fresh installation's pages, with one
+  RDP server whose certificate is the test peer's;
+- a real browser (Playwright's Chromium, `web/desktop-native-browser-test.mjs`)
+  that signs up, enrols a second factor, saves the server's password and opens
+  the desktop page;
+- the RDP manager, which starts the proxy in the worker's sandbox, and the
+  test peer behind it.
+
+The page must draw the peer's grey desktop, read back from a screenshot. Then
+the peer itself, not the page, must report the pointer, a click and the A key
+(scan code 0x1e). Signing out must end the desktop: the page shows its fixed
+words and keeps no picture, and the gateway's lease for the desktop ends. The
+browser driver prints only fixed stage lines; the peer's lines are kept only
+when they are its own fixed words.
+
 ## Worker and broker
 
 The manager starts each desktop's worker in Bubblewrap: private network, PID,

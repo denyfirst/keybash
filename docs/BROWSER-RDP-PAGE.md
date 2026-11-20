@@ -189,6 +189,9 @@ guacd and FreeRDP use leaves, each part in its own pull request:
   - **3e4.** A native end-to-end test on the test peer: this page, the
     gateway, the manager and the sandboxed proxy, with input checked at the
     peer. It comes last, in a native lab that no longer builds FreeRDP.
-    Until then the IronRDP path rests on `TestBrowserDesktopPage`, the
-    proxy's end-to-end tests against the peer, the proxy's native NLA test
-    and the live test of 3d. Removing guacd takes nothing from that path.
+    `TestNativeRDPDesktopFromThePageToThePeer` runs a fresh installation's
+    pages in a real browser, the gateway as its own UID, the manager, the
+    proxy in the worker's sandbox and the test peer: sign-up, the second
+    factor, the saved password, the peer's grey desktop drawn on the page, a
+    click, the pointer and a key seen by the peer, and signing out ending the
+    desktop with its words and no picture left.
