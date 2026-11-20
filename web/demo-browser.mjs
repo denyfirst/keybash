@@ -57,13 +57,12 @@ try {
   // Nobody may use a server until an administrator puts them on it, the
   // administrator included; the first account is one, as on the Servers page.
   const self = (await (await account.request.get(config.Origin + '/api/users')).json()).self;
-  for (const target of [config.SSH, config.RDP]) assert.equal((await account.request.post(config.Origin + '/api/servers/' + target + '/grant', {headers, data: {account: self}})).status(), 204);
+  for (const target of [config.SSH]) assert.equal((await account.request.post(config.Origin + '/api/servers/' + target + '/grant', {headers, data: {account: self}})).status(), 204);
   const connections = {};
   for (const [mode, name, secret, target] of [
-    ['ssh', 'Linux SSH · UI simulation', config.SSHSecret, config.SSH],
-    ['rdp', 'Desktop · UI simulation (not Windows)', config.RDPSecret, config.RDP]
+    ['ssh', 'Linux SSH · UI simulation', config.SSHSecret, config.SSH]
   ]) {
-    const saved = await account.request.post(config.Origin + '/api/credentials', {headers, data: {name, kind: mode === 'ssh' ? 'ssh-key' : 'password', username: 'synthetic-user', secret, passphrase: ''}});
+    const saved = await account.request.post(config.Origin + '/api/credentials', {headers, data: {name, kind: 'ssh-key', username: 'synthetic-user', secret, passphrase: ''}});
     assert.equal(saved.status(), 200);
     const credential = await saved.json();
     const linked = await account.request.post(config.Origin + '/api/connections', {headers, data: {name, target, credential: credential.id, approval: (await (await account.request.get(config.Origin + '/api/targets/' + target)).json()).approval}});
@@ -82,15 +81,14 @@ try {
     await guide.setContent(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Keybash · Demo guide</title><style>
       body{background:#111216;color:#e8eaf0;font:17px system-ui;max-width:820px;margin:52px auto;padding:0 24px;line-height:1.6}h1{font-size:38px}strong{color:#22d3ee}code,output{background:#20232b;padding:8px 12px;border-radius:6px;display:inline-block}output{font-size:28px;letter-spacing:5px}button{background:#0e7490;color:white;border:0;border-radius:6px;padding:12px 20px;font:inherit;cursor:pointer}textarea{width:100%;height:90px;background:#20232b;color:#eee;border:1px solid #444}small{color:#b3bac8}li{margin:10px 0}</style>
       <h1>keybash<span style="color:#22d3ee">.</span> Demo</h1>
-      <p><strong>This is a local UI simulation.</strong> There is no real Linux shell or Windows. Do not enter your own server keys or passwords.</p>
+      <p><strong>This is a local UI simulation.</strong> There is no real Linux shell, and no desktop: the desktop page needs a real Windows server. Do not enter your own server keys or passwords.</p>
       <button id="workspace">Open the workspace</button>
-      <ol><li>The workspace has two sample connections. Choose <b>Connect</b>.</li><li>In the terminal try <code>help</code>, <code>whoami</code>, <code>echo hello friend</code>, Ctrl+C and the paste preview.</li><li>On the desktop, click, type, try Backspace/Enter and full screen. RDP clipboard and remote resize are still off.</li><li>Connecting and adding keys or connections need no code; showing and deleting secrets ask for the code on your phone (not within 10 minutes of signing in). Signing out closes every open connection.</li></ol>
+      <ol><li>The workspace has a sample terminal connection. Choose <b>Connect</b>.</li><li>In the terminal try <code>help</code>, <code>whoami</code>, <code>echo hello friend</code>, Ctrl+C and the paste preview.</li><li>Connecting and adding keys or connections need no code; showing and deleting secrets ask for the code on your phone (not within 10 minutes of signing in). Signing out closes every open connection.</li></ol>
       <p>Demo user: <code>demo</code><br>Demo password: <code id="password"></code></p>
       <p>Current MFA code: <output id="otp"></output><br><small id="remaining"></small><br><small>Each code works once. If the code was used at start-up, wait for the next 30-second code.</small></p>
       <details><summary>Demo MFA seed and one-time recovery codes</summary><p>To add it to an authenticator by hand: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Each recovery code works once. They exist only for this temporary demo.</p></details>
-      <details><summary>Demo server identities</summary><p>Nobody types an identity when creating a connection; Keybash takes it from the server list. These are for information only:</p><p>SSH: <code id="ssh-fingerprint"></code></p><p>RDP: <code id="rdp-fingerprint"></code></p></details><p><small>The session ends when you close every demo window, or after an hour. Each start begins with new, temporary data.</small></p></html>`);
+      <details><summary>Demo server identities</summary><p>Nobody types an identity when creating a connection; Keybash takes it from the server list. These are for information only:</p><p>SSH: <code id="ssh-fingerprint"></code></p></details><p><small>The session ends when you close every demo window, or after an hour. Each start begins with new, temporary data.</small></p></html>`);
     await guide.locator('#ssh-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.SSHFingerprint);
-    await guide.locator('#rdp-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.RDPFingerprint);
     await guide.locator('#password').evaluate((el, value) => { el.textContent = value; }, config.Password);
     await guide.locator('#seed').evaluate((el, value) => { el.textContent = value; }, seed);
     await guide.locator('#recovery').evaluate((el, value) => { el.value = value; }, recovery.join('\n'));
@@ -135,35 +133,11 @@ try {
     await terminal.keyboard.type('echo Salam dostum'); await terminal.keyboard.press('Enter');
     await terminal.waitForFunction(() => (document.querySelector('.xterm-rows')?.textContent.match(/Salam dostum/g) ?? []).length >= 2);
     if (screenshot) await terminal.screenshot({path: screenshot + '-terminal.png'});
-    stage = 'desktop simulation';
-    const desktop = await context.newPage();
-    await desktop.goto(config.Origin + '/remote/rdp/' + connections.rdp);
-    await desktop.locator('#status').filter({hasText: /^Connected$/}).waitFor();
-    await desktop.waitForFunction(() => [...document.querySelectorAll('#display canvas')].some(c => c.width >= 1024 && c.height >= 768 && c.getContext('2d').getImageData(0, 0, 1, 1).data[0] > 200));
-    const pixels = () => desktop.evaluate(() => {
-      const canvas = [...document.querySelectorAll('#display canvas')].find(c => c.width >= 1024 && c.height >= 768);
-      return JSON.stringify([...canvas.getContext('2d').getImageData(52, 350, 600, 14).data]);
-    });
-    const beforeInput = await pixels();
-    await desktop.locator('#desktop').focus(); await desktop.keyboard.press('a');
-    await desktop.waitForFunction(before => {
-      const canvas = [...document.querySelectorAll('#display canvas')].find(c => c.width >= 1024 && c.height >= 768);
-      return JSON.stringify([...canvas.getContext('2d').getImageData(52, 350, 600, 14).data]) !== before;
-    }, beforeInput);
-    const beforeMouse = await pixels();
-    const box = await desktop.locator('#display').boundingBox(); assert(box);
-    await desktop.mouse.click(box.x + 120, box.y + 120);
-    await desktop.waitForFunction(before => {
-      const canvas = [...document.querySelectorAll('#display canvas')].find(c => c.width >= 1024 && c.height >= 768);
-      return JSON.stringify([...canvas.getContext('2d').getImageData(52, 350, 600, 14).data]) !== before;
-    }, beforeMouse);
-    if (screenshot) await desktop.screenshot({path: screenshot + '-desktop.png'});
     stage = 'logout revocation';
     await account.bringToFront(); await account.locator('#logout').click(); await account.waitForURL(config.Origin + '/login');
     await terminal.waitForFunction(() => document.getElementById('terminal').childElementCount === 0);
-    await desktop.waitForFunction(() => document.getElementById('display').childElementCount === 0);
     assert.deepEqual(errors, []);
-    console.log('Interactive demo browser: MFA, owned samples, terminal input, desktop drawing/input and logout passed.');
+    console.log('Interactive demo browser: MFA, owned samples, terminal input and logout passed.');
   }
 } catch (error) {
   // Never reflect Playwright request/fill diagnostics containing fixture data.
