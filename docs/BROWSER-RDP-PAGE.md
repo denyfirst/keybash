@@ -169,9 +169,13 @@ guacd and FreeRDP use leaves, each part in its own pull request:
     click. CI's proxy job runs the proxy's end-to-end tests against it, so
     they no longer need Windows. The clipboard test, which drives Windows'
     own desktop, still needs Windows.
-  - **3e2.** A native end-to-end test on that peer: this page, the gateway,
-    the manager and the sandboxed proxy, with input checked at the peer.
-  - **3e3.** guacd's page, its viewer path and `vendor/guacamole.mjs` leave.
-  - **3e4.** guacd and FreeRDP leave the runtime, the stage build and the
+  - **3e2.** guacd's page, its viewer path and `vendor/guacamole.mjs` leave.
+  - **3e3.** guacd and FreeRDP leave the runtime, the stage build and the
     native lab, whose NLA peer becomes the test peer, with their freshness
     watches, dependency notes and documents.
+  - **3e4.** A native end-to-end test on the test peer: this page, the
+    gateway, the manager and the sandboxed proxy, with input checked at the
+    peer. It comes last, in a native lab that no longer builds FreeRDP.
+    Until then the IronRDP path rests on `TestBrowserDesktopPage`, the
+    proxy's end-to-end tests against the peer, the proxy's native NLA test
+    and the live test of 3d. Removing guacd takes nothing from that path.
