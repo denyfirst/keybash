@@ -1,8 +1,9 @@
 # Keybash RDP proxy (ADR 0008, step 2)
 
 17 November 2026. Design for the credential-injecting proxy that replaces
-guacd and FreeRDP when a desktop runs in the browser (ADR 0008, D). Nothing
-here is wired to a page yet; step 3 does that.
+guacd and FreeRDP when a desktop runs in the browser (ADR 0008, D). Since
+20 November (step 3e3 of `BROWSER-RDP-PAGE.md`) every desktop runs it, and
+guacd and FreeRDP have left; the text below keeps the order it was built in.
 
 ## Where it runs
 
@@ -71,8 +72,8 @@ the server name from `/run/keybash/name`, as FreeRDP does now.
 5. The browser's MCS Connect Initial is decoded, checked and re-encoded. It
    is never forwarded as it came.
    - The selected protocol is set to what Windows selected.
-   - The desktop size and scale must be within the bounds
-     (`identity.DesktopSize`, the same table in both languages).
+   - The desktop size and scale must be within the bounds: even, at least 200
+     by 200, at most full HD times one of Windows' scales (`desktop_allowed`).
    - Only allowed static channels, each once: `drdynvc` always, and `cliprdr`
      when the clipboard is allowed. The page asks for nothing else, so any
      other channel (drives, printers, smart cards, sound, RemoteApp) ends the
@@ -165,9 +166,10 @@ Decision).
   - `rdplab.ManagerWorker.OpenBrowserRDP` sends the setup frame and returns a
     stream of whole messages, with the proxy's end code as the pages' word.
     The clipboard is on since the page arrived (3d);
-  - `build-stage.sh --with-rdp-proxy` builds the proxy into the runtime;
-  - the native lab runs the proxy in the sandbox against the FreeRDP sample
-    server with NLA.
+  - `build-stage.sh --with-rdp-proxy` built the proxy into the runtime (since
+    3e3, `--with-rdp` builds a runtime of the proxy alone);
+  - the native lab ran the proxy in the sandbox against the FreeRDP sample
+    server with NLA (since 3e3, against the test peer).
   The gateway's relay to the browser comes with the page in step 3.
 - **2c.** The `drdynvc` allowlist with display-control bounds, then the text
   clipboard filter.

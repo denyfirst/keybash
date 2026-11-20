@@ -16,13 +16,11 @@ A loopback-only HTTPS browser lab adds local xterm rendering, bounded WebSocket
 transport and paste review. It uses a synthetic SSH fixture; Linux CI exercises
 a real Bash PTY inside the test fixture. A credential-free RDP lab now tests
 HYBRID negotiation, pinned TLS and bounded Unicode text streams; Linux CI tests
-an empty worker network namespace. A separate native Linux lab builds pinned
-Guacamole/FreeRDP, verifies identity on its own TLS before CredSSP, authenticates
-a synthetic NLA account and decodes desktop images through an isolated worker.
-Its one-use broker and actual native identity mutations are required CI gates.
-A loopback browser RDP viewer adds bounded PNG/canvas rendering, focused mouse/
-keyboard, local fullscreen and native revocation checks. That original lab
-keeps native clipboard and remote resize disabled.
+an empty worker network namespace. Desktops run IronRDP in the browser
+through Keybash's own RDP proxy (ADR 0008), which verifies the pinned
+certificate on its own TLS before CredSSP; a native Linux lab runs the proxy in
+an isolated worker against a synthetic NLA server, and mutations of its pin are
+required CI gates.
 A separate memory-only identity lab adds named password login, Argon2id,
 bounded attempts, password change, secure cookies/CSRF and session revocation.
 A separate Linux loopback custody lab now adds durable encrypted accounts,
@@ -84,8 +82,8 @@ without deploying anything on the workstation.
 - [Implemented security invariants](docs/SECURITY-INVARIANTS.md)
 - [Protocol lab scope and next gates](docs/PROTOCOL-LAB.md)
 - [RDP boundaries and remaining native gates](docs/adr/0003-rdp-precredential-boundaries.md)
-- [Proposed: H.264 to the browser from our own encoder](docs/adr/0007-h264-to-the-browser.md)
-- [Proposed: which path video takes, guacd or a browser RDP client](docs/adr/0008-video-path.md)
+- [Superseded by ADR 0008: H.264 to the browser from our own encoder](docs/adr/0007-h264-to-the-browser.md)
+- [Accepted: desktops run IronRDP in the browser behind Keybash's RDP proxy](docs/adr/0008-video-path.md)
 - [Native RDP lab evidence and limits](docs/NATIVE-RDP-LAB.md)
 - [Browser RDP lab evidence and limits](docs/BROWSER-RDP-LAB.md)
 - [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)

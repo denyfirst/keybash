@@ -1,5 +1,9 @@
 # Keybash protocol lab
 
+> **20 November 2026.** A record of the first protocol lab. Desktops now run
+> IronRDP behind Keybash's RDP proxy (ADR 0008); guacd, FreeRDP and the
+> Guacamole client have left the repository.
+
 The protocol stage starts with secure destination selection. It is not yet a
 browser application or remote-access deployment. Use synthetic keys/accounts
 only. No production credential custody or release is authorized by this lab.

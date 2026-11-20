@@ -1,186 +1,91 @@
 # Native RDP laboratory
 
-14 October 2026. Synthetic lab with a required Linux CI gate; not a release
-or production entry point. No real remote account or credential is used.
+Synthetic lab with a required Linux CI gate (`scripts/native-rdp-lab.sh`); not
+a release or production entry point. No real remote account or credential is
+used.
 
-The lab builds Guacamole server 1.6.0 and FreeRDP 3.33.1 from upstream release
-archives, verified before extraction:
+> **20 November 2026, step 3e3 of [the IronRDP desktop page](BROWSER-RDP-PAGE.md).**
+> Until this date the lab built Guacamole server 1.6.0 and FreeRDP 3.33.1, with
+> Keybash's patches and its OpenSSL identity callback, and every desktop ran
+> guacd. Every desktop now runs Keybash's RDP proxy (`BROWSER-RDP-PROXY.md`),
+> and guacd, FreeRDP, their patches and their freshness watches have left the
+> repository. ADR 0003 and ADR 0008 keep the reasons; the git history keeps the
+> old lab.
 
-| Source | SHA-256 |
-|---|---|
-| FreeRDP 3.33.1 tar.gz | `4431bbf04d370545cfe2924b9d9f116b95c90c64ff156b2550bbaf82d34e7124` |
-| Guacamole server 1.6.0 tar.gz | `8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b` |
+## What the lab builds
 
-Both upstream projects use Apache-2.0. The builder preserves upstream license/
-NOTICE material and records installed package versions, native file hashes and
-dynamic linkage. This is dated CI evidence, not a reproducible release or a
-complete production license/SBOM bundle. OS libraries come from Ubuntu 24.04's
+- **Keybash's RDP proxy** (`rdp-proxy/`, `scripts/build-rdp-proxy.sh`), the
+  one program a desktop's worker starts.
+- **The test peer** (`rdp-testpeer/`, `scripts/build-rdp-testpeer.sh`):
+  IronRDP's own server at the commit the proxy and the browser module pin,
+  with TLS and NLA for one synthetic account. It is never shipped.
+- **The runtime** (`scripts/build-rdp-runtime.py`): the proxy, `setpriv`, and
+  the operating-system libraries `ldd` finds for them, with the mountpoints the
+  sandbox binds. Nothing else is in it; its full ordered inventory binds every
+  file and permission (`RuntimeInventory`), and the proxy is required.
+- The Keybash programs the service lab installs.
+
+Both Rust programs come from their committed `Cargo.lock`, with a fresh cargo
+home and the toolchain IronRDP pins. OS libraries come from Ubuntu 24.04's
 package repositories; they are not claimed immutable or universally CVE-free.
-No container image, Java web application or Guacamole JS client is adopted here.
+The lab prints the runtime's file hashes and the proxy's linkage as dated CI
+evidence, not a reproducible release or a complete SBOM.
 
-Upstream FreeRDP advisories and latest releases were checked again on
-12 November 2026. 3.33.1 is the current upstream release. Its archive matched
-the release's published checksum and its detached signature verified with the
-FreeRDP release key before the digest above was pinned; the advisories it fixes
-are reviewed in `DEPENDENCIES.md` (FreeRDP security update). Published advisories
-include legacy ranges and items without machine-readable patched versions;
-the release choice is not a blanket absence-of-vulnerabilities claim. Guacamole
-security reports list 1.6.0 as the current fixed release. Review/update ownership
-remains with the maintainer; review changed native APIs, archives, advisories and
-OS dependency inventory before changing pins. Production packaging needs its
-own complete native vulnerability/license review and independent candidate audit.
+## Identity and protocol boundary
 
-## Native identity and protocol boundary
+The proxy enforces its own pin on its own TLS before CredSSP
+(`rdp-proxy/src/pin.rs`): rustls, TLS 1.2 or 1.3, a verifier that takes only
+the pinned certificate's exact bytes within its dates, and the leaf compared
+again before any credential leaves the process. A protocol other than NLA
+refuses. A server reached by DNS name was approved with a certificate for that
+name; a server at a literal address with its exact certificate, which may be
+Windows' own (ADR 0003). The rules come from the target (`identityFor`), and the
+sealed name file holds a DNS name or exactly `@exact-leaf`.
 
-Guacamole's supplied fingerprint fast path can accept before ordinary X509
-validation. The lab instead registers FreeRDP's application-managed X509 hook,
-removes that fast path and forbids ignore/automatic certificate trust. The hook
-uses OpenSSL to compare the actual leaf's SHA-256 DER digest with the imported
-approved leaf and validate its DNS SAN, validity, server-auth/digital-signature
-usage, critical extensions and key strength. It refuses gateway/redirect flags.
-TLS has a 1.2 floor and ECDHE/AEAD TLS 1.2 suites. The check occurs on the native
-worker's actual TLS connection, before CredSSP, not on a separate probe.
-A server reached by DNS name needs an approved certificate with a matching DNS
-SAN; a CN alone is refused.
+`TestNativeRDPManagerProxyMeetsNLAInTheSandbox` runs every desktop the way the
+service does, through the manager, the worker's sandbox and the guarded broker:
 
-A server at a literal address is identified by its exact certificate (ADR 0003):
-the sealed name file then holds exactly `@exact-leaf`, the name check does not
-run, and the key usage may be key encipherment instead of digital signature,
-which is what Windows' own RDP certificate carries. Everything else above still
-applies. An empty, cut or longer name file refuses. CI runs Windows' shape of
-certificate through the hook, NLA and the manager's sealed files, and mutates the
-actual C callback for each thing this relaxes, in both directions.
+- the right password gets IronRDP's RDCleanPath answer with the pinned
+  certificate, by name and by Windows' own certificate pinned exactly, and
+  revocation ends it with nothing more crossing;
+- a wrong password ends as "credentials";
+- a gateway that is not the configured one gets nothing, and nothing is dialled;
+- a server showing another certificate, the pinned one past or before its
+  dates, TLS 1.1, TLS without NLA, or plain RDP ends as "refused". A Go TLS
+  peer observes each of these, and closure must come before any CredSSP data.
 
-`native/prepare.py` applies narrow checked patches to the pinned sources. The
-FreeRDP sample is a synthetic fixture only: NLA enabled, legacy/TLS-only mode
-disabled, loopback-only listener and a fresh test SAM account. Its fixed marker
-is emitted in PostConnect, after protocol authentication. Guacamole `ready`
-alone is not evidence of successful RDP authentication. Required cases include
-correct/incorrect password, actual image output, revocation, changed/expired/
-name-mismatched certificates, old TLS and missing NLA. TLS refusal fixtures
-observe closure before any CredSSP application data. These are Linux synthetic
-peer tests, not Windows interoperability or full desktop/clipboard evidence.
+CI then mutates the proxy's pin in both directions, from a disposable copy of
+`rdp-proxy/`: a proxy that takes any certificate must fail the refusals with
+credentials seen leaving it, and a proxy that takes none must fail the right
+password. The normal lab then runs again in full. A refusal timeout alone fails.
 
-The private Go adapter accepts the exact reviewed Guacamole argument schema;
-unknown, duplicate, missing or changed-version fields refuse before credentials
-are sent. Native clipboard, touch and dynamic display channels stay disabled. The lab
-uses a fixed 1024x768 viewport (a managed workspace starts at its page's size
-and DPI, even and within full HD times the screen's scale, the bounds a resize
-already had; see `BROWSER-RDP-LAB.md`; the guacd patch tells Windows that
-DPI's scale when connecting and in each resize, `native/scale.c`)
-and classic NSCodec bitmap updates; PNG is the
-only advertised image format. Image evidence bounds the concurrent streams,
-the bytes each may hold from its own size and the bytes open together,
-dimensions and layer count before decoding (`BROWSER-RDP-LAB.md`). It is
-not a general browser drawing-instruction validator.
-
-A real Windows Server 2025 desktop (2026-11-08) showed what the synthetic peer
-never did. guacd 1.6 numbers buffers from a pool that reuses a number only
-after 1024 have been used, so the viewer bounds live layers (1024) and pixels
-(16 Mi), not numbers. The pixel budget is sized from that desktop, not from
-this lab's 1024x768: at full HD guacd copies the whole display into a buffer
-of the same size, and each pointer FreeRDP holds is a buffer of up to 384 by
-384. Its browser client never acknowledges image blobs, so the viewer requires
-no such ack. The build caps FreeRDP's pointer cache at 32 (FreeRDP takes the
-smaller of both sides' sizes; it keeps the server's large-pointer sizes
-whatever the client asks). The RDP bitmap and offscreen caches never become
-browser buffers and stay on. Text is drawn with ClearType and windows in their
-theme (`enable-font-smoothing`, `enable-theming`), as Windows' own client
-shows them; wallpaper, menu animations, live window dragging and desktop
-composition stay off, as guacd's defaults (`TestNativePlanEnforcesNLAChannelsAndRedactsCredentials`). `TestNativeRDPExactCertificateAuthenticates`
-checks the pointer cache the server settles on, with the sample server
-offering 128. guacd ends a user silent for 15 seconds, and a hidden browser
-page ran Guacamole's keep-alive too rarely: the gateway keeps its own link
-alive while the browser has been heard from within 2 minutes, and the manager
-test holds a desktop open for 18 seconds with nothing from the browser's side.
-Browser-selected params,
-target/gateway selection, drive, file transfer,
-SFTP, arbitrary channels, programs, audio, printing and recording are unavailable.
-Credentials travel on private Unix control IPC, never command arguments, URLs or
-environment. Formatting the plan redacts credentials. Streams have instruction,
-frame/byte limits and reject unsolicited files/pipes/argv/prompts. There is no
-browser RDP route or product login/ownership/vault in this candidate.
-
-## guacd behaviour the patches change (2026-11-16)
-
-An end-to-end review after the first 200% sessions found five places where
-guacd 1.6's own behaviour hurt a real Windows desktop. `native/prepare.py`
-changes each with an anchored patch; every patch fails the build if its
-anchor moves.
-
-- **Repaint after a resize.** FreeRDP gives guacd a new, zeroed framebuffer
-  when the server resizes the desktop, and guacd takes it as what the browser
-  shows. Windows repaints only what it invalidates, so the rest stayed stale,
-  showed the page, or turned black where guacd merged it into a neighbouring
-  update. Once the connection is active again after a resize, guacd asks the
-  server once for the whole desktop (Refresh Rect, as FreeRDP's own SDL client
-  does). `TestNativeRDPScaledDesktopTellsWindowsItsScale` resizes through the
-  display channel and requires the synthetic server to receive the full-size
-  request; with the request removed it fails.
-- **Display workers.** guacd started one encoding thread per online processor
-  and ignored a thread it could not create, joining it later. It now starts at
-  most four per desktop, counts only those created, and a desktop that gets
-  none ends. Four keep a desktop's open image streams within the viewer's 32
-  and its threads within the worker's limit on large hosts.
-- **Freed last-frame buffers.** When guacd removed a layer it returned the
-  layer's last-frame buffer to its pool without a dispose, so the browser kept
-  the canvas and the viewer counted its pixels for the rest of the session;
-  pointers dropped from FreeRDP's cache accumulated. guacd now disposes it.
-- **PNG effort.** The gateway decodes every image and writes it again, so
-  guacd's default compression bought only CPU: palette tiles now use zlib's
-  fastest level, and opaque truecolour tiles (more than 256 colours, such as
-  ClearType text) a direct libpng writer with the fastest level and one Sub
-  filter instead of Cairo's writer with adaptive filters. The pointer, which
-  has transparency, keeps Cairo's writer.
-- **Memory arenas.** guacd runs with `MALLOC_ARENA_MAX=2`: glibc's arena per
-  thread reserved 64 MiB of address space each against `RLIMIT_AS` and kept
-  freed image buffers resident, so guacd's footprint followed the host's
-  processor count.
+These are synthetic peer tests, not Windows interoperability: the proxy's live
+tests against Windows and the maintainer's tests on the test VM cover that.
 
 ## Worker and broker
 
-The launcher lives only in Linux test files. Bubblewrap supplies private network,
-PID, IPC, UTS and mount namespaces, UID/GID 65534, no groups/capabilities and
-no-new-privileges. Approved trust files and individual per-test socket inodes
-are bound read-only; no host home, database, vault, Docker socket or fixture
-private key/SAM is mounted into the worker. Read-only OS libraries under /usr
-and /lib and the reviewed CI prefix remain visible; this is not a minimal
-production root filesystem. guacd receives address-space, CPU, descriptor and
-process limits. Aggregate cgroup/session quotas remain a production gate.
+The manager starts each desktop's worker in Bubblewrap: private network, PID,
+IPC, UTS and mount namespaces, the worker's own UID and GID, no groups or
+capabilities, no new privileges, a syscall denylist, and the runtime as a
+read-only root. The worker checks all of this itself, then starts only the
+proxy, with no argument and an empty environment; it reaches the server
+through a private loopback bridge over the one guarded stream it inherits.
+`TestNativeRDPSandboxPreparation` checks the sandbox's shape, and the sandbox
+mutations (allow-all and deny-all syscall filters) must fail its public
+preflight.
 
-A one-use raw-stream broker binds the guarded NamedTarget to the approved logical
+A one-use raw-stream broker binds the guarded NamedTarget to the approved
 identity and uses its dial result without another DNS lookup. The worker never
-chooses another host/port: its private loopback bridge consumes one Unix stream
-capability, with TLS preserved end-to-end. Broker cancellation/quotas close both
-directions. Synthetic native fixtures inject loopback dials only in test files;
-the production guard's exclusions are unchanged. Private IPC checks the peer UID
-and host parent directories remain mode 0700. This is lab capability isolation,
-not application user ownership or authorization.
+chooses another host or port, and TLS is preserved end to end. Credentials
+travel once, in the proxy's setup frame on private pipes, never in command
+arguments, URLs or the environment. The manager checks its peer's Unix
+credentials before it starts anything.
 
-Before installing a product worker: complete usable production launch/IPC
-authorization, small runtime filesystem, aggregate resource/egress abuse tests,
-real Windows/browser clipboard/keyboard and reconnect matrix, credential custody,
-packaging and independent security review. No production service is deployed.
+`TestNativeRDPSystemdServiceBoundary` installs the real units on the CI runner,
+opens a desktop through the installed manager, checks the worker's identity
+and cgroup and the slice's limits, and stops the manager: the desktop's input
+and output end with it.
 
-Integration initializes GDI and its drawing callbacks in PostConnect, following
-the pinned FreeRDP lifecycle and the upstream Guacamole fix. Native event errors
-abort immediately; batches are limited to 64 events before display/input work.
-Missing/rejected credentials cannot prompt or retry. Cleartext account hints in
-the initial negotiation cookie are disabled. CI prints only fixed phase markers
-and bounded numeric native error codes, never native/session diagnostic text.
-Temporary stack debugger tooling was removed after diagnosis.
-
-The required builder compiles our identity callback with warnings as errors and
-runs Clang static analysis separately. Go/JS/actions CodeQL coverage is separate;
-C CodeQL coverage is not claimed until GitHub confirms its language selection.
-Actual native allow-all and deny-all callback mutations must fail the changed-
-certificate and valid-account assertions respectively; original bytes are then
-restored and the full native matrix reruns. A refusal timeout alone fails.
-
-Primary references: [FreeRDP release](https://github.com/FreeRDP/FreeRDP/releases/tag/3.33.1),
-[FreeRDP advisories](https://github.com/FreeRDP/FreeRDP/security/advisories),
-[Guacamole source/checksums](https://guacamole.apache.org/releases/1.6.0/),
-[Guacamole security](https://guacamole.apache.org/security/),
-[OpenSSL verification](https://docs.openssl.org/3.0/man3/X509_verify_cert/),
-[Bubblewrap](https://github.com/containers/bubblewrap), and
-[Guacamole GDI lifecycle fix](https://github.com/apache/guacamole-server/commit/ab36756b596520ae2a94cd4d25e406e0b5aa820b).
+Primary references: [IronRDP](https://github.com/Devolutions/IronRDP),
+[rustls](https://github.com/rustls/rustls), and
+[Bubblewrap](https://github.com/containers/bubblewrap).

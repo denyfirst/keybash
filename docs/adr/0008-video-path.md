@@ -286,6 +286,7 @@ Order of work. Each step is one or more pull requests with its own evidence.
 4. The switch, folded into step 3 (the update above):
    - the IronRDP page replaces today's desktop page directly;
    - after the maintainer's test on the Windows VM, guacd, FreeRDP and everything only they use leave.
+   - Done 20 November in steps 3d to 3e3 of `BROWSER-RDP-PAGE.md`: the IronRDP page is the only desktop page, and guacd, FreeRDP and everything only they used have left the repository.
 5. Then:
    - the 4:4:4 combination, for servers that send the second view;
    - the codec shown on the page;

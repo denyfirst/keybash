@@ -60,7 +60,7 @@ connect with without seeing them. These need their own design and review.
 
 ## 3. Third-party components and local operation
 
-"Third-party code" and "an external service" are different things. Guacamole
+"Third-party code" and "an external service" are different things. IronRDP
 and xterm.js are other projects' open-source code; Keybash ships them and runs
 them on the customer's infrastructure.
 
@@ -69,8 +69,8 @@ them on the customer's infrastructure.
 | Keybash web pages | Served by the customer's server to the browser | Sign-in, connections, credentials and the workspace |
 | xterm.js | In the user's browser | Draws the terminal and reads the keyboard; opens no SSH connection itself |
 | SSH worker | On the customer's server | Opens the SSH connection and the remote PTY |
-| Guacamole JS client | In the browser, from the local bundle | Protocol client for the RDP picture and input |
-| Native RDP runtime | On the customer's server | Turns RDP into a stream the browser can draw |
+| IronRDP | In the browser, from the local bundle (WebAssembly) | The RDP client: draws the desktop on the GPU, decodes its video and sends input; it never holds the password |
+| RDP proxy | On the customer's server, in the worker sandbox | Signs in to Windows with the stored credential and passes only allowed RDP between it and the browser |
 | Gateway and vault | On the customer's server | Authentication, permissions, credential custody and sessions |
 | Database | On the customer's server | Encrypted secrets and application metadata |
 
@@ -112,13 +112,14 @@ PostgreSQL, Docker Compose):
 - a Go gateway and workers, with plain JavaScript modules for the pages;
 - bbolt for local custody, with the instance key kept apart (15 October 2026,
   `adr/0004-durable-local-custody.md`);
-- xterm.js in the browser, and a pinned, native Guacamole/FreeRDP runtime for
-  RDP;
+- xterm.js in the browser for SSH; IronRDP in the browser and Keybash's own
+  Rust RDP proxy on the server for RDP (17 November 2026, `adr/0008-video-path.md`);
 - native Linux systemd services with cgroup v2 limits (20 October 2026,
   `LINUX-SERVICE-LAB.md`).
 
-SSH and RDP are never implemented from scratch. Guacamole's Java web
-application is not used; the same authorization rules apply to both protocols.
+SSH and RDP are never implemented from scratch: the browser client is IronRDP's
+and the proxy is built on IronRDP's crates, and the same authorization rules
+apply to both protocols.
 
 ## 5. Security model and trust boundary
 

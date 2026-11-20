@@ -1,5 +1,11 @@
 # RDP workspace integration work record
 
+> **20 November 2026.** This records the manager, runtime and guacd workspace
+> as they were built. The manager, the worker sandbox and the runtime
+> inventory stay; the worker now starts Keybash's RDP proxy, and guacd,
+> FreeRDP, the native clipboard codec and the viewer have left
+> (`BROWSER-RDP-PAGE.md`, 3e3; `NATIVE-RDP-LAB.md`).
+
 Scope: source-only Linux/amd64 RDP manager and isolated native runtime, bounded
 explicit text clipboard, bounded desktop resizing and a fresh disposable test
 VM setup path. No release artifact or customer deployment is authorized here.

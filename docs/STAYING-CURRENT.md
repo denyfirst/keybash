@@ -1,7 +1,7 @@
 # Staying current
 
-Keybash pins every version it builds or tests with: Go and its modules, the
-native FreeRDP and guacamole-server sources, Node.js, pnpm, the browser test
+Keybash pins every version it builds or tests with: Go and its modules,
+IronRDP and the Rust crates locked with it, Node.js, pnpm, the browser test
 packages and the analysis tools. A pin keeps builds exact, so it also has to
 be moved on purpose. Two scheduled checks on `main` say when to move one
 (`.github/workflows/freshness.yml`):
@@ -33,8 +33,6 @@ the workflow builds it first and runs the binary.
 |---|---|---|
 | Go | `go.mod` | the highest stable release at go.dev |
 | Direct Go modules and analysis tools | `go.mod`, the workflows | the Go module proxy's latest release |
-| FreeRDP | `scripts/build-native-runtime.sh` | the highest non-draft, non-pre-release GitHub release |
-| guacamole-server | the same script | the highest plain version tag on GitHub |
 | Node.js | `ci.yml` | the highest LTS release in Node's index |
 | pnpm, Playwright, xterm | `ci.yml`, `web/package.json` | the npm registry's `latest` |
 | IronRDP | `scripts/build-ironrdp-web.sh` | the highest plain `ironrdp-v` tag on GitHub |

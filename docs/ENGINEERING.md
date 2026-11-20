@@ -61,10 +61,11 @@ Git config. Untrusted PR code receives no signing or production secrets.
 
 The target guard uses the Go standard library. SSH adopts the pinned dependency
 reviewed in `DEPENDENCIES.md`. The browser lab also adopts the reviewed local
-xterm and WebSocket packages, with PTY tooling confined to tests. Pinned
-Guacamole/FreeRDP source builds exist only in the synthetic Linux lab;
-`NATIVE-RDP-LAB.md` records inventory, integration changes and limits. The
-native success/refusal/mutation gate is required on every CI run. The password
+xterm and WebSocket packages, with PTY tooling confined to tests. Desktops run
+IronRDP (pinned commit plus Keybash's patch) in the browser and Keybash's RDP
+proxy on the server; `DEPENDENCIES.md` records their review and
+`NATIVE-RDP-LAB.md` the native lab. The native success/refusal/mutation gate
+is required on every CI run. The password
 identity lab uses the reviewed Argon2id package from the existing pinned crypto
 module. Durable custody adopts the reviewed bbolt/OTP modules and standard Go
 envelope encryption; see `DEPENDENCIES.md` and `CUSTODY-LAB.md`. The

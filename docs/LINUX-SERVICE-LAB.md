@@ -118,15 +118,15 @@ CPU exhaustion throttles. Tasks exhaustion refuses process/thread creation.
 Memory exhaustion can invoke the kernel OOM killer and end active work; a hard
 memory ceiling is NOT an application busy queue or availability guarantee.
 OOMPolicy=continue and control-group cleanup apply per service: the kernel
-kills the largest process, one desktop's guacd or one SSH worker, and only that
-session ends. With OOMPolicy=kill systemd killed the whole manager with it, and
+kills the largest process, one desktop's proxy or one SSH worker, and only
+that session ends. With OOMPolicy=kill systemd killed the whole manager with it, and
 the gateway bound to it, so every session ended and Keybash stayed down (one
-200% desktop peaks near 500 MB of the default 1 GiB). Aggregate pressure can
+200% desktop under guacd peaked near 500 MB of the default 1 GiB). Aggregate pressure can
 affect either service. No remote-process-kill or kernel-uninterruptible-task
 guarantee exists. Go's worker GOMEMLIMIT remains a soft hint, not this hard cap.
 The worker RLIMIT_NPROC is 1024, a shared-per-UID backstop above the slice's
-TasksMax: desktops and SSH sessions share the worker UID, guacd and FreeRDP need
-about 30 threads per desktop, and the former 128 ran out at four desktops.
+TasksMax: desktops and SSH sessions share the worker UID. The former 128 ran
+out at four desktops when guacd and FreeRDP took about 30 threads each.
 Capacity/profile sizing requires measurement, especially at higher admission.
 
 ## Required evidence
