@@ -36,12 +36,6 @@ var closeCodes = map[Reason]websocket.StatusCode{
 // settle. The close text is "identity-changed".
 const CloseIdentityChanged websocket.StatusCode = 4020
 
-// CloseCode is the close a reason ends a browser desktop with.
-func CloseCode(r Reason) (websocket.StatusCode, bool) {
-	code, ok := closeCodes[r]
-	return code, ok
-}
-
 // Desktop messages a browser may send each second: the same budget as a
 // terminal's input (inputFramesPerSecond, inputBytesPerSecond). A dragged
 // window sends input and graphics acknowledgements each display frame.

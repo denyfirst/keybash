@@ -2,6 +2,7 @@ package rdplab
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -34,10 +35,11 @@ var (
 )
 
 // credentialsAllowed is what may reach a proxy at all: an identity with its
-// certificate and name, a user name of letters, digits and "._-@" of at most
-// 128 bytes, and a password of valid UTF-8 without NUL of at most 4096 bytes.
+// certificate, its digest and name, a user name of letters, digits and "._-@"
+// of at most 128 bytes, and a password of valid UTF-8 without NUL of at most
+// 4096 bytes.
 func credentialsAllowed(pin *Identity, user, password string) bool {
-	if pin == nil || len(pin.der) == 0 || pin.roots == nil || pin.name == "" ||
+	if pin == nil || len(pin.der) == 0 || pin.pin == [sha256.Size]byte{} || pin.name == "" ||
 		len(user) == 0 || len(user) > 128 || len(password) == 0 || len(password) > 4096 || !utf8.ValidString(password) || strings.ContainsRune(password, 0) {
 		return false
 	}
