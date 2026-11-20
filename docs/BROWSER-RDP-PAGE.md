@@ -161,8 +161,21 @@ guacd and FreeRDP use leaves, each part in its own pull request:
     - the maintainer's test on the Windows VM.
   The native lab's owned-page test drove guacd's page, which the UI no
   longer reaches, so it leaves here; the native end-to-end test returns in 3e.
-- **3e.** guacd, FreeRDP and what only they use leave. FreeRDP's sample
-  server is the native lab's RDP peer today. A peer built from the pinned
-  IronRDP's own server takes its place, and with it a native end-to-end
-  test: this page, the gateway, the manager and the sandboxed proxy, against
-  that peer, with input checked at the peer.
+- **3e.** guacd, FreeRDP and what only they use leave, in steps, so nothing
+  is left untested in between:
+  - **3e1.** A test peer from the pinned IronRDP's own server
+    (`rdp-testpeer/`, test-only, never shipped): TLS and NLA with one
+    account, a grey desktop, and a line for each desktop, key press and
+    click. CI's proxy job runs the proxy's end-to-end tests against it, so
+    they no longer need Windows. The clipboard test, which drives Windows'
+    own desktop, still needs Windows.
+  - **3e2.** guacd's page, its viewer path and `vendor/guacamole.mjs` leave.
+  - **3e3.** guacd and FreeRDP leave the runtime, the stage build and the
+    native lab, whose NLA peer becomes the test peer, with their freshness
+    watches, dependency notes and documents.
+  - **3e4.** A native end-to-end test on the test peer: this page, the
+    gateway, the manager and the sandboxed proxy, with input checked at the
+    peer. It comes last, in a native lab that no longer builds FreeRDP.
+    Until then the IronRDP path rests on `TestBrowserDesktopPage`, the
+    proxy's end-to-end tests against the peer, the proxy's native NLA test
+    and the live test of 3d. Removing guacd takes nothing from that path.

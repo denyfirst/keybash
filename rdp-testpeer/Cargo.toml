@@ -1,0 +1,18 @@
+[package]
+name = "keybash-rdp-testpeer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "AGPL-3.0-only"
+publish = false
+description = "A synthetic RDP server for Keybash's tests only, never shipped (docs/BROWSER-RDP-PAGE.md, 3e)"
+
+# IronRDP's own server at the commit scripts/build-ironrdp-web.sh pins, so the
+# browser, the proxy and this peer speak the same IronRDP.
+[dependencies]
+ironrdp-server = { git = "https://github.com/Devolutions/IronRDP.git", rev = "abfc97b299f04622cb7860f344a35bbea9bd4361", default-features = false, features = ["helper"] }
+tokio = { version = "1", default-features = false, features = ["rt", "macros"] }
+async-trait = "0.1"
+
+[profile.release]
+overflow-checks = true

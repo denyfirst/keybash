@@ -145,6 +145,17 @@ server with an exact `font/woff2` type and `nosniff`, every page policy limits
 fonts to `font-src 'self'`, and no stylesheet loads any other URL or import.
 It adds no Go or JavaScript dependency and nothing at runtime outside the page.
 
+## RDP test peer (2026-11-20)
+
+`rdp-testpeer/` is a synthetic RDP server for tests only: IronRDP's own
+`ironrdp-server` at the commit the browser module and the proxy pin, with
+TLS and NLA (`docs/BROWSER-RDP-PAGE.md`, 3e1). CI's proxy job builds it with
+`scripts/build-rdp-testpeer.sh` from its committed `Cargo.lock` and runs the
+proxy's end-to-end tests against it. No stage, runtime or release contains
+it, so its crates are not part of Keybash's licence or advisory review. Among
+them is `aws-lc-rs`, which `ironrdp-server`'s TLS brings in; the proxy keeps
+ring.
+
 ## Toolchain and test tools (2026-11-13)
 
 Go moves from 1.26.11 to 1.27.4, the current release. 1.26 still receives

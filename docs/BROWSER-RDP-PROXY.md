@@ -150,7 +150,9 @@ Decision).
     bytes, and checks licences and advisories on its compiled crates.
   - On 17 November the end-to-end test passed against the test VM's Windows
     Server 2025 (NLA with HYBRID_EX, TLS 1.3). It runs against any NLA server
-    named in `KEYBASH_PROXY_TEST`; 2b adds the FreeRDP sample server in CI.
+    named in `KEYBASH_PROXY_TEST`. Since 3e1, CI's proxy job runs it against
+    Keybash's test peer (`rdp-testpeer/`, IronRDP's own server; a trailing
+    `,peer` in the variable), and checks that the peer opened a desktop.
 - **2b.** The worker starts the proxy instead of guacd for a desktop that
   asks for it:
   - the gateway asks the manager with a second fixed lease packet

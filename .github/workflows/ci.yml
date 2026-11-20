@@ -301,11 +301,25 @@ jobs:
           cargo install --locked cargo-audit --version 0.23.0 --root "${tools}"
           echo "${tools}/bin" >> "${GITHUB_PATH}"
 
-      - name: Test, then build twice in different directories and compare the bytes
+      - name: Test against the test peer, then build twice in different directories and compare the bytes
         run: |
           set -eu
+          # The proxy's end-to-end tests meet a real NLA server: Keybash's
+          # test peer, IronRDP's own server at the pinned commit, with a fresh
+          # certificate and a random password.
+          peer="${RUNNER_TEMP}/peer"
+          sh scripts/build-rdp-testpeer.sh "${peer}"
+          openssl req -x509 -newkey rsa:2048 -keyout "${peer}/key.pem" -out "${peer}/cert.pem" -days 2 -nodes \
+            -subj /CN=keybash-testpeer -addext extendedKeyUsage=serverAuth 2>/dev/null
+          (umask 077 && printf 'kbpeer\n%s\n' "$(openssl rand -hex 16)" > "${peer}/secret")
+          "${peer}/keybash-rdp-testpeer" 127.0.0.1:3390 "${peer}/cert.pem" "${peer}/key.pem" "${peer}/secret" > "${peer}/peer.log" 2>&1 &
+          for _ in $(seq 50); do bash -c '</dev/tcp/127.0.0.1/3390' 2>/dev/null && break; sleep 0.2; done
+          bash -c '</dev/tcp/127.0.0.1/3390'
           mkdir "${RUNNER_TEMP}/a" "${RUNNER_TEMP}/b"
-          sh scripts/build-rdp-proxy.sh "${RUNNER_TEMP}/a/out" --with-tests
+          KEYBASH_PROXY_TEST="127.0.0.1:3390,${peer}/cert.pem,@exact-leaf,${peer}/secret,peer" \
+            sh scripts/build-rdp-proxy.sh "${RUNNER_TEMP}/a/out" --with-tests
+          # The tests reached the peer's desktop, not only passed without it.
+          grep -q '^keybash-testpeer: desktop$' "${peer}/peer.log"
           sh scripts/build-rdp-proxy.sh "${RUNNER_TEMP}/b/out"
           diff -r "${RUNNER_TEMP}/a/out" "${RUNNER_TEMP}/b/out"
           ls -l "${RUNNER_TEMP}/a/out"

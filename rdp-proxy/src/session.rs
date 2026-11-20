@@ -477,15 +477,16 @@ mod tests {
 
     /// End to end against a real NLA server. `KEYBASH_PROXY_TEST` holds
     /// `address,certificate.pem,name,secret-file`, and the secret file the user
-    /// name and the password on two lines. CI's native lab and the test VM set
-    /// it; elsewhere the test says so and passes.
+    /// name and the password on two lines. A trailing `,peer` names Keybash's
+    /// test peer (`rdp-testpeer/`), which CI's proxy job runs; the test VM
+    /// names Windows. Elsewhere the test says so and passes.
     #[test]
     fn a_browser_reaches_the_desktop_through_the_proxy() {
         let Ok(spec) = std::env::var("KEYBASH_PROXY_TEST") else {
             eprintln!("KEYBASH_PROXY_TEST unset: no NLA server to reach");
             return;
         };
-        let parts: Vec<&str> = spec.split(',').collect();
+        let parts: Vec<&str> = spec.strip_suffix(",peer").unwrap_or(&spec).split(',').collect();
         let [address, certificate, name, secret] = parts.as_slice() else {
             panic!("KEYBASH_PROXY_TEST must be address,certificate,name,secret-file");
         };
@@ -498,6 +499,7 @@ mod tests {
         let (user, password) = secret.trim_end_matches('\n').split_once('\n').expect("two lines");
         let setup = crate::setup::parse(&crate::setup::encode(user, "", password, false)).expect("setup");
         let target: SocketAddr = address.parse().expect("address");
+        let _turn = live_turn();
         run_async(async {
             let (mut to_proxy, mut proxy_in) = duplex(256 * 1024);
             let (mut proxy_out, mut from_proxy) = duplex(256 * 1024);
@@ -705,10 +707,17 @@ mod tests {
         });
     }
 
+    /// One live desktop at a time: the test peer serves one session, and a
+    /// second session for the same account would take Windows' over.
+    static LIVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn live_turn() -> std::sync::MutexGuard<'static, ()> {
+        LIVE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// The NLA server named in `KEYBASH_PROXY_TEST`, if any (see above).
     fn live_server() -> Option<(Trust, Setup, SocketAddr)> {
         let spec = std::env::var("KEYBASH_PROXY_TEST").ok()?;
-        let parts: Vec<&str> = spec.split(',').collect();
+        let parts: Vec<&str> = spec.strip_suffix(",peer").unwrap_or(&spec).split(',').collect();
         let [address, certificate, name, secret] = parts.as_slice() else {
             panic!("KEYBASH_PROXY_TEST must be address,certificate,name,secret-file");
         };
@@ -738,6 +747,7 @@ mod tests {
             eprintln!("KEYBASH_PROXY_TEST unset: no NLA server to reach");
             return;
         };
+        let _turn = live_turn();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_io()
             .enable_time()
@@ -978,6 +988,11 @@ mod tests {
             eprintln!("KEYBASH_PROXY_TEST unset: no NLA server to reach");
             return;
         };
+        if std::env::var("KEYBASH_PROXY_TEST").is_ok_and(|spec| spec.ends_with(",peer")) {
+            eprintln!("the clipboard test drives Windows' own desktop, which the test peer has not");
+            return;
+        }
+        let _turn = live_turn();
         setup.clipboard = true;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_io()
