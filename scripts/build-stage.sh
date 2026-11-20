@@ -2,22 +2,20 @@
 # Builds a stage for scripts/install.sh, as an ordinary user, from the
 # repository root. It installs nothing and never writes into an existing path.
 #   build-stage.sh NEW_STAGE                 SSH only
-#   build-stage.sh NEW_STAGE --with-rdp      also builds the native RDP runtime
-#   build-stage.sh NEW_STAGE --with-rdp-proxy   that, plus Keybash's RDP proxy
-#                                            (needs rustup; scripts/build-rdp-proxy.sh)
+#   build-stage.sh NEW_STAGE --with-rdp      also builds Keybash's RDP proxy and
+#                                            the runtime around it (needs rustup;
+#                                            scripts/build-rdp-proxy.sh)
 #   build-stage.sh NEW_STAGE --rdp-runtime=DIR   reuses a runtime made by
 #                                            scripts/build-rdp-runtime.py
 set -eu
-usage() { echo 'usage: build-stage.sh NEW_ABSOLUTE_STAGE [--with-rdp | --with-rdp-proxy | --rdp-runtime=DIR]' >&2; exit 1; }
+usage() { echo 'usage: build-stage.sh NEW_ABSOLUTE_STAGE [--with-rdp | --rdp-runtime=DIR]' >&2; exit 1; }
 test "$#" -ge 1 && test "$#" -le 2 || usage
 stage="$1"
 rdp=no
 prebuilt=''
-proxy=no
 if test "$#" = 2; then
   case "$2" in
     --with-rdp) rdp=build ;;
-    --with-rdp-proxy) rdp=build; proxy=yes ;;
     --rdp-runtime=/*) rdp=copy; prebuilt="${2#*=}" ;;
     *) usage ;;
   esac
@@ -40,14 +38,8 @@ for program in ${programs}; do
 done
 case "${rdp}" in
   build)
-    sh scripts/build-native-runtime.sh "${stage}/native"
-    if test "${proxy}" = yes; then
-      sh scripts/build-rdp-proxy.sh "${stage}/proxy"
-      LD_LIBRARY_PATH="${stage}/native/lib" python3 scripts/build-rdp-runtime.py --prefix "${stage}/native" \
-        --output "${stage}/runtime" --proxy "${stage}/proxy/keybash-rdp-proxy"
-    else
-      LD_LIBRARY_PATH="${stage}/native/lib" python3 scripts/build-rdp-runtime.py --prefix "${stage}/native" --output "${stage}/runtime"
-    fi
+    sh scripts/build-rdp-proxy.sh "${stage}/proxy"
+    python3 scripts/build-rdp-runtime.py --proxy "${stage}/proxy/keybash-rdp-proxy" --output "${stage}/runtime"
     ;;
   copy)
     cp -R -- "${prebuilt}" "${stage}/runtime"

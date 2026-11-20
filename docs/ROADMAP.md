@@ -137,6 +137,10 @@ In order:
    - 18 November: the proxy (step 2) is done. The page (step 3,
      `BROWSER-RDP-PAGE.md`) replaces guacd and FreeRDP outright, since Keybash
      has no users yet; they leave once the page passes the maintainer's test.
+   - 20 November: done. The IronRDP page passed the maintainer's test on the
+     Windows VM and is the only desktop page; guacd, FreeRDP and everything
+     only they used have left (`BROWSER-RDP-PAGE.md`, 3e1 to 3e3). The native
+     end-to-end test on the test peer (3e4) is next.
 
 The QOI-style picture draft (ADR 0006) is set aside: the gateway is no longer
 the bottleneck.

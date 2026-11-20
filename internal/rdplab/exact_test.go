@@ -156,24 +156,10 @@ func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
 	if _, e := newNativeBroker(literal, byName); e != errNative {
 		t.Fatal("a named identity was brokered to a literal address")
 	}
-	// A mismatch stops at the check, before anything else happens; the match
-	// after it shows that the check is what stopped it.
-	var reached atomic.Bool
-	opening := openingContext{context.Background(), &reached}
-	worker := ManagerWorker{SocketPath: "/synthetic/rdp-manager.sock"}
-	if s, e := worker.open(opening, named, exact, "synthetic-user", "synthetic-password", 0, 0, 0); s != nil || e != errNative {
-		t.Fatal("a session opened with an exact identity at a name")
-	}
-	if s, e := worker.open(opening, literal, byName, "synthetic-user", "synthetic-password", 0, 0, 0); s != nil || e != errNative {
-		t.Fatal("a session opened with a named identity at an address")
-	}
-	if reached.Load() {
-		t.Fatal("a mismatched identity went past the check")
-	}
-	if s, e := worker.open(opening, literal, exact, "synthetic-user", "synthetic-password", 0, 0, 0); s != nil || e != errNative || !reached.Load() {
-		t.Fatal("a matching identity did not go on towards the manager")
-	}
-	// The rules come from the target, never from the certificate.
+	// A desktop takes its identity from its target, never from the
+	// certificate: Windows' own certificate stops at a server reached by name
+	// before anything else happens, and goes on at its address, which shows
+	// that the check is what stopped it.
 	windows := windowsCertificate(t, nil, nil).Certificate[0]
 	if pin, e := identityFor(literal, windows); e != nil || pin.name != exactLeaf {
 		t.Fatal("a literal address did not take its exact certificate")
@@ -181,12 +167,20 @@ func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
 	if _, e := identityFor(named, windows); e == nil {
 		t.Fatal("Windows' own certificate passed for a server reached by name")
 	}
-	if s, e := worker.OpenRDP(context.Background(), identity.RDPRequest{Target: named, Certificate: windows, Username: "synthetic-user", Password: "synthetic-password"}); s != nil || e != errNative {
-		t.Fatal("Windows' own certificate opened a server reached by name")
+	var reached atomic.Bool
+	opening := openingContext{context.Background(), &reached}
+	worker := ManagerWorker{SocketPath: "/synthetic/rdp-manager.sock"}
+	request := identity.RDPRequest{Target: named, Certificate: windows, Username: "synthetic-user", Password: "synthetic-password"}
+	if s, e := worker.OpenBrowserRDP(opening, request); s != nil || e != errNative || reached.Load() {
+		t.Fatal("Windows' own certificate went on towards a server reached by name")
 	}
-	// A plan takes the exact mark; the manager's name file has room for it.
-	if _, e := newNativePlan(exact, "synthetic-user", "synthetic-password"); e != nil || strings.TrimSpace(exactLeaf) != exactLeaf || len(exactLeaf) > 253 {
-		t.Fatal("an exact identity does not reach the worker")
+	request.Target = literal
+	if s, e := worker.OpenBrowserRDP(opening, request); s != nil || e != errNative || !reached.Load() {
+		t.Fatal("Windows' own certificate did not go on towards its address")
+	}
+	// The setup takes the exact mark; the manager's name file has room for it.
+	if _, e := browserSetup(exact, "synthetic-user", "synthetic-password"); e != nil || strings.TrimSpace(exactLeaf) != exactLeaf || len(exactLeaf) > 253 {
+		t.Fatal("an exact identity does not reach the proxy")
 	}
 	// The original probe is for a name: it never takes an exact identity.
 	if Probe(context.Background(), literal, exact) != ErrConfiguration || Probe(context.Background(), named, exact) != ErrConfiguration {

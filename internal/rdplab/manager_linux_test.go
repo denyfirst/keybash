@@ -50,12 +50,12 @@ func TestRDPManagerPacketsBoundRightsAndPeer(t *testing.T) {
 		t.Fatal("kernel peer identity changed")
 	}
 	r, _ := rdpTestPipe(t)
-	if writeRDPPacket(a, managerStart, r, r, r, r, r) != nil {
+	if writeRDPPacket(a, managerStartProxy, r, r, r, r, r) != nil {
 		t.Fatal("valid manager packet refused")
 	}
 	packet, files, err := recvRDPPacket(b)
 	defer closeRDPFiles(files)
-	if err != nil || packet != managerStart || len(files) != 5 {
+	if err != nil || packet != managerStartProxy || len(files) != 5 {
 		t.Fatal("valid manager packet changed")
 	}
 	for _, f := range files {
@@ -67,7 +67,7 @@ func TestRDPManagerPacketsBoundRightsAndPeer(t *testing.T) {
 	for _, bad := range []struct {
 		data string
 		fds  []*os.File
-	}{{string(bytes.Repeat([]byte("x"), 65)), nil}, {managerStart, []*os.File{r, r, r, r, r, r, r}}, {"", nil}} {
+	}{{string(bytes.Repeat([]byte("x"), 65)), nil}, {managerStartProxy, []*os.File{r, r, r, r, r, r, r}}, {"", nil}} {
 		if writeRDPPacket(a, bad.data, bad.fds...) != nil {
 			t.Fatal("malformed fixture send failed")
 		}
@@ -79,7 +79,7 @@ func TestRDPManagerPacketsBoundRightsAndPeer(t *testing.T) {
 	if writeRDPPacket(a, managerHello, r) != nil || expectRDPPacket(b, managerHello) == nil {
 		t.Fatal("unexpected manager reply capabilities accepted")
 	}
-	if writeRDPPacket(a, managerStart) != nil || expectRDPPacket(b, managerHello) == nil {
+	if writeRDPPacket(a, managerStartProxy) != nil || expectRDPPacket(b, managerHello) == nil {
 		t.Fatal("unexpected manager reply schema accepted")
 	}
 }

@@ -60,7 +60,7 @@ the desktop on the GPU. H.264 is decoded by the browser's own decoder
      message, the RDCleanPath request, and never in the address;
    - CredSSP off, so it asks for TLS alone, as the proxy requires;
    - no user name and no password: the browser never holds the credential;
-   - the size from the Screen menu, within `identity.DesktopSize`.
+   - the size from the Screen menu, within the proxy's bounds (`desktop_allowed`).
 3. The gateway's new endpoint makes the checks the current socket makes: the
    origin, the signed-in session, the account's access to the server, and
    capacity. Then:
@@ -179,7 +179,13 @@ guacd and FreeRDP use leaves, each part in its own pull request:
     lab's guacd desktop is reached only by its own tests until 3e3.
   - **3e3.** guacd and FreeRDP leave the runtime, the stage build and the
     native lab, whose NLA peer becomes the test peer, with their freshness
-    watches, dependency notes and documents.
+    watches, dependency notes and documents. The worker starts only the proxy,
+    with no mode word; the manager has one start word; the runtime is the
+    proxy, `setpriv` and their OS libraries, and its inventory requires the
+    proxy. The native lab meets the sandboxed proxy with the test peer: the
+    right and a wrong password, a wrong gateway, Windows' own certificate
+    pinned exactly, eight certificate and protocol refusals, and the installed
+    service; CI mutates the proxy's pin both ways there.
   - **3e4.** A native end-to-end test on the test peer: this page, the
     gateway, the manager and the sandboxed proxy, with input checked at the
     peer. It comes last, in a native lab that no longer builds FreeRDP.

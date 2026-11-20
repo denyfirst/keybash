@@ -26,22 +26,14 @@ cd keybash
 sh scripts/build-stage.sh "$HOME/keybash-stage"
 ```
 
-To reach Windows servers over RDP as well, install the extra packages and add
-`--with-rdp`; this can take 15 to 30 minutes:
+To reach Windows servers over RDP as well, add `--with-rdp`. It builds Keybash's
+RDP proxy (`BROWSER-RDP-PROXY.md`) and the small runtime around it, and needs a
+C compiler and rustup with the toolchain IronRDP pins:
 
 ```sh
-sudo apt-get install --no-install-recommends build-essential clang cmake ninja-build pkg-config \
-  libssl-dev libcairo2-dev libjpeg-dev libpng-dev libwebp-dev libpango1.0-dev libuuid1 uuid-dev
-sh scripts/build-stage.sh "$HOME/keybash-stage" --with-rdp
-```
-
-`--with-rdp-proxy` builds the same, plus Keybash's RDP proxy for desktops
-whose RDP client runs in the browser (`BROWSER-RDP-PROXY.md`). No page uses it
-yet. It needs rustup with the toolchain IronRDP pins:
-
-```sh
+sudo apt-get install --no-install-recommends build-essential
 rustup toolchain install 1.94.1 --profile minimal
-sh scripts/build-stage.sh "$HOME/keybash-stage" --with-rdp-proxy
+sh scripts/build-stage.sh "$HOME/keybash-stage" --with-rdp
 ```
 
 ### 2. An HTTPS certificate, for testing

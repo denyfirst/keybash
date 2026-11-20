@@ -27,9 +27,10 @@ var (
 const setupBudget = 5 * time.Second
 
 // exactLeaf stands where a DNS name would be for a server at a literal address,
-// whose identity is its exact certificate alone. native/identity.c reads the
-// same value. "@" is in no DNS name, so a missing, empty or cut file can never
-// be read as this: only these exact bytes turn the name check off.
+// whose identity is its exact certificate alone. The RDP proxy reads the same
+// value (rdp-proxy/src/pin.rs). "@" is in no DNS name, so a missing, empty or
+// cut file can never be read as this: only these exact bytes turn the name
+// check off.
 const exactLeaf = "@exact-leaf"
 
 // Identity is an immutable out-of-band approved leaf certificate and DNS name,

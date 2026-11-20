@@ -17,9 +17,9 @@ const SCALES: [u32; 5] = [100, 125, 150, 175, 200];
 #[derive(Debug, PartialEq, Eq)]
 pub struct Refusal(pub &'static str);
 
-/// `identity.DesktopSize` at a scale: even, at least 200 by 200, at most full
-/// HD times the scale. Both checks must agree; the gateway's tests hold the
-/// same table.
+/// The desktops Keybash opens, at one of Windows' scales: even, at least 200 by
+/// 200, at most full HD times the scale. The desktop page asks for no more
+/// (web/remote-desktop-gfx.mjs holds the same largest size).
 pub fn desktop_allowed(width: u16, height: u16, scale: u32) -> bool {
     if !SCALES.contains(&scale) {
         return false;
@@ -210,8 +210,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_desktop_bounds_match_the_gateway() {
-        // The same table as identity.DesktopSize.
+    fn the_desktop_bounds_are_full_hd_times_windows_scales() {
         for (w, h, scale, ok) in [
             (1920, 1080, 100, true),
             (1922, 1080, 100, false),

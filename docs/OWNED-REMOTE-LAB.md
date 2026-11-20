@@ -107,10 +107,10 @@ runs in-process; a production OS sandbox/launcher remains a separate gate.
 worker registration endpoint. It receives exactly one owned username/password,
 the guarded target and copied approved certificate. Its own native TLS must
 verify that certificate before CredSSP, and cancellation must revoke the broker
-and worker. Native CI connects this interface to the existing isolated test
-launcher, validated Guacamole/FreeRDP viewer and one-use broker. The synthetic
+and worker. Its one implementation, `rdplab.ManagerWorker`, starts Keybash's RDP
+proxy in the manager's worker sandbox through the one-use broker. The synthetic
 loopback substitution remains only in `_test.go` files, never a production flag.
-There is no shipped RDP launcher, unguarded guacd socket or probe-then-trust path.
+There is no unguarded RDP socket or probe-then-trust path.
 
 `terminalweb.Relay` reuses bounded framing, output credit/quotas and control
 validation after authorization; no second lab bootstrap cookie is minted.
@@ -123,8 +123,8 @@ frame/byte limit; repeated invalid/overflow traffic closes the connection.
 ## Browser and remaining product work
 
 The custody page adds owned connections, catalog/credential selectors, deletion
-and navigation to SSH/RDP views. Existing local xterm/Guacamole profiles are
-reused. The capability stays in memory and is sent only in the first socket
+and navigation to SSH/RDP views: the terminal page (xterm) and the IronRDP
+desktop page. The capability stays in memory and is sent only in the first socket
 frame; background/BFCache handling cannot revive an abandoned async launch.
 SSH paste preview and focused RDP input remain enforced. RDP clipboard/remote
 resize are still disabled. Explicit SSH clipboard permission applies only to

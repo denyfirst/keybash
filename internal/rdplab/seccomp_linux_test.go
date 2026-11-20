@@ -9,8 +9,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The native RDP filter is evaluated instruction by instruction. guacd and
-// FreeRDP keep loopback sockets, forks and threads; namespace creation and
+// The native RDP filter is evaluated instruction by instruction. The worker and
+// the proxy keep loopback sockets, forks and threads; namespace creation and
 // the shared kernel surface stay denied; foreign architectures die.
 func TestRDPSeccompDecisions(t *testing.T) {
 	filter := rdpSeccomp()

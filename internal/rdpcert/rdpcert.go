@@ -142,8 +142,7 @@ func CheckServer(cert *x509.Certificate) error {
 // Check is CheckServer for a server at a literal address, whose identity is the
 // exact certificate alone, as an SSH server's is its host key: there is no name
 // to verify. The key usage is what TLS itself needs, which is what Windows' own
-// RDP certificate carries (key encipherment, without digital signature). It is
-// checked as native/identity.c checks it.
+// RDP certificate carries (key encipherment, without digital signature).
 func Check(cert *x509.Certificate) error {
 	if err := CheckServer(cert); err != nil {
 		return err

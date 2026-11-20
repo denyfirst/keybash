@@ -11,7 +11,7 @@ code. Each notice ships beside its code in `docs/third-party/` or `web/vendor/`.
 
 | Licence | Components |
 |---|---|
-| Apache-2.0 | FreeRDP and guacamole-server (native runtime), the vendored Guacamole JavaScript client |
+| MIT OR Apache-2.0 | IronRDP: the vendored browser client and Keybash's RDP proxy, whose other crates `scripts/rust-licences.py` checks against a fixed list |
 | BSD-3-Clause | `golang.org/x/crypto`, `x/sys`, `x/term` |
 | MIT | bbolt, xterm and its WebGL addon, the SecLists password list; creack/pty in tests only |
 | ISC | coder/websocket |
@@ -19,9 +19,26 @@ code. Each notice ships beside its code in `docs/third-party/` or `web/vendor/`.
 | CC0-1.0 | Simple Icons |
 
 Apache-2.0 code can be combined into GPLv3-family works, but not the other
-way round. Test-only tools (Playwright, Node.js, pnpm) are not shipped. For the
+way round. FreeRDP and guacamole-server (Apache-2.0) left with guacd on
+20 November 2026. Test-only tools (Playwright, Node.js, pnpm) are not shipped. For the
 planned H.264 encoder, AGPL-3.0 admits OpenH264 (BSD-2-Clause), FFmpeg (LGPL)
 and x264 (GPL-2.0-or-later); patents are a separate review in that decision.
+
+## guacd and FreeRDP removed (2026-11-20)
+
+Step 3e3 of `BROWSER-RDP-PAGE.md`. Every desktop runs Keybash's RDP proxy, so
+guacamole-server 1.6.0 and FreeRDP 3.33.1 leave with everything only they used:
+
+- the source build (`scripts/build-native-runtime.sh`), Keybash's patches and
+  its OpenSSL identity callback (`native/`), and the clipboard codec mutations;
+- their libraries and OpenSSL's legacy provider in the RDP runtime, which now
+  holds the proxy, `setpriv` and the OS libraries they load;
+- the gateway's PNG viewer, the Guacamole wire and clipboard codecs, and their
+  pacing (`internal/rdplab`);
+- the freshness watches on FreeRDP and guacamole-server.
+
+The sections below that name them are the record of their review. The native
+lab now meets the proxy with the test peer ("RDP test peer").
 
 ## IronRDP browser client build (2026-11-17)
 
@@ -149,9 +166,10 @@ It adds no Go or JavaScript dependency and nothing at runtime outside the page.
 
 `rdp-testpeer/` is a synthetic RDP server for tests only: IronRDP's own
 `ironrdp-server` at the commit the browser module and the proxy pin, with
-TLS and NLA (`docs/BROWSER-RDP-PAGE.md`, 3e1). CI's proxy job builds it with
-`scripts/build-rdp-testpeer.sh` from its committed `Cargo.lock` and runs the
-proxy's end-to-end tests against it. No stage, runtime or release contains
+TLS and NLA (`docs/BROWSER-RDP-PAGE.md`, 3e1). CI's proxy job and the native
+lab build it with `scripts/build-rdp-testpeer.sh` from its committed
+`Cargo.lock`: the proxy's end-to-end tests run against it, and since 3e3 so
+does the native lab's sandboxed proxy. No stage, runtime or release contains
 it, so its crates are not part of Keybash's licence or advisory review. Among
 them is `aws-lc-rs`, which `ironrdp-server`'s TLS brings in; the proxy keeps
 ring.
@@ -506,16 +524,11 @@ Sources: [xterm security](https://xtermjs.org/docs/guides/security/),
 
 ## Remaining adoptions
 
-The native RDP lab uses test-only source builds of Guacamole 1.6.0 and
-FreeRDP 3.33.1. Exact archives, integration changes, upstream/OS review, license
-inventory and limits are recorded in `NATIVE-RDP-LAB.md`; required Linux CI
-checks native success, refusal, decoded images, cancellation and actual C
-callback sabotage in both directions, followed by restored-source verification. They are not adopted
-as a production runtime or packaged/deployed service. The Go module graph adds
-no version; x/sys becomes a direct test dependency for Unix peer credentials.
-NTLM's MD4 SAM hash is confined to a synthetic `_linux_test.go` peer, not a vault
-password hashing choice. Native vulnerability evidence is separate from Go's
-govulncheck and the browser graph audit.
+The native RDP lab builds Keybash's RDP proxy and its test peer from their
+committed locks; its runtime holds the proxy, `setpriv` and the OS libraries
+they load (`NATIVE-RDP-LAB.md`). x/sys is a direct dependency for Unix peer
+credentials. Native vulnerability evidence is the Rust advisory checks on the
+compiled crates, separate from Go's govulncheck and the browser graph audit.
 
 The credential-free RDP probe/private text codec introduces no module, native
 binary or browser dependency. TLS uses the pinned Go standard library. Its
@@ -527,7 +540,7 @@ Linux isolation fixture uses runner-provided util-linux unshare/setpriv and
 sudo, and only a temporary fixed test child. This does not package a sandbox.
 See ADR 0003 for limits and the native adoption gate.
 
-Production Guacamole/FreeRDP, database and vault dependencies remain unapproved. Review
+Production database and vault dependencies remain unapproved. Review
 their exact versions, full graph, license, advisories,
 resource limits and update process before adding them.
 
@@ -542,9 +555,9 @@ guacamole-common-js was the desktop page's client while desktops went through
 guacd. The IronRDP desktop page (`BROWSER-RDP-PAGE.md`, 3d) replaced that
 page, and step 3e2 removed it with `web/vendor/guacamole.mjs`, its manifest,
 LICENSE and NOTICE, and `scripts/vendor-guacamole.py`. No Keybash page loads
-it, and CI no longer fetches its archive. guacd and FreeRDP stay in the native
-lab, reached only by its own tests, until step 3e3. The page's history and its
-review are in [the browser RDP lab](BROWSER-RDP-LAB.md).
+it, and CI no longer fetches its archive. guacd and FreeRDP left in step 3e3
+(see "guacd and FreeRDP removed"). The page's history and its review are in
+[the browser RDP lab](BROWSER-RDP-LAB.md).
 
 ## Operating-system marks (2026-10-30)
 

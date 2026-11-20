@@ -2,7 +2,7 @@
 
 Original sources/binaries remain intact. No native select/connect or credential
 is sent by the selected diagnostic test. Overlays print only fixed preparation
-refusal numbers and bwrap/setpriv/guacd public-only setup diagnostics.
+refusal numbers and bwrap/setpriv/proxy public-only setup diagnostics.
 """
 import json
 from pathlib import Path
@@ -25,7 +25,10 @@ for name in ("runtime_linux_amd64.go", "worker_linux_amd64.go", "manager_native_
         text = text.replace(anchor, "cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, os.Stderr")
     elif name == "worker_linux_amd64.go":
         text = text.replace('"context"', '"context"\n"fmt"', 1)
-        text = text.replace("guacd.Stdout, guacd.Stderr = io.Discard, io.Discard", "guacd.Stdout, guacd.Stderr = io.Discard, os.Stderr")
+        anchor = "proxy.Stdin, proxy.Stdout, proxy.Stderr = os.Stdin, os.Stdout, io.Discard"
+        if text.count(anchor) != 1:
+            raise SystemExit("diagnostic worker anchor changed")
+        text = text.replace(anchor, "proxy.Stdin, proxy.Stdout, proxy.Stderr = os.Stdin, os.Stdout, os.Stderr")
         start = text.index("func RunNativeWorker(")
         end = text.index("\nfunc relayRDP", start)
         function = text[start:end]

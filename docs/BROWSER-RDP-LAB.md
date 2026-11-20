@@ -3,8 +3,8 @@
 > **Status, 20 November 2026.** This is the record of the guacd desktop page.
 > Its browser side (the page, `web/vendor/guacamole.mjs` and their browser
 > tests) left in step 3e2 of [the IronRDP desktop page](BROWSER-RDP-PAGE.md),
-> whose page every desktop now opens. guacd, FreeRDP and the viewer stay in the
-> native lab, reached only by its own tests, until step 3e3.
+> whose page every desktop now opens, and guacd, FreeRDP and the viewer left in
+> step 3e3.
 
 14 October 2026. Synthetic viewer laboratory; each change requires native/browser
 CI and the documented adversarial self-review. No production account or public

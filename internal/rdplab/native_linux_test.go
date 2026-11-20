@@ -6,35 +6,20 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/asn1"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"image/png"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
-	"unicode/utf16"
-
-	"golang.org/x/crypto/md4"
-	"golang.org/x/sys/unix"
 )
 
 // All process launching/synthetic root setup is test-only. No installed worker
@@ -57,13 +42,12 @@ func sandboxArgs(prefix string) []string {
 		"--proc", "/proc", "--dev", "/dev", "--perms", "1777", "--tmpfs", "/tmp", "--chmod", "0755", "/",
 		"--perms", "0755", "--dir", filepath.Dir(prefix), "--chmod", "0755", filepath.Dir(prefix),
 		"--ro-bind", prefix, prefix, "--dir", "/run",
-		"--setenv", "LD_LIBRARY_PATH", prefix + "/lib", "--setenv", "HOME", "/tmp", "--setenv", "LANG", "C",
-		"--setenv", "WLOG_LEVEL", "ERROR", "--setenv", "KEYBASH_NATIVE_PREFIX", prefix}
+		"--setenv", "HOME", "/tmp", "--setenv", "LANG", "C", "--setenv", "KEYBASH_NATIVE_PREFIX", prefix}
 }
 
 // Root performs mount/network setup only. The fixed setpriv helper drops the
 // real host UID/GID and every capability before any fixture/worker executes.
-// A remapped namespace-root must never be accepted as the IPC's UID 65534.
+// A remapped namespace-root is never the fixture's UID 65534.
 func dropNativePrivileges() []string {
 	return []string{"--", "/usr/bin/setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--"}
 }
@@ -78,36 +62,6 @@ type nativeSetupErrors struct{ text string }
 func (d *nativeSetupErrors) Write(p []byte) (int, error) {
 	if len(d.text) < 4096 {
 		d.text += string(p[:min(len(p), 4096-len(d.text))])
-	}
-	return len(p), nil
-}
-
-// Only generated integration-stage constants can reach CI. Native diagnostic
-// lines, credential values and remote text are discarded, not reflected.
-type nativeStages struct{ pending string }
-
-func (s *nativeStages) Write(p []byte) (int, error) {
-	for _, b := range p {
-		if b == '\n' {
-			if strings.HasPrefix(s.pending, "KB_NATIVE_ERROR_") {
-				codes := strings.Split(strings.TrimPrefix(s.pending, "KB_NATIVE_ERROR_"), "_")
-				if len(codes) == 2 {
-					_, first := strconv.ParseUint(codes[0], 10, 32)
-					_, second := strconv.ParseUint(codes[1], 10, 32)
-					if first == nil && second == nil {
-						fmt.Fprintln(os.Stdout, s.pending)
-					}
-				}
-			}
-			for _, stage := range []string{"KB_STAGE_CONTEXT", "KB_STAGE_NETWORK", "KB_STAGE_SETTINGS", "KB_STAGE_GDI", "KB_STAGE_GDI_READY", "KB_STAGE_CHANNELS", "KB_STAGE_IDENTITY", "KB_STAGE_POST_READY", "KB_STAGE_CONNECTED", "KB_STAGE_DISP_SELECTED", "KB_STAGE_DVC_REQUESTED", "KB_STAGE_DVC_FAILED"} {
-				if s.pending == stage {
-					fmt.Fprintln(os.Stdout, stage)
-				}
-			}
-			s.pending = ""
-		} else if len(s.pending) < 256 {
-			s.pending += string(b)
-		}
 	}
 	return len(p), nil
 }
@@ -179,288 +133,10 @@ func TestNativeRDPSandboxPreparation(t *testing.T) {
 	}
 }
 
-type nativeMarker struct {
-	mu                         sync.Mutex
-	tail                       string
-	ready                      chan struct{}
-	once                       sync.Once
-	keys, mouse                chan struct{}
-	keysOnce, mouseOnce        sync.Once
-	clipboard, resized         chan struct{}
-	clipboardOnce, resizedOnce sync.Once
-	pointers                   string   // the settled pointer capabilities, digits only
-	scale                      string   // the core data's scales and physical size, digits only
-	layouts                    []string // display-control layouts received, digits only, newest 32
-	refreshes                  []string // repaint requests received, digits only, newest 32
-}
-
-// clientPointers is the pointer cache and large-pointer support the sample
-// server settled on with the client, as it printed them before authenticating.
-func (m *nativeMarker) clientPointers() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.pointers
-}
-
-// clientScale is the desktop and device scale factors and the physical size in
-// millimetres the client's core data told the sample server.
-func (m *nativeMarker) clientScale() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.scale
-}
-
-// sawLayout reports whether the sample server received this display-control
-// layout: width, height, desktop and device scale, physical millimetres.
-func (m *nativeMarker) sawLayout(want string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Contains(m.layouts, want)
-}
-
-// sawRefresh reports whether the sample server was asked to repaint this area:
-// left, top, right, bottom.
-func (m *nativeMarker) sawRefresh(want string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Contains(m.refreshes, want)
-}
-
-// fixtureDigits holds only what the fixture printed as numbers and underscores.
-func fixtureDigits(values string) bool {
-	return len(values) <= 64 && strings.Trim(values, "0123456789_") == ""
-}
-
-func (m *nativeMarker) Write(p []byte) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, b := range p {
-		if b == '\n' {
-			if values, ok := strings.CutPrefix(m.tail, "KB_CLIENT_POINTERS_"); ok && len(values) <= 32 && strings.Trim(values, "0123456789_") == "" {
-				m.pointers = values
-			}
-			if values, ok := strings.CutPrefix(m.tail, "KB_CLIENT_SCALE_"); ok && fixtureDigits(values) {
-				m.scale = values
-			}
-			if values, ok := strings.CutPrefix(m.tail, "KB_LAYOUT_"); ok && fixtureDigits(values) {
-				m.layouts = append(m.layouts[max(0, len(m.layouts)-31):], values)
-			}
-			if values, ok := strings.CutPrefix(m.tail, "KB_REFRESH_RECT_"); ok && fixtureDigits(values) {
-				m.refreshes = append(m.refreshes[max(0, len(m.refreshes)-31):], values)
-			}
-			switch m.tail {
-			case "KB_AUTHENTICATED":
-				m.once.Do(func() { close(m.ready) })
-			case "KB_INPUT_A":
-				m.keysOnce.Do(func() { close(m.keys) })
-			case "KB_INPUT_MOUSE":
-				m.mouseOnce.Do(func() { close(m.mouse) })
-			case "KB_CLIPBOARD_LOCAL":
-				m.clipboardOnce.Do(func() { close(m.clipboard) })
-			case "KB_DESKTOP_RESIZED":
-				m.resizedOnce.Do(func() { close(m.resized) })
-			case "KB_DISP_READY", "KB_DISP_CAPS_SENT", "KB_DVC_JOINED", "KB_DVC_ABSENT", "KB_DVC_STATE_READY":
-				fmt.Fprintln(os.Stdout, m.tail) // fixed synthetic channel states only
-			}
-			m.tail = ""
-		} else if len(m.tail) < 256 {
-			m.tail += string(b)
-		}
-	}
-	return len(p), nil
-}
-
-func writeLabFile(t *testing.T, path string, data []byte) {
-	t.Helper()
-	if os.WriteFile(path, data, 0600) != nil || os.Chmod(path, 0444) != nil {
-		t.Fatal("fixture file creation failed")
-	}
-}
-
-func nativePeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certificate, password string) (string, <-chan struct{}) {
-	address, marker := nativePeerWithInput(t, ctx, prefix, cert, password)
-	return address, marker.ready
-}
-
-func nativePeerWithInput(t *testing.T, ctx context.Context, prefix string, cert tls.Certificate, password string) (string, *nativeMarker) {
-	t.Helper()
-	dir := t.TempDir()
-	writeLabFile(t, filepath.Join(dir, "cert.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}))
-	key, ok := cert.PrivateKey.(*rsa.PrivateKey)
-	if !ok {
-		t.Fatal("fixture requires fresh RSA")
-	}
-	writeLabFile(t, filepath.Join(dir, "key.pem"), pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
-	// NTLM's legacy SAM hash exists only for the synthetic peer, never a vault.
-	h := md4.New()
-	var encoded []byte
-	for _, r := range utf16.Encode([]rune(password)) {
-		encoded = append(encoded, byte(r), byte(r>>8))
-	}
-	_, _ = h.Write(encoded)
-	clear(encoded)
-	sam := []byte("synthetic-user:::" + hex.EncodeToString(h.Sum(nil)) + ":\n")
-	writeLabFile(t, filepath.Join(dir, "SAM"), sam)
-	clear(sam)
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	_ = probe.Close()
-	args := sandboxArgs(prefix)
-	// Peer needs a host loopback listener for the broker. Its namespace is still
-	// filesystem/PID isolated, but it intentionally shares the test host network.
-	args = append(args[:0], args[1:]...)
-	args = append(args, "--dir", "/run/fixture", "--ro-bind", filepath.Join(dir, "cert.pem"), "/run/fixture/cert.pem",
-		"--ro-bind", filepath.Join(dir, "key.pem"), "/run/fixture/key.pem", "--ro-bind", filepath.Join(dir, "SAM"), "/run/fixture/SAM",
-		"--ro-bind", prefix+"/share/lab/test_icon.bmp", "/tmp/test_icon.bmp", "--chdir", "/tmp")
-	args = append(args, dropNativePrivileges()...)
-	args = append(args, prefix+"/bin/sfreerdp-server", fmt.Sprintf("--port=%d", port), "--cert=/run/fixture/cert.pem", "--key=/run/fixture/key.pem")
-	marker := &nativeMarker{ready: make(chan struct{}), keys: make(chan struct{}), mouse: make(chan struct{}), clipboard: make(chan struct{}), resized: make(chan struct{})}
-	runSandbox(t, ctx, args, marker)
-	address := fmt.Sprintf("127.0.0.1:%d", port)
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		c, err := (&net.Dialer{Timeout: 50 * time.Millisecond}).DialContext(ctx, "tcp", address)
-		if err == nil {
-			_ = c.Close()
-			break
-		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			t.Fatal("synthetic NLA peer did not listen")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return address, marker
-}
-
-func nativeSocket(t *testing.T, path string) *net.UnixListener {
-	t.Helper()
-	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if os.Chmod(path, 0666) != nil {
-		t.Fatal("test IPC permissions failed")
-	}
-	// Host parent directory remains 0700. Only individual socket inodes are
-	// bound into the isolated UID's namespace; they are not public listeners.
-	t.Cleanup(func() { _ = l.Close() })
-	return l
-}
-
-func acceptNative(ctx context.Context, l *net.UnixListener) (net.Conn, error) {
-	stop := context.AfterFunc(ctx, func() { _ = l.Close() })
-	defer stop()
-	c, err := l.AcceptUnix()
-	if err != nil {
-		return nil, errNative
-	}
-	_ = l.Close()
-	raw, err := c.SyscallConn()
-	if err != nil {
-		_ = c.Close()
-		return nil, errNative
-	}
-	allowed := false
-	err = raw.Control(func(fd uintptr) {
-		cred, e := unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
-		allowed = e == nil && cred.Uid == 65534
-	})
-	if err != nil || !allowed {
-		_ = c.Close()
-		return nil, errNative
-	}
-	return c, nil
-}
-
-func TestNativeRDPControlIPCRejectsWrongUID(t *testing.T) {
-	_ = nativePrefix(t)
-	path := filepath.Join(t.TempDir(), "control.sock")
-	l := nativeSocket(t, path)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	client, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
-	if err != nil {
-		t.Fatal("synthetic wrong-UID IPC dial failed")
-	}
-	defer client.Close()
-	// The trusted parent runs as root; it must not impersonate the dropped
-	// worker merely by reaching the socket. The real native cases prove that
-	// UID 65534 succeeds inside its private mounted capability boundary.
-	connection, err := acceptNative(ctx, l)
-	if connection != nil {
-		_ = connection.Close()
-		t.Fatal("wrong-UID process obtained native IPC")
-	}
-	if err != errNative {
-		t.Fatal("wrong-UID native IPC was not refused")
-	}
-	if client.SetReadDeadline(time.Now().Add(time.Second)) != nil {
-		t.Fatal("synthetic IPC deadline failed")
-	}
-	var b [1]byte
-	n, err := client.Read(b[:])
-	if n != 0 || !errors.Is(err, io.EOF) {
-		t.Fatal("refused IPC transport stayed open")
-	}
-}
-
-func launchNativeWorker(t *testing.T, ctx context.Context, prefix string, identity *Identity, dial func(context.Context) (net.Conn, error)) (net.Conn, *nativeProcess, <-chan error) {
-	t.Helper()
-	dir := t.TempDir()
-	control := nativeSocket(t, filepath.Join(dir, "control.sock"))
-	target := nativeSocket(t, filepath.Join(dir, "target.sock"))
-	writeLabFile(t, filepath.Join(dir, "approved.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: identity.der}))
-	writeLabFile(t, filepath.Join(dir, "name"), []byte(identity.name))
-	writeLabFile(t, filepath.Join(dir, "host-sentinel"), []byte("synthetic host secret"))
-	parentNS, err := os.Readlink("/proc/self/ns/net")
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := sandboxArgs(prefix)
-	args = append(args, "--dir", "/run/keybash")
-	for _, file := range []string{"control.sock", "target.sock", "approved.pem", "name"} {
-		args = append(args, "--ro-bind", filepath.Join(dir, file), "/run/keybash/"+file)
-	}
-	args = append(args, "--setenv", "KEYBASH_NATIVE_ROLE", "worker", "--setenv", "KEYBASH_PARENT_NETNS", parentNS,
-		"--setenv", "KEYBASH_HOST_SENTINEL", filepath.Join(dir, "host-sentinel"))
-	args = append(args, dropNativePrivileges()...)
-	args = append(args, prefix+"/bin/lab.test", "-test.run=^TestNativeRDPChild$", "-test.timeout=35s")
-	// Only this fixed Go test child's assertions reach stdout. guacd and native
-	// peer diagnostics remain discarded; they may contain session material.
-	cmd := runSandbox(t, ctx, args, os.Stdout)
-	lifetime, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	go func() {
-		select {
-		case <-cmd.done:
-		case <-ctx.Done():
-		}
-		cancel()
-	}()
-	broker := &nativeBroker{dial: dial}
-	done := make(chan error, 1)
-	go func() {
-		c, err := acceptNative(lifetime, target)
-		if err != nil {
-			done <- err
-			return
-		}
-		done <- broker.serve(lifetime, c)
-	}()
-	c, err := acceptNative(lifetime, control)
-	if err != nil {
-		t.Fatal("worker did not establish private control IPC")
-	}
-	t.Cleanup(func() { _ = c.Close() })
-	return c, cmd, done
-}
-
+// TestNativeRDPChild is the sandbox's preflight child: the worker's identity,
+// privileges and network as the manager's sandbox leaves them.
 func TestNativeRDPChild(t *testing.T) {
-	role := os.Getenv("KEYBASH_NATIVE_ROLE")
-	if role != "worker" && role != "preflight" {
+	if os.Getenv("KEYBASH_NATIVE_ROLE") != "preflight" {
 		t.Skip("required fixed sandbox child")
 	}
 	if os.Geteuid() != 65534 || os.Getegid() != 65534 {
@@ -486,249 +162,62 @@ func TestNativeRDPChild(t *testing.T) {
 	if err != nil || ns == os.Getenv("KEYBASH_PARENT_NETNS") {
 		t.Fatal("worker shares host network")
 	}
-	if role == "preflight" {
-		return
+}
+
+func writeLabFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if os.WriteFile(path, data, 0600) != nil || os.Chmod(path, 0444) != nil {
+		t.Fatal("fixture file creation failed")
 	}
-	if _, err := os.ReadFile(os.Getenv("KEYBASH_HOST_SENTINEL")); err == nil {
-		t.Fatal("worker read host file")
-	}
-	if f, err := os.OpenFile("/run/keybash/name", os.O_WRONLY, 0); err == nil {
-		_ = f.Close()
-		t.Fatal("worker can replace trust")
-	}
-	for _, address := range []string{"192.0.2.1:3389", "[2001:db8::1]:3389"} {
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		c, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
-		cancel()
-		if c != nil {
-			_ = c.Close()
-		}
-		if err == nil {
-			t.Fatal("worker obtained independent egress")
-		}
-	}
-	prefix := os.Getenv("KEYBASH_NATIVE_PREFIX")
-	guacd := exec.Command("/usr/bin/prlimit", "--as=2147483648", "--cpu=20", "--nofile=64", "--nproc=128", "--core=0", "--", prefix+"/sbin/guacd", "-f", "-b", "127.0.0.1", "-l", "4822", "-L", "error") // #nosec G204 -- verified, read-only CI prefix; never supplied by a browser.
-	guacd.Stdout = &nativeStages{}
-	guacd.Stderr = io.Discard
-	if guacd.Start() != nil {
-		t.Fatal("guacd launch failed")
-	}
-	defer func() { _ = guacd.Process.Kill(); _ = guacd.Wait() }()
-	bridge, err := net.Listen("tcp", "127.0.0.1:3390")
+}
+
+// testPeer runs Keybash's test peer (rdp-testpeer/, IronRDP's own server at
+// the pinned commit) in the lab's sandbox: TLS with cert, and NLA for
+// synthetic-user with password. Its output is discarded.
+func testPeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certificate, password string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeLabFile(t, filepath.Join(dir, "cert.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}))
+	key, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
 	if err != nil {
-		t.Fatal("private loopback bridge failed")
+		t.Fatal("fixture key encoding failed")
 	}
-	defer bridge.Close()
-	go func() {
-		local, err := bridge.Accept()
-		_ = bridge.Close()
-		if err != nil {
-			return
-		}
-		upstream, err := net.Dial("unix", "/run/keybash/target.sock")
-		if err != nil {
-			_ = local.Close()
-			return
-		}
-		relayNative(local, upstream)
-	}()
-	var guac net.Conn
-	deadline := time.Now().Add(3 * time.Second)
+	writeLabFile(t, filepath.Join(dir, "key.pem"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}))
+	clear(key)
+	secret := []byte("synthetic-user\n" + password + "\n")
+	writeLabFile(t, filepath.Join(dir, "secret"), secret)
+	clear(secret)
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := probe.Addr().String()
+	_ = probe.Close()
+	args := sandboxArgs(prefix)
+	// The peer needs a host loopback listener for the broker. Its namespace is
+	// still filesystem/PID isolated, but it intentionally shares the host network.
+	args = append(args[:0], args[1:]...)
+	args = append(args, "--dir", "/run/fixture", "--ro-bind", filepath.Join(dir, "cert.pem"), "/run/fixture/cert.pem",
+		"--ro-bind", filepath.Join(dir, "key.pem"), "/run/fixture/key.pem", "--ro-bind", filepath.Join(dir, "secret"), "/run/fixture/secret",
+		"--chdir", "/tmp")
+	args = append(args, dropNativePrivileges()...)
+	args = append(args, prefix+"/bin/keybash-rdp-testpeer", address, "/run/fixture/cert.pem", "/run/fixture/key.pem", "/run/fixture/secret")
+	runSandbox(t, ctx, args, io.Discard)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
-		guac, err = net.DialTimeout("tcp", "127.0.0.1:4822", 50*time.Millisecond)
+		c, err := (&net.Dialer{Timeout: 50 * time.Millisecond}).DialContext(ctx, "tcp", address)
 		if err == nil {
-			break
+			_ = c.Close()
+			return address
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("guacd did not listen")
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			t.Fatal("the test peer did not listen")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	control, err := net.Dial("unix", "/run/keybash/control.sock")
-	if err != nil {
-		_ = guac.Close()
-		t.Fatal("private control IPC failed")
-	}
-	relayNative(control, guac)
 }
 
-func relayNative(a, b net.Conn) {
-	done := make(chan struct{}, 2)
-	copyOne := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		_ = dst.Close()
-		_ = src.Close()
-		done <- struct{}{}
-	}
-	go copyOne(a, b)
-	go copyOne(b, a)
-	<-done
-	<-done
-}
-
-func TestNativeRDPAuthenticationRenderingAndRevocation(t *testing.T) {
-	prefix := nativePrefix(t)
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert, _ := labCertificate(t, nil, key)
-	identity, err := NewIdentity("synthetic-rdp.invalid", cert.Certificate[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, valid := range []bool{true, false} {
-		t.Run(fmt.Sprintf("password_valid_%t", valid), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			address, authenticated := nativePeer(t, ctx, prefix, cert, "Synthetic-NLA-password")
-			control, process, brokerDone := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
-				fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
-				return (&net.Dialer{}).DialContext(c, "tcp", address)
-			})
-			password := "wrong-synthetic-password"
-			if valid {
-				password = "Synthetic-NLA-password"
-			}
-			plan, err := newNativePlan(identity, "synthetic-user", password)
-			if err != nil {
-				t.Fatal(err)
-			}
-			stream, err := nativeConnect(ctx, control, plan)
-			if err != nil {
-				t.Fatal("native control handshake failed")
-			}
-			defer stream.close()
-			if valid {
-				select {
-				case <-authenticated:
-				case <-ctx.Done():
-					t.Fatal("native account did not authenticate")
-				}
-				// The sample's initial solid background can become a cfill. Its
-				// mouse handler paints the nonuniform fixture icon onto layer 0.
-				if writeInstruction(control, instruction{"mouse", "120", "120", "0"}) != nil {
-					t.Fatal("authenticated native mouse input failed")
-				}
-			}
-			image := false
-			type nativeImage struct {
-				layer  string
-				pixels []byte
-			}
-			images := make(map[string]*nativeImage)
-			imageBytes := 0
-			decodedLayers := make(map[string]bool)
-			seen := make(map[string]int)
-			for {
-				in, err := stream.next()
-				if err != nil {
-					if valid {
-						t.Logf("bounded display instruction counts: %v", seen)
-						t.Fatalf("native RDP did not render (%v)", stream.failure.Load())
-					}
-					if ctx.Err() != nil {
-						t.Fatal("native password refusal timed out without evidence")
-					}
-					break
-				}
-				seen[in[0]]++ // next admits only fixed opcode constants
-				if in[0] == "sync" && (len(in) == 2 || len(in) == 3) {
-					_ = writeInstruction(control, in)
-				}
-				if in[0] == "img" {
-					if len(in) != 7 || in[4] != "image/png" || len(images) >= 8 || images[in[1]] != nil {
-						t.Fatal("invalid or excessive native image streams")
-					}
-					id, err := strconv.ParseUint(in[1], 10, 16)
-					if err != nil || strconv.FormatUint(id, 10) != in[1] {
-						t.Fatal("invalid native image stream ID")
-					}
-					images[in[1]] = &nativeImage{layer: in[3]}
-				}
-				if in[0] == "blob" {
-					if len(in) != 3 || images[in[1]] == nil {
-						t.Fatal("unexpected native image blob")
-					}
-					current := images[in[1]]
-					data, err := base64.StdEncoding.Strict().DecodeString(in[2])
-					if err != nil || len(current.pixels)+len(data) > 256*1024 || imageBytes+len(data) > 1024*1024 {
-						t.Fatal("invalid or excessive native image")
-					}
-					current.pixels = append(current.pixels, data...)
-					imageBytes += len(data)
-					if writeInstruction(control, instruction{"ack", in[1], "OK", "0"}) != nil {
-						t.Fatal("native image acknowledgement failed")
-					}
-				}
-				if in[0] == "end" {
-					if len(in) != 2 || images[in[1]] == nil {
-						t.Fatal("unexpected native image end")
-					}
-					current := images[in[1]]
-					config, err := png.DecodeConfig(bytes.NewReader(current.pixels))
-					if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 1024 || config.Height > 768 {
-						t.Fatal("invalid native image dimensions")
-					}
-					if _, err := png.Decode(bytes.NewReader(current.pixels)); err != nil {
-						t.Fatal("native image payload did not decode")
-					}
-					if len(decodedLayers) >= 32 {
-						t.Fatal("excessive fixture image layers")
-					}
-					decodedLayers[current.layer] = true
-					image = current.layer == "0"
-					imageBytes -= len(current.pixels)
-					delete(images, in[1])
-				}
-				if (in[0] == "copy" || in[0] == "transfer") && len(in) == 10 && in[7] == "0" && decodedLayers[in[1]] {
-					image = true
-				}
-				if in[0] == "dispose" && len(in) == 2 {
-					delete(decodedLayers, in[1])
-				}
-				if image {
-					break
-				}
-			}
-			if valid {
-				select {
-				case <-authenticated:
-				case <-ctx.Done():
-					t.Fatal("render without verified NLA authentication")
-				}
-				if !image {
-					t.Fatal("no native image")
-				}
-			} else {
-				select {
-				case <-authenticated:
-					t.Fatal("wrong password authenticated")
-				default:
-				}
-				if image {
-					t.Fatal("wrong password rendered")
-				}
-			}
-			cancel()
-			stream.close()
-			select {
-			case <-brokerDone:
-			case <-time.After(time.Second):
-				t.Fatal("revoked target broker stayed open")
-			}
-			// Context revocation must stop the sandbox without a manual kill.
-			select {
-			case <-process.done:
-			case <-time.After(time.Second):
-				t.Fatal("revoked worker stayed alive")
-			}
-		})
-	}
-}
-
-// Actual native TLS cert refusals are observed by a synthetic Go TLS peer:
+// The proxy's TLS refusals are observed by a synthetic Go TLS peer:
 // handshake failure/closure must precede ANY CredSSP application data.
 func nativeTLSRefusalPeer(t *testing.T, cert tls.Certificate, version uint16, selected byte) (string, <-chan error) {
 	t.Helper()
@@ -776,7 +265,7 @@ func nativeTLSRefusalPeer(t *testing.T, cert tls.Certificate, version uint16, se
 		if err := server.Handshake(); err != nil {
 			var timeout net.Error
 			if errors.As(err, &timeout) && timeout.Timeout() {
-				done <- errors.New("native TLS refusal timed out without evidence")
+				done <- errors.New("the TLS refusal timed out without evidence")
 				return
 			}
 			done <- nil
@@ -785,260 +274,15 @@ func nativeTLSRefusalPeer(t *testing.T, cert tls.Certificate, version uint16, se
 		var b [1]byte
 		n, err := server.Read(b[:])
 		if n != 0 {
-			done <- errors.New("native worker sent CredSSP before certificate refusal")
+			done <- errors.New("the proxy sent CredSSP before its certificate refusal")
 			return
 		}
 		var timeout net.Error
 		if err == nil || errors.As(err, &timeout) && timeout.Timeout() {
-			done <- errors.New("native credential refusal lacked connection closure")
+			done <- errors.New("the refusal lacked connection closure")
 			return
 		}
 		done <- nil
 	}()
 	return l.Addr().String(), done
-}
-
-// What Windows makes for itself, pinned exactly, carries a session through the
-// worker's own TLS and NLA: no name, and key encipherment without signature.
-func TestNativeRDPExactCertificateAuthenticates(t *testing.T) {
-	prefix := nativePrefix(t)
-	cert := windowsCertificate(t, nil, nil)
-	identity, err := NewExactIdentity(cert.Certificate[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	address, marker := nativePeerWithInput(t, ctx, prefix, cert, "Synthetic-NLA-password")
-	control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
-		fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
-		return (&net.Dialer{}).DialContext(c, "tcp", address)
-	})
-	plan, err := newNativePlan(identity, "synthetic-user", "Synthetic-NLA-password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream, err := nativeConnect(ctx, control, plan)
-	if err != nil {
-		t.Fatal("native control handshake failed")
-	}
-	defer stream.close()
-	select {
-	case <-marker.ready:
-	case <-ctx.Done():
-		t.Fatal("native account did not authenticate")
-	}
-	// The client asked for 32 pointers: FreeRDP's 128, at up to 384 by 384,
-	// would outgrow the viewer's pixel budget. The server offers 128 and
-	// settles on the smaller; the large-pointer flags are FreeRDP's to settle.
-	if got := marker.clientPointers(); !strings.HasPrefix(got, "32_32_") {
-		t.Fatalf("pointer caches settled as %q, want 32 and 32", got)
-	}
-	// The fixed lab desktop is 100%: 1024 by 768 at 96 DPI is 271 by 203 mm.
-	if got := marker.clientScale(); got != "100_100_271_203" {
-		t.Fatalf("core data told scale and size %q, want 100%% at 271 by 203 mm", got)
-	}
-}
-
-// Windows draws at a desktop's scale only when the client says so. A desktop
-// opened at 192 DPI tells it 200% when it connects and in every resize after,
-// with the physical size of a 192 DPI monitor; without that Windows draws at
-// 100% in twice the pixels and everything on the page is half size.
-func TestNativeRDPScaledDesktopTellsWindowsItsScale(t *testing.T) {
-	prefix := nativePrefix(t)
-	cert := windowsCertificate(t, nil, nil)
-	identity, err := NewExactIdentity(cert.Certificate[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	address, marker := nativePeerWithInput(t, ctx, prefix, cert, "Synthetic-scaled-NLA-password")
-	control, _, _ := launchNativeWorker(t, ctx, prefix, identity, func(c context.Context) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(c, "tcp", address)
-	})
-	plan, err := managedPlan(identity, "synthetic-user", "Synthetic-scaled-NLA-password", 2880, 1800, 192)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stream, err := nativeConnect(ctx, control, plan)
-	if err != nil {
-		t.Fatal("native control handshake failed")
-	}
-	defer stream.close()
-	// guacd's own output is read and its frames answered, as a page would.
-	var writes sync.Mutex
-	send := func(in instruction) bool {
-		writes.Lock()
-		defer writes.Unlock()
-		return writeInstruction(stream.raw, in) == nil
-	}
-	go func() {
-		for {
-			in, err := stream.next()
-			if err != nil {
-				return
-			}
-			if len(in) >= 2 && in[0] == "sync" {
-				_ = send(instruction{"sync", in[1]})
-			}
-		}
-	}()
-	select {
-	case <-marker.ready:
-	case <-ctx.Done():
-		t.Fatal("native account did not authenticate")
-	}
-	// 2880 by 1800 at 192 DPI is 381 by 238 mm.
-	if got := marker.clientScale(); got != "200_100_381_238" {
-		t.Fatalf("core data told scale and size %q, want 200%% at 381 by 238 mm", got)
-	}
-	// A resize from the page keeps the scale: 1280 by 720 at 192 DPI, 169 by
-	// 95 mm. guacd sends it once the display channel is up, so ask until then.
-	const want = "1280_720_200_100_169_95"
-	for !marker.sawLayout(want) {
-		if !send(instruction{"size", "1280", "720"}) {
-			t.Fatal("resize could not be sent")
-		}
-		select {
-		case <-time.After(250 * time.Millisecond):
-		case <-ctx.Done():
-			t.Fatalf("display-control layout %s never arrived", want)
-		}
-	}
-	// The resize gives guacd a new, empty framebuffer; once the connection is
-	// active again it asks the server once to repaint the whole desktop, so no
-	// region stays stale or black.
-	for !marker.sawRefresh("0_0_1280_720") {
-		select {
-		case <-time.After(50 * time.Millisecond):
-		case <-ctx.Done():
-			t.Fatal("no full repaint was requested after the resize")
-		}
-	}
-}
-
-func TestNativeRDPCertificateRefusalBeforeCredentials(t *testing.T) {
-	prefix := nativePrefix(t)
-	for _, reason := range []string{"changed", "expired", "name", "purpose", "critical", "TLS11", "TLS-only", "plain-RDP", "windows-named",
-		"exact-changed", "exact-expired", "exact-purpose", "exact-usage", "exact-critical", "exact-ca", "exact-cut", "exact-longer", "exact-empty"} {
-		t.Run(reason, func(t *testing.T) {
-			key, err := rsa.GenerateKey(rand.Reader, 2048)
-			if err != nil {
-				t.Fatal(err)
-			}
-			cert, _ := labCertificate(t, nil, key)
-			identity, err := NewIdentity("synthetic-rdp.invalid", cert.Certificate[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			serverCert := cert
-			version := uint16(tls.VersionTLS12)
-			selected := byte(2)
-			// A server at a literal address, showing exactly what is pinned
-			// unless the case changes it: the native rules on their own, since
-			// NewExactIdentity would refuse these certificates first.
-			exact := func(change func(*x509.Certificate)) {
-				serverCert = windowsCertificate(t, key, change)
-				identity.name, identity.der = exactLeaf, bytes.Clone(serverCert.Certificate[0])
-			}
-			named := identity
-			switch reason {
-			case "windows-named":
-				// Key encipherment passes only for an exact pin, never for a name.
-				serverCert = windowsCertificate(t, key, func(c *x509.Certificate) { c.DNSNames = []string{"synthetic-rdp.invalid"} })
-				identity.der = bytes.Clone(serverCert.Certificate[0])
-			case "exact-changed":
-				exact(nil)
-				serverCert = windowsCertificate(t, key, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(10) })
-			case "exact-expired":
-				exact(func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Minute) })
-			case "exact-purpose":
-				exact(func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} })
-			case "exact-usage":
-				exact(func(c *x509.Certificate) { c.KeyUsage = x509.KeyUsageDataEncipherment })
-			case "exact-critical":
-				exact(func(c *x509.Certificate) {
-					c.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 2, 3, 4, 5}, Critical: true, Value: []byte{5, 0}}}
-				})
-			case "exact-ca":
-				exact(func(c *x509.Certificate) {
-					c.IsCA, c.BasicConstraintsValid = true, true
-					c.KeyUsage |= x509.KeyUsageCertSign
-				})
-			case "exact-cut":
-				// Only the whole mark turns the name check off.
-				exact(nil)
-				identity.name = strings.TrimSuffix(exactLeaf, "f")
-			case "exact-longer":
-				exact(nil)
-				identity.name = exactLeaf + "f"
-			case "exact-empty":
-				// A file that was never written relaxes nothing.
-				exact(nil)
-				copied := *identity
-				copied.name = ""
-				named = &copied
-			}
-			switch reason {
-			case "changed":
-				serverCert, _ = labCertificate(t, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(2) }, key)
-			case "expired":
-				serverCert, _ = labCertificate(t, func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Minute) }, key)
-				identity.der = bytes.Clone(serverCert.Certificate[0])
-			case "name":
-				identity.name = "different.invalid"
-			case "purpose":
-				serverCert, _ = labCertificate(t, func(c *x509.Certificate) { c.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth} }, key)
-				identity.der = bytes.Clone(serverCert.Certificate[0])
-			case "critical":
-				serverCert, _ = labCertificate(t, func(c *x509.Certificate) {
-					c.ExtraExtensions = []pkix.Extension{{Id: asn1.ObjectIdentifier{1, 2, 3, 4, 5}, Critical: true, Value: []byte{5, 0}}}
-				}, key)
-				identity.der = bytes.Clone(serverCert.Certificate[0])
-			case "TLS11":
-				version = tls.VersionTLS11
-			case "TLS-only":
-				selected = 1
-			case "plain-RDP":
-				selected = 0
-			}
-			address, noCredentials := nativeTLSRefusalPeer(t, serverCert, version, selected)
-			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-			defer cancel()
-			control, _, _ := launchNativeWorker(t, ctx, prefix, named, func(c context.Context) (net.Conn, error) {
-				fmt.Fprintln(os.Stdout, "KB_BROKER_DIAL")
-				return (&net.Dialer{}).DialContext(c, "tcp", address)
-			})
-			plan, err := newNativePlan(identity, "synthetic-user", "must-not-be-sent")
-			if err != nil {
-				t.Fatal(err)
-			}
-			stream, err := nativeConnect(ctx, control, plan)
-			if err != nil {
-				t.Fatal("private native handshake failed")
-			}
-			defer stream.close()
-			for {
-				in, err := stream.next()
-				if err != nil {
-					if ctx.Err() != nil {
-						t.Fatal("native certificate refusal timed out without evidence")
-					}
-					break
-				}
-				if in[0] == "img" && len(in) == 7 && in[3] == "0" {
-					t.Fatal("invalid certificate rendered")
-				}
-			}
-			select {
-			case err := <-noCredentials:
-				if err != nil {
-					t.Fatal(err)
-				}
-			case <-ctx.Done():
-				t.Fatal("native certificate refusal evidence missing")
-			}
-		})
-	}
 }

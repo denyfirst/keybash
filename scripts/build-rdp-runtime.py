@@ -1,7 +1,9 @@
-"""Build an empty-stage, source-test runtime from an already verified prefix.
+"""Build an empty-stage, source-test RDP runtime around Keybash's RDP proxy.
 
 Run on the disposable Ubuntu builder only. Does not install/start any service.
 No shell evaluation, external downloads, customer inputs or release signing.
+The runtime holds the proxy (scripts/build-rdp-proxy.sh), setpriv, and the
+operating-system libraries they load, found with ldd; nothing else.
 """
 import argparse
 import os
@@ -11,13 +13,10 @@ import shutil
 import subprocess
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--prefix", type=Path, required=True)
+parser.add_argument("--proxy", type=Path, required=True)
 parser.add_argument("--output", type=Path, required=True)
-# Keybash's RDP proxy, built by scripts/build-rdp-proxy.sh; without it the
-# runtime serves guacd desktops only and the manager refuses proxy leases.
-parser.add_argument("--proxy", type=Path)
 args = parser.parse_args()
-prefix, output = args.prefix.resolve(strict=True), args.output
+output = args.output
 if not output.is_absolute() or output.exists() or output != output.resolve():
     raise SystemExit("runtime stage must be a new absolute directory")
 output.mkdir(mode=0o755)
@@ -38,22 +37,13 @@ def copy(source, destination):
     pending.append(source)
 
 
-copy(prefix / "sbin/guacd", "/opt/keybash-rdp/sbin/guacd")
-if args.proxy:
-    copy(args.proxy.resolve(strict=True), "/opt/keybash-rdp/bin/keybash-rdp-proxy")
-for source in sorted((prefix / "lib").rglob("*.so*")):
-    if source.is_file() and (source.name.startswith(("libguac", "libfreerdp3", "libwinpr3")) or source.parent.name == "freerdp3"):
-        copy(source, "/opt/keybash-rdp/" + source.relative_to(prefix).as_posix())
+copy(args.proxy.resolve(strict=True), "/opt/keybash-rdp/bin/keybash-rdp-proxy")
 copy("/usr/bin/setpriv", "/setpriv")
-# WinPR's NTLM implementation needs OpenSSL's MD4 provider. This is a
-# dlopened OS module, so ldd alone cannot discover it. TLS/certificate policy
-# remains the separate mandatory strong-cipher and exact-identity boundary.
-copy("/usr/lib/x86_64-linux-gnu/ossl-modules/legacy.so", "/opt/keybash-rdp/ossl-modules/legacy.so")
 
 while pending:
     source = pending.pop()
-    # ldd is executed only on binaries built from the pinned verified source,
-    # or trusted builder OS libraries. This is not an untrusted ELF inspector.
+    # ldd is executed only on the proxy built from this repository's pinned
+    # sources, or trusted builder OS files. This is not an untrusted ELF inspector.
     result = subprocess.run(["/usr/bin/ldd", str(source)], capture_output=True, text=True, check=True)
     for line in result.stdout.splitlines():
         if "not found" in line:
@@ -68,13 +58,9 @@ while pending:
                     continue
             raise SystemExit("unrecognized native dependency inventory: " + source.name + ": " + line[:256])
         dependency = Path(match[1])
-        if dependency.is_relative_to(prefix):
-            destination = "/opt/keybash-rdp/" + dependency.relative_to(prefix).as_posix()
-        elif str(dependency).startswith(("/lib/", "/lib64/", "/usr/lib/")):
-            destination = str(dependency)
-        else:
+        if not str(dependency).startswith(("/lib/", "/lib64/", "/usr/lib/")):
             raise SystemExit("unexpected native dependency path")
-        copy(dependency, destination)
+        copy(dependency, str(dependency))
 
 # Mountpoints exist before the root filesystem is bound read-only. Namespace
 # setup must never create host files in the approved runtime at launch time.

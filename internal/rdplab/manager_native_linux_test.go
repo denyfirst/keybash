@@ -5,16 +5,11 @@ package rdplab
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -134,15 +129,21 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	if os.Rename(hidden, helper) != nil {
 		t.Fatal("runtime helper restoration failed")
 	}
-	provider := filepath.Join(c.Runtime, "opt/keybash-rdp/ossl-modules/legacy.so")
-	if os.Rename(provider, provider+".hidden") != nil {
-		t.Fatal("native NTLM provider fixture failed")
+	proxy := filepath.Join(c.Runtime, rdpProxyPath)
+	if os.Rename(proxy, proxy+".hidden") != nil {
+		t.Fatal("proxy fixture failed")
 	}
 	if _, e := RuntimeInventory(c.Runtime); e == nil {
-		t.Fatal("runtime without its native NTLM provider accepted")
+		t.Fatal("runtime without the RDP proxy accepted")
 	}
-	if os.Rename(provider+".hidden", provider) != nil {
-		t.Fatal("native NTLM provider restoration failed")
+	if os.Rename(proxy+".hidden", proxy) != nil {
+		t.Fatal("proxy restoration failed")
+	}
+	if os.Chmod(proxy, 0644) != nil || runtimeHasProxy(c) {
+		t.Fatal("a proxy that cannot run was taken")
+	}
+	if os.Chmod(proxy, 0755) != nil || !runtimeHasProxy(c) {
+		t.Fatal("proxy mode restoration failed")
 	}
 	file, e := sealedRDPFile([]byte("public trust"))
 	if e != nil {
@@ -157,17 +158,21 @@ func TestNativeRDPManagerRuntimeAndProvenance(t *testing.T) {
 	}
 }
 
+// managedGateway is the gateway child: this test binary, as the gateway's or
+// another UID, opening one desktop through the manager in the given mode.
+func managedGateway(ctx context.Context, c ManagerConfig, address string, pin *Identity, mode string, uid uint32) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=70s") // #nosec G204 -- this exact compiled fixture and fixed selector.
+	cmd.Dir = "/tmp"
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGED_SOCKET=" + c.SocketPath, "KEYBASH_MANAGED_ADDRESS=" + address, "KEYBASH_MANAGED_PIN=" + base64.StdEncoding.EncodeToString(pin.der), "KEYBASH_MANAGED_NAME=" + pin.name, "KEYBASH_MANAGED_MODE=" + mode}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: c.GatewayGID, Groups: []uint32{c.GatewayGID}}}
+	return cmd
+}
+
 func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Identity, mode string, uid uint32, during ...func()) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeRDPManagerGatewayChild$", "-test.v", "-test.timeout=70s") // #nosec G204 -- this exact compiled fixture and fixed selector.
-	cmd.Dir = "/tmp"
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "KEYBASH_MANAGED_SOCKET=" + c.SocketPath, "KEYBASH_MANAGED_ADDRESS=" + address, "KEYBASH_MANAGED_PIN=" + base64.StdEncoding.EncodeToString(pin.der), "KEYBASH_MANAGED_MODE=" + mode}
-	if pin.name == exactLeaf {
-		cmd.Env = append(cmd.Env, "KEYBASH_MANAGED_EXACT=1")
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: c.GatewayGID, Groups: []uint32{c.GatewayGID}}}
+	cmd := managedGateway(ctx, c, address, pin, mode, uid)
 	if len(during) > 0 {
 		output := &rdpServiceOutput{ready: make(chan struct{})}
 		cmd.Stdout, cmd.Stderr = output, output
@@ -204,6 +209,14 @@ func runManagedGateway(t *testing.T, c ManagerConfig, address string, pin *Ident
 	}
 }
 
+// tryManagedGateway is runManagedGateway that hands back the child's failure
+// instead of ending the test, so a caller can first look at other evidence.
+func tryManagedGateway(c ManagerConfig, address string, pin *Identity, mode string, uid uint32) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+	return managedGateway(ctx, c, address, pin, mode, uid).CombinedOutput()
+}
+
 type rdpServiceOutput struct {
 	mu    sync.Mutex
 	text  string
@@ -225,88 +238,17 @@ func (o *rdpServiceOutput) Write(p []byte) (int, error) {
 }
 func (o *rdpServiceOutput) snapshot() string { o.mu.Lock(); defer o.mu.Unlock(); return o.text }
 
-func TestNativeRDPManagerAuthenticationRevocationAndRefusal(t *testing.T) {
-	c := nativeManagerFixture(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- ServeRDPManager(ctx, c) }()
-	defer func() {
-		cancel()
-		select {
-		case e := <-done:
-			if e != nil {
-				t.Error("manager shutdown failed")
-			}
-		case <-time.After(4 * time.Second):
-			t.Error("manager shutdown failed to reap")
-		}
-	}()
-	ready := false
-	for until := time.Now().Add(3 * time.Second); time.Now().Before(until); {
-		if st, e := os.Stat(c.SocketPath); e == nil && st.Mode().Perm() == 0660 {
-			ready = true
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !ready {
-		t.Fatal("native manager socket unavailable")
-	}
-	key, e := rsa.GenerateKey(rand.Reader, 2048)
+// rawIdentity is a pin as the gateway sends it to the manager, without its
+// constructors' checks, so a test can show what the proxy itself refuses.
+func rawIdentity(t *testing.T, name string, der []byte) *Identity {
+	t.Helper()
+	cert, e := x509.ParseCertificate(der)
 	if e != nil {
-		t.Fatal(e)
+		t.Fatal("fixture certificate failed")
 	}
-	cert, _ := labCertificate(t, nil, key)
-	pin, e := NewIdentity("synthetic-rdp.invalid", cert.Certificate[0])
-	if e != nil {
-		t.Fatal(e)
-	}
-	address, marker := nativePeerWithInput(t, ctx, nativePrefix(t), cert, "Synthetic-managed-NLA-password")
-	runManagedGateway(t, c, address, pin, "wrong-peer", 65532)
-	runManagedGateway(t, c, address, pin, "positive", 65533)
-	select {
-	case <-marker.ready:
-	default:
-		t.Fatal("manager success did not authenticate native NLA")
-	}
-	changed, _ := labCertificate(t, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(778) }, key)
-	refusal, noCredentials := nativeTLSRefusalPeer(t, changed, tls.VersionTLS12, 2)
-	runManagedGateway(t, c, refusal, pin, "refusal", 65533)
-	select {
-	case e := <-noCredentials:
-		if e != nil {
-			t.Fatal(e)
-		}
-	case <-ctx.Done():
-		t.Fatal("managed TLS refusal lacked evidence")
-	}
-	// The exact mark crosses the manager in its sealed file like a name does:
-	// Windows' own certificate authenticates, and a renewed one is refused.
-	windows := windowsCertificate(t, key, nil)
-	exact, e := NewExactIdentity(windows.Certificate[0])
-	if e != nil {
-		t.Fatal(e)
-	}
-	address, marker = nativePeerWithInput(t, ctx, nativePrefix(t), windows, "Synthetic-managed-NLA-password")
-	runManagedGateway(t, c, address, exact, "idle", 65533)
-	select {
-	case <-marker.ready:
-	default:
-		t.Fatal("manager success did not authenticate native NLA with an exact certificate")
-	}
-	renewed := windowsCertificate(t, key, func(c *x509.Certificate) { c.SerialNumber = big.NewInt(779) })
-	refusal, noCredentials = nativeTLSRefusalPeer(t, renewed, tls.VersionTLS12, 2)
-	runManagedGateway(t, c, refusal, exact, "refusal", 65533)
-	select {
-	case e := <-noCredentials:
-		if e != nil {
-			t.Fatal(e)
-		}
-	case <-ctx.Done():
-		t.Fatal("managed exact refusal lacked evidence")
-	}
-	t.Log("Actual isolated RDP manager: dedicated identity, minimal runtime, NLA, pin-before-CredSSP, wrong peer and revoked I/O passed")
+	roots := x509.NewCertPool()
+	roots.AddCert(cert)
+	return &Identity{name: name, pin: sha256.Sum256(der), roots: roots, der: bytes.Clone(der)}
 }
 
 func TestNativeRDPManagerGatewayChild(t *testing.T) {
@@ -320,13 +262,7 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 	if e != nil {
 		t.Fatal("fixture pin failed")
 	}
-	pin, e := NewIdentity("synthetic-rdp.invalid", p)
-	if os.Getenv("KEYBASH_MANAGED_EXACT") == "1" {
-		pin, e = NewExactIdentity(p)
-	}
-	if e != nil {
-		t.Fatal("fixture identity failed")
-	}
+	pin := rawIdentity(t, os.Getenv("KEYBASH_MANAGED_NAME"), p)
 	dialed := false
 	dial := func(c context.Context) (net.Conn, error) {
 		dialed = true
@@ -335,7 +271,7 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 	if os.Getenv("KEYBASH_MANAGED_MODE") == "preflight" {
 		setup, stop := context.WithTimeout(ctx, 10*time.Second)
 		defer stop()
-		connection, e := connectRDPManager(ctx, setup, path, dial, pin, false)
+		connection, e := connectRDPManager(ctx, setup, path, dial, pin)
 		if e != nil {
 			t.Fatal("public-only managed preflight refused")
 		}
@@ -344,108 +280,7 @@ func TestNativeRDPManagerGatewayChild(t *testing.T) {
 		}
 		return
 	}
-	if mode := os.Getenv("KEYBASH_MANAGED_MODE"); strings.HasPrefix(mode, "proxy") {
-		nativeProxyChild(t, ctx, path, dial, pin, mode)
-		return
-	}
-	s, e := (ManagerWorker{SocketPath: path}).openDial(ctx, dial, pin, "synthetic-user", "Synthetic-managed-NLA-password", 0, 0, 0)
-	mode := os.Getenv("KEYBASH_MANAGED_MODE")
-	if mode == "wrong-peer" {
-		if s != nil || e == nil || dialed {
-			t.Fatal("wrong gateway peer obtained launch authority")
-		}
-		return
-	}
-	if e != nil || s == nil {
-		t.Fatal("managed RDP setup failed")
-	}
-	defer s.Close()
-	if mode == "refusal" {
-		_, e = io.Copy(io.Discard, s)
-		if e == nil || ctx.Err() != nil {
-			t.Fatal("managed invalid pin failed to refuse")
-		}
-		return
-	}
-	if _, e = s.Write(encodedInstruction(t, instruction{"mouse", "120", "120", "0"})); e != nil {
-		t.Fatal("managed input failed")
-	}
-	got := make(chan error, 1)
-	go func() {
-		reader := make([]byte, 8192)
-		var all bytes.Buffer
-		for all.Len() < 256*1024 {
-			n, e := s.Read(reader)
-			_, _ = all.Write(reader[:n])
-			if bytes.Contains(all.Bytes(), []byte("5.cfill")) || bytes.Contains(all.Bytes(), []byte("3.img")) {
-				got <- nil
-				return
-			}
-			if e != nil {
-				got <- e
-				return
-			}
-		}
-		got <- errNative
-	}()
-	select {
-	case e := <-got:
-		if e != nil {
-			t.Fatalf("managed native desktop did not render (fixed classification: %v)", s.(*viewerStream).native.failure.Load())
-		}
-	case <-ctx.Done():
-		t.Fatal("managed native desktop stalled")
-	}
-	if mode == "idle" {
-		// guacd ends a user it hears nothing from for 15 seconds. Nothing
-		// comes from the browser's side for longer than that, as from a hidden
-		// page; the gateway's own keep-alive must hold the desktop open.
-		drained := make(chan error, 1)
-		go func() {
-			b := make([]byte, 8192)
-			for {
-				if _, e := s.Read(b); e != nil {
-					drained <- e
-					return
-				}
-			}
-		}()
-		select {
-		case <-drained:
-			t.Fatalf("an idle desktop ended (fixed classification: %v)", s.(*viewerStream).native.failure.Load())
-		case <-time.After(18 * time.Second):
-		}
-		if _, e := s.Write(encodedInstruction(t, instruction{"mouse", "121", "121", "0"})); e != nil {
-			t.Fatal("idle desktop refused input")
-		}
-		_ = s.Close()
-		<-drained
-	}
-	if mode == "service" {
-		fmt.Fprintln(os.Stdout, "KB_SERVICE_READY")
-		var ack [1]byte
-		if _, e := io.ReadFull(os.Stdin, ack[:]); e != nil || ack[0] != 1 {
-			t.Fatal("service parent acknowledgement failed")
-		}
-		var b [16]byte
-		if n, _ := s.Read(b[:]); n != 0 {
-			t.Fatal("manager stop retained RDP output")
-		}
-		if _, e := s.Write(encodedInstruction(t, instruction{"key", "97", "1"})); e == nil {
-			t.Fatal("manager stop retained RDP input")
-		}
-	}
-	cancel()
-	if s.Close() != nil {
-		t.Fatal("managed revocation failed")
-	}
-	var b [1024]byte
-	if n, _ := s.Read(b[:]); n != 0 {
-		t.Fatal("revoked native output escaped")
-	}
-	if _, e = s.Write(encodedInstruction(t, instruction{"key", "97", "1"})); e == nil {
-		t.Fatal("revoked native input escaped")
-	}
+	nativeProxyChild(t, ctx, cancel, path, dial, &dialed, pin, os.Getenv("KEYBASH_MANAGED_MODE"))
 }
 
 // This diagnostic gate sends only public trust and an already-connected empty

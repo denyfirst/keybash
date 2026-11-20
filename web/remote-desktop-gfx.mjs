@@ -14,7 +14,8 @@ const EVICT = 9, BITMAP = 10, AVC420 = 11, AVC444 = 12, END_FRAME = 13, MAP_SCAL
 const CLOSE = 16, ALPHA = 17;
 
 export const limits = Object.freeze({
-  // The largest desktop Keybash opens: full HD at 200% (identity.DesktopSize).
+  // The largest desktop Keybash opens: full HD at 200% (desktop_allowed in
+  // rdp-proxy/src/policy.rs).
   width: 3840, height: 2160,
   surfaces: 16, surfacePixels: 2 * 3840 * 2160,
   // The small cache Keybash's patch asks for: 16 MiB (MS-RDPEGFX 2.2.3.1).

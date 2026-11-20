@@ -1,7 +1,8 @@
 # 0007 — H.264 to the browser from Keybash's own encoder
 
-Date: 2026-11-13. Status: proposed. It is built only after the measurements
-below, each step its own pull request.
+Date: 2026-11-13. Status: superseded on 17 November 2026 by ADR 0008, which
+the maintainer accepted: Windows' own H.264 reaches the browser through IronRDP,
+so Keybash builds no encoder. The text below is the record of the proposal.
 
 ## Context
 

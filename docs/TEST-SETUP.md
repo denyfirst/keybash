@@ -38,24 +38,23 @@ trust list separately. Do not build as root. Run these in the repository root:
 ```sh
 sudo apt-get update
 sudo apt-get install --no-install-recommends git golang-go python3 curl ca-certificates \
-  build-essential clang cmake ninja-build pkg-config bubblewrap openssl \
-  libssl-dev libcairo2-dev libjpeg-dev libpng-dev libwebp-dev libpango1.0-dev \
-  libuuid1 uuid-dev
+  build-essential bubblewrap openssl
+rustup toolchain install 1.94.1 --profile minimal
 go version
 go mod verify
 mkdir -m 700 test-stage
 mkdir -m 700 test-stage/bin
 CGO_ENABLED=0 go build -trimpath -o test-stage/bin/ ./cmd/...
-sh scripts/build-native-runtime.sh "$(pwd)/test-stage/native"
-LD_LIBRARY_PATH="$(pwd)/test-stage/native/lib" python3 scripts/build-rdp-runtime.py \
-  --prefix "$(pwd)/test-stage/native" --output "$(pwd)/test-stage/runtime"
+sh scripts/build-rdp-proxy.sh "$(pwd)/test-stage/proxy"
+python3 scripts/build-rdp-runtime.py --proxy "$(pwd)/test-stage/proxy/keybash-rdp-proxy" \
+  --output "$(pwd)/test-stage/runtime"
 ```
 
-Go has to switch to the exact toolchain in `go.mod`. The build downloads Go
-modules and the pinned native source archives. The runtime needs no Node, CDN
-or cloud service. The build script never writes over an existing output
-directory; after a failed build, choose a new stage name. `--fixtures` is for
-CI only.
+Go has to switch to the exact toolchain in `go.mod`, and rustup provides the
+toolchain IronRDP pins. The build downloads Go modules and the proxy's crates,
+checked against its `Cargo.lock`. The runtime needs no Node, CDN or cloud
+service. The build scripts never write over an existing output directory;
+after a failed build, choose a new stage name.
 
 ## The targets' identities
 
