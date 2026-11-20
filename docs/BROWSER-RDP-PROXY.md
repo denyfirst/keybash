@@ -162,7 +162,7 @@ Decision).
     its own pipes and an empty environment;
   - `rdplab.ManagerWorker.OpenBrowserRDP` sends the setup frame and returns a
     stream of whole messages, with the proxy's end code as the pages' word.
-    The clipboard stays off until the page arrives in step 3;
+    The clipboard is on since the page arrived (3d);
   - `build-stage.sh --with-rdp-proxy` builds the proxy into the runtime;
   - the native lab runs the proxy in the sandbox against the FreeRDP sample
     server with NLA.

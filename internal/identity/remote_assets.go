@@ -11,8 +11,10 @@ import (
 
 func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bool {
 	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop.mjs": "desktop.mjs", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs",
-		// IronRDP's browser client, exactly as vendored and checked against
-		// CI's build (scripts/vendor-ironrdp-web.py, BROWSER-RDP-PAGE.md).
+		// The desktop page on IronRDP (BROWSER-RDP-PAGE.md, 3d), and IronRDP's
+		// browser client exactly as vendored and checked against CI's build
+		// (scripts/vendor-ironrdp-web.py).
+		"/remote-desktop.mjs": "remote-desktop.mjs", "/remote-desktop-input.mjs": "remote-desktop-input.mjs", "/remote-desktop-gfx.mjs": "remote-desktop-gfx.mjs",
 		"/vendor/ironrdp/ironrdp_web.js": "vendor/ironrdp/ironrdp_web.js", "/vendor/ironrdp/ironrdp_web_bg.wasm": "vendor/ironrdp/ironrdp_web_bg.wasm"}
 	file := assets[r.URL.Path]
 	protocol := ""
@@ -37,7 +39,7 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		}
 		file = "index.html"
 		if protocol == "rdp" {
-			file = "desktop.html"
+			file = "remote-desktop.html"
 		}
 	}
 	if file == "" {
@@ -48,7 +50,14 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		refuse(w, 503)
 		return true
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src "+l.origin+" "+strings.Replace(l.origin, "https:", "wss:", 1)+"; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; img-src blob:")
+	scripts := "'self'"
+	if protocol == "rdp" {
+		// The desktop page runs IronRDP's WebAssembly, which needs this to
+		// compile; it does not let the page evaluate JavaScript. No other page
+		// has it.
+		scripts = "'self' 'wasm-unsafe-eval'"
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src "+scripts+"; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src "+l.origin+" "+strings.Replace(l.origin, "https:", "wss:", 1)+"; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; img-src blob:")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(self), clipboard-write=(self)")
 	if protocol != "ssh" && protocol != "rdp" {
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=(self)")

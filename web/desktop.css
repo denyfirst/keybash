@@ -12,6 +12,8 @@
 }
 #desktop:focus-visible { outline: 2px solid var(--term-tool); outline-offset: -2px; }
 #display { line-height: 0; }
+/* IronRDP draws the desktop on this canvas; touch moves the pointer. */
+#screen-canvas { display: block; flex: none; touch-action: none; }
 
 /* Screen size: the choice and the size the remote has now, then a chevron. */
 #screen .chevron { width: 0.85rem; height: 0.85rem; margin-left: -0.1rem; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }

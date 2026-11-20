@@ -202,11 +202,12 @@ func TestOpenBrowserRDPRefusesBeforeAnyManager(t *testing.T) {
 }
 
 // The setup frame carries only credentials the native path would accept, and
-// never turns the clipboard on.
+// turns the clipboard on: the desktop page asks for it (cliprdr), and the
+// proxy refuses a channel the setup did not allow.
 func TestBrowserSetupHasTheNativeRules(t *testing.T) {
 	pin := &Identity{name: "server.test", der: []byte{1}, roots: x509.NewCertPool()}
 	got, err := browserSetup(pin, "synthetic-user", "p")
-	if err != nil || got[len(got)-1] != 0 {
+	if err != nil || got[len(got)-1] != 1 {
 		t.Fatalf("valid credentials: %v %v", got, err)
 	}
 	for name, c := range map[string][2]string{

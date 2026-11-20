@@ -9,9 +9,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"net/http/httptest"
@@ -52,13 +50,13 @@ func runInteractiveDemo(t *testing.T, interactive bool) {
 	if err != nil {
 		t.Fatal("demo signer failed")
 	}
-	desktop := remoteTargetFixture(t)
-	desktop.Name = "Desktop demo (simulation, not Windows)"
-	terminal := desktop
+	// The terminal only: the desktop page runs IronRDP, which needs a real
+	// RDP server, not a simulation.
+	terminal := remoteTargetFixture(t)
 	terminal.ID, terminal.Name, terminal.Protocol = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "Linux SSH UI demo (simulation)", "ssh"
 	terminal.Identity = signer.PublicKey().Marshal()
 	worker := &demoWorker{}
-	lab, err := NewRemoteLab("https://"+server.Listener.Addr().String(), store, []RemoteTarget{terminal, desktop}, worker, worker)
+	lab, err := NewRemoteLab("https://"+server.Listener.Addr().String(), store, []RemoteTarget{terminal}, worker, nil)
 	if err != nil {
 		t.Fatal("demo admission failed")
 	}
@@ -68,9 +66,9 @@ func runInteractiveDemo(t *testing.T, interactive bool) {
 	server.StartTLS()
 	defer server.Close()
 	config, err := json.Marshal(struct {
-		Origin, Code, Password, SSHSecret, RDPSecret, SSH, RDP, SSHFingerprint, RDPFingerprint string
-		Interactive                                                                            bool
-	}{server.URL, code, "Synthetic Keybash demo password 73!", string(pem.EncodeToMemory(block)), demoRemotePassword, terminal.ID, desktop.ID, ssh.FingerprintSHA256(signer.PublicKey()), demoCertificateFingerprint(desktop.Identity), interactive})
+		Origin, Code, Password, SSHSecret, SSH, SSHFingerprint string
+		Interactive                                            bool
+	}{server.URL, code, "Synthetic Keybash demo password 73!", string(pem.EncodeToMemory(block)), terminal.ID, ssh.FingerprintSHA256(signer.PublicKey()), interactive})
 	if err != nil {
 		t.Fatal("demo configuration failed")
 	}
@@ -84,11 +82,6 @@ func runInteractiveDemo(t *testing.T, interactive bool) {
 	if err = command.Run(); err != nil && !(interactive && ctx.Err() != nil) {
 		t.Fatal("interactive demo/browser check failed")
 	}
-}
-
-func demoCertificateFingerprint(der []byte) string {
-	sum := sha256.Sum256(der)
-	return "SHA256:" + hex.EncodeToString(sum[:])
 }
 
 func TestInteractiveDemo(t *testing.T) {

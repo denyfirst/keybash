@@ -120,8 +120,49 @@ guacd and FreeRDP use leaves, each part in its own pull request:
   Tested against a test proxy. The real proxy's own path through the worker
   sandbox is the native lab's (2b); the whole path meets Windows with the
   page in 3d.
-- **3d.** The page: IronRDP in place of guacd on the desktop page, with the
-  session bar, the clipboard, the end reasons, the timeout and the CSP's
-  `'wasm-unsafe-eval'`. Browser tests
-  for the page's rules, and the maintainer's test on the Windows VM.
-- **3e.** guacd, FreeRDP and what only they use leave.
+- **3d.** The page: `/remote/rdp/<id>` serves `remote-desktop.html`, IronRDP
+  in place of guacd, with the same session bar:
+  - **The module** loads under the page's own policy, which alone adds
+    `'wasm-unsafe-eval'`. The page's one WebSocket opens only to the desktop
+    endpoint. IronRDP does not pass the socket's close on, so the page reads
+    the close itself, and an ending is told only when its code and word
+    agree. The page holds no user name or password.
+  - **Input**:
+    - each key goes as the scan code Windows' own driver reports;
+    - a held modifier or lock key is sent once;
+    - the pointer and the wheel go at most once a display frame, the wheel
+      at most 255 units a message;
+    - only the five mouse buttons IronRDP knows are sent;
+    - Shift, Ctrl, Alt and the Windows key follow what each event says,
+      so one held before the desktop had focus still counts;
+    - a held key or button is let go when the desktop loses focus.
+  - **The picture**: Windows' graphics pipeline. Where the browser decodes
+    H.264, it is offered as in step 2, and Windows chooses 4:4:4 or 4:2:0,
+    once its administrator turned H.264 on (ADR 0008). Windows Server 2025
+    never used the older 4:2:0-only mode when that was offered alone. The
+    page draws the main view, all that server sends. When the session ends,
+    the picture is cleared. Keybash's patch hands the page records it draws
+    on the GPU (`remote-desktop-gfx.mjs`), within fixed bounds:
+    - the largest desktop (full HD at 200%);
+    - 16 surfaces and twice that many pixels;
+    - the 16 MiB small cache;
+    - four video decoders, 4,096 items to a record.
+    A record past these ends the desktop before anything is allocated for it.
+  - **The rest**: the look Windows draws (ClearType, the theme; wallpaper,
+    animations and live dragging off, as guacd had it), Smooth or Sharp, Fit
+    or a fixed size through display control, and the 20-second start limit.
+  - **The clipboard**: the gateway's setup turns it on for the proxy, which
+    keeps it to bounded text. A paste goes to Windows' clipboard, and only
+    once Windows has taken the format list does the remote's Ctrl+V follow.
+  - **Tests**:
+    - node tests for the input rules and the renderer's bounds;
+    - `TestBrowserDesktopPage` in a real browser against a test proxy;
+    - `TestOnlyTheDesktopPageMayCompileWebAssembly`;
+    - the maintainer's test on the Windows VM.
+  The native lab's owned-page test drove guacd's page, which the UI no
+  longer reaches, so it leaves here; the native end-to-end test returns in 3e.
+- **3e.** guacd, FreeRDP and what only they use leave. FreeRDP's sample
+  server is the native lab's RDP peer today. A peer built from the pinned
+  IronRDP's own server takes its place, and with it a native end-to-end
+  test: this page, the gateway, the manager and the sandboxed proxy, against
+  that peer, with input checked at the peer.

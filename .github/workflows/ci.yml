@@ -77,7 +77,7 @@ jobs:
           node web/vendor.mjs
           python3 scripts/vendor-guacamole.py --check
           test -z "$(git status --porcelain)"
-          node --test web/paste.test.mjs web/desktop-workspace.test.mjs
+          node --test web/paste.test.mjs web/desktop-workspace.test.mjs web/remote-desktop-input.test.mjs web/remote-desktop-gfx.test.mjs
           "${pnpm}" --dir web exec playwright install --with-deps chromium
 
       - name: Verify the pinned toolchain and module files
@@ -138,6 +138,7 @@ jobs:
           go test -tags=browserlab -race -run='^TestBrowserPasswordLogin$' -timeout=90s ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserDurableCustody$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserOwnedRemotePortable$' -timeout=2m ./internal/identity
+          go test -tags=browserlab -race -run='^TestBrowserDesktopPage$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserServerTrustWorkflow$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserCapacityWorkflow$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserServersPage$' -timeout=2m ./internal/identity
