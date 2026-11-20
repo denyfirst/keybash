@@ -156,7 +156,9 @@ func TestNativeRDPManagerProxyMeetsNLAInTheSandbox(t *testing.T) {
 	runManagedGateway(t, c, testPeer(t, ctx, nativePrefix(t), windows, "Synthetic-managed-NLA-password"), exact, "proxy", 65533)
 
 	expired := func(c *x509.Certificate) { c.NotAfter = time.Now().Add(-time.Minute) }
-	notYet := func(c *x509.Certificate) { c.NotBefore = time.Now().Add(time.Hour) }
+	notYet := func(c *x509.Certificate) {
+		c.NotBefore, c.NotAfter = time.Now().Add(time.Hour), time.Now().Add(2*time.Hour)
+	}
 	for _, refusal := range []struct {
 		name     string
 		pin      *Identity
