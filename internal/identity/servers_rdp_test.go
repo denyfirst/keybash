@@ -117,14 +117,18 @@ type desktopWorker struct {
 	mu      sync.Mutex
 	literal bool
 	pinned  []byte
+	last    *fixtureMessages
+	// start is how long the proxy's sandbox takes to start.
+	start time.Duration
 }
 
 func (d *desktopWorker) OpenBrowserRDP(ctx context.Context, r RDPRequest) (terminalweb.MessageStream, error) {
 	d.calls.Add(1)
-	d.mu.Lock()
-	d.literal, d.pinned = r.Target.Literal(), r.Certificate
-	d.mu.Unlock()
+	time.Sleep(d.start)
 	m := newFixtureMessages()
+	d.mu.Lock()
+	d.literal, d.pinned, d.last = r.Target.Literal(), r.Certificate, m
+	d.mu.Unlock()
 	go func() { <-ctx.Done(); _ = m.Close() }()
 	return m, nil
 }
@@ -574,11 +578,12 @@ func TestWatchCertificatesStartsWithRDPAndStopsWithTheLab(t *testing.T) {
 	}
 }
 
-// Just before a desktop opens the gateway reads once more. A different
-// certificate stops it there, before any proxy exists or a password goes
-// anywhere, and the page is told with its own close. Everything else is left
-// to the proxy, which checks its own handshake.
-func TestADesktopStopsBeforeAnyProxyWhenTheServerChanged(t *testing.T) {
+// As a desktop opens the gateway reads once more, while the proxy's sandbox
+// starts. A different certificate stops it before the proxy gets the
+// browser's request, so the proxy never reaches the server and no password
+// goes there, and the page is told with its own close. Everything else is
+// left to the proxy, which checks its own handshake.
+func TestADesktopStopsBeforeTheServerWhenItsCertificateChanged(t *testing.T) {
 	server, origin := tlsFixture(t)
 	f, reads, worker := desktopFixtureAt(t, origin)
 	startTLS(t, server, f.l)
@@ -621,13 +626,22 @@ func TestADesktopStopsBeforeAnyProxyWhenTheServerChanged(t *testing.T) {
 	if !literal || string(pinned) != string(old.Raw) {
 		t.Fatal("the proxy was not given the literal target and its pin")
 	}
-	// Renewed since the last read: nothing below this point ever runs.
+	// Renewed since the last read: the proxy's sandbox started alongside the
+	// read, but it never got the browser's request, so it never dialled.
 	reads.set("10.20.0.8:3389", windowsLeaf(t, nil))
 	if got := connect(); got != "identity-changed" {
 		t.Fatalf("the socket said %s", got)
 	}
-	if worker.calls.Load() != 1 {
-		t.Fatal("a proxy started for a server that changed")
+	worker.mu.Lock()
+	stopped := worker.last
+	worker.mu.Unlock()
+	if worker.calls.Load() != 2 || stopped.count.Load() != 0 {
+		t.Fatal("the request reached a proxy for a server that changed")
+	}
+	select {
+	case <-stopped.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the proxy for a server that changed was left running")
 	}
 	// The read itself told the administrator.
 	if row, _ := serverRow(listServersView(t, f.alice), id); row.Certificate != "changed" {
@@ -637,7 +651,7 @@ func TestADesktopStopsBeforeAnyProxyWhenTheServerChanged(t *testing.T) {
 	// the pin, and when it is lost the proxy still gets only the pin.
 	reads.set("10.20.0.8:3389", old)
 	reads.fail("10.20.0.8:3389", errors.New("synthetic: no answer"))
-	if connect() != "open" || worker.calls.Load() != 2 {
+	if connect() != "open" || worker.calls.Load() != 3 {
 		t.Fatal("a failed read decided instead of the proxy")
 	}
 	// Without the watch nothing is read before a desktop.
@@ -648,6 +662,40 @@ func TestADesktopStopsBeforeAnyProxyWhenTheServerChanged(t *testing.T) {
 	reads.set("10.20.0.8:3389", windowsLeaf(t, nil))
 	if connect() != "open" || reads.count() != before {
 		t.Fatal("a desktop read the server without the watch")
+	}
+}
+
+// The certificate read and the proxy's start run together: a desktop opens
+// after the slower of the two, not after both one by one.
+func TestADesktopReadsTheCertificateWhileTheProxyStarts(t *testing.T) {
+	const each = 500 * time.Millisecond
+	server, origin := tlsFixture(t)
+	f, reads, worker := desktopFixtureAt(t, origin)
+	startTLS(t, server, f.l)
+	id, _ := addDesktop(t, f, reads, "Desk", "10.20.0.8:3389")
+	bob, b := f.person("bob", roleUser)
+	record := desktopConnection(t, f, bob, b, id)
+	raw := grantFixture(t, bob, record)
+	reads.mu.Lock()
+	reads.onRead = func() { time.Sleep(each) }
+	reads.mu.Unlock()
+	worker.start = each
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	socket, e := dialDesktop(ctx, server, origin, http.Header{"Origin": []string{origin}, "Cookie": []string{bob.cookie.String()}})
+	if e != nil {
+		t.Fatal("valid socket refused")
+	}
+	defer socket.CloseNow()
+	began := time.Now()
+	if socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, bob.csrf+"."+raw)) != nil || socket.Write(ctx, websocket.MessageBinary, []byte("synthetic rdp")) != nil {
+		t.Fatal("request write failed")
+	}
+	if _, data, e := socket.Read(ctx); e != nil || string(data) != "synthetic rdp" {
+		t.Fatalf("the desktop did not open: %v", e)
+	}
+	if took := time.Since(began); took < each || took >= 2*each-100*time.Millisecond {
+		t.Fatalf("the desktop opened after %v: the read and the proxy's start did not overlap", took)
 	}
 }
 

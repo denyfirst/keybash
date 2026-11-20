@@ -36,12 +36,16 @@ var closeCodes = map[Reason]websocket.StatusCode{
 // settle. The close text is "identity-changed".
 const CloseIdentityChanged websocket.StatusCode = 4020
 
-// Desktop messages a browser may send each second: the same budget as a
-// terminal's input (inputFramesPerSecond, inputBytesPerSecond). A dragged
-// window sends input and graphics acknowledgements each display frame.
+// Desktop messages and bytes a browser's messages may carry each second. The
+// page sends at most one pointer move and one wheel step per display frame,
+// plus a graphics acknowledgement per drawn frame: about 540 a second on a
+// 240 Hz screen while moving and scrolling, about 1060 on a 500 Hz one. A
+// browser past the budget waits for the next second (the socket's own flow
+// control holds the rest); it is slowed, never ended, so a fast screen cannot
+// cut a desktop.
 const (
-	desktopMessagesPerSecond = inputFramesPerSecond
-	desktopBytesPerSecond    = inputBytesPerSecond
+	desktopMessagesPerSecond = 2048
+	desktopBytesPerSecond    = 256 * 1024
 	// A browser that stops reading for this long ends the desktop.
 	desktopWriteWait = 10 * time.Second
 )
@@ -61,8 +65,9 @@ func messageEndReason(ctx context.Context, stream MessageStream) Reason {
 // The caller owns origin, session, CSRF, the lease and admission, and has
 // already written the stream's first message. admit is asked about each
 // browser message before it is passed on; false ends the desktop. Only
-// binary messages within MaxMessage and the per-second budget pass; anything
-// else ends it as "refused". Cancellation closes both sides, says why, and
+// binary messages within MaxMessage pass; anything else ends it as
+// "refused". Past the per-second budget the relay waits for the next second
+// before reading on. Cancellation closes both sides, says why, and
 // joins both directions.
 func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStream, admit func([]byte) bool) {
 	if ctx == nil || conn == nil || stream == nil || admit == nil {
@@ -123,14 +128,22 @@ func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStre
 			cancel(nil)
 			break
 		}
+		if kind != websocket.MessageBinary || len(data) == 0 {
+			cancel(ReasonRefused)
+			break
+		}
 		if time.Since(start) >= time.Second {
 			start, count, size = time.Now(), 0, 0
 		}
 		count++
 		size += len(data)
-		if kind != websocket.MessageBinary || len(data) == 0 || count > desktopMessagesPerSecond || size > desktopBytesPerSecond {
-			cancel(ReasonRefused)
-			break
+		if count > desktopMessagesPerSecond || size > desktopBytesPerSecond {
+			// Past the budget: this message, and everything behind it, waits
+			// for the next second.
+			if !waitFor(ctx, time.Until(start.Add(time.Second))) {
+				break
+			}
+			start, count, size = time.Now(), 1, len(data)
 		}
 		if !admit(data) {
 			cancel(nil)
@@ -143,4 +156,19 @@ func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStre
 	}
 	joined.Wait()
 	<-closed
+}
+
+// waitFor waits d, or until ctx ends; it reports whether d passed.
+func waitFor(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	wait := time.NewTimer(d)
+	defer wait.Stop()
+	select {
+	case <-wait.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

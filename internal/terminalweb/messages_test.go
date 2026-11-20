@@ -175,14 +175,6 @@ func TestADesktopSaysWhyItEndedInItsClose(t *testing.T) {
 		"an empty message": func(c *websocket.Conn) error {
 			return c.Write(ctx, websocket.MessageBinary, nil)
 		},
-		"more than the budget": func(c *websocket.Conn) error {
-			for range desktopMessagesPerSecond + 1 {
-				if err := c.Write(ctx, websocket.MessageBinary, []byte{0}); err != nil {
-					return nil // already closed: the budget ended it
-				}
-			}
-			return nil
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			stream := newMessageStream()
@@ -190,6 +182,53 @@ func TestADesktopSaysWhyItEndedInItsClose(t *testing.T) {
 			_ = send(conn)
 			if code, text := closeOf(t, conn); code != 4011 || text != "refused" {
 				t.Fatalf("closed with %d %q", code, text)
+			}
+			waitFinished(t, finished, stream)
+		})
+	}
+}
+
+// A browser past the per-second budget, in messages or in bytes, is slowed,
+// never ended: every message still reaches the proxy, the ones past the
+// budget a second later, and the desktop goes on.
+func TestADesktopPastItsBudgetIsSlowedNotEnded(t *testing.T) {
+	for name, message := range map[string][]byte{
+		"messages": {0},
+		"bytes":    make([]byte, MaxMessage),
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			stream := newMessageStream()
+			conn, finished := desktopClient(t, context.Background(), stream, admitAll)
+			sent := desktopMessagesPerSecond + 1
+			if len(message) > 1 {
+				sent = desktopBytesPerSecond/len(message) + 1
+			}
+			start := time.Now()
+			go func() {
+				for range sent + 1 {
+					if conn.Write(ctx, websocket.MessageBinary, message) != nil {
+						return
+					}
+				}
+			}()
+			for i := range sent + 1 {
+				select {
+				case <-stream.in:
+				case <-ctx.Done():
+					t.Fatalf("%d of %d messages reached the proxy", i, sent+1)
+				}
+				// sent-1 is the first message past the budget; those before it pass at once.
+				if i == sent-2 && time.Since(start) >= 800*time.Millisecond {
+					t.Fatal("the budget slowed messages within it")
+				}
+			}
+			if elapsed := time.Since(start); elapsed < 800*time.Millisecond {
+				t.Fatalf("%d messages passed in %v: the budget did not slow them", sent+1, elapsed)
+			}
+			if err := conn.Close(websocket.StatusNormalClosure, ""); err != nil {
+				t.Fatalf("the desktop was ended: %v", err)
 			}
 			waitFinished(t, finished, stream)
 		})
