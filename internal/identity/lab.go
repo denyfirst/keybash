@@ -313,6 +313,15 @@ func (l *Lab) attemptLocked(key string, limit int) bool {
 	}
 	return w.allow(now, limit)
 }
+
+// slotWait is how long a request waits for one of the two derivation slots.
+// Two Argon2id or bcrypt derivations at a time bound memory and CPU; a third
+// person signing in or connecting at the same moment waits a fraction of a
+// second for one to end instead of being refused.
+const slotWait = 5 * time.Second
+
+// slot takes one of the two derivation slots, waiting at most slotWait, and
+// never while ctx is done. Callers never hold l.mu.
 func (l *Lab) slot(ctx context.Context) bool {
 	if ctx.Err() != nil {
 		return false
@@ -321,6 +330,15 @@ func (l *Lab) slot(ctx context.Context) bool {
 	case l.derive <- struct{}{}:
 		return true
 	default:
+	}
+	wait := time.NewTimer(slotWait)
+	defer wait.Stop()
+	select {
+	case l.derive <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-wait.C:
 		return false
 	}
 }

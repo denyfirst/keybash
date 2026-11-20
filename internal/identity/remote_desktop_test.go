@@ -161,6 +161,33 @@ func TestTheDesktopOpensWithItsProofInsideRDCleanPath(t *testing.T) {
 	}
 }
 
+// A desktop derives nothing, so it opens at once while both derivation slots
+// are busy with other people's sign-ins.
+func TestADesktopOpensWhileSignInsHoldTheSlots(t *testing.T) {
+	server, origin := tlsFixture(t)
+	l, _, c, record, worker := remoteFixture(t, origin)
+	startTLS(t, server, l)
+	raw := grantFixture(t, c, record)
+	l.derive <- struct{}{}
+	l.derive <- struct{}{}
+	defer func() { <-l.derive; <-l.derive }()
+	ctx, cancel := context.WithTimeout(context.Background(), slotWait/2)
+	defer cancel()
+	socket, err := dialDesktop(ctx, server, origin, http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}})
+	if err != nil {
+		t.Fatal("a valid desktop socket was refused")
+	}
+	defer socket.CloseNow()
+	if socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, c.csrf+"."+raw)) != nil {
+		t.Fatal("the request could not be sent")
+	}
+	select {
+	case <-worker.messages:
+	case <-ctx.Done():
+		t.Fatal("the desktop waited behind the sign-ins")
+	}
+}
+
 // Without the session, from another origin or site, or without exactly its
 // proof in the first message, no proxy starts.
 func TestTheDesktopRefusesWithoutItsProof(t *testing.T) {
