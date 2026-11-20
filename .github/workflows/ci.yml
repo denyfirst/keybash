@@ -75,7 +75,6 @@ jobs:
           "${pnpm}" --dir web install --frozen-lockfile --ignore-scripts
           "${pnpm}" --dir web audit
           node web/vendor.mjs
-          python3 scripts/vendor-guacamole.py --check
           test -z "$(git status --porcelain)"
           node --test web/paste.test.mjs web/desktop-workspace.test.mjs web/remote-desktop-input.test.mjs web/remote-desktop-gfx.test.mjs
           "${pnpm}" --dir web exec playwright install --with-deps chromium
@@ -146,8 +145,6 @@ jobs:
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
           go test -tags=browserlab -race -run='^TestBrowserTerminalOnTheGPU$' -timeout=3m ./internal/sshtransport
           go test -tags=browserlab -race -run='^TestBrowserOwnedSSHConnectionAndLogout$' -timeout=2m ./internal/sshtransport
-          go test -tags=browserlab -race -run='^TestBrowserRDPWorkspacePortable$' -timeout=90s ./internal/rdplab
-          go test -tags=browserlab -race -run='^TestBrowserRDPViewerLab$' -timeout=1m ./internal/rdplab
           # Test-only empty netns; root setup drops to UID/GID 65534 with no
           # effective capabilities before the fixed child runs. No guacd yet.
           worker_dir="$(mktemp -d /tmp/keybash-rdp-worker.XXXXXX)"

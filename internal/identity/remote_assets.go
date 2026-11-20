@@ -10,7 +10,7 @@ import (
 )
 
 func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bool {
-	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop.mjs": "desktop.mjs", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs",
+	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css",
 		// The desktop page on IronRDP (BROWSER-RDP-PAGE.md, 3d), and IronRDP's
 		// browser client exactly as vendored and checked against CI's build
 		// (scripts/vendor-ironrdp-web.py).
