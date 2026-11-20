@@ -24,6 +24,10 @@ import (
 	"time"
 )
 
+// hybridConfirmation is an X.224 Connection Confirm selecting HYBRID (NLA),
+// as Windows sends it; a refusal peer changes its selected protocol.
+var hybridConfirmation = [19]byte{3, 0, 0, 19, 14, 0xd0, 0, 0, 0, 1, 0, 2, 0, 8, 0, 2, 0, 0, 0}
+
 // All process launching/synthetic root setup is test-only. No installed worker
 // launcher, public service or production credential. Read-only system library
 // directories are mounted; user homes and credential stores are not.

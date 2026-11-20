@@ -12,14 +12,13 @@ import (
 	"time"
 
 	"github.com/denyfirst/keybash/internal/sshkey"
-	"github.com/denyfirst/keybash/internal/targetguard"
 	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
-// ProcessWorker is a Linux/amd64 privileged laboratory manager, NOT a public
-// root gateway or installed service. Binary/hash come from trusted operator
-// configuration. Other systems, missing sandbox tools and arbitrary signers
-// refuse. The existing custody-only CLI does not enable this launcher.
+// ProcessWorker is the SSH worker image the root SSH manager starts for each
+// terminal (ServeSSHManager): its path and digest, from trusted operator
+// configuration, and the UID and GID it runs as. Other systems, missing
+// sandbox tools and a changed image refuse.
 type ProcessWorker struct {
 	Path   string
 	Digest [sha256.Size]byte
@@ -34,14 +33,10 @@ func workerIdentity(uid, gid uint32) (uint32, uint32, bool) {
 	return uid, gid, uid > 0 && gid > 0 && uid <= 2147483647 && gid <= 2147483647
 }
 
-func (w ProcessWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
-	if target == nil || target.Hostname() == "" {
-		return nil, ErrProcess
-	}
-	return w.open(ctx, target.Hostname(), target.DialContext, pin, user, auth)
-}
-
-// The private dial seam permits synthetic TCP fixtures only in _test.go.
+// open starts this worker image in its sandbox directly, without the manager,
+// over the connection dial returns. Only the process lab's tests use it, to
+// meet the real worker with synthetic SSH peers; the service always goes
+// through the manager (ServeSSHManager).
 func (w ProcessWorker) open(ctx context.Context, host string, dial func(context.Context) (net.Conn, error), pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
 	if ctx == nil || ctx.Err() != nil || dial == nil {
 		return nil, ErrProcess

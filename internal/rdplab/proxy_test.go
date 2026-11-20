@@ -3,7 +3,6 @@ package rdplab
 import (
 	"bytes"
 	"context"
-	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -176,9 +175,19 @@ func TestProxyStreamCloseUnblocksReadsAndWrites(t *testing.T) {
 // Credentials outside credentialsAllowed, and a missing context or dial, never
 // reach a manager.
 func TestOpenBrowserRDPRefusesBeforeAnyManager(t *testing.T) {
-	pin := &Identity{name: "server.test", der: []byte{1}, roots: x509.NewCertPool()}
+	pin := &Identity{name: "server.test", pin: [32]byte{1}, der: []byte{1}}
 	if !credentialsAllowed(pin, "u", "p") {
 		t.Fatal("the fixture identity itself is refused")
+	}
+	for name, partial := range map[string]*Identity{
+		"no identity":    nil,
+		"no certificate": {name: pin.name, pin: pin.pin},
+		"no digest":      {name: pin.name, der: pin.der},
+		"no name":        {pin: pin.pin, der: pin.der},
+	} {
+		if credentialsAllowed(partial, "u", "p") {
+			t.Errorf("%s: credentials allowed", name)
+		}
 	}
 	dial := func(context.Context) (net.Conn, error) { t.Fatal("dialled"); return nil, nil }
 	w := ManagerWorker{SocketPath: "/nonexistent/keybash-rdp.sock"}
@@ -206,7 +215,7 @@ func TestOpenBrowserRDPRefusesBeforeAnyManager(t *testing.T) {
 // turns the clipboard on: the desktop page asks for it (cliprdr), and the
 // proxy refuses a channel the setup did not allow.
 func TestBrowserSetupHasTheCredentialRules(t *testing.T) {
-	pin := &Identity{name: "server.test", der: []byte{1}, roots: x509.NewCertPool()}
+	pin := &Identity{name: "server.test", pin: [32]byte{1}, der: []byte{1}}
 	got, err := browserSetup(pin, "synthetic-user", "p")
 	if err != nil || got[len(got)-1] != 1 {
 		t.Fatalf("valid credentials: %v %v", got, err)

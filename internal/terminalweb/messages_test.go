@@ -224,13 +224,13 @@ func TestUnadmittedAndOversizedMessagesNeverReachTheProxy(t *testing.T) {
 func TestEveryReasonHasItsOwnCloseCode(t *testing.T) {
 	seen := map[websocket.StatusCode]bool{CloseIdentityChanged: true}
 	for reason := range reasons {
-		code, ok := CloseCode(reason)
+		code, ok := closeCodes[reason]
 		if !ok || code < 4000 || code > 4999 || seen[code] {
 			t.Fatalf("%s has close code %d", reason, code)
 		}
 		seen[code] = true
 	}
-	if _, ok := CloseCode("anything else"); ok {
-		t.Fatal("an unknown word has a close code")
+	if _, ok := closeCodes["anything else"]; ok || len(closeCodes) != len(reasons) {
+		t.Fatal("a word that is no reason has a close code")
 	}
 }

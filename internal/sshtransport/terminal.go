@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/denyfirst/keybash/internal/sshkey"
-	"github.com/denyfirst/keybash/internal/targetguard"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -58,16 +57,11 @@ type Terminal struct {
 	once    sync.Once
 }
 
-// Connect uses only the guarded target's connection. The parent context is the
-// session lifetime, not just setup: cancel it to stop the active remote channel.
-func Connect(ctx context.Context, target *targetguard.NamedTarget, config Config) (*Terminal, error) {
-	if target == nil || target.Hostname() == "" {
-		return nil, ErrInvalidConfig
-	}
-	return connect(ctx, target.Hostname(), target.DialContext, config)
-}
-
-// connect's dial seam is package-private and used only by synthetic tests.
+// connect opens the terminal over the one connection dial returns: in the
+// worker, the guarded TCP stream it inherited (serveSSHWorker); in tests, a
+// synthetic peer. identity is the server's logical name for host-key checks.
+// The parent context is the session lifetime, not just setup: cancel it to
+// stop the active remote channel.
 func connect(ctx context.Context, identity string, dial func(context.Context) (net.Conn, error), config Config) (*Terminal, error) {
 	pin, err := validateConfig(config)
 	if err != nil || ctx == nil || dial == nil || identity == "" {

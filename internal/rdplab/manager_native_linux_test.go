@@ -242,13 +242,10 @@ func (o *rdpServiceOutput) snapshot() string { o.mu.Lock(); defer o.mu.Unlock();
 // constructors' checks, so a test can show what the proxy itself refuses.
 func rawIdentity(t *testing.T, name string, der []byte) *Identity {
 	t.Helper()
-	cert, e := x509.ParseCertificate(der)
-	if e != nil {
+	if _, e := x509.ParseCertificate(der); e != nil {
 		t.Fatal("fixture certificate failed")
 	}
-	roots := x509.NewCertPool()
-	roots.AddCert(cert)
-	return &Identity{name: name, pin: sha256.Sum256(der), roots: roots, der: bytes.Clone(der)}
+	return &Identity{name: name, pin: sha256.Sum256(der), der: bytes.Clone(der)}
 }
 
 func TestNativeRDPManagerGatewayChild(t *testing.T) {

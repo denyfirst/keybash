@@ -149,18 +149,10 @@ func TestSSHProcessImageAndPolicyRefuseBeforeDial(t *testing.T) {
 			t.Fatal("invalid worker image reached target dial")
 		}
 	}
-	ip := netip.MustParseAddr("10.44.0.2")
-	policy, err := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(ip, 22)}, nil)
-	if err != nil {
-		t.Fatal("fixture policy failed")
-	}
-	target, err := targetguard.NewNamedTarget(policy, "ssh.invalid", 22, []netip.Addr{ip})
-	if err != nil {
-		t.Fatal("fixture target failed")
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if stream, err := manager.OpenSSH(ctx, target, host.PublicKey().Marshal(), "lab-user", user); err == nil || stream != nil {
+	called := false
+	if stream, err := manager.open(ctx, "ssh.invalid", func(context.Context) (net.Conn, error) { called = true; return nil, ErrProcess }, host.PublicKey().Marshal(), "lab-user", user); err == nil || stream != nil || called {
 		t.Fatal("canceled process launch accepted")
 	}
 }

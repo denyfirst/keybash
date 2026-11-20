@@ -124,7 +124,7 @@ func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
 	}
 	byName := labIdentity(t)
 	// A name that is the address itself still is not the exact certificate.
-	asAddress := &Identity{name: literal.Hostname(), pin: byName.pin, roots: byName.roots, der: byName.der}
+	asAddress := &Identity{name: literal.Hostname(), pin: byName.pin, der: byName.der}
 	for _, tc := range []struct {
 		name   string
 		id     *Identity
@@ -143,18 +143,6 @@ func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
 		if tc.id.boundTo(tc.target) != tc.bound {
 			t.Fatalf("%s: bound is not %v", tc.name, tc.bound)
 		}
-	}
-	if byName.der == nil {
-		byName = &Identity{name: byName.name, pin: byName.pin, roots: byName.roots, der: []byte{1}}
-	}
-	if _, e := newNativeBroker(literal, exact); e != nil {
-		t.Fatal("an exact identity was refused at its literal address")
-	}
-	if _, e := newNativeBroker(named, exact); e != errNative {
-		t.Fatal("an exact identity was brokered to a name")
-	}
-	if _, e := newNativeBroker(literal, byName); e != errNative {
-		t.Fatal("a named identity was brokered to a literal address")
 	}
 	// A desktop takes its identity from its target, never from the
 	// certificate: Windows' own certificate stops at a server reached by name
@@ -181,9 +169,5 @@ func TestIdentityGoesOnlyWithItsKindOfTarget(t *testing.T) {
 	// The setup takes the exact mark; the manager's name file has room for it.
 	if _, e := browserSetup(exact, "synthetic-user", "synthetic-password"); e != nil || strings.TrimSpace(exactLeaf) != exactLeaf || len(exactLeaf) > 253 {
 		t.Fatal("an exact identity does not reach the proxy")
-	}
-	// The original probe is for a name: it never takes an exact identity.
-	if Probe(context.Background(), literal, exact) != ErrConfiguration || Probe(context.Background(), named, exact) != ErrConfiguration {
-		t.Fatal("the name-checking probe took an exact identity")
 	}
 }

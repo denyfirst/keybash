@@ -575,9 +575,6 @@ func TestSSHInvalidConfigurationAndCanceledRequestsNeverDial(t *testing.T) {
 	if _, err := connect(context.Background(), "", dial, base); err != ErrInvalidConfig {
 		t.Fatal("missing logical server identity accepted")
 	}
-	if _, err := Connect(context.Background(), nil, base); err != ErrInvalidConfig {
-		t.Fatal("missing guarded target accepted")
-	}
 }
 
 func TestSSHInputAndResizeBoundsDoNotSendRequests(t *testing.T) {
