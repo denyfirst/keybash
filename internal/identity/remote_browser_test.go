@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +26,16 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type portableSSHWorker struct{ echo fixtureRDPWorker }
+// portableSSHWorker is a counted echo terminal for the fixture's one account
+// and server.
+type portableSSHWorker struct{ calls atomic.Int32 }
 
-func (f *portableSSHWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, _ []byte, user string, _ sshkey.Credential) (terminalweb.Stream, error) {
-	return f.echo.OpenRDP(ctx, RDPRequest{Target: target, Username: user, Password: f.echo.expected})
+func (w *portableSSHWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, key []byte, user string, c sshkey.Credential) (terminalweb.Stream, error) {
+	if user != "synthetic-user" || target.Hostname() != "rdp.invalid" {
+		return nil, errRefused
+	}
+	w.calls.Add(1)
+	return echoSSHWorker{}.OpenSSH(ctx, target, key, user, c)
 }
 func TestBrowserOwnedRemotePortable(t *testing.T) { runOwnedPortable(t, false, false) }
 func TestBrowserServerTrustWorkflow(t *testing.T) { runOwnedPortable(t, true, false) }
@@ -53,7 +60,7 @@ func runOwnedPortable(t *testing.T, review, capacity bool) {
 	target := remoteTargetFixture(t)
 	target.Protocol = "ssh"
 	target.Identity = signer.PublicKey().Marshal()
-	worker := &portableSSHWorker{echo: fixtureRDPWorker{expected: "synthetic"}}
+	worker := &portableSSHWorker{}
 	limits := sessionlimits.Default()
 	if capacity {
 		limits = sessionlimits.Limits{Total: 16, PerOwner: 1}
@@ -112,7 +119,7 @@ func runOwnedPortable(t *testing.T, review, capacity bool) {
 	if command.Run() != nil {
 		t.Fatal("portable owned UI checks failed")
 	}
-	if capacity && worker.echo.calls.Load() != 1 {
+	if capacity && worker.calls.Load() != 1 {
 		t.Fatal("busy browser started an extra worker")
 	}
 }

@@ -1,5 +1,11 @@
 # Browser RDP laboratory
 
+> **Status, 20 November 2026.** This is the record of the guacd desktop page.
+> Its browser side (the page, `web/vendor/guacamole.mjs` and their browser
+> tests) left in step 3e2 of [the IronRDP desktop page](BROWSER-RDP-PAGE.md),
+> whose page every desktop now opens. guacd, FreeRDP and the viewer stay in the
+> native lab, reached only by its own tests, until step 3e3.
+
 14 October 2026. Synthetic viewer laboratory; each change requires native/browser
 CI and the documented adversarial self-review. No production account or public
 listener, product login/vault, installer, deployment or release.
@@ -192,7 +198,7 @@ A 200% desktop has about four times the pixels of a 100% one. It needs about
 that much more memory per session on the gateway host, which the operator's
 aggregate memory limit (`--memory-mib`, 1 GiB by default) still bounds, and
 more network bandwidth for lossless pictures. Evidence:
-`TestOwnedRemoteDesktopStartsAtThePageSize`,
+`TestDesktopBoundsAreWindowsScales`,
 `TestDesktopStartsAtThePageSize`, `TestScaledDesktopHoldsItsPixelsAndNoMore`,
 `TestNativeRDPScaledDesktopTellsWindowsItsScale`, `native/scale_test.c` and
 `web/desktop-workspace.test.mjs`.

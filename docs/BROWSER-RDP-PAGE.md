@@ -170,6 +170,13 @@ guacd and FreeRDP use leaves, each part in its own pull request:
     they no longer need Windows. The clipboard test, which drives Windows'
     own desktop, still needs Windows.
   - **3e2.** guacd's page, its viewer path and `vendor/guacamole.mjs` leave.
+    The gateway's terminal socket is for terminals only: its proof is exactly
+    the CSRF value and a lease, and a desktop's lease is used up there without
+    starting anything. `identity.RDPWorker` is the RDP proxy alone, and its
+    request carries no size: the proxy checks the page's own. The gateway's
+    tests that went through guacd's path (sign-out during setup, idle, a
+    server that changed, roles) now go through the desktop socket. The native
+    lab's guacd desktop is reached only by its own tests until 3e3.
   - **3e3.** guacd and FreeRDP leave the runtime, the stage build and the
     native lab, whose NLA peer becomes the test peer, with their freshness
     watches, dependency notes and documents.

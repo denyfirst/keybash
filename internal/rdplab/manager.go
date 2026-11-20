@@ -37,6 +37,10 @@ func (c ManagerConfig) valid() bool {
 
 type ManagerWorker struct{ SocketPath string }
 
+// OpenRDP opens the native lab's guacd desktop at the lab's own size. The
+// gateway no longer reaches it: desktops open in the browser through the RDP
+// proxy (OpenBrowserRDP). It stays for the native lab until step 3e3 removes
+// guacd and FreeRDP.
 func (w ManagerWorker) OpenRDP(ctx context.Context, request identity.RDPRequest) (terminalweb.Stream, error) {
 	if request.Target == nil {
 		return nil, errNative
@@ -45,7 +49,7 @@ func (w ManagerWorker) OpenRDP(ctx context.Context, request identity.RDPRequest)
 	if err != nil {
 		return nil, errNative
 	}
-	return w.open(ctx, request.Target, pin, request.Username, request.Password, request.Width, request.Height, request.DPI)
+	return w.open(ctx, request.Target, pin, request.Username, request.Password, 0, 0, 0)
 }
 
 // identityFor takes the rules from the target, never from the certificate: a
