@@ -9,7 +9,13 @@ sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends bubblewrap
 prefix="${lab}/prefix"
 mkdir -p "${prefix}/bin"
-go test -c -race -tags=nativelab -o "${prefix}/bin/lab.test" ./internal/rdplab
+# Fixed verified test Node runtime for the desktop's browser test
+# (TestNativeRDPDesktopFromThePageToThePeer); no browser runtime enters a release.
+test "$(node --version)" = v26.13.1
+cp "$(command -v node)" "${prefix}/bin/node"
+export KEYBASH_NATIVE_BROWSER_CACHE="${HOME}/.cache/ms-playwright"
+test -d "${KEYBASH_NATIVE_BROWSER_CACHE}"
+go test -c -race -tags=nativelab,browserlab -o "${prefix}/bin/lab.test" ./internal/rdplab
 chmod 755 "${prefix}" "${prefix}/bin" "${prefix}/bin/lab.test"
 sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDPSandboxPreparation$' -test.timeout=10s -test.v
@@ -32,7 +38,7 @@ if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
   python3 scripts/rdp-preflight-diagnostics.py "${prefix}"
   overlay="${lab}/preflight-diagnostics/overlay.json"
   CGO_ENABLED=0 go build -overlay="${overlay}" -trimpath -o "${prefix}/bin/debug-worker" ./cmd/keybash-rdp-worker
-  go test -c -overlay="${overlay}" -race -tags=nativelab -o "${prefix}/bin/debug.test" ./internal/rdplab
+  go test -c -overlay="${overlay}" -race -tags=nativelab,browserlab -o "${prefix}/bin/debug.test" ./internal/rdplab
   sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
     "${prefix}/bin/debug.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v || true
   echo 'Normal candidate public preflight failed; diagnostic overlays cannot pass this gate.' >&2
@@ -41,7 +47,7 @@ fi
 # Collect every normal native/service boundary even if public manager
 # preparation failed. Overlays never run these credential-bearing fixtures;
 # any normal failure stops the gate before mutation/acceptance conclusions.
-if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+if ! sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=8m -test.v; then
   preflight_failed=1
 fi
@@ -50,7 +56,7 @@ test "${preflight_failed}" = 0
 # public-only overlays cannot send credentials or satisfy a normal test gate.
 python3 scripts/rdp-sandbox-mutations.py "${prefix}"
 for mutation in allow refuse; do
-  go test -c -overlay="${lab}/sandbox-mutations/${mutation}.json" -race -tags=nativelab -o "${prefix}/bin/mutation.test" ./internal/rdplab
+  go test -c -overlay="${lab}/sandbox-mutations/${mutation}.json" -race -tags=nativelab,browserlab -o "${prefix}/bin/mutation.test" ./internal/rdplab
   if sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
     "${prefix}/bin/mutation.test" -test.run='^TestNativeRDPManagerPublicPreflight$' -test.timeout=25s -test.v > "${lab}/sandbox-${mutation}.log" 2>&1; then
     echo 'RDP sandbox mutation escaped its positive preflight test' >&2
@@ -98,7 +104,7 @@ mutant_proxy 's/if end_entity.as_ref() != self.pinned.as_slice() {/if false {/' 
 mutant_proxy 's/if end_entity.as_ref() != self.pinned.as_slice() {/if true {/' \
   's/    if leaf != trust.certificate {/    if true {/' \
   'no RDCleanPath response with the pinned certificate'
-sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" \
+sudo -n env -i PATH=/usr/bin:/bin KEYBASH_NATIVE_PREFIX="${prefix}" KEYBASH_NATIVE_BROWSER_CACHE="${KEYBASH_NATIVE_BROWSER_CACHE}" \
   "${prefix}/bin/lab.test" -test.run='^TestNativeRDP' -test.timeout=8m -test.v
 
 # The installer's RDP path, with the same runtime the managers use.

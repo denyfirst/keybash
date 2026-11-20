@@ -16,7 +16,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -173,8 +175,54 @@ func writeLabFile(t *testing.T, path string, data []byte) {
 
 // testPeer runs Keybash's test peer (rdp-testpeer/, IronRDP's own server at
 // the pinned commit) in the lab's sandbox: TLS with cert, and NLA for
-// synthetic-user with password. Its output is discarded.
+// synthetic-user with password.
 func testPeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certificate, password string) string {
+	t.Helper()
+	address, _ := testPeerSaying(t, ctx, prefix, cert, password)
+	return address
+}
+
+// peerLines keeps what the test peer says (`keybash-testpeer: ...`): each
+// desktop it opens, each key press and click, and the first pointer move.
+// Nothing else it prints is kept or shown.
+type peerLines struct {
+	mu      sync.Mutex
+	pending string
+	lines   []string
+}
+
+func (p *peerLines) Write(b []byte) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, c := range b {
+		if c != '\n' {
+			if len(p.pending) < 64 {
+				p.pending += string(c)
+			}
+			continue
+		}
+		if line, ok := strings.CutPrefix(p.pending, "keybash-testpeer: "); ok && len(p.lines) < 256 {
+			p.lines = append(p.lines, line)
+		}
+		p.pending = ""
+	}
+	return len(b), nil
+}
+
+// said reports whether the peer said a line that starts with each prefix.
+func (p *peerLines) said(prefixes ...string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, prefix := range prefixes {
+		if !slices.ContainsFunc(p.lines, func(line string) bool { return strings.HasPrefix(line, prefix) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// testPeerSaying is testPeer that also keeps what the peer says.
+func testPeerSaying(t *testing.T, ctx context.Context, prefix string, cert tls.Certificate, password string) (string, *peerLines) {
 	t.Helper()
 	dir := t.TempDir()
 	writeLabFile(t, filepath.Join(dir, "cert.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}))
@@ -202,13 +250,14 @@ func testPeer(t *testing.T, ctx context.Context, prefix string, cert tls.Certifi
 		"--chdir", "/tmp")
 	args = append(args, dropNativePrivileges()...)
 	args = append(args, prefix+"/bin/keybash-rdp-testpeer", address, "/run/fixture/cert.pem", "/run/fixture/key.pem", "/run/fixture/secret")
-	runSandbox(t, ctx, args, io.Discard)
+	said := &peerLines{}
+	runSandbox(t, ctx, args, said)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		c, err := (&net.Dialer{Timeout: 50 * time.Millisecond}).DialContext(ctx, "tcp", address)
 		if err == nil {
 			_ = c.Close()
-			return address
+			return address, said
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			t.Fatal("the test peer did not listen")
