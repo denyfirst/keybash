@@ -51,7 +51,7 @@ func TestGeneratedKeysNeverLeave(t *testing.T) {
 	if e != nil || !stored.Generated || stored.Kind != "ssh-key" || stored.Username != "deploy" || stored.Public != made.Public {
 		t.Fatal("generated key not stored as made here")
 	}
-	key, e := openSSHKey(stored)
+	key, e := checkCredential(&stored)
 	if e != nil || string(key.PublicKey().Marshal()) != string(public.Marshal()) {
 		t.Fatal("stored private key does not match its public line")
 	}
