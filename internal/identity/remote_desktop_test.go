@@ -59,26 +59,6 @@ func (m *fixtureMessages) ReadMessage() ([]byte, error) {
 func (m *fixtureMessages) Reason() terminalweb.Reason { return "" }
 func (m *fixtureMessages) Close() error               { m.once.Do(func() { close(m.done) }); return nil }
 
-func (f *fixtureRDPWorker) OpenBrowserRDP(ctx context.Context, r RDPRequest) (terminalweb.MessageStream, error) {
-	if r.Password != f.expected || r.Username != "synthetic-user" || r.Target.Hostname() != "rdp.invalid" {
-		return nil, errRefused
-	}
-	f.calls.Add(1)
-	m := newFixtureMessages()
-	go func() { <-ctx.Done(); _ = m.Close() }()
-	if f.messages != nil {
-		f.messages <- m
-	}
-	return m, nil
-}
-
-func (d *desktopWorker) OpenBrowserRDP(ctx context.Context, r RDPRequest) (terminalweb.MessageStream, error) {
-	d.calls.Add(1)
-	m := newFixtureMessages()
-	go func() { <-ctx.Done(); _ = m.Close() }()
-	return m, nil
-}
-
 // x224Request is IronRDP's X.224 connection request for TLS alone.
 var x224Request = []byte{0x03, 0x00, 0x00, 0x13, 0x0e, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00}
 
@@ -253,33 +233,6 @@ func TestTheDesktopRefusesWithoutItsProof(t *testing.T) {
 	}
 	if worker.calls.Load() != 1 {
 		t.Fatalf("a lease started %d proxies", worker.calls.Load())
-	}
-}
-
-// A server showing another certificate than the approved one ends the
-// desktop before the proxy starts, with its own close.
-func TestADesktopWhoseServerChangedSaysSoBeforeStarting(t *testing.T) {
-	server, origin := tlsFixture(t)
-	f, reads, worker := desktopFixtureAt(t, origin)
-	startTLS(t, server, f.l)
-	id, _ := addDesktop(t, f, reads, "Desk", "10.20.0.8:3389")
-	bob, b := f.person("bob", roleUser)
-	record := desktopConnection(t, f, bob, b, id)
-	reads.set("10.20.0.8:3389", windowsLeaf(t, nil))
-	raw := grantFixture(t, bob, record)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	socket, err := dialDesktop(ctx, server, origin, http.Header{"Origin": []string{origin}, "Cookie": []string{bob.cookie.String()}})
-	if err != nil {
-		t.Fatal("dial")
-	}
-	defer socket.CloseNow()
-	_ = socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, bob.csrf+"."+raw))
-	if code, text := closeCode(ctx, socket); code != terminalweb.CloseIdentityChanged || text != "identity-changed" {
-		t.Fatalf("closed with %d %q", code, text)
-	}
-	if worker.calls.Load() != 0 {
-		t.Fatal("a proxy started for a server that changed")
 	}
 }
 

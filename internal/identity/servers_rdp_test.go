@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -111,8 +110,8 @@ func (f *fixtureCertificates) scan(_ context.Context, target *targetguard.NamedT
 	return nil, errors.New("synthetic: nothing answers")
 }
 
-// desktopWorker stands in for the RDP manager: an echo stream, counting who
-// asked it to connect.
+// desktopWorker stands in for the RDP proxy: an echo desktop
+// (fixtureMessages), counting who asked it to connect.
 type desktopWorker struct {
 	calls   atomic.Int32
 	mu      sync.Mutex
@@ -120,15 +119,14 @@ type desktopWorker struct {
 	pinned  []byte
 }
 
-func (d *desktopWorker) OpenRDP(ctx context.Context, r RDPRequest) (terminalweb.Stream, error) {
+func (d *desktopWorker) OpenBrowserRDP(ctx context.Context, r RDPRequest) (terminalweb.MessageStream, error) {
 	d.calls.Add(1)
 	d.mu.Lock()
 	d.literal, d.pinned = r.Target.Literal(), r.Certificate
 	d.mu.Unlock()
-	left, right := net.Pipe()
-	go func() { defer right.Close(); _, _ = io.Copy(right, right) }()
-	go func() { <-ctx.Done(); _ = left.Close() }()
-	return fixtureRemoteStream{left}, nil
+	m := newFixtureMessages()
+	go func() { <-ctx.Done(); _ = m.Close() }()
+	return m, nil
 }
 
 // desktopFixture is a lab with an SSH and an RDP worker and target networks,
@@ -576,76 +574,80 @@ func TestWatchCertificatesStartsWithRDPAndStopsWithTheLab(t *testing.T) {
 	}
 }
 
-// Just before a session opens the gateway reads once more. A different
-// certificate stops it there, before any worker exists, and the person is told.
-// Everything else is left to the worker, which checks its own handshake.
-func TestSocketStopsBeforeAnyWorkerWhenTheServerChanged(t *testing.T) {
-	server := httptest.NewUnstartedServer(nil)
-	origin := "https://" + server.Listener.Addr().String()
+// Just before a desktop opens the gateway reads once more. A different
+// certificate stops it there, before any proxy exists or a password goes
+// anywhere, and the page is told with its own close. Everything else is left
+// to the proxy, which checks its own handshake.
+func TestADesktopStopsBeforeAnyProxyWhenTheServerChanged(t *testing.T) {
+	server, origin := tlsFixture(t)
 	f, reads, worker := desktopFixtureAt(t, origin)
-	server.Config.Handler = f.l
-	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
-	server.StartTLS()
-	defer server.Close()
+	startTLS(t, server, f.l)
 	id, old := addDesktop(t, f, reads, "Desk", "10.20.0.8:3389")
 	bob, b := f.person("bob", roleUser)
 	record := desktopConnection(t, f, bob, b, id)
+	// An open desktop passes messages both ways; a stopped one closes with
+	// its word.
 	connect := func() string {
 		t.Helper()
 		raw := grantFixture(t, bob, record)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		header := http.Header{"Origin": []string{origin}, "Cookie": []string{bob.cookie.String()}}
-		socket, _, e := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: header})
+		socket, e := dialDesktop(ctx, server, origin, http.Header{"Origin": []string{origin}, "Cookie": []string{bob.cookie.String()}})
 		if e != nil {
 			t.Fatal("valid socket refused")
 		}
 		defer socket.CloseNow()
-		if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(map[string]string{"csrf": bob.csrf, "lease": raw}))) != nil {
-			t.Fatal("proof write failed")
+		if socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, bob.csrf+"."+raw)) != nil {
+			t.Fatal("request write failed")
 		}
+		_ = socket.Write(ctx, websocket.MessageBinary, []byte("synthetic rdp"))
 		_, data, e := socket.Read(ctx)
-		if e != nil {
-			t.Fatal("the socket closed without saying why")
+		var closed websocket.CloseError
+		switch {
+		case e == nil && string(data) == "synthetic rdp":
+			return "open"
+		case errors.As(e, &closed) && closed.Code == terminalweb.CloseIdentityChanged:
+			return closed.Reason
 		}
-		return string(data)
+		t.Fatal("the socket closed without saying why")
+		return ""
 	}
-	if connect() != `{"type":"ready"}` || worker.calls.Load() != 1 {
+	if connect() != "open" || worker.calls.Load() != 1 {
 		t.Fatal("the pinned server did not open")
 	}
 	worker.mu.Lock()
 	literal, pinned := worker.literal, worker.pinned
 	worker.mu.Unlock()
 	if !literal || string(pinned) != string(old.Raw) {
-		t.Fatal("the worker was not given the literal target and its pin")
+		t.Fatal("the proxy was not given the literal target and its pin")
 	}
 	// Renewed since the last read: nothing below this point ever runs.
 	reads.set("10.20.0.8:3389", windowsLeaf(t, nil))
-	if got := connect(); got != `{"type":"identity-changed"}` {
+	if got := connect(); got != "identity-changed" {
 		t.Fatalf("the socket said %s", got)
 	}
 	if worker.calls.Load() != 1 {
-		t.Fatal("a worker started for a server that changed")
+		t.Fatal("a proxy started for a server that changed")
 	}
 	// The read itself told the administrator.
 	if row, _ := serverRow(listServersView(t, f.alice), id); row.Certificate != "changed" {
-		t.Fatal("a stopped session did not tell the administrator")
+		t.Fatal("a stopped desktop did not tell the administrator")
 	}
-	// The read cannot grant anything: when it fails the worker decides, holding
-	// the pin, and when it is lost the worker still gets only the pin.
+	// The read cannot grant anything: when it fails the proxy decides, holding
+	// the pin, and when it is lost the proxy still gets only the pin.
 	reads.set("10.20.0.8:3389", old)
 	reads.fail("10.20.0.8:3389", errors.New("synthetic: no answer"))
-	if connect() != `{"type":"ready"}` || worker.calls.Load() != 2 {
-		t.Fatal("a failed read decided instead of the worker")
+	if connect() != "open" || worker.calls.Load() != 2 {
+		t.Fatal("a failed read decided instead of the proxy")
 	}
-	// Without the watch nothing is read before a session.
+	// Without the watch nothing is read before a desktop.
 	f.l.mu.Lock()
 	f.l.remote.watching = false
 	f.l.mu.Unlock()
 	before := reads.count()
 	reads.set("10.20.0.8:3389", windowsLeaf(t, nil))
-	if connect() != `{"type":"ready"}` || reads.count() != before {
-		t.Fatal("a session read the server without the watch")
+	if connect() != "open" || reads.count() != before {
+		t.Fatal("a desktop read the server without the watch")
 	}
 }
 

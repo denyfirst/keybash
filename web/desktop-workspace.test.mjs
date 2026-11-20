@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopScales, nearestScale, pictureScale, scaledSize, startSizeField, rateLimiter, pastePacer, windowsLines, pointerCursor } from './desktop-workspace.mjs';
+import { desktopScales, nearestScale, pictureScale, scaledSize, rateLimiter, pastePacer, windowsLines, pointerCursor } from './desktop-workspace.mjs';
 
 test('the picture: sharp is the screen\'s scale, smooth is 100%, and with no choice smooth from 175% up', () => {
   for (const [ratio, sharp] of [[1, 1], [1.25, 1.25], [1.5, 1.5], [1.75, 1.75], [2, 2], [2.625, 2], [NaN, 1]]) {
@@ -11,8 +11,8 @@ test('the picture: sharp is the screen\'s scale, smooth is 100%, and with no cho
     assert.equal(pictureScale('Sharp', ratio), pictureScale('', ratio), `other words at ${ratio}`);
   }
   // A 4K screen at 200% with no choice opens at 100%: a quarter of the pixels.
-  assert.equal(startSizeField(...scaledSize(1920, 1040, pictureScale('', 2)), pictureScale('', 2)), '1920x1040');
-  assert.equal(startSizeField(...scaledSize(1920, 1040, pictureScale('sharp', 2)), pictureScale('sharp', 2)), '3840x2080@192');
+  assert.deepEqual(scaledSize(1920, 1040, pictureScale('', 2)), [1920, 1040]);
+  assert.deepEqual(scaledSize(1920, 1040, pictureScale('sharp', 2)), [3840, 2080]);
 });
 
 test("Windows' pointer becomes the browser's own at the desktop's scale", () => {
@@ -37,7 +37,7 @@ test('device pixels: width a multiple of 4, height even, at least 200, within fu
   assert.deepEqual(scaledSize(1400, 1000, 1), [1400, 1000]);
   assert.deepEqual(scaledSize(1401, 901, 1), [1400, 900]);
   assert.deepEqual(scaledSize(1403, 901, 1), [1400, 900]);
-  // guacd opens 1706 as 1704: the page asks for what it gets.
+  // The width comes down to a multiple of 4.
   assert.deepEqual(scaledSize(1366, 768, 1.25), [1704, 960]);
   assert.deepEqual(scaledSize(50, 50, 2), [200, 200]);
   for (const scale of desktopScales) {
@@ -85,10 +85,3 @@ test('pasted text reaches Windows with CRLF line ends', () => {
   assert.equal(windowsLines('\r\n\r\n'), '\r\n\r\n');
 });
 
-test('the start size names the DPI only on a scaled screen', () => {
-  assert.equal(startSizeField(1600, 900, 1), '1600x900');
-  assert.equal(startSizeField(2880, 1800, 2), '2880x1800@192');
-  assert.equal(startSizeField(2400, 1350, 1.25), '2400x1350@120');
-  assert.equal(startSizeField(2880, 1620, 1.5), '2880x1620@144');
-  assert.equal(startSizeField(3360, 1890, 1.75), '3360x1890@168');
-});

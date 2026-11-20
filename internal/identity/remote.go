@@ -1,7 +1,6 @@
 package identity
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"crypto/x509"
@@ -32,12 +31,13 @@ type RemoteTarget struct {
 }
 
 // RDPWorker is a TRUSTED launcher boundary, not an extension/plugin surface.
-// Implementations must enforce the supplied pin on the worker's own TLS before
-// CredSSP and bind guarded broker/process revocation to ctx. The shipped CLI
-// does not supply a launcher: the native isolated implementation remains a CI
-// lab. No fallback, separate TLS probe authority or bare guacd dial is enabled.
+// It opens a desktop whose RDP client runs in the browser (ADR 0008,
+// docs/BROWSER-RDP-PAGE.md) through Keybash's RDP proxy, with the stored
+// credential and the approved certificate. Implementations must enforce the
+// supplied pin on the proxy's own TLS before CredSSP and bind the proxy's
+// revocation to ctx. No fallback or separate TLS probe authority is enabled.
 type RDPWorker interface {
-	OpenRDP(context.Context, RDPRequest) (terminalweb.Stream, error)
+	OpenBrowserRDP(context.Context, RDPRequest) (terminalweb.MessageStream, error)
 }
 
 // SSHWorker receives exactly one session credential: a key or a password.
@@ -48,20 +48,17 @@ type RDPRequest struct {
 	Target             *targetguard.NamedTarget
 	Certificate        []byte
 	Username, Password string
-	Width, Height      int // the page's desktop size (see desktopSize); 0 for the worker's default
-	DPI                int // the page's display scale as a DPI (see DesktopBounds); 0 means 96
 }
 
 // desktopDPIs are Windows' own display scales as the DPI a desktop reports:
-// 100% (96, the default), 125, 150, 175 and 200%. A page on a scaled screen
-// asks for its device pixels at the matching DPI, so the desktop is drawn one
-// remote pixel per screen pixel instead of being stretched, and Windows draws
-// text and controls at the size a person expects.
+// 100% (96, the default), 125, 150, 175 and 200%. Only the native lab's guacd
+// desktop sizes itself by them, until step 3e3 removes it; the browser
+// desktop's sizes are the RDP proxy's to check.
 var desktopDPIs = []int{96, 120, 144, 168, 192}
 
-// DesktopBounds is the largest desktop a page may ask for at dpi: full HD at
-// 96, full HD times the scale above it, so a scaled screen gets its own pixels
-// and never more. ok is false for any DPI but Windows' scales.
+// DesktopBounds is the largest desktop the native lab's guacd desktop opens at
+// dpi: full HD at 96, full HD times the scale above it. ok is false for any
+// DPI but Windows' scales.
 func DesktopBounds(dpi int) (width, height int, ok bool) {
 	if !slices.Contains(desktopDPIs, dpi) {
 		return 0, 0, false
@@ -69,34 +66,12 @@ func DesktopBounds(dpi int) (width, height int, ok bool) {
 	return 1920 * dpi / 96, 1080 * dpi / 96, true
 }
 
-// DesktopSize reports whether a desktop may open at, or resize to, width by
-// height at dpi: even, at least 200 by 200, within DesktopBounds.
+// DesktopSize reports whether the native lab's guacd desktop may open at, or
+// resize to, width by height at dpi: even, at least 200 by 200, within
+// DesktopBounds.
 func DesktopSize(width, height, dpi int) bool {
 	mw, mh, ok := DesktopBounds(dpi)
 	return ok && width >= 200 && width <= mw && height >= 200 && height <= mh && width%2 == 0 && height%2 == 0
-}
-
-// desktopSize reads the size a desktop page asks to start at: "1600x900" at
-// 96 DPI, or "2880x1800@192" on a screen scaled to 200%. Digits are canonical
-// and 96 is never written out, so each size has one spelling; it must pass
-// DesktopSize, the same rule the page's later resizes meet.
-func desktopSize(raw string) (int, int, int, bool) {
-	size, scale, scaled := strings.Cut(raw, "@")
-	dpi := 96
-	if scaled {
-		d, e := strconv.Atoi(scale)
-		if e != nil || strconv.Itoa(d) != scale || d == 96 {
-			return 0, 0, 0, false
-		}
-		dpi = d
-	}
-	ws, hs, found := strings.Cut(size, "x")
-	w, e1 := strconv.Atoi(ws)
-	h, e2 := strconv.Atoi(hs)
-	if !found || e1 != nil || e2 != nil || strconv.Itoa(w) != ws || strconv.Itoa(h) != hs || !DesktopSize(w, h, dpi) {
-		return 0, 0, 0, false
-	}
-	return w, h, dpi, true
 }
 
 func (RDPRequest) Format(w fmt.State, _ rune) {
@@ -325,13 +300,17 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 	lease.active, lease.cancel = true, cancel
 	return lease, target, credential, ctx, nil
 }
-func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential, width, height, dpi int) (terminalweb.Stream, error) {
-	if ctx.Err() != nil || !l.slot(ctx) {
+
+// openTerminal opens an SSH terminal in a bounded setup slot, with the stored
+// credential under its own rules. Desktops open on their own socket
+// (remoteDesktop), never here.
+func (l *Lab) openTerminal(ctx context.Context, t RemoteTarget, c Credential) (terminalweb.Stream, error) {
+	if t.Protocol != "ssh" || l.remote.ssh == nil || ctx.Err() != nil || !l.slot(ctx) {
 		return nil, errRefused
 	}
 	e := validateCredential(&c)
 	var auth sshkey.Credential
-	if e == nil && t.Protocol == "ssh" {
+	if e == nil {
 		if c.Kind == "password" {
 			auth, e = sshkey.NewPassword(c.Secret)
 		} else {
@@ -345,11 +324,7 @@ func (l *Lab) openRemote(ctx context.Context, t RemoteTarget, c Credential, widt
 	if e != nil || ctx.Err() != nil {
 		return nil, errRefused
 	}
-	if t.Protocol == "ssh" {
-		return l.remote.ssh.OpenSSH(ctx, t.Target, t.Identity, c.Username, auth)
-	}
-	return l.remote.rdp.OpenRDP(ctx, RDPRequest{Target: t.Target, Certificate: append([]byte(nil), t.Identity...),
-		Username: c.Username, Password: c.Secret, Width: width, Height: height, DPI: dpi})
+	return l.remote.ssh.OpenSSH(ctx, t.Target, t.Identity, c.Username, auth)
 }
 func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" || r.Header.Get("Origin") != l.origin || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
@@ -393,20 +368,9 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, ok := parseFields(data, 1024, "csrf", "lease")
-	if !ok {
-		// A desktop page also says the size its desktop starts at.
-		fields, ok = parseFields(data, 1024, "csrf", "lease", "size")
-	}
 	clear(data)
 	if !ok {
 		return
-	}
-	width, height, dpi := 0, 0, 0
-	if size, sized := fields["size"]; sized {
-		var valid bool
-		if width, height, dpi, valid = desktopSize(size); !valid {
-			return
-		}
 	}
 	l.mu.Lock()
 	if subtle.ConstantTimeCompare([]byte(fields["csrf"]), []byte(l.csrf(id))) != 1 {
@@ -421,26 +385,18 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, _ := tokenID(raw)
-	if width != 0 && target.Protocol != "rdp" {
-		lease.cancel(nil)
-		l.mu.Lock()
-		delete(l.remote.leases, key)
-		l.mu.Unlock()
-		return // a size belongs to a desktop only
-	}
+	// This socket is for terminals. A desktop's lease is used up here without
+	// starting anything; a desktop opens only on its own socket.
 	defer func() { lease.cancel(nil); l.mu.Lock(); delete(l.remote.leases, key); l.mu.Unlock() }()
+	if target.Protocol != "ssh" {
+		return
+	}
 	stopRequest := context.AfterFunc(r.Context(), func() { lease.cancel(nil) })
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
 	defer stopSocket()
-	// Told before any worker exists or a password goes anywhere; the worker
-	// would refuse this certificate on its own handshake anyway.
-	if l.serverShowsAnother(ctx, target) {
-		_ = socket.Write(ctx, websocket.MessageText, []byte(`{"type":"identity-changed"}`))
-		return
-	}
 	setupTimer := time.AfterFunc(10*time.Second, func() { lease.cancel(nil) })
-	stream, e := l.openRemote(ctx, target, credential, width, height, dpi)
+	stream, e := l.openTerminal(ctx, target, credential)
 	setupTimer.Stop()
 	if e != nil || stream == nil || ctx.Err() != nil {
 		if stream != nil {
@@ -450,7 +406,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	// An SSH stream exists only after the server took the key and opened a
 	// terminal, so a key made here is now known to be on a server.
-	if target.Protocol == "ssh" && credential.Generated && !credential.Used {
+	if credential.Generated && !credential.Used {
 		_ = l.store.markKeyUsed(lease.owner, lease.credential)
 	}
 	if socket.Write(ctx, websocket.MessageText, []byte(`{"type":"ready"}`)) != nil {
@@ -461,7 +417,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	// closing it at once here would leave the page with no reason.
 	stopOwner()
 	stopSocket()
-	terminalweb.Relay(ctx, socket, &remoteActivity{Stream: stream, l: l, id: id, ctx: ctx, protocol: target.Protocol})
+	terminalweb.Relay(ctx, socket, &remoteActivity{Stream: stream, l: l, id: id, ctx: ctx})
 }
 
 // Reason passes on why the stream ended by itself, when it can say.
@@ -472,9 +428,10 @@ func (s *remoteActivity) Reason() terminalweb.Reason {
 	return ""
 }
 
+// remoteActivity is a terminal's stream: what the person types keeps the
+// sign-in alive, once the terminal took it.
 type remoteActivity struct {
-	protocol string
-	ctx      context.Context
+	ctx context.Context
 	terminalweb.Stream
 	l  *Lab
 	id [32]byte
@@ -488,11 +445,10 @@ func (s *remoteActivity) Write(p []byte) (int, error) {
 		return 0, errRefused
 	}
 	n, e := s.Stream.Write(p)
-	// Count only successfully validated native key/mouse commands as RDP
-	// activity. Output-driven Guacamole ack/sync/nop frames must not keep an
-	// unattended desktop logged in. SSH remains an opaque terminal input stream.
-	activity := len(p) > 0 && (s.protocol == "ssh" || s.protocol == "rdp" && (bytes.HasPrefix(p, []byte("3.key,")) || bytes.HasPrefix(p, []byte("5.mouse,"))))
-	if e == nil && n == len(p) && activity {
+	// A terminal's input is the person's own, an opaque stream; only what the
+	// terminal took counts. A desktop's activity is its fast-path input alone
+	// (fastPathInput).
+	if e == nil && n == len(p) && len(p) > 0 {
 		s.l.mu.Lock()
 		if s.ctx.Err() == nil && s.l.readyLocked(s.id, false) != nil {
 			s.l.sessions[s.id].last = s.l.now()

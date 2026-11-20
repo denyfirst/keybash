@@ -57,11 +57,15 @@ MFA state, current account revision, owner records, protocol/kind and approval
 fingerprint. There are at most two pending/active leases per
 owner and eight overall. Failed/closed setup consumes the capability too.
 
-WebSocket upgrade uses the exact fixed `/api/remote/socket` path, secure
-HttpOnly cookie and exact Origin after the common TLS 1.3, loopback, Host and
-canonical-URL checks. No token is accepted in URLs, query strings, storage or
-subprotocol headers. Before ANY worker/parser/dial starts, one bounded text
-frame must supply CSRF plus capability within five seconds. At most two
+A terminal's WebSocket upgrade uses the exact fixed `/api/remote/socket` path
+and a desktop's `/api/remote/desktop`, each with the secure HttpOnly cookie and
+exact Origin after the common TLS 1.3, loopback, Host and canonical-URL
+checks. No token is accepted in URLs, query strings, storage or subprotocol
+headers. Before ANY worker/parser/dial starts, one bounded first frame must
+supply CSRF plus capability within five seconds: on the terminal socket a text
+frame of exactly those two fields, on the desktop socket IronRDP's RDCleanPath
+request (`docs/BROWSER-RDP-PAGE.md`). A desktop's capability sent to the
+terminal socket is used up there without starting anything. At most two
 upgraded sockets/owner and eight overall can be in admission/active state;
 these bounds include sockets that never send a valid proof. This is not a
 general TCP accept/DDoS or exact process-memory guarantee.
@@ -73,9 +77,10 @@ ten seconds. Trusted worker implementations must honor cancellation and return
 a stream whose Close unblocks all reads/writes. A nonconforming in-process
 callback cannot be forcibly killed by a context; production worker processes
 need their own tested kill/resource boundary. Late results are closed and can
-never become ready after observed revocation. A fixed ready response is sent
-only after setup; it is not a generic RDP authentication claim (`guacd ready`
-alone still does not prove NLA).
+never become ready after observed revocation. A terminal's fixed ready
+response is sent only after setup. A desktop has none: NLA happens at the RDP
+proxy, and the page learns the outcome from IronRDP's own handshake or the
+socket's fixed close code.
 
 Contexts bind active streams to logout, idle/absolute expiry, account password/
 MFA/recovery revision change and service close. Credential/connection deletion
@@ -83,7 +88,8 @@ also cancels matching pending/active leases. Current owned input rechecks live
 session state. Entering MFA replacement immediately revokes that browser's
 leases, including output-only streams, while retaining the old account factor
 until the new one is confirmed. Current owned input refreshes
-idle; output/ACK/status polls do not. Socket close
+idle (for a desktop, only fast-path keyboard and mouse input);
+output/ACK/status polls do not. Socket close
 closes that stream, while account logout cancels all its browser streams. Data
 already sent and remote background processes cannot be retracted/guaranteed
 killed by closing the transport. The one-second identity sweep remains the

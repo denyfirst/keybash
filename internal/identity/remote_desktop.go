@@ -11,13 +11,6 @@ import (
 	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
-// BrowserRDPWorker opens a desktop whose RDP client runs in the browser
-// (ADR 0008, docs/BROWSER-RDP-PAGE.md), through Keybash's RDP proxy, with the
-// stored credential and the approved certificate.
-type BrowserRDPWorker interface {
-	OpenBrowserRDP(context.Context, RDPRequest) (terminalweb.MessageStream, error)
-}
-
 // desktopToken is the page's proof inside the RDCleanPath request: its CSRF
 // value and its single-use lease, both 43 base64url characters, joined by a
 // dot. The base64url alphabet has no dot.
@@ -36,11 +29,11 @@ func fastPathInput(message []byte) bool {
 	return len(message) > 1 && message[0]&0x03 == 0
 }
 
-// remoteDesktop is the browser desktop's socket. It makes the checks the
-// current socket makes (origin, session, access to servers, capacity), then
-// reads the page's proof from IronRDP's first message, the RDCleanPath
-// request, never from the address. The request goes on to the proxy without
-// the proof.
+// remoteDesktop is the desktop's socket, the only way a desktop opens. It
+// makes the checks the terminal socket makes (origin, session, access to
+// servers, capacity), then reads the page's proof from IronRDP's first
+// message, the RDCleanPath request, never from the address. The request goes
+// on to the proxy without the proof.
 func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" || r.Header.Get("Origin") != l.origin || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		refuse(w, 403)
@@ -49,9 +42,9 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	id, ok := tokenID(requestToken(r))
 	l.mu.Lock()
 	s := l.readyLocked(id, false)
-	var browser BrowserRDPWorker
+	var browser RDPWorker
 	if l.remote != nil {
-		browser, _ = l.remote.rdp.(BrowserRDPWorker)
+		browser = l.remote.rdp
 	}
 	allowed := ok && s != nil && browser != nil && l.serversLocked(s)
 	capacityFull := allowed && !l.reserveRemoteSocketLocked(s.owner)
@@ -124,7 +117,7 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		return
 	}
-	// As openRemote: a bounded setup slot, and the stored credential's rules.
+	// As openTerminal: a bounded setup slot, and the stored credential's rules.
 	if !l.slot(ctx) {
 		return
 	}

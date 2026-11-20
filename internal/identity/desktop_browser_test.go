@@ -29,10 +29,6 @@ type pageProxy struct {
 	forwarded chan []byte
 }
 
-func (p *pageProxy) OpenRDP(context.Context, RDPRequest) (terminalweb.Stream, error) {
-	return nil, errRefused
-}
-
 func (p *pageProxy) OpenBrowserRDP(ctx context.Context, r RDPRequest) (terminalweb.MessageStream, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

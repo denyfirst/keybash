@@ -358,11 +358,11 @@ func TestAuditorReachesNoServer(t *testing.T) {
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	server.StartTLS()
 	defer server.Close()
-	socket := func(c *custodyClient) int {
+	socket := func(c *custodyClient, path string) int {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		conn, response, err := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}})
+		conn, response, err := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+path, &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}})
 		if conn != nil {
 			conn.CloseNow()
 		}
@@ -379,8 +379,10 @@ func TestAuditorReachesNoServer(t *testing.T) {
 	}
 	bob, b := f.person("bob", roleUser)
 	openTo(t, f.l, b.ID)
-	if socket(bob) != 101 {
-		t.Fatal("a user's terminal socket was refused")
+	for _, path := range []string{"/api/remote/socket", "/api/remote/desktop"} {
+		if socket(bob, path) != 101 {
+			t.Fatalf("a user's %s was refused", path)
+		}
 	}
 	credential, e := f.store.putCredential(b.ID, Credential{Name: "Synthetic remote", Kind: "password", Username: "synthetic-user", Secret: "Synthetic remote password"})
 	if e != nil {
@@ -415,8 +417,10 @@ func TestAuditorReachesNoServer(t *testing.T) {
 		bob.expect(route[0], route[1], route[2], 403)
 	}
 	bob.expect("GET", "/remote/rdp/"+record.ID, "", 404)
-	if socket(bob) != 403 {
-		t.Fatal("an auditor opened a terminal socket")
+	for _, path := range []string{"/api/remote/socket", "/api/remote/desktop"} {
+		if socket(bob, path) != 403 {
+			t.Fatalf("an auditor opened %s", path)
+		}
 	}
 	f.l.mu.Lock()
 	id, _ := tokenID(bob.cookie.Value)

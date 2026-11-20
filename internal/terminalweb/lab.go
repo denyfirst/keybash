@@ -44,7 +44,6 @@ type Lab struct {
 	factory      Factory
 	outputLimit  int
 	creditWait   time.Duration
-	desktop      bool
 	mu           sync.Mutex
 	bootstrap    [32]byte
 	bootstrapEnd time.Time
@@ -75,17 +74,6 @@ func New(origin string, factory Factory) (*Lab, string, error) {
 	return &Lab{origin: origin, host: u.Host, factory: factory, outputLimit: 8 * 1024 * 1024, creditWait: creditTimeout, bootstrap: sha256.Sum256([]byte(code)), bootstrapEnd: time.Now().Add(5 * time.Minute)}, code, nil
 }
 
-// NewDesktop uses the same loopback/TLS/owner/session boundary with a fixed
-// desktop asset profile. The supplied Stream must validate both directions;
-// this transport is not a Guacamole argument or credential endpoint.
-func NewDesktop(origin string, factory Factory) (*Lab, string, error) {
-	lab, code, err := New(origin, factory)
-	if err == nil {
-		lab.desktop = true
-	}
-	return lab, code, err
-}
-
 func randomToken() (string, error) {
 	var bytes [32]byte
 	if _, err := rand.Read(bytes[:]); err != nil {
@@ -105,9 +93,6 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src "+l.origin+" "+strings.Replace(l.origin, "https:", "wss:", 1)+"; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'")
-	if l.desktop {
-		w.Header().Set("Content-Security-Policy", w.Header().Get("Content-Security-Policy")+"; img-src blob:")
-	}
 	peer, _, peerErr := net.SplitHostPort(r.RemoteAddr)
 	peerAddr, addrErr := netip.ParseAddr(peer)
 	if peerErr != nil || addrErr != nil || !peerAddr.Unmap().IsLoopback() || r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || r.Host != l.host || r.URL.RawQuery != "" || r.URL.Path != r.URL.EscapedPath() {
@@ -138,9 +123,6 @@ func (l *Lab) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	assets := map[string]string{"/": "index.html", "/app.mjs": "app.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2", "/style.css": "style.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css"}
-	if l.desktop {
-		assets = map[string]string{"/": "desktop.html", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/paste.mjs": "paste.mjs", "/desktop.mjs": "desktop.mjs", "/remote.mjs": "remote.mjs", "/keybash.css": "keybash.css", web.FontPath: "schibsted-grotesk.woff2", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/guacamole.mjs": "vendor/guacamole.mjs"}
-	}
 	path, ok := assets[r.URL.Path]
 	if !ok {
 		http.NotFound(w, r)

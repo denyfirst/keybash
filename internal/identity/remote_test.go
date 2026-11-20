@@ -7,7 +7,6 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -15,7 +14,6 @@ import (
 	"math/big"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -35,42 +33,67 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// fixtureRDPWorker plays Keybash's RDP proxy: each desktop it opens is a
+// fixtureMessages, and it can hold a desktop at setup until released.
 type fixtureRDPWorker struct {
 	calls    atomic.Int32
-	width    atomic.Int64 // the size the last desktop was asked to start at
-	height   atomic.Int64
-	dpi      atomic.Int64
 	started  chan struct{}
 	release  chan struct{}
 	closed   chan struct{}
 	once     sync.Once             // closed is closed once, however many desktops a test opens
-	messages chan *fixtureMessages // each browser desktop opened, for the test to inspect
+	messages chan *fixtureMessages // each desktop opened, for the test to inspect
 	expected string
 }
 
-func (f *fixtureRDPWorker) OpenRDP(ctx context.Context, r RDPRequest) (terminalweb.Stream, error) {
+func (f *fixtureRDPWorker) OpenBrowserRDP(ctx context.Context, r RDPRequest) (terminalweb.MessageStream, error) {
 	if r.Password != f.expected || r.Username != "synthetic-user" || r.Target.Hostname() != "rdp.invalid" {
 		return nil, errRefused
 	}
 	f.calls.Add(1)
-	f.width.Store(int64(r.Width))
-	f.height.Store(int64(r.Height))
-	f.dpi.Store(int64(r.DPI))
 	if f.started != nil {
 		close(f.started)
 	}
 	if f.release != nil {
 		<-f.release
 	}
-	left, right := net.Pipe()
-	go func() { defer right.Close(); _, _ = io.Copy(right, right) }()
+	m := newFixtureMessages()
 	go func() {
 		<-ctx.Done()
-		_ = left.Close()
+		_ = m.Close()
 		if f.closed != nil {
 			f.once.Do(func() { close(f.closed) })
 		}
 	}()
+	if f.messages != nil {
+		f.messages <- m
+	}
+	return m, nil
+}
+
+// terminalWorker plays the SSH worker: an echo terminal for the account
+// "deploy", counted, which can be held at setup until released and says when
+// its context ends.
+type terminalWorker struct {
+	calls            atomic.Int32
+	started, release chan struct{}
+	closed           chan struct{}
+	once             sync.Once // closed is closed once, however many terminals a test opens
+}
+
+func (w *terminalWorker) OpenSSH(ctx context.Context, _ *targetguard.NamedTarget, _ []byte, user string, _ sshkey.Credential) (terminalweb.Stream, error) {
+	if user != "deploy" {
+		return nil, errRefused
+	}
+	w.calls.Add(1)
+	if w.started != nil {
+		close(w.started)
+	}
+	if w.release != nil {
+		<-w.release
+	}
+	left, right := net.Pipe()
+	go func() { defer right.Close(); _, _ = io.Copy(right, right) }()
+	go func() { <-ctx.Done(); _ = left.Close(); w.once.Do(func() { close(w.closed) }) }()
 	return fixtureRemoteStream{left}, nil
 }
 
@@ -223,16 +246,57 @@ func TestOwnedRemoteExpiryLimitsAndDelete(t *testing.T) {
 	}
 	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
 }
+
+// terminalFixture is remoteFixture for an SSH server: alice, ready and freshly
+// proved, owns one connection to it, with a password for "deploy".
+func terminalFixture(t *testing.T, origin string, worker SSHWorker) (*Lab, *custodyClient, string) {
+	t.Helper()
+	store, _, _ := bootstrapped(t)
+	_, _, codes := enrollFixture(t, store, "alice", time.Now())
+	_, hostKey, _ := ed25519.GenerateKey(rand.Reader)
+	hostSigner, _ := ssh.NewSignerFromKey(hostKey)
+	ip := netip.MustParseAddr("10.34.0.9")
+	policy, e := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(ip, 22)}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	named, e := targetguard.NewNamedTarget(policy, "ssh.invalid", 22, []netip.Addr{ip})
+	if e != nil {
+		t.Fatal(e)
+	}
+	target := RemoteTarget{strings.Repeat("c", 32), "Synthetic SSH", "ssh", named, hostSigner.PublicKey().Marshal()}
+	l, e := NewRemoteLab(origin, store, []RemoteTarget{target}, worker, nil)
+	if e != nil {
+		t.Fatal("remote constructor refused")
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	openTo(t, l, mustLookup(t, store, "alice").ID)
+	c := &custodyClient{t: t, l: l}
+	c.login()
+	c.session("challenge")
+	c.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
+	c.session("ready")
+	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
+	a, _ := store.lookup("alice")
+	credential, e := store.putCredential(a.ID, Credential{Name: "Synthetic login", Kind: "password", Username: "deploy", Secret: "Synthetic remote password"})
+	if e != nil {
+		t.Fatal("fixture credential failed")
+	}
+	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic terminal", "target": target.ID, "credential": credential, "approval": approvalFingerprint(target)}), 200)
+	var record struct{ ID string }
+	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
+		t.Fatal("connection creation failed")
+	}
+	return l, c, record.ID
+}
+
 func TestOwnedRemoteSocketEchoLogoutAndLateSetup(t *testing.T) {
 	for _, late := range []bool{false, true} {
 		t.Run(map[bool]string{false: "active", true: "late"}[late], func(t *testing.T) {
-			server := httptest.NewUnstartedServer(nil)
-			origin := "https://" + server.Listener.Addr().String()
-			l, _, c, record, worker := remoteFixture(t, origin)
-			server.Config.Handler = l
-			server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
-			server.StartTLS()
-			defer server.Close()
+			server, origin := tlsFixture(t)
+			worker := &terminalWorker{closed: make(chan struct{})}
+			l, c, record := terminalFixture(t, origin, worker)
+			startTLS(t, server, l)
 			if late {
 				worker.started = make(chan struct{})
 				worker.release = make(chan struct{})
@@ -258,9 +322,6 @@ func TestOwnedRemoteSocketEchoLogoutAndLateSetup(t *testing.T) {
 				_, data, e := socket.Read(ctx)
 				if e != nil || string(data) != `{"type":"ready"}` {
 					t.Fatal("worker ready missing")
-				}
-				if worker.width.Load() != 0 || worker.height.Load() != 0 {
-					t.Fatal("a proof with no size asked for one")
 				}
 				if socket.Write(ctx, websocket.MessageText, []byte(`{"type":"resize","columns":130,"rows":27}`)) != nil {
 					t.Fatal("resize write failed")
@@ -291,6 +352,61 @@ func TestOwnedRemoteSocketEchoLogoutAndLateSetup(t *testing.T) {
 			}
 			if worker.calls.Load() != 1 {
 				t.Fatal("unexpected worker launch count")
+			}
+		})
+	}
+}
+
+// Signing out ends a desktop as it ends a terminal, open or still starting:
+// the page's socket ends, and so does the proxy's context.
+func TestOwnedDesktopEndsOnSignOutOpenOrStarting(t *testing.T) {
+	for _, late := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open", true: "starting"}[late], func(t *testing.T) {
+			server, origin := tlsFixture(t)
+			l, _, c, record, worker := remoteFixture(t, origin)
+			startTLS(t, server, l)
+			if late {
+				worker.started = make(chan struct{})
+				worker.release = make(chan struct{})
+			}
+			raw := grantFixture(t, c, record)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			socket, e := dialDesktop(ctx, server, origin, http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}})
+			if e != nil {
+				t.Fatal("valid socket refused")
+			}
+			defer socket.CloseNow()
+			if socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, c.csrf+"."+raw)) != nil {
+				t.Fatal("the request could not be sent")
+			}
+			if late {
+				<-worker.started
+				c.expect("DELETE", "/api/session", "{}", 204)
+				close(worker.release)
+				if _, _, e := socket.Read(ctx); e == nil {
+					t.Fatal("a desktop signed out during setup answered")
+				}
+			} else {
+				<-worker.messages
+				if socket.Write(ctx, websocket.MessageBinary, []byte("synthetic input")) != nil {
+					t.Fatal("input refused")
+				}
+				if _, data, e := socket.Read(ctx); e != nil || string(data) != "synthetic input" {
+					t.Fatal("the desktop did not pass exact bytes both ways")
+				}
+				c.expect("DELETE", "/api/session", "{}", 204)
+				if code, text := closeCode(ctx, socket); code != 4003 || text != "signed-out" {
+					t.Fatalf("signing out closed the desktop with %d %q", code, text)
+				}
+			}
+			select {
+			case <-worker.closed:
+			case <-ctx.Done():
+				t.Fatal("the proxy did not see the sign-out")
+			}
+			if worker.calls.Load() != 1 {
+				t.Fatal("unexpected proxy launch count")
 			}
 		})
 	}
@@ -554,8 +670,10 @@ func (p activityProbe) Write(b []byte) (int, error) {
 }
 func (activityProbe) Resize(uint32, uint32) error { return nil }
 func (activityProbe) Close() error                { return nil }
-func TestOwnedRemoteOutputDrivenRDPDoesNotExtendIdle(t *testing.T) {
-	l, _, c, _, _ := remoteFixture(t, "https://127.0.0.1:8443")
+
+// A terminal's input keeps its sign-in alive only once the terminal took it.
+func TestOwnedTerminalInputExtendsIdleOnlyWhenTaken(t *testing.T) {
+	l, c, _ := terminalFixture(t, "https://127.0.0.1:8443", &terminalWorker{closed: make(chan struct{})})
 	id, _ := tokenID(c.cookie.Value)
 	now := time.Now()
 	l.mu.Lock()
@@ -564,35 +682,75 @@ func TestOwnedRemoteOutputDrivenRDPDoesNotExtendIdle(t *testing.T) {
 	ctx := l.sessions[id].ctx
 	l.mu.Unlock()
 	advance(l, &now, time.Minute)
-	stream := &remoteActivity{Stream: activityProbe{}, l: l, id: id, ctx: ctx, protocol: "rdp"}
-	for _, command := range []string{"3.nop;", "4.sync,1.1;", "3.ack,1.0,2.OK,1.0;"} {
-		if _, e := stream.Write([]byte(command)); e != nil {
-			t.Fatal("valid protocol credit fixture refused")
-		}
-	}
-	l.mu.Lock()
-	unchanged := l.sessions[id].last.Equal(start)
-	l.mu.Unlock()
-	if !unchanged {
-		t.Fatal("output-driven RDP credit extended idle")
-	}
-	stream.Stream = activityProbe{refuse: true}
-	_, _ = stream.Write([]byte("3.key,2.97,1.1;"))
-	l.mu.Lock()
-	unchanged = l.sessions[id].last.Equal(start)
-	l.mu.Unlock()
-	if !unchanged {
+	last := func() time.Time { l.mu.Lock(); defer l.mu.Unlock(); return l.sessions[id].last }
+	stream := &remoteActivity{Stream: activityProbe{refuse: true}, l: l, id: id, ctx: ctx}
+	_, _ = stream.Write([]byte("ls\r"))
+	if !last().Equal(start) {
 		t.Fatal("rejected input extended idle")
 	}
 	stream.Stream = activityProbe{}
-	if _, e := stream.Write([]byte("3.key,2.97,1.1;")); e != nil {
+	if _, e := stream.Write(nil); e != nil || !last().Equal(start) {
+		t.Fatal("an empty write extended idle")
+	}
+	if _, e := stream.Write([]byte("ls\r")); e != nil {
 		t.Fatal("valid user activity refused")
 	}
-	l.mu.Lock()
-	touched := l.sessions[id].last.Equal(now)
-	l.mu.Unlock()
-	if !touched {
+	if !last().Equal(now) {
 		t.Fatal("valid user activity did not refresh idle")
+	}
+}
+
+// What the page sends by itself (graphics acknowledgements, every slow-path
+// reply) does not keep a desktop signed in; the person's keys and mouse, the
+// fast-path input, do.
+func TestOnlyThePersonsInputKeepsADesktopSignedIn(t *testing.T) {
+	server, origin := tlsFixture(t)
+	l, _, c, record, worker := remoteFixture(t, origin)
+	startTLS(t, server, l)
+	id, _ := tokenID(c.cookie.Value)
+	now := time.Now()
+	l.mu.Lock()
+	l.now = func() time.Time { return now }
+	l.mu.Unlock()
+	raw := grantFixture(t, c, record)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	socket, e := dialDesktop(ctx, server, origin, http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}})
+	if e != nil {
+		t.Fatal("valid socket refused")
+	}
+	defer socket.CloseNow()
+	if socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, c.csrf+"."+raw)) != nil {
+		t.Fatal("the request could not be sent")
+	}
+	<-worker.messages
+	last := func() time.Time { l.mu.Lock(); defer l.mu.Unlock(); return l.sessions[id].last }
+	start := last()
+	advance(l, &now, time.Minute)
+	// The relay admits each message before the proxy gets it, so its echo
+	// means the gateway has already counted it, or not.
+	send := func(message []byte) {
+		t.Helper()
+		if socket.Write(ctx, websocket.MessageBinary, message) != nil {
+			t.Fatal("a desktop message was refused")
+		}
+		if _, data, e := socket.Read(ctx); e != nil || !bytes.Equal(data, message) {
+			t.Fatal("the desktop message did not come back")
+		}
+	}
+	for _, reply := range [][]byte{
+		{0x03, 0x00, 0x00, 0x0c, 0x02, 0xf0, 0x80, 0x64, 0x00, 0x07, 0x03, 0xeb}, // a slow-path PDU
+		{0x03, 0x00, 0x00, 0x08, 0x02, 0xf0, 0x80, 0x00},
+		{0x01, 0x02}, // neither fast-path input nor a TPKT
+	} {
+		send(reply)
+	}
+	if !last().Equal(start) {
+		t.Fatal("what the page sent by itself extended idle")
+	}
+	send([]byte{0x04, 0x02, 0x00}) // fast-path input
+	if !last().Equal(now) {
+		t.Fatal("the person's input did not refresh idle")
 	}
 }
 
@@ -645,7 +803,7 @@ func TestExpiredRDPCertificateDisablesOnlyItsServer(t *testing.T) {
 	if !future.UsableAt(now.Add(90 * time.Minute)) {
 		t.Fatal("a future certificate did not become usable in its period")
 	}
-	_, _ = l.openRemote(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"}, 0, 0, 0)
+	_, _ = l.openTerminal(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"})
 	if _, ok := worker.got.(*sshkey.Password); !ok {
 		t.Fatal("the SSH server stopped working beside an expired RDP certificate")
 	}
@@ -732,29 +890,22 @@ func TestOwnedRemoteSessionsEndWithTheirReason(t *testing.T) {
 	})
 }
 
-// A desktop starts at the size its page asks for, within the bounds the page
-// could ask for once connected; any other size, or a size for a terminal,
-// opens nothing.
-func TestOwnedRemoteDesktopStartsAtThePageSize(t *testing.T) {
-	for raw, want := range map[string][3]int{"1600x900": {1600, 900, 96}, "200x200": {200, 200, 96}, "1920x1080": {1920, 1080, 96},
-		"2880x1800@192": {2880, 1800, 192}, "3840x2160@192": {3840, 2160, 192}, "2400x1350@120": {2400, 1350, 120},
-		"2880x1620@144": {2880, 1620, 144}, "3360x1890@168": {3360, 1890, 168}, "200x200@192": {200, 200, 192}} {
-		if w, h, dpi, ok := desktopSize(raw); !ok || w != want[0] || h != want[1] || dpi != want[2] {
-			t.Fatalf("%q refused", raw)
-		}
-	}
-	bad := []string{"", "1601x900", "1600x901", "198x900", "1922x900", "1600x198", "1600x1082", "01600x900", "1600x0900", "1600X900", "1600x", "x900", "1600x900x2", " 1600x900", "1600x900 ", "+1600x900", "-1600x900", "1600×900",
-		// Only Windows' scales, one spelling each, and never past full HD times the scale.
-		"1600x900@96", "1600x900@100", "1600x900@288", "1600x900@0", "1600x900@-192", "1600x900@0192", "1600x900@+192", "1600x900@", "1600x900@192@192", "1600x900@192 ",
-		"3842x2160@192", "3840x2162@192", "2402x1350@120", "2400x1352@120", "2882x1620@144", "3362x1890@168", "2880x1800@144", "1922x1080@96"}
-	for _, raw := range bad {
-		if _, _, _, ok := desktopSize(raw); ok {
-			t.Fatalf("%q accepted", raw)
-		}
-	}
+// The native lab's guacd desktop sizes itself by Windows' scales, never past
+// full HD times the scale, until step 3e3 removes it.
+func TestDesktopBoundsAreWindowsScales(t *testing.T) {
 	for dpi, want := range map[int][2]int{96: {1920, 1080}, 120: {2400, 1350}, 144: {2880, 1620}, 168: {3360, 1890}, 192: {3840, 2160}} {
 		if w, h, ok := DesktopBounds(dpi); !ok || w != want[0] || h != want[1] || !DesktopSize(w, h, dpi) || DesktopSize(w+2, h, dpi) || DesktopSize(w, h+2, dpi) {
 			t.Fatalf("bounds at %d DPI: %dx%d %v", dpi, w, h, ok)
+		}
+	}
+	for _, size := range [][3]int{{200, 200, 96}, {1600, 900, 96}, {2880, 1800, 192}} {
+		if !DesktopSize(size[0], size[1], size[2]) {
+			t.Fatalf("%v refused", size)
+		}
+	}
+	for _, size := range [][3]int{{1601, 900, 96}, {1600, 901, 96}, {198, 900, 96}, {1600, 198, 96}, {1922, 1080, 96}, {2880, 1800, 144}} {
+		if DesktopSize(size[0], size[1], size[2]) {
+			t.Fatalf("%v accepted", size)
 		}
 	}
 	for _, dpi := range []int{0, 72, 95, 97, 100, 110, 200, 240, 288, 384} {
@@ -762,120 +913,59 @@ func TestOwnedRemoteDesktopStartsAtThePageSize(t *testing.T) {
 			t.Fatalf("%d DPI accepted", dpi)
 		}
 	}
-	server := httptest.NewUnstartedServer(nil)
-	origin := "https://" + server.Listener.Addr().String()
-	l, _, c, record, worker := remoteFixtureWithLimits(t, origin, sessionlimits.Limits{Total: 16, PerOwner: 16})
-	server.Config.Handler = l
-	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
-	server.StartTLS()
-	defer server.Close()
-	open := func(size string) string {
+}
+
+// The terminal socket opens terminals only. Its proof is exactly the page's
+// CSRF value and lease, so the size the guacd page once sent opens nothing
+// and leaves the lease unused; a desktop's lease is used up there without
+// starting anything, and is gone from the desktop's own socket too.
+func TestTheTerminalSocketOpensTerminalsOnly(t *testing.T) {
+	server, origin := tlsFixture(t)
+	l, _, c, record, worker := remoteFixture(t, origin)
+	startTLS(t, server, l)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	header := http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}
+	open := func(proof map[string]string) {
 		t.Helper()
-		raw := grantFixture(t, c, record)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		header := http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}
 		socket, _, e := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: header})
 		if e != nil {
 			t.Fatal("valid socket refused")
 		}
 		defer socket.CloseNow()
-		if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(map[string]string{"csrf": c.csrf, "lease": raw, "size": size}))) != nil {
+		if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(proof))) != nil {
 			t.Fatal("proof write failed")
 		}
-		_, data, e := socket.Read(ctx)
-		if e != nil {
-			return ""
-		}
-		return string(data)
-	}
-	for _, raw := range []string{"1601x900", "1922x1080", "01600x900", "1600x900x2", "1600x900@96", "3842x2160@192", "1600x900@100"} {
-		if got := open(raw); got != "" || worker.calls.Load() != 0 {
-			t.Fatalf("a desktop opened at %q (%q)", raw, got)
+		if _, data, e := socket.Read(ctx); e == nil {
+			t.Fatalf("the terminal socket answered %q", data)
 		}
 	}
-	if got := open("1600x900"); got != `{"type":"ready"}` || worker.width.Load() != 1600 || worker.height.Load() != 900 || worker.dpi.Load() != 96 {
-		t.Fatalf("the page's size did not reach the desktop: %q %dx%d at %d", got, worker.width.Load(), worker.height.Load(), worker.dpi.Load())
+	raw := grantFixture(t, c, record)
+	key, _ := tokenID(raw)
+	open(map[string]string{"csrf": c.csrf, "lease": raw, "size": "1600x900"})
+	l.mu.Lock()
+	unused := l.remote.leases[key] != nil && !l.remote.leases[key].active
+	l.mu.Unlock()
+	if !unused {
+		t.Fatal("a proof with a size used the lease")
 	}
-	if got := open("2880x1800@192"); got != `{"type":"ready"}` || worker.width.Load() != 2880 || worker.height.Load() != 1800 || worker.dpi.Load() != 192 {
-		t.Fatalf("a scaled screen's size did not reach the desktop: %q %dx%d at %d", got, worker.width.Load(), worker.height.Load(), worker.dpi.Load())
+	open(map[string]string{"csrf": c.csrf, "lease": raw})
+	l.mu.Lock()
+	left := len(l.remote.leases)
+	l.mu.Unlock()
+	if left != 0 {
+		t.Fatal("a desktop's lease outlived the terminal socket")
 	}
-}
-
-// countingSSHWorker opens nothing and counts how often it was asked to.
-type countingSSHWorker struct{ calls atomic.Int32 }
-
-func (w *countingSSHWorker) OpenSSH(context.Context, *targetguard.NamedTarget, []byte, string, sshkey.Credential) (terminalweb.Stream, error) {
-	w.calls.Add(1)
-	return nil, errRefused
-}
-
-// A size belongs to a desktop: a terminal's socket that names one opens nothing.
-func TestOwnedRemoteTerminalTakesNoDesktopSize(t *testing.T) {
-	store, _, _ := bootstrapped(t)
-	_, _, codes := enrollFixture(t, store, "alice", time.Now())
-	_, hostKey, _ := ed25519.GenerateKey(rand.Reader)
-	hostSigner, _ := ssh.NewSignerFromKey(hostKey)
-	ip := netip.MustParseAddr("10.34.0.9")
-	policy, e := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(ip, 22)}, nil)
-	if e != nil {
-		t.Fatal(e)
-	}
-	named, e := targetguard.NewNamedTarget(policy, "ssh.invalid", 22, []netip.Addr{ip})
-	if e != nil {
-		t.Fatal(e)
-	}
-	target := RemoteTarget{strings.Repeat("c", 32), "Synthetic SSH", "ssh", named, hostSigner.PublicKey().Marshal()}
-	worker := &countingSSHWorker{}
-	server := httptest.NewUnstartedServer(nil)
-	origin := "https://" + server.Listener.Addr().String()
-	l, e := NewRemoteLab(origin, store, []RemoteTarget{target}, worker, nil)
-	if e != nil {
-		t.Fatal("remote constructor refused")
-	}
-	defer l.Close()
-	server.Config.Handler = l
-	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
-	server.StartTLS()
-	defer server.Close()
-	openTo(t, l, mustLookup(t, store, "alice").ID)
-	c := &custodyClient{t: t, l: l}
-	c.login()
-	c.session("challenge")
-	c.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
-	c.session("ready")
-	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
-	a, _ := store.lookup("alice")
-	credential, e := store.putCredential(a.ID, Credential{Name: "Synthetic login", Kind: "password", Username: "deploy", Secret: "Synthetic remote password"})
-	if e != nil {
-		t.Fatal("fixture credential failed")
-	}
-	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic terminal", "target": target.ID, "credential": credential, "approval": approvalFingerprint(target)}), 200)
-	var record struct{ ID string }
-	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
-		t.Fatal("connection creation failed")
-	}
-	raw := grantFixture(t, c, record.ID)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	header := http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}
-	socket, _, e := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: header})
+	socket, e := dialDesktop(ctx, server, origin, header)
 	if e != nil {
 		t.Fatal("valid socket refused")
 	}
 	defer socket.CloseNow()
-	if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(map[string]string{"csrf": c.csrf, "lease": raw, "size": "1600x900"}))) != nil {
-		t.Fatal("proof write failed")
-	}
-	if _, data, e := socket.Read(ctx); e == nil {
-		t.Fatalf("a terminal took a desktop size: %q", data)
+	_ = socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, c.csrf+"."+raw))
+	if _, _, e := socket.Read(ctx); e == nil {
+		t.Fatal("a lease used on the terminal socket opened a desktop")
 	}
 	if worker.calls.Load() != 0 {
-		t.Fatal("a terminal with a desktop size reached its worker")
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if len(l.remote.leases) != 0 {
-		t.Fatal("the refused lease stayed")
+		t.Fatal("the terminal socket started a desktop")
 	}
 }
