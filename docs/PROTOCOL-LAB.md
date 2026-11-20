@@ -23,10 +23,11 @@ See ADR 0002 for availability tradeoffs and deployment limits.
 ## Slice 2: SSH identity and remote PTY (library lab implemented)
 
 Adopted `golang.org/x/crypto v0.58.0`; exact graph, licenses, vulnerability
-scope, limits and update owner are recorded in `DEPENDENCIES.md`. The public
-`sshtransport.Connect` receives a guarded `NamedTarget` and trusted per-target
-configuration, then passes its connection to `ssh.NewClientConn` without
-re-resolution. The approved host key is copied and checked before key
+scope, limits and update owner are recorded in `DEPENDENCIES.md`. The SSH
+connector (`connect` in `sshtransport/terminal.go`; today it runs inside the
+sandboxed worker, `SSH-PROCESS-LAB.md`) takes the connection dialled through a
+guarded `NamedTarget` and trusted per-target configuration, then passes it to
+`ssh.NewClientConn` without re-resolution. The approved host key is copied and checked before key
 authentication. The initial lab accepts Ed25519 host/user keys only; no automatic
 trust, password, agent, or keyboard-interactive fallback.
 
@@ -86,57 +87,30 @@ informs these integration gates; using the renderer alone does not secure SSH.
 
 ## Slice 4a: credential-free RDP boundaries (lab implemented)
 
-`rdplab.Probe` performs fixed-size initial RDP negotiation and an actual TLS
-handshake with Go's standard library, an imported approved leaf, standard TLS
-name/certificate verification and an additional exact DER SHA-256 pin. Only
-HYBRID, TLS >=1.2 and the checked pinned leaf are accepted. It accepts no
-credential and closes every outcome. Fresh-key loopback fixtures cover valid
-Ed25519/RSA/ECDSA, old TLS, changed/expired/future/purpose certs, weak keys,
-malformed/downgrade responses, cancellation and timeouts. This proves neither
-account authentication nor CredSSP/NLA interoperability; the fixture only speaks
-negotiation and TLS. Probe success cannot authorize a different connection.
+This slice's credential-free probe (`rdplab.Probe`) checked an approved leaf
+after a HYBRID negotiation, without any credential. It and the Guacamole text
+prototype were removed on 20 November 2026. What it established stays:
 
-A private bounded Guacamole text prototype preserves split Unicode, controls
-and line endings both ways. It admits only text/plain with 32 KiB total decoded
-text, isolates session buffers, refuses malformed/replayed/wrong-stream data
-and clears on close. No desktop, browser or OS clipboard is connected.
+- the Servers page reads a server's certificate with `rdpcert`, which requires
+  HYBRID and a valid confirmation and sends nothing of an account;
+- an approved identity is a current server leaf with an allowed key, the server
+  purpose and no CA (`rdplab/identity.go`);
+- Keybash's RDP proxy enforces that exact certificate on its own TLS before
+  CredSSP (`NATIVE-RDP-LAB.md`).
 
 Required Linux CI proves an empty unnamed network namespace, UID/GID/capability
 drop and failed network attempts, with a no-namespace sabotage check. The child
-still sees the host filesystem; no guacd or authorized egress route exists.
-This is not a production sandbox. See [ADR 0003](adr/0003-rdp-precredential-boundaries.md).
+still sees the host filesystem; no authorized egress route exists. This is not
+a production sandbox. See [ADR 0003](adr/0003-rdp-precredential-boundaries.md).
 
-## Slice 4b: native RDP (synthetic lab implemented)
+## Slice 4b: native RDP (replaced)
 
-The private native adapter, one-use guarded stream broker, actual TLS identity
-hook and test-only Linux worker/peer launcher are implemented.
-`NATIVE-RDP-LAB.md` records pinned sources and boundaries. Required native CI
-proves synthetic NLA login, bounded decoded desktop images, actual certificate
-refusal before CredSSP, sandbox/broker cancellation and callback sabotage in
-both directions. Native clipboard/dynamic display remain disabled. A separate loopback browser
-viewer now validates the drawing/input subset, locally renders PNGs, forwards
-focused mouse/keyboard input and revokes the native stream. Native Chromium
-checks authenticate the peer independently and observe input/pixel changes.
-See `BROWSER-RDP-LAB.md`. Desktop text clipboard, remote resize and the wider
-keyboard/reconnect matrix remain the next protocol-lab gate.
-
-Guacamole JS is pinned and bundled for this lab; production guacd/FreeRDP remain
-candidates. Before production adoption, record exact
-versions, licenses, transitive/native build inventory, security reports, resource
-limits and update policy. guacd stays on an isolated unpublished worker network.
-It must receive a validated literal destination and have independently enforced
-egress; the Go guard does not protect guacd automatically.
-
-Require NLA and TLS identity verification. Demonstrate the exact pinned version's
-hostname/CA or explicit approved fingerprint behavior while dialing a literal IP.
-Do not use blanket certificate-ignore or automatic first-use trust to solve
-that integration. Changed/untrusted certificates must fail before a session.
-Only then measure Unicode text clipboard both ways, per-session buffers,
-permission refusal, keyboard layouts and reconnect behavior against a synthetic
-RDP fixture. File/image clipboard and device redirection remain deferred.
-
-Sources checked on 2026-10-13:
-[Guacamole RDP options](https://guacamole.apache.org/doc/gug/configuring-guacamole.html),
-[security reports](https://guacamole.apache.org/security/), and
-[guacd isolation](https://guacamole.apache.org/doc/gug/guacamole-docker.html).
+This slice built guacd and FreeRDP into a sandboxed native worker with a
+one-use stream broker and a loopback browser viewer. ADR 0008 replaced them
+with IronRDP in the browser and Keybash's RDP proxy, and they left the
+repository on 20 November 2026 (`BROWSER-RDP-PAGE.md`, `NATIVE-RDP-LAB.md`).
+Its rules hold for the proxy: NLA and TLS identity verification, the approved
+certificate pinned exactly at a literal address, no certificate-ignore or
+first-use trust, and a changed certificate fails before any credential leaves.
+File/image clipboard and device redirection remain deferred.
 These are investigation gates, not claims that RDP or clipboard already works.

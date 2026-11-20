@@ -95,9 +95,10 @@ through a private loopback bridge over the one guarded stream it inherits.
 mutations (allow-all and deny-all syscall filters) must fail its public
 preflight.
 
-A one-use raw-stream broker binds the guarded NamedTarget to the approved
-identity and uses its dial result without another DNS lookup. The worker never
-chooses another host or port, and TLS is preserved end to end. Credentials
+The gateway takes the identity from the target (`identityFor`, `boundTo`),
+dials the guarded NamedTarget once, with no other DNS lookup, and hands the
+manager only that TCP socket (`connectRDPManager`). The worker never chooses
+another host or port, and TLS is preserved end to end. Credentials
 travel once, in the proxy's setup frame on private pipes, never in command
 arguments, URLs or the environment. The manager checks its peer's Unix
 credentials before it starts anything.

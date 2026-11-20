@@ -37,8 +37,10 @@ guacamole-server 1.6.0 and FreeRDP 3.33.1 leave with everything only they used:
   pacing (`internal/rdplab`);
 - the freshness watches on FreeRDP and guacamole-server.
 
-The sections below that name them are the record of their review. The native
-lab now meets the proxy with the test peer ("RDP test peer").
+Their reviews (the source runtime, the FreeRDP security updates and the
+Guacamole browser client) were removed from this file with them; the git
+history keeps them up to `1c91783`. The native lab now meets the proxy with the
+test peer ("RDP test peer").
 
 ## IronRDP browser client build (2026-11-17)
 
@@ -191,8 +193,8 @@ Windows desktop, `BenchmarkFastNormalizeDesktop` takes 72 ms instead of 80 ms
 for a full-HD picture and 4.0 ms instead of 4.7 ms for a 256-pixel tile.
 Decoding is about 3% slower (inflate's `huffSym`). The parallel
 `BenchmarkViewerFrameOfTiles` spends 4% less CPU but finishes about 5% later
-(64.5 against 61.2 ms, nine alternating runs each). The measured desktop is
-limited by guacd and Windows, not by this stage.
+(64.5 against 61.2 ms, nine alternating runs each). The desktop measured then
+was limited by guacd and Windows, not by this stage; the viewer left with guacd.
 
 `golang.org/x/crypto` 0.59.0, `x/sys` 0.50.0 and `x/term` 0.48.0 are the
 current releases; their licences are unchanged. The crypto release deletes its
@@ -221,38 +223,6 @@ Playwright and playwright-core, 1.64.0 to 1.65.0, whose integrities match the
 registry. The audit reports no known vulnerability. None of these tools runs
 in the product.
 
-## FreeRDP security update (2026-11-12)
-
-The native pin moves from FreeRDP 3.32.2 to 3.33.1, released 10 November.
-The 3.33.0 and 3.33.1 releases name 24 security advisories; 13 are published
-and 11 are still private. The archive's SHA-256 (`4431bbf0…4e7124`) matches
-the release's published checksum and GitHub's asset digest, and its detached
-signature verifies with the release key
-`7703 B333 420E 0AEF 995E B4B3 A494 54A3 FC90 9FD5`, the same key that signed
-3.32.2 and 3.33.0. The build itself trusts only the pinned digest.
-
-guacamole-server 1.6.0 draws classic RDP orders through FreeRDP's own GDI, so
-two published fixes reach the path Keybash uses today: an out-of-bounds write
-in OpaqueRect clipping
-([GHSA-2hm9-2h5q-x525](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-2hm9-2h5q-x525), high)
-and a use-after-free through the brush cache
-([GHSA-fw6x-h8gw-778w](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-fw6x-h8gw-778w), medium).
-Heap corruption in the Progressive codec
-([GHSA-v7hr-xh82-79p7](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-v7hr-xh82-79p7), high)
-is in the graphics pipeline, which Keybash turned on on 16 November with this
-pin in place (`disable-gfx` false, `BROWSER-RDP-LAB.md`). The other published advisories are in parts
-Keybash does not build or enable: the proxy, shadow server, RD Gateway,
-smartcard, device redirection, Remote Credential Guard, the H.264 encoder and
-image clipboard formats. The private ones are fixed by the same pin.
-
-guacamole-server stays 1.6.0. `native/prepare.py` patches FreeRDP only in the
-synthetic fixture server, whose source differs between the two releases by two
-error-log lines away from every anchor. WinPR now gives a default-size thread
-at least 8 MiB of stack (FreeRDP #14004), which is already glibc's default
-under the usual 8 MiB stack limit; the worker's 2 GiB address-space limit is
-unchanged. The required native CI lab builds the new archive and reruns its
-success, refusal and callback sabotage matrix.
-
 ## Toolchain security update (2026-11-11)
 
 The current pin is Go 1.26.11. The live vulnerability gate reported
@@ -268,46 +238,6 @@ GO-2026-6809 in crypto/x509 on 1.26.9; 1.26.10 contains the upstream certificate
 verification correction. See the [Go release history](https://go.dev/doc/devel/release#go1.26.10).
 Historical adoption notes below describe the toolchain at adoption time.
 All native/browser/service and analysis gates must pass with the updated pin.
-
-## RDP source runtime integration (2026-10-21)
-
-Versions and source archive digests were then the pinned Guacamole 1.6.0/FreeRDP
-3.32.2; FreeRDP is 3.33.1 since 12 November (see above).
-`build-native-runtime.sh` shares the checked build between
-the synthetic sample-enabled prefix and the empty-prefix server/sample-disabled
-test-VM path. The installed manager runtime is staged from the latter. It
-contains only guacd, its selected libraries and transitive loader/library closure,
-the trusted builder's setpriv closure and fixed empty mountpoints. No browser,
-sample server, source build tool, host /usr mount or vault file enters it.
-The source-test package is not a signed/offline distributable or final SBOM.
-Host library licensing/inventory, reproducibility and independent audit remain
-release gates. User-space native loopback sockets are private to each worker.
-The runtime inventory explicitly includes OpenSSL's distribution-supplied
-`legacy.so` provider, which WinPR loads dynamically for NTLM's protocol MD4
-operation and which `ldd` cannot discover. The module and its dependencies are
-hash-bound; its fixed module directory is supplied only to guacd. This does not
-enable weak TLS ciphers/certificates or change the Argon2id login password store.
-
-The 21 October recheck includes the new [FreeRDP advisories](https://github.com/FreeRDP/FreeRDP/security/advisories),
-including [DRDYNVC allocation bounds](https://github.com/FreeRDP/FreeRDP/security/advisories/GHSA-rrp5-666j-g6gp)
-(affected through 3.32.1, fixed in the existing 3.32.2 pin), and the current
-[Apache security reports](https://guacamole.apache.org/security/). This is a
-dated advisory review, not a vulnerability-free or independent-audit claim.
-Distribution loader/library updates still belong to the supported-host/release
-inventory and update policy.
-
-Guacamole 1.6's common UTF-16 reader/writer treats individual 16-bit units as
-characters. The RDP clipboard integration therefore adds a narrow adapter using
-the already pinned WinPR conversion API, queried capacities, explicit UTF-16
-surrogate/terminator checks and exact UTF-8 roundtrip validation. The adapter
-copies a bounded snapshot under the native clipboard lock before querying or
-converting, so concurrent clipboard updates cannot change its input. Only
-CF_UNICODETEXT is advertised/requested; no lossy codepage fallback is enabled.
-The codec tests compare golden wire bytes, empty/exact-limit text, malformed
-UTF-8/UTF-16 and buffer bounds under ASan/UBSan. Both accept-all/refuse-all
-mutations must fail the intended assertions before the normal test reruns.
-Go/browser boundaries still validate complete UTF-8 independently. This changes
-the RDP adapter, not the upstream common converter or other protocol support.
 
 ## Durable custody adoption (2026-10-15)
 
@@ -530,15 +460,11 @@ they load (`NATIVE-RDP-LAB.md`). x/sys is a direct dependency for Unix peer
 credentials. Native vulnerability evidence is the Rust advisory checks on the
 compiled crates, separate from Go's govulncheck and the browser graph audit.
 
-The credential-free RDP probe/private text codec introduces no module, native
-binary or browser dependency. TLS uses the pinned Go standard library. Its
-imported leaf is the only trust anchor; standard TLS/name checks remain enabled,
-along with the mandatory exact DER pin and validity/usage/key constraints.
-No credentials or live stream are
-returned. It is not Guacamole's native certificate implementation. The tagged
-Linux isolation fixture uses runner-provided util-linux unshare/setpriv and
-sudo, and only a temporary fixed test child. This does not package a sandbox.
-See ADR 0003 for limits and the native adoption gate.
+The RDP identity checks (`rdplab/identity.go`) and the certificate reader
+(`rdpcert`) introduce no module, native binary or browser dependency; they use
+the pinned Go standard library's X.509. The tagged Linux isolation fixture uses
+runner-provided util-linux unshare/setpriv and sudo, and only a temporary fixed
+test child. This does not package a sandbox. See ADR 0003 for limits.
 
 Production database and vault dependencies remain unapproved. Review
 their exact versions, full graph, license, advisories,
@@ -548,16 +474,6 @@ Primary references: [SSH API at the pinned version](https://pkg.go.dev/golang.or
 [upstream source](https://github.com/golang/crypto/tree/v0.58.0/ssh), and
 [Go vulnerability management](https://go.dev/doc/security/vuln/).
 
-
-## Browser RDP lab: Apache guacamole-common-js 1.6.0 (removed 2026-11-20)
-
-guacamole-common-js was the desktop page's client while desktops went through
-guacd. The IronRDP desktop page (`BROWSER-RDP-PAGE.md`, 3d) replaced that
-page, and step 3e2 removed it with `web/vendor/guacamole.mjs`, its manifest,
-LICENSE and NOTICE, and `scripts/vendor-guacamole.py`. No Keybash page loads
-it, and CI no longer fetches its archive. guacd and FreeRDP left in step 3e3
-(see "guacd and FreeRDP removed"). The page's history and its review are in
-[the browser RDP lab](BROWSER-RDP-LAB.md).
 
 ## Operating-system marks (2026-10-30)
 

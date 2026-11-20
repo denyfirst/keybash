@@ -97,11 +97,12 @@ background cancellation bound; individual input/admission checks are immediate.
 
 ## Transport and trusted workers
 
-The stock `sshtransport.Worker` calls the existing guarded/pinned connector;
-there is no raw browser-selected dial, local SSH agent or shell subprocess.
-Key validation still precedes library parsing, and signing still requires
-actual host-key verification on that connection. The SSH library currently
-runs in-process; a production OS sandbox/launcher remains a separate gate.
+Each terminal's SSH client runs in its own sandboxed worker, which the root
+SSH manager starts on the one TCP stream the gateway dialled through the
+guarded target (`SSH-PROCESS-LAB.md`); there is no raw browser-selected dial,
+local SSH agent or shell subprocess. Key validation still precedes library
+parsing, and signing still requires actual host-key verification on that
+connection. The earlier in-process SSH worker was removed on 20 November 2026.
 
 `RDPWorker` is an explicit trusted launcher interface, not a plugin or public
 worker registration endpoint. It receives exactly one owned username/password,

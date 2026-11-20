@@ -1,7 +1,7 @@
 # Keybash — current status
 
-2 November 2026. This page replaces the earlier Azerbaijani status and
-readiness notes. Keybash is in active development and has not been released:
+2 November 2026, with the desktop updated on 20 November. This page replaces
+the earlier Azerbaijani status and readiness notes. Keybash is in active development and has not been released:
 keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
 `ROADMAP.md`.
 
@@ -76,8 +76,13 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
 - An SSH terminal through an isolated worker process: its own namespaces, a
   syscall filter, the host key checked before authentication, and paste
   review (`SSH-MANAGER-LAB.md`, `SSH-PROCESS-LAB.md`).
-- RDP through a pinned native runtime, when built with `--with-rdp`. It offers
-  text-only clipboard and display updates (`RDP-WORKSPACE-INTEGRATION.md`).
+- Windows desktops, when built with `--with-rdp`: IronRDP runs in the browser
+  (WebAssembly, drawn on the GPU, H.264 through WebCodecs), and Keybash's RDP
+  proxy, in Rust, runs in a sandboxed worker per desktop. The proxy pins the
+  server's certificate before any credential leaves it and joins only the
+  channels Keybash allows; the browser never sees the password. Text
+  clipboard, resizing, full screen and a Smooth or Sharp picture on scaled
+  screens (`BROWSER-RDP-PAGE.md`, `BROWSER-RDP-PROXY.md`, ADR 0008).
 - Total and per-owner session limits (`SESSION-CAPACITY.md`).
 - The workspace in English, in light and dark schemes, laid out for phones
   too.

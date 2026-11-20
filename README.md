@@ -8,68 +8,35 @@ bundled local assets and no required vendor relay, cloud account, or telemetry.
 Security comes before convenience; comfortable clipboard and keyboard behavior
 are designed and tested alongside the security boundaries.
 
-**Current status:** repository foundation, tested outbound IP target guard,
-and hostname-scoped DNS pins with literal-IP dialing.
-An SSH library lab now verifies an approved Ed25519 host key before key
-authentication and opens a bounded remote PTY with cancellation and resize.
-A loopback-only HTTPS browser lab adds local xterm rendering, bounded WebSocket
-transport and paste review. It uses a synthetic SSH fixture; Linux CI exercises
-a real Bash PTY inside the test fixture. A credential-free RDP lab now tests
-HYBRID negotiation, pinned TLS and bounded Unicode text streams; Linux CI tests
-an empty worker network namespace. Desktops run IronRDP in the browser
-through Keybash's own RDP proxy (ADR 0008), which verifies the pinned
-certificate on its own TLS before CredSSP; a native Linux lab runs the proxy in
-an isolated worker against a synthetic NLA server, and mutations of its pin are
-required CI gates.
-A separate memory-only identity lab adds named password login, Argon2id,
-bounded attempts, password change, secure cookies/CSRF and session revocation.
-A separate Linux loopback custody lab now adds durable encrypted accounts,
-one-use operator bootstrap, mandatory MFA/recovery, and owner-scoped encrypted
-SSH key (Ed25519, ECDSA, RSA 2048+) and password custody with fresh
-authentication for sensitive actions.
-Its browser interface and offline operator entry point use synthetic data.
-An owned-session lab now links MFA/custody and encrypted connection records to
-the existing SSH and isolated native RDP browser fixtures, with one-use socket
-admission, approval binding and account-wide logout revocation.
-A disposable interactive UI preview now opens sample terminal/desktop views
-through the normal MFA/owned-connection flow. These are simulations, not real
-Linux/Windows sessions; see the [local demo guide](docs/INTERACTIVE-DEMO.md).
-Production packaging, real Windows/browser matrices, deployment and an
-independently audited release remain gates.
-A separate Linux/amd64 SSH process laboratory now uses a hash-bound static
-child, private namespaces, restricted syscalls and one inherited guarded TCP
-connection. Its privileged test manager is not a root web service or installer.
-See [the SSH process boundary](docs/SSH-PROCESS-LAB.md) for limits and remaining gates.
-A separate authenticated Unix manager now launches that worker for an
-unprivileged gateway, without reading its session key or terminal stream.
-See [the manager boundary](docs/SSH-MANAGER-LAB.md); installation remains a gate.
-The owned lab now requires explicit server identity review with host/port/IP
-metadata and the full independently compared fingerprint. Changed or legacy
-decisions block launch until freshly reapproved by their owner; see
-[the server trust boundary](docs/SERVER-TRUST-LAB.md).
-An offline root-owned JSON catalog now provisions guarded server approvals.
-`check-targets` validates it without network or database access; `serve-ssh-lab`
-connects an SSH-only catalog to the separate manager for a nonroot loopback
-gateway. See [operator configuration and its limits](docs/OPERATOR-CATALOG-LAB.md).
-Production packaging and deployment remain gates.
-Total/per-owner remote admission is now configurable in the protected operator
-catalog, including the separate SSH manager. Full capacity produces a clear
-busy state while existing connections continue; see [capacity policy](docs/SESSION-CAPACITY.md).
-An offline source systemd plan now supplies separate service identities and a
-checked common cgroup-v2 CPU/memory/pids boundary for the SSH path. Disposable
-Linux CI measures actual units, SSH, shutdown/restart and kernel enforcement;
-see [service integration and limits](docs/LINUX-SERVICE-LAB.md). A production
-installer and public ingress remain gates.
+**Current status:** in development and not released; keep only test data on
+it. [What exists and what remains before a release](docs/STATUS.md). In short:
 
-The separate RDP manager now integrates with durable MFA/custody and the approved
-catalog through `serve-remote-lab`. A hash-bound minimal runtime, sealed public
-trust mounts, private namespaces and a distinct worker identity constrain the
-native path; optional RDP units share the checked aggregate service slice.
-This workspace adds explicit bounded plain-text clipboard, permission fallback,
-paste review and bounded display-update resizing. Actual native/browser/service
-tests are required gates; see [the integration work record](docs/RDP-WORKSPACE-INTEGRATION.md).
-[The source test setup guide](docs/TEST-SETUP.md) prepares a separate test VM
-without deploying anything on the workstation.
+- A source installer, upgrader and uninstaller for one Linux x86-64 host with
+  systemd. HTTPS on loopback or on named LAN/VPN networks only, and the kernel
+  lets the gateway reach only the networks its servers are in
+  ([installing](docs/INSTALL.md), [LAN ingress](docs/LAN-INGRESS.md)).
+- Accounts with Argon2id passwords, mandatory TOTP and recovery codes, roles
+  and invitations, all managed on the web pages.
+- Stored SSH keys and passwords, each sealed under its own data key. Servers
+  are added on the Servers page; their host key or certificate is checked on
+  the server's console and pinned ([server trust](docs/SERVER-TRUST-LAB.md)).
+- SSH terminals through a sandboxed worker per session
+  ([SSH worker](docs/SSH-PROCESS-LAB.md), [manager](docs/SSH-MANAGER-LAB.md)).
+- Windows desktops run IronRDP in the browser (WebAssembly, drawn on the GPU,
+  H.264 through WebCodecs) behind Keybash's own RDP proxy, written in Rust. The
+  proxy pins the server's certificate on its own TLS before any credential
+  leaves it, and the browser never sees the password
+  ([ADR 0008](docs/adr/0008-video-path.md), [the desktop page](docs/BROWSER-RDP-PAGE.md),
+  [the proxy](docs/BROWSER-RDP-PROXY.md)).
+- Offline encrypted backups and restore ([backup](docs/BACKUP-RESTORE.md)).
+- Signed commits, CodeQL, static and vulnerability analysis, Linux CI that
+  installs and upgrades on systemd, browser tests, native tests that open a
+  desktop from the page to a synthetic RDP server, and sabotage of security
+  checks in both directions.
+
+[The local demo](docs/INTERACTIVE-DEMO.md) shows the pages with a sample
+terminal and no servers, and [the test setup guide](docs/TEST-SETUP.md) prepares a separate
+test VM.
 
 ## Start here
 
@@ -84,14 +51,16 @@ without deploying anything on the workstation.
 - [RDP boundaries and remaining native gates](docs/adr/0003-rdp-precredential-boundaries.md)
 - [Superseded by ADR 0008: H.264 to the browser from our own encoder](docs/adr/0007-h264-to-the-browser.md)
 - [Accepted: desktops run IronRDP in the browser behind Keybash's RDP proxy](docs/adr/0008-video-path.md)
+- [The desktop page on IronRDP](docs/BROWSER-RDP-PAGE.md)
+- [Keybash's RDP proxy](docs/BROWSER-RDP-PROXY.md)
 - [Native RDP lab evidence and limits](docs/NATIVE-RDP-LAB.md)
-- [Browser RDP lab evidence and limits](docs/BROWSER-RDP-LAB.md)
+- [Record of the earlier guacd desktop page](docs/BROWSER-RDP-LAB.md)
 - [Password identity lab and remaining MFA gates](docs/IDENTITY-LAB.md)
 - [Durable MFA/custody lab and operator usage](docs/CUSTODY-LAB.md)
 - [Account-owned SSH/RDP session integration](docs/OWNED-REMOTE-LAB.md)
 - [Try the local interactive UI demo](docs/INTERACTIVE-DEMO.md)
 - [Separate test VM setup](docs/TEST-SETUP.md)
-- [Pinned SSH dependency review](docs/DEPENDENCIES.md)
+- [Dependencies and their reviews](docs/DEPENDENCIES.md)
 - [Staying current: scheduled version and vulnerability checks](docs/STAYING-CURRENT.md)
 
 ## Development checks

@@ -140,7 +140,10 @@ In order:
    - 20 November: done. The IronRDP page passed the maintainer's test on the
      Windows VM and is the only desktop page; guacd, FreeRDP and everything
      only they used have left (`BROWSER-RDP-PAGE.md`, 3e1 to 3e3). The native
-     end-to-end test on the test peer (3e4) is next.
+     end-to-end test on the test peer (3e4) followed in PR 99, and the code
+     only earlier labs used (the RDP probe and broker, the in-process SSH
+     worker) was removed the same day. ADR 0008's step 5 is next: the codec
+     shown on the page and a guide for H.264 and 60 frames a second.
 
 The QOI-style picture draft (ADR 0006) is set aside: the gateway is no longer
 the bottleneck.

@@ -96,6 +96,14 @@ At the end the terminal shows two codes, **once**:
 
 Never put these codes in a chat, a screenshot or notes.
 
+The installer keeps its own copy of the certificate and key in
+`/etc/keybash/tls`, readable only by the gateway. Delete yours, so the key
+exists once; keep `ca.pem` for the PCs that trust it:
+
+```sh
+shred -u "$HOME/keybash-tls/key.pem"
+```
+
 ### 5. First sign-in
 
 Open the printed address in the browser, for example

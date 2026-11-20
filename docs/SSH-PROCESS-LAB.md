@@ -15,8 +15,8 @@ one-use capabilities, quotas and active revocation. After bounded OpenSSH import
 validation it builds one session credential: an `sshkey.Key` (Ed25519, ECDSA
 P-256/384/521, or RSA 2048–8192 bits signing only with SHA-2) or an
 `sshkey.Password`. This redacted, copied material is closed after setup. The
-existing library worker still works. `ProcessWorker` accepts only these two
-kinds: there is no SSH agent or reusable signing RPC/oracle.
+worker accepts only these two kinds: there is no SSH agent or reusable signing
+RPC/oracle.
 
 The process worker receives that one credential (a PKCS#8 key of at most 8 KiB,
 or a password of at most 4096 bytes) in a version 2 start frame through a
