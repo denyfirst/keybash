@@ -42,17 +42,23 @@ export function watchFullscreen(button,changed=()=>{}){
  document.addEventListener('fullscreenchange',()=>{const on=Boolean(document.fullscreenElement);if(!on)navigator.keyboard?.unlock?.();const label=button.querySelector('.label')??button;label.textContent=on?'Exit full screen':'Full screen';button.title=label.textContent;changed(on);});
 }
 // What a terminal and a desktop page share around the session. In full screen
-// the bar steps aside and comes back at the top edge, from its handle, or
-// while it has focus or a menu is open. Short messages fade; once the session
-// has ended its reason stays, with Connect again for an owned session.
+// the bar steps aside into a small tab at the top centre. Resting the pointer
+// on the tab, or pressing it, brings the bar down from there; the rest of the
+// top edge stays the remote's, so its title bars and corner buttons are never
+// covered. The bar also comes back while it has focus or a menu is open.
+// Short messages fade; once the session has ended its reason stays, with
+// Connect again for an owned session.
+const handleRest=180;
 export function sessionChrome(){
- const session=document.querySelector('.session'),bar=session.querySelector('.bar'),notice=document.getElementById('notice'),reconnect=document.getElementById('reconnect');
- let hideTimer=0,noticeTimer=0;
+ const session=document.querySelector('.session'),bar=session.querySelector('.bar'),handle=session.querySelector('.bar-handle'),notice=document.getElementById('notice'),reconnect=document.getElementById('reconnect');
+ let hideTimer=0,restTimer=0,noticeTimer=0;
  const full=()=>session.classList.contains('full');
- const show=()=>{clearTimeout(hideTimer);session.classList.add('bar-shown');};
+ const show=()=>{clearTimeout(hideTimer);clearTimeout(restTimer);session.classList.add('bar-shown');};
  const hide=(delay=900)=>{clearTimeout(hideTimer);hideTimer=setTimeout(()=>{if(full()&&!bar.matches(':hover, :focus-within')&&!session.querySelector('.menu:not([hidden])'))session.classList.remove('bar-shown');},delay);};
- session.addEventListener('pointermove',event=>{if(!full())return;if(event.clientY<=6)show();else if(!bar.contains(event.target))hide();});
- session.querySelector('.bar-handle').addEventListener('click',show);
+ session.addEventListener('pointermove',event=>{if(full()&&!bar.contains(event.target)&&event.target!==handle)hide();});
+ handle.addEventListener('pointerenter',()=>{if(!full())return;clearTimeout(restTimer);restTimer=setTimeout(show,handleRest);});
+ handle.addEventListener('pointerleave',()=>clearTimeout(restTimer));
+ handle.addEventListener('click',show);
  bar.addEventListener('focusin',()=>{if(full())show();});
  bar.addEventListener('focusout',()=>{if(full())hide();});
  document.addEventListener('fullscreenchange',()=>{const on=document.fullscreenElement===session;session.classList.toggle('full',on);if(on){show();hide(2500);}else{clearTimeout(hideTimer);session.classList.remove('bar-shown');}});
