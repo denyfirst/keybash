@@ -190,7 +190,13 @@ Credentials are independent of future connections. Password secrets up to
 keys require aes256-ctr/bcrypt, salt 16..64 bytes and 1..64 rounds before
 invoking the library. Wrong passphrases, weak RSA, other curves, legacy PEM,
 multiple keys, trailing data and a stored public half that is not the private
-key's own refuse. A password serves SSH and RDP alike.
+key's own refuse. A key that comes with its passphrase is unlocked once, when
+it is saved, and kept as the same key without one: the record is sealed like
+every other, and a passphrase sealed beside its key protects nothing, while
+bcrypt on every connection cost 238 ms at 16 rounds on the test VM. Reveal
+therefore shows the unlocked key. Keys an earlier version stored with their
+passphrase are unlocked once when the gateway starts; one that no longer
+opens is left as it was. A password serves SSH and RDP alike.
 Labels/usernames reject controls and formatting characters. RDP domain fields,
 other key formats, edit/export and sharing are not implemented in this slice.
 

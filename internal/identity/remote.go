@@ -284,13 +284,14 @@ func (l *Lab) openTerminal(ctx context.Context, t RemoteTarget, c Credential) (t
 	if t.Protocol != "ssh" || l.remote.ssh == nil || ctx.Err() != nil || !l.slot(ctx) {
 		return nil, errRefused
 	}
-	e := validateCredential(&c)
+	// The key is opened once: checkCredential's own check hands it over.
+	key, e := checkCredential(&c)
 	var auth sshkey.Credential
 	if e == nil {
 		if c.Kind == "password" {
 			auth, e = sshkey.NewPassword(c.Secret)
 		} else {
-			auth, e = openSSHKey(c)
+			auth = key
 		}
 		if e == nil {
 			defer auth.Close()
