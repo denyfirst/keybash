@@ -132,6 +132,9 @@ guacd and FreeRDP use leaves, each part in its own pull request:
     - a held modifier or lock key is sent once;
     - the pointer and the wheel go at most once a display frame, the wheel
       at most 255 units a message;
+    - the wheel goes in Windows' own units: a browser's notch or touchpad
+      travel of 100 pixels is 120 units, Windows' notch, so scrolling moves
+      as far as it does on Windows itself;
     - only the five mouse buttons IronRDP knows are sent;
     - Shift, Ctrl, Alt and the Windows key follow what each event says,
       so one held before the desktop had focus still counts;

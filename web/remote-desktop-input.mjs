@@ -90,10 +90,15 @@ export function desktopPoint(clientX, clientY, rect, width, height) {
   };
 }
 
-// A wheel event in IronRDP's pixel unit (it counts a line as 50 and a page as
-// 1900), with Windows' signs: up and right are positive, as FreeRDP sends them.
+// A wheel event in Windows' own wheel units, which IronRDP's pixel unit passes
+// on unchanged. One notch is 120 units (WHEEL_DELTA) for three lines. Chrome
+// and Edge give a notch, and a touchpad's same travel, as 100 pixels, so a
+// pixel is 1.2 units and Windows gets what it would have got locally, as from
+// mstsc. A line is 40 units, and a page IronRDP's 38 lines. Windows' signs:
+// up and right are positive.
+export const wheelUnits = Object.freeze({ pixel: 1.2, line: 40, page: 38 * 40 });
 export function wheelPixels(event) {
-  const scale = event.deltaMode === 1 ? 50 : event.deltaMode === 2 ? 1900 : 1;
+  const scale = event.deltaMode === 1 ? wheelUnits.line : event.deltaMode === 2 ? wheelUnits.page : wheelUnits.pixel;
   const finite = v => Number.isFinite(v) ? v : 0;
   return { x: finite(event.deltaX) * scale, y: -finite(event.deltaY) * scale };
 }
