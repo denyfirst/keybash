@@ -154,7 +154,9 @@ the same user takes over the first desktop). "Full screen" (the whole session,
 for both) asks the browser for
 full screen and, where it allows (Chromium), Keyboard Lock, so Esc, the
 Windows key and Alt+Tab reach the remote and holding Esc leaves. There the bar
-steps aside and comes back at the top edge or from its handle. Both need a
+steps aside into a small tab at the top centre and comes back from it, when
+the pointer rests on it or it is pressed. The rest of the top edge stays the
+remote's, so its title bars and corner buttons are never covered. Both need a
 click on the page, and closing the session leaves full screen. An ended
 session keeps its reason on the page, with Connect again, which only reloads
 the page and so asks for a new one-use lease.

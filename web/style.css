@@ -156,19 +156,26 @@ body.session-page main { padding: 0; }
 body.ended .ended-card { top: 50%; bottom: auto; transform: translate(-50%, -50%); }
 body.ended .ended-card #notice { padding: 1rem 1.3rem; font-size: 0.95rem; visibility: visible; transform: none; }
 
-/* In full screen the session is the whole screen and the bar steps aside: it
-   comes back when the pointer reaches the top edge or the handle is pressed,
-   and while it has focus or a menu is open. */
+/* In full screen the session is the whole screen and the bar steps aside into
+   a small tab at the top centre. Resting on the tab, or pressing it, brings
+   the bar down from there: centred and only as wide as its tools, so the
+   remote's own title bar and its corner buttons stay reachable. It also comes
+   back while it has focus or a menu is open. */
 .session.full { height: 100vh; }
 .session.full .bar {
   position: absolute;
   top: 0;
-  right: 0;
-  left: 0;
-  transform: translateY(-100%);
-  transition: transform 0.18s ease;
+  left: 50%;
+  gap: 1.25rem;
+  width: max-content;
+  max-width: calc(100% - 1.5rem);
+  border: 1px solid var(--term-rule);
+  border-top: 0;
+  border-radius: 0 0 0.8rem 0.8rem;
+  transform: translate(-50%, -100%);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.session.full.bar-shown .bar { box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45); transform: none; }
+.session.full.bar-shown .bar { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); transform: translate(-50%, 0); }
 .bar-handle { display: none; }
 .session.full:not(.bar-shown) button.bar-handle {
   position: absolute;
@@ -176,27 +183,34 @@ body.ended .ended-card #notice { padding: 1rem 1.3rem; font-size: 0.95rem; visib
   left: 50%;
   z-index: 3;
   display: block;
-  width: 3.4rem;
-  height: 0.9rem;
+  width: 5rem;
+  height: 0.65rem;
   margin: 0;
   padding: 0;
-  background: transparent;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--term-bar) 88%, transparent);
   background-image: none;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+  border: 1px solid var(--term-rule);
+  border-top: 0;
+  border-radius: 0 0 0.6rem 0.6rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   transform: translateX(-50%);
+  transition: width 0.16s ease, height 0.16s ease;
 }
+.session.full:not(.bar-shown) button.bar-handle:is(:hover, :focus-visible) { width: 6.5rem; height: 1.2rem; }
+.session.full:not(.bar-shown) button.bar-handle:focus-visible { outline: 2px solid var(--term-tool); outline-offset: 1px; }
 .bar-handle::before {
   content: "";
   position: absolute;
-  top: 0.3rem;
-  right: 0.7rem;
-  left: 0.7rem;
-  height: 0.22rem;
-  background: color-mix(in srgb, var(--term-ink) 40%, transparent);
+  right: 1.3rem;
+  bottom: 0.2rem;
+  left: 1.3rem;
+  height: 0.18rem;
+  background: color-mix(in srgb, var(--term-ink) 45%, transparent);
   border-radius: 0.2rem;
+  transition: background 0.16s ease;
 }
+.bar-handle:is(:hover, :focus-visible)::before { background: var(--term-tool); }
 
 /* A phone keeps the tools as icons, each still named for screen readers. */
 @media (max-width: 760px) {
