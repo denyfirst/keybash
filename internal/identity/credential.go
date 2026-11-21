@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -63,27 +64,69 @@ func label(value string, maxBytes int, empty bool) bool {
 	return true
 }
 func validateCredential(c *Credential) error {
+	key, e := checkCredential(c)
+	if key != nil {
+		key.Close()
+	}
+	return e
+}
+
+// checkCredential applies a credential's rules and, for an SSH key, returns
+// it opened; the caller closes it. A key that came with its passphrase is
+// unlocked here, once, and kept as the same key without one: the vault seals
+// every record, and a passphrase kept beside its key in the same record
+// protects nothing, while bcrypt on each connection costs a quarter of a
+// second at 16 rounds and a second at 64.
+func checkCredential(c *Credential) (*sshkey.Key, error) {
 	if !label(c.Name, 160, false) || !label(c.Username, 128, true) || len(c.Secret) == 0 || len(c.Secret) > 64*1024 || !utf8.ValidString(c.Secret) || len(c.Passphrase) > 1024 || !utf8.ValidString(c.Passphrase) {
-		return errRefused
+		return nil, errRefused
 	}
 	if c.Kind == "password" {
 		if len(c.Secret) > 4096 || len(c.Passphrase) != 0 || strings.ContainsRune(c.Secret, 0) {
-			return errRefused
+			return nil, errRefused
 		}
 		c.Fingerprint, c.Public = "", ""
-		return nil
+		return nil, nil
 	}
 	if c.Kind != "ssh-key" {
-		return errRefused
+		return nil, errRefused
 	}
-	key, e := openSSHKey(*c)
+	raw, public, locked, e := parseSSHKey(*c)
 	if e != nil {
-		return errRefused
+		return nil, errRefused
+	}
+	defer sshkey.Discard(raw)
+	key, e := openedKey(raw, public)
+	if e != nil {
+		return nil, errRefused
+	}
+	if locked {
+		text, e := unlockedKey(raw)
+		if e != nil {
+			key.Close()
+			return nil, errRefused
+		}
+		c.Secret, c.Passphrase = text, ""
 	}
 	c.Fingerprint = ssh.FingerprintSHA256(key.PublicKey())
 	c.Public = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key.PublicKey())))
-	key.Close()
-	return nil
+	return key, nil
+}
+
+// unlockedKey writes a parsed private key as an OpenSSH key without a
+// passphrase.
+func unlockedKey(raw any) (string, error) {
+	if k, ok := raw.(*ed25519.PrivateKey); ok {
+		raw = *k
+	}
+	block, e := ssh.MarshalPrivateKey(raw, "")
+	if e != nil {
+		return "", errRefused
+	}
+	text := pem.EncodeToMemory(block)
+	clear(block.Bytes)
+	defer clear(text)
+	return string(text), nil
 }
 
 // newGeneratedKey makes an Ed25519 key here, for a person who has none. It is
@@ -110,23 +153,24 @@ func newGeneratedKey(name, username string) (Credential, error) {
 	return c, nil
 }
 
-// openSSHKey bounds an OpenSSH private key's cost before parsing it and
-// returns it as a session key. Accepted: Ed25519, ECDSA P-256/384/521 and RSA
-// 2048–8192 bits; unencrypted, or aes256-ctr with bcrypt of at most 64 rounds.
-// The stored public half must be the private key's own. The caller closes it.
-func openSSHKey(c Credential) (*sshkey.Key, error) {
+// parseSSHKey bounds an OpenSSH private key's cost before parsing it, and
+// says whether it was locked with a passphrase. Accepted: Ed25519, ECDSA
+// P-256/384/521 and RSA 2048–8192 bits; unencrypted, or aes256-ctr with bcrypt
+// of at most 64 rounds. The stored public half must be the private key's own.
+// The caller discards the key it returns.
+func parseSSHKey(c Credential) (any, []byte, bool, error) {
 	text := strings.TrimSpace(c.Secret)
 	if !strings.HasPrefix(text, "-----BEGIN OPENSSH PRIVATE KEY-----") {
-		return nil, errRefused
+		return nil, nil, false, errRefused
 	}
 	b, rest := pem.Decode([]byte(text))
 	if b == nil || b.Type != "OPENSSH PRIVATE KEY" || len(b.Headers) != 0 || strings.TrimSpace(string(rest)) != "" {
-		return nil, errRefused
+		return nil, nil, false, errRefused
 	}
 	defer clear(b.Bytes)
 	const magic = "openssh-key-v1\x00"
 	if !bytes.HasPrefix(b.Bytes, []byte(magic)) {
-		return nil, errRefused
+		return nil, nil, false, errRefused
 	}
 	var outer struct {
 		Cipher, KDF, Options string
@@ -136,33 +180,40 @@ func openSSHKey(c Credential) (*sshkey.Key, error) {
 	}
 	// An 8192-bit RSA public key is about 1 KiB and its private section 4 KiB.
 	if ssh.Unmarshal(b.Bytes[len(magic):], &outer) != nil || outer.Count != 1 || len(outer.Rest) != 0 || len(outer.Public) > 1100 || len(outer.Private) > 6144 || len(outer.Options) > 128 {
-		return nil, errRefused
+		return nil, nil, false, errRefused
 	}
 	public, e := ssh.ParsePublicKey(outer.Public)
 	if e != nil || !sshkey.Allowed(public) {
-		return nil, errRefused
+		return nil, nil, false, errRefused
 	}
 	var raw any
-	if outer.Cipher == "none" {
+	locked := outer.Cipher != "none"
+	if !locked {
 		if outer.KDF != "none" || outer.Options != "" || c.Passphrase != "" {
-			return nil, errRefused
+			return nil, nil, false, errRefused
 		}
 		raw, e = ssh.ParseRawPrivateKey([]byte(text))
 	} else {
 		if !encryptionAllowed(outer.Cipher, outer.KDF, outer.Options) || c.Passphrase == "" {
-			return nil, errRefused
+			return nil, nil, false, errRefused
 		}
 		raw, e = ssh.ParseRawPrivateKeyWithPassphrase([]byte(text), []byte(c.Passphrase))
 	}
 	if e != nil {
-		return nil, errRefused
+		return nil, nil, false, errRefused
 	}
+	// A copy: outer.Public is part of b.Bytes, which is cleared on return.
+	return raw, bytes.Clone(outer.Public), locked, nil
+}
+
+// openedKey makes a parsed key a session key, if its public half is the one
+// the key file names; the caller closes it.
+func openedKey(raw any, public []byte) (*sshkey.Key, error) {
 	key, e := sshkey.New(raw)
-	sshkey.Discard(raw)
 	if e != nil {
 		return nil, errRefused
 	}
-	if !bytes.Equal(key.PublicKey().Marshal(), outer.Public) {
+	if !bytes.Equal(key.PublicKey().Marshal(), public) {
 		key.Close()
 		return nil, errRefused
 	}
@@ -305,4 +356,75 @@ func (s *Store) deleteCredential(owner, id string) error {
 		}
 		return tx.Bucket(credentialBucket).Delete(credentialKey(owner, id))
 	})
+}
+
+// unlockStoredKeys keeps, once, every SSH key stored with its passphrase as
+// the same key without one (checkCredential), at its next revision. A key that
+// no longer opens is left as it was. A start with nothing to unlock rolls back
+// and writes nothing, as adoptSoleAdmin does.
+func (s *Store) unlockStoredKeys() error {
+	nothing := errors.New("no locked key")
+	e := s.updateWhy(func(tx *bolt.Tx) error {
+		if _, e := s.meta(tx); e != nil {
+			return e
+		}
+		b := tx.Bucket(credentialBucket)
+		var locked [][2]string
+		if e := b.ForEach(func(k, _ []byte) error {
+			owner, id, ok := strings.Cut(string(k), "/")
+			if !ok || !validID(owner) || !validID(id) {
+				return errRefused
+			}
+			c, e := s.credential(tx, owner, id)
+			if e != nil {
+				return e
+			}
+			if c.Kind == "ssh-key" && c.Passphrase != "" {
+				locked = append(locked, [2]string{owner, id})
+			}
+			return nil
+		}); e != nil {
+			return e
+		}
+		unlocked := 0
+		for _, at := range locked {
+			owner, id := at[0], at[1]
+			c, e := s.credential(tx, owner, id)
+			if e != nil {
+				return e
+			}
+			key, e := checkCredential(&c)
+			if e != nil {
+				continue
+			}
+			key.Close()
+			// Only the revision is needed; the plaintext holds the secret.
+			previous, revision, e := s.unseal("credential", owner, id, b.Get(credentialKey(owner, id)))
+			clear(previous)
+			if e != nil || revision >= 1<<31 {
+				return errRefused
+			}
+			plain, e := json.Marshal(c) // #nosec G117 -- intentional bounded secret serialization solely into the authenticated encrypted envelope; no logs or metadata response.
+			if e != nil {
+				return errRefused
+			}
+			sealed, e := s.seal(tx, "credential", owner, id, revision+1, plain)
+			clear(plain)
+			if e != nil {
+				return errRefused
+			}
+			if e := b.Put(credentialKey(owner, id), sealed); e != nil {
+				return e
+			}
+			unlocked++
+		}
+		if unlocked == 0 {
+			return nothing
+		}
+		return nil
+	})
+	if e == nothing {
+		return nil
+	}
+	return e
 }

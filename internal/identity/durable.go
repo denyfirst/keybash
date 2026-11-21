@@ -24,7 +24,7 @@ func NewPersistent(origin string, store *Store, options ...Option) (*Lab, error)
 	if store == nil {
 		return nil, errRefused
 	}
-	if _, e := store.initialized(); e != nil || store.adoptSoleAdmin() != nil {
+	if _, e := store.initialized(); e != nil || store.adoptSoleAdmin() != nil || store.unlockStoredKeys() != nil {
 		return nil, errRefused
 	}
 	dummy, e := token()
