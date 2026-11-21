@@ -129,21 +129,24 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	stream, e := browser.OpenBrowserRDP(ctx, RDPRequest{Target: target.Target, Certificate: append([]byte(nil), target.Identity...),
 		Username: credential.Username, Password: credential.Secret})
 	setupTimer.Stop()
-	if e != nil || stream == nil || ctx.Err() != nil {
+	if e != nil && stream != nil {
+		_ = stream.Close()
+		stream = nil
+	}
+	// The read's answer is told first, whether or not the proxy started: a
+	// server showing another certificate is the reason the person needs.
+	other := false
+	select {
+	case other = <-changed:
+	case <-ctx.Done():
+	}
+	if other || stream == nil || ctx.Err() != nil {
 		if stream != nil {
 			_ = stream.Close()
 		}
-		return
-	}
-	select {
-	case other := <-changed:
 		if other {
-			_ = stream.Close()
 			_ = socket.Close(terminalweb.CloseIdentityChanged, "identity-changed")
-			return
 		}
-	case <-ctx.Done():
-		_ = stream.Close()
 		return
 	}
 	if stream.WriteMessage(forward) != nil {

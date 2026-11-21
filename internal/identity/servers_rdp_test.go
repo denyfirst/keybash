@@ -120,11 +120,16 @@ type desktopWorker struct {
 	last    *fixtureMessages
 	// start is how long the proxy's sandbox takes to start.
 	start time.Duration
+	// refuse makes the proxy fail to start.
+	refuse atomic.Bool
 }
 
 func (d *desktopWorker) OpenBrowserRDP(ctx context.Context, r RDPRequest) (terminalweb.MessageStream, error) {
 	d.calls.Add(1)
 	time.Sleep(d.start)
+	if d.refuse.Load() {
+		return nil, errRefused
+	}
 	m := newFixtureMessages()
 	d.mu.Lock()
 	d.literal, d.pinned, d.last = r.Target.Literal(), r.Certificate, m
@@ -647,11 +652,18 @@ func TestADesktopStopsBeforeTheServerWhenItsCertificateChanged(t *testing.T) {
 	if row, _ := serverRow(listServersView(t, f.alice), id); row.Certificate != "changed" {
 		t.Fatal("a stopped desktop did not tell the administrator")
 	}
+	// A proxy that fails to start does not hide why: the page still hears
+	// that the server changed.
+	worker.refuse.Store(true)
+	if got := connect(); got != "identity-changed" || worker.calls.Load() != 3 {
+		t.Fatalf("with the proxy refusing, the socket said %s", got)
+	}
+	worker.refuse.Store(false)
 	// The read cannot grant anything: when it fails the proxy decides, holding
 	// the pin, and when it is lost the proxy still gets only the pin.
 	reads.set("10.20.0.8:3389", old)
 	reads.fail("10.20.0.8:3389", errors.New("synthetic: no answer"))
-	if connect() != "open" || worker.calls.Load() != 3 {
+	if connect() != "open" || worker.calls.Load() != 4 {
 		t.Fatal("a failed read decided instead of the proxy")
 	}
 	// Without the watch nothing is read before a desktop.
