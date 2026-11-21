@@ -286,7 +286,12 @@ func TestIdentityRateKDFAndSessionQuotas(t *testing.T) {
 	l2 := fixture(t)
 	l2.derive <- struct{}{}
 	l2.derive <- struct{}{}
-	if _, err := l2.login(context.Background(), "bob", bobPassword, ""); err != errLimited {
+	// Two derivations at a time: a third waits, and is refused once its
+	// request ends without a slot.
+	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	_, err := l2.login(short, "bob", bobPassword, "")
+	cancel()
+	if err != errLimited {
 		t.Fatal("excess parallel KDF accepted")
 	}
 	<-l2.derive
@@ -394,7 +399,10 @@ func TestIdentityCapacityRefusalCreatesNoAttemptState(t *testing.T) {
 	l.derive <- struct{}{}
 	l.derive <- struct{}{}
 	for i := range 50 {
-		if _, err := l.login(context.Background(), fmt.Sprint("name-", i), bobPassword, ""); err != errLimited {
+		short, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+		_, err := l.login(short, fmt.Sprint("name-", i), bobPassword, "")
+		cancel()
+		if err != errLimited {
 			t.Fatal("login without a derive slot was not limited")
 		}
 	}
@@ -404,6 +412,39 @@ func TestIdentityCapacityRefusalCreatesNoAttemptState(t *testing.T) {
 	defer l.mu.Unlock()
 	if len(l.attempts) != 0 {
 		t.Fatal("capacity refusals created attacker-chosen attempt state")
+	}
+}
+
+// Two derivations run at a time. A third person signing in at that moment
+// waits for one of them to end and signs in; they are not refused. The wait
+// is bounded: with no slot within slotWait, the sign-in is refused.
+func TestASignInWaitsForADerivationSlot(t *testing.T) {
+	l := fixture(t)
+	l.derive <- struct{}{}
+	l.derive <- struct{}{}
+	done := make(chan error, 1)
+	go func() {
+		_, err := l.login(context.Background(), "bob", bobPassword, "")
+		done <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("the sign-in did not wait for a slot: %v", err)
+	default:
+	}
+	<-l.derive
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the sign-in that waited failed: %v", err)
+		}
+	case <-time.After(slotWait):
+		t.Fatal("the sign-in did not take the freed slot")
+	}
+	<-l.derive
+	if slotWait > 10*time.Second || slotWait < time.Second {
+		t.Fatal("a derivation slot is waited for too long or too briefly")
 	}
 }
 

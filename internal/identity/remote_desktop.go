@@ -107,22 +107,21 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
 	defer stopSocket()
-	// Told before the proxy starts or a password goes anywhere; the proxy
-	// would refuse this certificate on its own TLS anyway.
-	if l.serverShowsAnother(ctx, target) {
-		_ = socket.Close(terminalweb.CloseIdentityChanged, "identity-changed")
-		return
-	}
+	// The certificate read runs while the proxy's sandbox starts. The proxy
+	// dials the server only once it has the RDCleanPath request, and that
+	// waits for the read below: a person whose server shows another
+	// certificate is told so before anything reaches the server and before a
+	// password goes there. The proxy would refuse it on its own TLS anyway.
+	changed := make(chan bool, 1)
+	go func() { changed <- l.serverShowsAnother(ctx, target) }()
 	forward, e := rdcleanpath.Forward(request.X224)
 	if e != nil {
 		return
 	}
-	// As openTerminal: a bounded setup slot, and the stored credential's rules.
-	if !l.slot(ctx) {
-		return
-	}
+	// The stored credential's rules. A desktop's lease holds a password only
+	// (compatible, at redeem), which derives nothing, so a desktop takes no
+	// derivation slot and never waits behind someone's sign-in.
 	e = validateCredential(&credential)
-	<-l.derive
 	if e != nil || ctx.Err() != nil {
 		return
 	}
@@ -130,9 +129,23 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	stream, e := browser.OpenBrowserRDP(ctx, RDPRequest{Target: target.Target, Certificate: append([]byte(nil), target.Identity...),
 		Username: credential.Username, Password: credential.Secret})
 	setupTimer.Stop()
-	if e != nil || stream == nil || ctx.Err() != nil {
+	if e != nil && stream != nil {
+		_ = stream.Close()
+		stream = nil
+	}
+	// The read's answer is told first, whether or not the proxy started: a
+	// server showing another certificate is the reason the person needs.
+	other := false
+	select {
+	case other = <-changed:
+	case <-ctx.Done():
+	}
+	if other || stream == nil || ctx.Err() != nil {
 		if stream != nil {
 			_ = stream.Close()
+		}
+		if other {
+			_ = socket.Close(terminalweb.CloseIdentityChanged, "identity-changed")
 		}
 		return
 	}
