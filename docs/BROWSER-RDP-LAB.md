@@ -205,9 +205,12 @@ more network bandwidth for lossless pictures. Evidence:
 
 ### Smooth or Sharp (2026-11-17)
 
-Four times the pixels cost speed as well. In ADR 0008's step 2 a 200% desktop
-moved at 36 frames a second where a 100% one moved at 62. On a scaled screen
-the person therefore chooses the picture in the Screen menu:
+Four times the pixels cost speed as well. On a Windows Server 2025 left at its
+defaults (lossless codecs, about 30 frames a second, no GPU), an Explorer list
+scrolled at 30 notches a second painted 29 frames a second at 100% and 21 to
+27 at 200% (22 November 2026). ADR 0008's step 2 measured 62 and 36 on a
+server set to H.264 and 60 frames a second, where moving text is softer. On a
+scaled screen the person therefore chooses the picture in the Screen menu:
 
 - Sharp: the screen's own pixels and scale, as above;
 - Smooth: the desktop at 100% in CSS pixels, which the browser enlarges. It is
