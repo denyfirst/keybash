@@ -50,8 +50,32 @@ func (c *rdpConnection) Write(p []byte) (int, error) {
 	}
 	return c.in.Write(p)
 }
+
+// goodbyeWait bounds how long a closed desktop's worker may take to finish by
+// itself: the proxy's disconnect to Windows (1 s at most) and the bridge
+// passing it on (1 s at most).
+const goodbyeWait = 2 * time.Second
+
+// Close ends the desktop. Both pipes close first, so nothing more crosses
+// between the browser and the proxy; the proxy reads the end of its input,
+// tells Windows the session is over, and exits. Only then, or after
+// goodbyeWait, is the lease revoked, which kills whatever is left. A worker
+// killed at once left Windows holding the session, and a desktop opened again
+// at once got no picture. A lease revoked from outside is killed at once, as
+// its context has already ended.
 func (c *rdpConnection) Close() error {
-	c.once.Do(func() { c.cancel(); _ = c.in.Close(); _ = c.out.Close() })
+	c.once.Do(func() {
+		_ = c.in.Close()
+		_ = c.out.Close()
+		wait := time.NewTimer(goodbyeWait)
+		select {
+		case <-c.done:
+		case <-c.ctx.Done():
+		case <-wait.C:
+		}
+		wait.Stop()
+		c.cancel()
+	})
 	select {
 	case <-c.done:
 		return nil
@@ -190,7 +214,9 @@ func runProxy(bridge net.Listener, target net.Conn) error {
 	done := make(chan struct{})
 	go func() { _ = proxy.Wait(); close(done) }()
 	defer func() { _ = proxy.Process.Kill(); <-done }()
+	relayed := make(chan struct{})
 	go func() {
+		defer close(relayed)
 		local, e := bridge.Accept()
 		_ = bridge.Close()
 		if e == nil {
@@ -201,7 +227,29 @@ func runProxy(bridge net.Listener, target net.Conn) error {
 		return errNative
 	}
 	<-done
+	// The proxy's last words to Windows (its disconnect, then TLS's close)
+	// may still be in the bridge: they cross before the worker exits. A proxy
+	// that never reached the bridge leaves nothing to wait for.
+	_ = bridge.Close()
+	awaitRelay(relayed, bridgeDrain)
 	return nil
+}
+
+// bridgeDrain bounds how long a worker waits for its bridge after the proxy
+// has exited.
+const bridgeDrain = time.Second
+
+// awaitRelay waits for the bridge to finish passing what the proxy wrote, or
+// until most has passed.
+func awaitRelay(relayed <-chan struct{}, most time.Duration) bool {
+	wait := time.NewTimer(most)
+	defer wait.Stop()
+	select {
+	case <-relayed:
+		return true
+	case <-wait.C:
+		return false
+	}
 }
 
 // A raw RDP byte pipe has no lifetime total: TCP flow control and the bounded

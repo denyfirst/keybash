@@ -135,6 +135,25 @@ The proxy relays both ways and checks what it passes on
     temporary directory, which is only for files, never reaches Windows.
 - Revocation, the idle limit and sign-out end the session as they do now.
   The gateway closes the pipes, and the manager ends the worker.
+- A desktop that ends on Keybash's side tells Windows so, as a client ends a
+  session. That covers a closed tab, a reload, Disconnect, and a browser
+  message the proxy refuses. The proxy sends the MCS Disconnect Provider
+  Ultimatum (user requested) and TLS's close, at a PDU boundary and within one
+  second. A write to Windows cut part way through a PDU leaves nothing to add.
+  - On a normal close the gateway closes both pipes first, so nothing more
+    crosses between the browser and the proxy. It revokes the lease only once
+    the worker has finished, or after two seconds; the worker waits up to one
+    second for its bridge to pass those last bytes on.
+  - A lease revoked from outside is killed at once, as before.
+  - Without this, Windows kept the session's graphics for a moment after a
+    connection that just vanished, and a desktop opened again at once got no
+    picture (measured 2026-11-22: immediate reloads alternated between a
+    picture and a black screen; after Disconnect, or 15 seconds away, every
+    reload drew).
+  - Tests: `an_end_on_keybash_side_says_goodbye_to_windows`,
+    `an_end_from_windows_says_nothing_more`,
+    `TestAClosedDesktopEndsBeforeItsLeaseIsRevoked` and
+    `TestAClosedDesktopIsRevokedWithinTheGoodbyeWait`.
 
 What the proxy cannot check is the video content: graphics-pipeline records
 and H.264 reach the browser's WebAssembly and its sandboxed decoder (ADR 0008,

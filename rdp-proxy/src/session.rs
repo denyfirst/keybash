@@ -7,6 +7,7 @@ use ironrdp_connector::credssp::CredsspSequence;
 use ironrdp_connector::sspi::generator::NetworkRequest;
 use ironrdp_connector::{ClientConnector, ConnectorResult, Credentials, Sequence as _, ServerName};
 use ironrdp_core::{WriteBuf, decode, encode_vec};
+use ironrdp_pdu::mcs::{DisconnectProviderUltimatum, DisconnectReason, McsMessage};
 use ironrdp_pdu::nego;
 use ironrdp_pdu::x224::X224;
 use ironrdp_rdcleanpath::{DetectionResult, RDCleanPathMessage, RDCleanPathPdu};
@@ -14,7 +15,7 @@ use ironrdp_tokio::FramedWrite as _;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crate::channels::{Channels, Pass, Splitter};
 use crate::frame::{self, Ended, FrameError, Kind};
@@ -136,27 +137,83 @@ where
     if to_windows.write_all(&checked).await.is_err() {
         return Fail::End(Ended::Remote);
     }
-
-    // The relay: whole PDUs each way, each checked against the channels
-    // before it passes (crate::channels). Both directions run in this one
-    // task, so they share the state without locks.
     let channels = RefCell::new(Channels::new(names, clipboard).for_account(&user, &domain));
+    relay(
+        gateway_in,
+        gateway_out,
+        &mut from_windows,
+        &mut to_windows,
+        &channels,
+        &rest,
+    )
+    .await
+}
+
+/// The relay: whole PDUs each way, each checked against the channels before
+/// it passes (crate::channels). Both directions run in this one task, so they
+/// share the state without locks. When it ends on Keybash's side, Windows is
+/// told so (`goodbye`).
+async fn relay<GR, GW, WR, WW>(
+    gateway_in: &mut GR,
+    gateway_out: &mut GW,
+    from_windows: &mut WR,
+    to_windows: &mut WW,
+    channels: &RefCell<Channels>,
+    rest: &[u8],
+) -> Fail
+where
+    GR: AsyncRead + Unpin,
+    GW: AsyncWrite + Unpin,
+    WR: AsyncRead + Unpin,
+    WW: AsyncWrite + Unpin,
+{
+    let writing = Cell::new(false);
     let mut browser = Splitter::default();
-    if let Err(fail) = pass_browser_bytes(&rest, &mut browser, &channels, &mut to_windows).await {
-        return fail;
+    let fail = match pass_browser_bytes(rest, &mut browser, channels, to_windows, &writing).await {
+        Err(fail) => fail,
+        Ok(()) => tokio::select! {
+            fail = upstream(gateway_in, to_windows, &mut browser, channels, &writing) => fail,
+            fail = downstream(from_windows, gateway_out, channels) => fail,
+        },
+    };
+    // Nothing more can be said when Windows ended it, or when a write to
+    // Windows was cut part way through a PDU.
+    if fail != Fail::End(Ended::Remote) && !writing.get() {
+        goodbye(to_windows).await;
     }
-    tokio::select! {
-        fail = upstream(gateway_in, &mut to_windows, &mut browser, &channels) => fail,
-        fail = downstream(&mut from_windows, gateway_out, &channels) => fail,
-    }
+    fail
+}
+
+/// How long telling Windows that the session is over may take, at most.
+const GOODBYE_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Tells Windows the session is over, as a client ends one: the MCS Disconnect
+/// Provider Ultimatum (user requested), then TLS's close. A connection that
+/// just vanishes leaves Windows holding the session's graphics for a while, and
+/// a desktop opened again at once got no picture. Best effort and bounded.
+async fn goodbye<W: AsyncWrite + Unpin>(windows: &mut W) {
+    let ultimatum = McsMessage::DisconnectProviderUltimatum(DisconnectProviderUltimatum::from_reason(
+        DisconnectReason::UserRequested,
+    ));
+    let Ok(pdu) = encode_vec(&X224(ultimatum)) else {
+        return;
+    };
+    let _ = tokio::time::timeout(GOODBYE_WAIT, async {
+        windows.write_all(&pdu).await?;
+        windows.flush().await?;
+        windows.shutdown().await
+    })
+    .await;
 }
 
 /// Splits browser bytes into PDUs, checks each, and sends the ones that pass.
+/// `writing` is true while bytes are on their way to Windows.
 async fn pass_browser_bytes<W: AsyncWrite + Unpin>(
     bytes: &[u8],
     splitter: &mut Splitter,
     channels: &RefCell<Channels>,
     windows: &mut W,
+    writing: &Cell<bool>,
 ) -> Result<(), Fail> {
     let pdus = splitter.push(bytes).map_err(|_| REFUSED)?;
     let mut out = Vec::new();
@@ -166,8 +223,11 @@ async fn pass_browser_bytes<W: AsyncWrite + Unpin>(
             Pass::Instead(instead) => instead.iter().for_each(|p| out.extend_from_slice(p)),
         }
     }
+    writing.set(true);
     windows.write_all(&out).await.map_err(|_| Fail::End(Ended::Remote))?;
-    windows.flush().await.map_err(|_| Fail::End(Ended::Remote))
+    windows.flush().await.map_err(|_| Fail::End(Ended::Remote))?;
+    writing.set(false);
+    Ok(())
 }
 
 /// The handshake must finish within this long, from the browser's first byte.
@@ -324,11 +384,12 @@ async fn upstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     windows: &mut W,
     splitter: &mut Splitter,
     channels: &RefCell<Channels>,
+    writing: &Cell<bool>,
 ) -> Fail {
     loop {
         match frame::read(gateway).await {
             Ok((Kind::Browser, payload)) => {
-                if let Err(fail) = pass_browser_bytes(&payload, splitter, channels, windows).await {
+                if let Err(fail) = pass_browser_bytes(&payload, splitter, channels, windows, writing).await {
                     return fail;
                 }
             }
@@ -1137,6 +1198,69 @@ mod tests {
             assert_eq!(heard.files_or_locks, 0);
             let pasted = heard.data.iter().flatten().find(|data| data.contains(" back"));
             assert_eq!(pasted.map(|data| data.trim_end()), Some(&*format!("{text} back")));
+        });
+    }
+
+    /// What Windows reads once a relay between pipes is over, and how it ended:
+    /// the browser may send one frame, and each side may stay or go away.
+    async fn relay_end(browser_sends: Option<Kind>, browser_stays: bool, windows_stays: bool) -> (Fail, Vec<u8>) {
+        let (mut browser, mut proxy_in) = duplex(64 * 1024);
+        let (mut proxy_out, _browser_reads) = duplex(64 * 1024);
+        let (windows_writes, mut from_windows) = duplex(64 * 1024);
+        let (mut to_windows, mut windows_reads) = duplex(64 * 1024);
+        if let Some(kind) = browser_sends {
+            frame::write(&mut browser, kind, b"x").await.expect("browser frame");
+        }
+        let _browser = browser_stays.then_some(browser);
+        let _windows = windows_stays.then_some(windows_writes);
+        let channels = RefCell::new(Channels::new(vec!["drdynvc".into()], false));
+        let fail = relay(
+            &mut proxy_in,
+            &mut proxy_out,
+            &mut from_windows,
+            &mut to_windows,
+            &channels,
+            &[],
+        )
+        .await;
+        drop(to_windows);
+        let mut heard = Vec::new();
+        windows_reads.read_to_end(&mut heard).await.expect("Windows' side");
+        (fail, heard)
+    }
+
+    fn ultimatum() -> Vec<u8> {
+        encode_vec(&X224(McsMessage::DisconnectProviderUltimatum(
+            DisconnectProviderUltimatum::from_reason(DisconnectReason::UserRequested),
+        )))
+        .expect("encode")
+    }
+
+    /// A browser that goes away, or one the relay refuses, ends the session
+    /// with Windows as a client does: the MCS Disconnect Provider Ultimatum
+    /// (user requested), then the close, and nothing else. A desktop opened
+    /// again at once then gets its picture.
+    #[test]
+    fn an_end_on_keybash_side_says_goodbye_to_windows() {
+        run_async(async {
+            // The browser goes away; the browser sends what only Windows may.
+            for (sends, stays, end) in [(None, false, Fail::Quiet), (Some(Kind::Desktop), true, REFUSED)] {
+                let (fail, heard) = relay_end(sends, stays, true).await;
+                assert_eq!(fail, end);
+                let X224(message) = decode::<X224<McsMessage<'_>>>(&heard).expect("an MCS PDU");
+                assert!(matches!(message, McsMessage::DisconnectProviderUltimatum(_)));
+                assert_eq!(heard, ultimatum(), "Windows heard more than the ultimatum");
+            }
+        });
+    }
+
+    /// When Windows ends the session, nothing more is written to it.
+    #[test]
+    fn an_end_from_windows_says_nothing_more() {
+        run_async(async {
+            let (fail, heard) = relay_end(None, true, false).await;
+            assert_eq!(fail, Fail::End(Ended::Remote));
+            assert!(heard.is_empty(), "the relay wrote to a Windows that had ended");
         });
     }
 }
