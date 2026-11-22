@@ -145,15 +145,22 @@ The proxy relays both ways and checks what it passes on
     the worker has finished, or after two seconds; the worker waits up to one
     second for its bridge to pass those last bytes on.
   - A lease revoked from outside is killed at once, as before.
-  - Without this, Windows kept the session's graphics for a moment after a
-    connection that just vanished, and a desktop opened again at once got no
-    picture (measured 2026-11-22: immediate reloads alternated between a
-    picture and a black screen; after Disconnect, or 15 seconds away, every
-    reload drew).
   - Tests: `an_end_on_keybash_side_says_goodbye_to_windows`,
     `an_end_from_windows_says_nothing_more`,
     `TestAClosedDesktopEndsBeforeItsLeaseIsRevoked` and
     `TestAClosedDesktopIsRevokedWithinTheGoodbyeWait`.
+- Windows needs a moment after a desktop to one account ends before it starts
+  the next one's picture. Measured on 2026-11-22 against Windows Server 2025,
+  with the goodbye above or without it:
+  - a desktop opened again at once (a reload, a closed tab, Connect again, a
+    picture change) got "Connected" and a black screen. Windows sent the
+    connection sequence and nothing more;
+  - opened 0.3 s after the last one ended, it was black; 0.8 s after, it drew;
+  - immediate reloads alternated between a picture and a black screen.
+  - So the gateway notes when each desktop to a server and Windows account
+    ends, and the next one to them waits out the rest of 1.5 seconds before
+    anything reaches the server (`TestADesktopOpenedAtOnceWaitsForTheLastOneToSettle`).
+  - A desktop to another account, or one opened later, does not wait.
 
 What the proxy cannot check is the video content: graphics-pipeline records
 and H.264 reach the browser's WebAssembly and its sandboxed decoder (ADR 0008,
