@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopScales, nearestScale, pictureScale, scaledSize, rateLimiter, pastePacer, windowsLines, pointerCursor, pictureWait, againMark, noPictureStep } from './desktop-workspace.mjs';
+import { desktopScales, nearestScale, pictureScale, scaledSize, rateLimiter, pastePacer, windowsLines, pointerCursor, pictureWait, pictureLimit, reopenWait, againMark, endWithoutPicture } from './desktop-workspace.mjs';
 
 test('the picture: sharp is the screen\'s scale, smooth is 100%, and with no choice smooth from 175% up', () => {
   for (const [ratio, sharp] of [[1, 1], [1.25, 1.25], [1.5, 1.5], [1.75, 1.75], [2, 2], [2.625, 2], [NaN, 1]]) {
@@ -86,13 +86,22 @@ test('pasted text reaches Windows with CRLF line ends', () => {
 });
 
 
-test('a desktop with no picture opens again once, then says so', () => {
-  assert.equal(noPictureStep(true, false), 'fine');
-  assert.equal(noPictureStep(true, true), 'fine');
-  assert.equal(noPictureStep(false, false), 'again');
-  assert.equal(noPictureStep(false, true), 'say');
-  // Long enough for a slow first picture, short of the start limit.
+test('a desktop Windows ended before any picture opens again once, then says so', () => {
+  // Windows gave up a stalled start: open it again once, then say so.
+  assert.equal(endWithoutPicture(false, 'remote-ended', false), 'reopen');
+  assert.equal(endWithoutPicture(false, 'remote-ended', true), 'say');
+  // A desktop that drew ends as any other.
+  assert.equal(endWithoutPicture(true, 'remote-ended', false), 'end');
+  assert.equal(endWithoutPicture(true, 'remote-ended', true), 'end');
+  // Any other ending is never retried: a lost connection, a refusal,
+  // sign-out, a changed access or server, another connection taking over.
+  for (const word of [null, '', 'refused', 'signed-out', 'idle', 'expired', 'access-changed', 'credentials', 'account', 'taken-over', 'unreachable', 'not-responding', 'identity-changed']) {
+    assert.equal(endWithoutPicture(false, word, false), 'end', String(word));
+  }
+  // Long enough for a slow first picture; the limit past Windows' own minute.
   assert.ok(pictureWait >= 3000 && pictureWait <= 10000);
+  assert.ok(pictureLimit > 60000 && pictureLimit <= 90000);
+  assert.ok(reopenWait >= 1000 && reopenWait <= 5000);
   // A plain mark: no secret ever goes into the address.
   assert.match(againMark, /^#[a-z]+$/);
 });

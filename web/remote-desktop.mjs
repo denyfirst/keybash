@@ -5,15 +5,15 @@
 import init, { setup, SessionBuilder, DesktopSize, Extension, InputTransaction, DeviceEvent, ClipboardData, RotationUnit } from './vendor/ironrdp/ironrdp_web.js';
 import { createRenderer } from './remote-desktop-gfx.mjs';
 import { scanCode, sendsRepeat, modifierChanges, ctrlAltDel, ctrlV, mouseButton, desktopPoint, wheelPixels, wheelStep, pointerPNG, closeReason } from './remote-desktop-input.mjs';
-import { pictureScale, scaledSize, nearestScale, pointerCursor, pastePacer, windowsLines, pictureWait, againMark, noPictureStep } from './desktop-workspace.mjs';
+import { pictureScale, scaledSize, nearestScale, pointerCursor, pastePacer, windowsLines, pictureWait, pictureLimit, reopenWait, againMark, endWithoutPicture } from './desktop-workspace.mjs';
 import { inspectPaste } from './paste.mjs';
 import { remoteProof, savePicture, remoteErrorMessage, identityChangedMessage, endingMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const chrome = sessionChrome();
 const canvas = $('screen-canvas'), desktop = $('desktop');
-// Opened again by the page itself after a desktop that showed no picture
-// (noPicture); the mark leaves the address at once.
+// Opened again by the page itself after Windows ended a desktop that showed
+// no picture (endWithoutPicture); the mark leaves the address at once.
 const again = location.hash === againMark;
 if (again) history.replaceState(null, '', location.pathname + location.search);
 // A picture has arrived: a frame of Windows' graphics pipeline, or a bitmap
@@ -402,6 +402,7 @@ $('disconnect').addEventListener('click', () => {
 // The end: why, in the gateway's own words when its close said so.
 async function finish(fallback) {
   if (stopped) return;
+  const drew = pictured();
   stopped = true; live = false; generation++;
   clearTimeout(pictureTimer);
   // The gateway's close can come a moment after IronRDP stops reading.
@@ -412,16 +413,28 @@ async function finish(fallback) {
   canvas.width = 0; canvas.height = 0;
   canvas.style.width = '0'; canvas.style.height = '0';
   const word = ending ? closeReason(ending.code, ending.reason) : null;
-  const message = userEnded ? '' : word === 'identity-changed' ? identityChangedMessage : (word && endingMessage(word)) || fallback;
-  if (message) $('notice').textContent = message;
+  const step = userEnded ? 'end' : endWithoutPicture(drew, word, again);
   down.clear(); cancelAnimationFrame(moveFrame); cancelAnimationFrame(wheelFrame); clearTimeout(sizeTimer);
   dropPointer('default');
   closeMenu(); closeDialog('paste-review'); closeDialog('copy-panel');
   remoteText = ''; delete $('copy').dataset.new;
   for (const id of ['paste-text', 'remote-text']) $(id).value = '';
   for (const id of ['screen', 'copy', 'paste', 'special', 'fullscreen', 'disconnect']) $(id).disabled = true;
+  $('status').classList.remove('connected');
+  if (step === 'reopen') {
+    // Windows gave up a stalled start, and the next desktop gets its picture.
+    // Nothing can be pressed meanwhile; leaving the page stops it.
+    $('status').textContent = 'Opening again';
+    await new Promise(resolve => setTimeout(resolve, reopenWait));
+    if (retired) return;
+    history.replaceState(null, '', location.pathname + location.search + againMark);
+    location.reload();
+    return;
+  }
+  const message = userEnded ? '' : step === 'say' ? noPictureMessage : word === 'identity-changed' ? identityChangedMessage : (word && endingMessage(word)) || fallback;
+  if (message) $('notice').textContent = message;
   if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-  $('status').textContent = 'Session ended'; $('status').classList.remove('connected');
+  $('status').textContent = 'Session ended';
   if (!$('notice').textContent) $('notice').textContent = 'Session ended.';
   chrome.end();
 }
@@ -488,28 +501,39 @@ async function begin() {
   for (const id of ['screen', 'paste', 'special', 'fullscreen', 'disconnect']) $(id).disabled = false;
   fit(); desktop.focus({ preventScroll: true });
   askSize();
-  pictureTimer = setTimeout(() => void noPicture(), pictureWait);
+  watchPicture(performance.now());
   session.run().then(
     () => void finish(endingMessage('remote-ended')),
     () => void finish('The connection to the desktop was lost.')
   );
 }
 
-// Windows sometimes connects a desktop and never starts its picture
-// (noPictureStep). The page ends it, as Disconnect does, and opens it again
-// once, marked in the address; the second time it says so.
-async function noPicture() {
+// A picture has arrived: a frame of Windows' graphics pipeline, or a bitmap
+// IronRDP drew itself (a server without the pipeline).
+function pictured() { return blitted || renderer.stats.frames > 0; }
+// Windows sometimes connects a desktop and does not show it while its session
+// manager is stalled (endWithoutPicture). Ending it would not help, so the page
+// says it is waiting; Windows ends a stalled one itself within a minute, and
+// finish opens it again. Past pictureLimit the page gives up and says so.
+let waiting = false;
+const noPictureMessage = 'Windows did not show the desktop. Wait a minute, then connect again.';
+function watchPicture(since) {
+  pictureTimer = 0;
   if (!live || stopped) return;
-  const step = noPictureStep(blitted || renderer.stats.frames > 0, again);
-  if (step === 'fine') return;
-  if (step === 'say') { void finish('Windows connected but showed no picture. Connect again to try once more.'); return; }
-  stopped = true; live = false; generation++;
-  try { session.shutdown(); } catch {}
-  await Promise.race([closeArrived, new Promise(resolve => setTimeout(resolve, 1000))]);
-  history.replaceState(null, '', location.pathname + location.search + againMark);
-  location.reload();
+  if (pictured()) {
+    if (waiting) { waiting = false; $('status').textContent = 'Connected'; }
+    return;
+  }
+  const waited = performance.now() - since;
+  if (waited >= pictureLimit) { void finish(noPictureMessage); return; }
+  if (!waiting && waited >= pictureWait) {
+    waiting = true;
+    $('status').textContent = 'Waiting for Windows';
+    $('notice').textContent = 'Windows is still opening this desktop. This can take up to a minute.';
+  }
+  pictureTimer = setTimeout(() => watchPicture(since), 500);
 }
-if (again) $('notice').textContent = 'Windows showed no picture, so Keybash opened the desktop again.';
+if (again) $('notice').textContent = 'Windows did not show the desktop at first, so Keybash opened it again.';
 
 window.addEventListener('pagehide', () => {
   retired = true; userEnded = true;

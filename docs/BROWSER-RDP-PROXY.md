@@ -161,6 +161,12 @@ The proxy relays both ways and checks what it passes on
     ends, and the next one to them waits out the rest of 1.5 seconds before
     anything reaches the server (`TestADesktopOpenedAtOnceWaitsForTheLastOneToSettle`).
   - A desktop to another account, or one opened later, does not wait.
+  - The settle makes it rare, not impossible: one in ten reloads was still
+    black, and a desktop opened 3 seconds after a long one ended was black
+    once. Windows' log names the stall (event 36, `CsrConnected` /
+    `EvCsrInitialized`), and Windows ends such a connection itself within a
+    minute; the desktop page waits for that and opens the desktop again once
+    (`BROWSER-RDP-PAGE.md`).
 
 What the proxy cannot check is the video content: graphics-pipeline records
 and H.264 reach the browser's WebAssembly and its sandboxed decoder (ADR 0008,
