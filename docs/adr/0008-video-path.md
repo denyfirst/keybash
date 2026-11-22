@@ -259,8 +259,12 @@ The maintainer chose D. B is not built.
   - Windows' default is the lossless codecs. In step 2 that gave 32 whole frames a second at both scales, pixel-exact.
   - H.264 and 60 frames a second are each server administrator's choice (`AVC444ModePreferred`, `DWMFRAMEINTERVAL`).
   - Keybash shows which codec a desktop uses and explains the two settings. It does not change Windows itself, which would need administrator rights on the server and widen what stored credentials are used for.
+  - Update, 22 November: the test server is back on Windows' defaults, and Keybash's numbers are the ones a default server gives.
+    - Measured: an Explorer list scrolled at 30 notches a second.
+    - Smooth (1092 × 680) painted 29 frames a second and Sharp (2184 × 1362) 21 to 27. Both run at Windows' 30-frame cadence, with no H.264 and text sharp while it moves.
+    - With the two settings, H.264 is faster but moving text is softer. At the bitrate Windows chooses (about 4 to 16 KB a frame), trails follow moving text and icons and clear once the picture stops. The page drew every picture in order, 2 to 5 ms after it arrived, so the trails come from Windows' encoder.
 - On scaled screens the user chooses the picture, and the choice is kept with the account:
-  - "Smooth" asks Windows for the desktop in CSS pixels at 100% and lets the browser enlarge it on the GPU. The desktop is the same size on screen, with softer text and a quarter of the pixels at 200%. In step 2 that meant the 100% numbers at 200%: 62 instead of 36 frames a second with H.264, 37 instead of 24 lossless, and about half the latency.
+  - "Smooth" asks Windows for the desktop in CSS pixels at 100% and lets the browser enlarge it on the GPU. The desktop is the same size on screen, with softer text and a quarter of the pixels at 200%. In step 2 that meant the 100% numbers at 200%: 62 instead of 36 frames a second with H.264, 37 instead of 24 lossless (both with `DWMFRAMEINTERVAL`), and about half the latency. On Windows' defaults it is 29 against 21 to 27 (see the update above).
   - "Sharp" asks for the screen's own pixels and scale, as since PR 76.
   - With no choice made, Smooth at 175% and 200%, where the saving is largest, and Sharp below.
 - Keybash carries the IronRDP changes as a pinned commit plus its own patch, as it does for guacd and FreeRDP. Offering them upstream is the maintainer's choice.
