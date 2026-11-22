@@ -400,9 +400,10 @@ $('disconnect').addEventListener('click', () => {
 });
 
 // The end: why, in the gateway's own words when its close said so.
-async function finish(fallback) {
+// how: the ending as the page itself saw it, when the gateway's close says
+// nothing.
+async function finish(fallback, how = null) {
   if (stopped) return;
-  const drew = pictured();
   stopped = true; live = false; generation++;
   clearTimeout(pictureTimer);
   // The gateway's close can come a moment after IronRDP stops reading.
@@ -412,8 +413,8 @@ async function finish(fallback) {
   // Nothing of the remote screen stays on the page once the session is over.
   canvas.width = 0; canvas.height = 0;
   canvas.style.width = '0'; canvas.style.height = '0';
-  const word = ending ? closeReason(ending.code, ending.reason) : null;
-  const step = userEnded ? 'end' : endWithoutPicture(drew, word, again);
+  const word = (ending ? closeReason(ending.code, ending.reason) : null) ?? how;
+  const step = userEnded ? 'end' : endWithoutPicture(drewLive, word, again);
   down.clear(); cancelAnimationFrame(moveFrame); cancelAnimationFrame(wheelFrame); clearTimeout(sizeTimer);
   dropPointer('default');
   closeMenu(); closeDialog('paste-review'); closeDialog('copy-panel');
@@ -502,8 +503,11 @@ async function begin() {
   fit(); desktop.focus({ preventScroll: true });
   askSize();
   watchPicture(performance.now());
+  // A run that completes is Windows ending the session. IronRDP sees that
+  // first and the page's socket closes, so the gateway's own word for it may
+  // never arrive.
   session.run().then(
-    () => void finish(endingMessage('remote-ended')),
+    () => void finish(endingMessage('remote-ended'), 'remote-ended'),
     () => void finish('The connection to the desktop was lost.')
   );
 }
@@ -515,12 +519,15 @@ function pictured() { return blitted || renderer.stats.frames > 0; }
 // manager is stalled (endWithoutPicture). Ending it would not help, so the page
 // says it is waiting; Windows ends a stalled one itself within a minute, and
 // finish opens it again. Past pictureLimit the page gives up and says so.
-let waiting = false;
+// drewLive: a picture was seen while the desktop was open, not anything
+// drawn as it ends.
+let waiting = false, drewLive = false;
 const noPictureMessage = 'Windows did not show the desktop. Wait a minute, then connect again.';
 function watchPicture(since) {
   pictureTimer = 0;
   if (!live || stopped) return;
   if (pictured()) {
+    drewLive = true;
     if (waiting) { waiting = false; $('status').textContent = 'Connected'; }
     return;
   }
