@@ -71,10 +71,15 @@ test('the pointer lands on the desktop\'s own pixels, inside its edges', () => {
 });
 
 test('the wheel goes in Windows\' signs and units, a step at a time', () => {
-  assert.deepEqual(wheelPixels({ deltaMode: 0, deltaX: 0, deltaY: 100 }), { x: 0, y: -100 });
-  assert.deepEqual(wheelPixels({ deltaMode: 0, deltaX: 30, deltaY: 0 }), { x: 30, y: -0 });
-  assert.deepEqual(wheelPixels({ deltaMode: 1, deltaX: 0, deltaY: -3 }), { x: 0, y: 150 });
-  assert.deepEqual(wheelPixels({ deltaMode: 2, deltaX: 0, deltaY: 1 }), { x: 0, y: -1900 });
+  // A notch, as Chrome and Edge give it, is Windows' 120 units; a touchpad's
+  // small steps add up the same way, with nothing lost.
+  assert.deepEqual(wheelPixels({ deltaMode: 0, deltaX: 0, deltaY: 100 }), { x: 0, y: -120 });
+  assert.deepEqual(wheelPixels({ deltaMode: 0, deltaX: 25, deltaY: 0 }), { x: 30, y: -0 });
+  const swipe = [4, 7.5, 12, 16.5, 10, 50].reduce((sum, d) => sum + wheelPixels({ deltaMode: 0, deltaX: 0, deltaY: d }).y, 0);
+  assert.ok(Math.abs(swipe + 120) < 1e-9, 'a touchpad notch is not one Windows notch');
+  // Three lines, as Firefox gives a notch, are a notch too.
+  assert.deepEqual(wheelPixels({ deltaMode: 1, deltaX: 0, deltaY: -3 }), { x: 0, y: 120 });
+  assert.deepEqual(wheelPixels({ deltaMode: 2, deltaX: 0, deltaY: 1 }), { x: 0, y: -1520 });
   assert.deepEqual(wheelPixels({ deltaMode: 0, deltaX: NaN, deltaY: Infinity }), { x: 0, y: -0 });
   assert.deepEqual(wheelStep(100), { step: 100, rest: 0 });
   assert.deepEqual(wheelStep(-400.7), { step: -255, rest: -145.7 });
