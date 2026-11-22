@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopScales, nearestScale, pictureScale, scaledSize, rateLimiter, pastePacer, windowsLines, pointerCursor } from './desktop-workspace.mjs';
+import { desktopScales, nearestScale, pictureScale, scaledSize, rateLimiter, pastePacer, windowsLines, pointerCursor, pictureWait, againMark, noPictureStep } from './desktop-workspace.mjs';
 
 test('the picture: sharp is the screen\'s scale, smooth is 100%, and with no choice smooth from 175% up', () => {
   for (const [ratio, sharp] of [[1, 1], [1.25, 1.25], [1.5, 1.5], [1.75, 1.75], [2, 2], [2.625, 2], [NaN, 1]]) {
@@ -85,3 +85,14 @@ test('pasted text reaches Windows with CRLF line ends', () => {
   assert.equal(windowsLines('\r\n\r\n'), '\r\n\r\n');
 });
 
+
+test('a desktop with no picture opens again once, then says so', () => {
+  assert.equal(noPictureStep(true, false), 'fine');
+  assert.equal(noPictureStep(true, true), 'fine');
+  assert.equal(noPictureStep(false, false), 'again');
+  assert.equal(noPictureStep(false, true), 'say');
+  // Long enough for a slow first picture, short of the start limit.
+  assert.ok(pictureWait >= 3000 && pictureWait <= 10000);
+  // A plain mark: no secret ever goes into the address.
+  assert.match(againMark, /^#[a-z]+$/);
+});

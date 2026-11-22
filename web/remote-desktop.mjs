@@ -5,13 +5,24 @@
 import init, { setup, SessionBuilder, DesktopSize, Extension, InputTransaction, DeviceEvent, ClipboardData, RotationUnit } from './vendor/ironrdp/ironrdp_web.js';
 import { createRenderer } from './remote-desktop-gfx.mjs';
 import { scanCode, sendsRepeat, modifierChanges, ctrlAltDel, ctrlV, mouseButton, desktopPoint, wheelPixels, wheelStep, pointerPNG, closeReason } from './remote-desktop-input.mjs';
-import { pictureScale, scaledSize, nearestScale, pointerCursor, pastePacer, windowsLines } from './desktop-workspace.mjs';
+import { pictureScale, scaledSize, nearestScale, pointerCursor, pastePacer, windowsLines, pictureWait, againMark, noPictureStep } from './desktop-workspace.mjs';
 import { inspectPaste } from './paste.mjs';
 import { remoteProof, savePicture, remoteErrorMessage, identityChangedMessage, endingMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
 const $ = id => document.getElementById(id);
 const chrome = sessionChrome();
 const canvas = $('screen-canvas'), desktop = $('desktop');
+// Opened again by the page itself after a desktop that showed no picture
+// (noPicture); the mark leaves the address at once.
+const again = location.hash === againMark;
+if (again) history.replaceState(null, '', location.pathname + location.search);
+// A picture has arrived: a frame of Windows' graphics pipeline, or a bitmap
+// IronRDP drew itself on this canvas (a server without the pipeline).
+let blitted = false;
+{
+  const screen = canvas.getContext('2d'), blit = screen.putImageData;
+  screen.putImageData = function (...args) { blitted = true; return blit.apply(this, args); };
+}
 const endpoint = `${location.origin.replace(/^https:/, 'wss:')}/api/remote/desktop`;
 // Open to a drawn desktop at most this long, then the page says so.
 const startLimit = 20000;
@@ -47,7 +58,7 @@ Object.defineProperty(globalThis, '__keybashGfx', {
   writable: false, configurable: false
 });
 
-let session = null, live = false, stopped = false, retired = false, userEnded = false;
+let session = null, live = false, stopped = false, retired = false, userEnded = false, pictureTimer = 0;
 let scale = 1, screen = 'fit', lastAsked = '', sizeTimer = 0;
 let picture = ['smooth', 'sharp'].includes(document.body.dataset.picture) ? document.body.dataset.picture : '';
 
@@ -392,6 +403,7 @@ $('disconnect').addEventListener('click', () => {
 async function finish(fallback) {
   if (stopped) return;
   stopped = true; live = false; generation++;
+  clearTimeout(pictureTimer);
   // The gateway's close can come a moment after IronRDP stops reading.
   if (sockets.size) await Promise.race([closeArrived, new Promise(resolve => setTimeout(resolve, 1000))]);
   for (const socket of sockets) socket.close();
@@ -476,11 +488,28 @@ async function begin() {
   for (const id of ['screen', 'paste', 'special', 'fullscreen', 'disconnect']) $(id).disabled = false;
   fit(); desktop.focus({ preventScroll: true });
   askSize();
+  pictureTimer = setTimeout(() => void noPicture(), pictureWait);
   session.run().then(
     () => void finish(endingMessage('remote-ended')),
     () => void finish('The connection to the desktop was lost.')
   );
 }
+
+// Windows sometimes connects a desktop and never starts its picture
+// (noPictureStep). The page ends it, as Disconnect does, and opens it again
+// once, marked in the address; the second time it says so.
+async function noPicture() {
+  if (!live || stopped) return;
+  const step = noPictureStep(blitted || renderer.stats.frames > 0, again);
+  if (step === 'fine') return;
+  if (step === 'say') { void finish('Windows connected but showed no picture. Connect again to try once more.'); return; }
+  stopped = true; live = false; generation++;
+  try { session.shutdown(); } catch {}
+  await Promise.race([closeArrived, new Promise(resolve => setTimeout(resolve, 1000))]);
+  history.replaceState(null, '', location.pathname + location.search + againMark);
+  location.reload();
+}
+if (again) $('notice').textContent = 'Windows showed no picture, so Keybash opened the desktop again.';
 
 window.addEventListener('pagehide', () => {
   retired = true; userEnded = true;

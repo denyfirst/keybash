@@ -80,6 +80,21 @@ the desktop on the GPU. H.264 is decoded by the browser's own decoder
 A desktop that has not drawn within 20 seconds of Open ends with a clear
 message ("The desktop did not start"), and Reconnect tries again.
 
+Windows sometimes connects a desktop and never starts its picture. It was
+seen when a desktop to the same account had just ended (the gateway's settle,
+`BROWSER-RDP-PROXY.md`, makes that rare) and after Keybash itself restarted.
+A desktop opened after such a one has always drawn.
+- So a desktop that shows no picture within five seconds of "Connected" is
+  ended, as Disconnect ends it, and opened again once by the page, marked
+  `#again` in the address. The mark goes from the address at once, and the
+  page says why it opened again.
+- If that one shows no picture either, the page says so, and Connect again
+  tries once more.
+- A picture is a frame of the graphics pipeline, or a bitmap IronRDP drew
+  itself, so a server without the pipeline is never opened again.
+- The page stores nothing for this: the mark alone carries it across the
+  reload.
+
 ## The clipboard
 
 The setup turns the clipboard on; the proxy keeps it to text

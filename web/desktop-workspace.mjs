@@ -9,6 +9,18 @@
 // scales only (rdp-proxy/src/policy.rs).
 export const desktopScales = [1, 1.25, 1.5, 1.75, 2];
 
+// A desktop that connected but shows no picture. Windows sometimes never
+// starts one: seen when a desktop to the same account had just ended, or
+// after Keybash itself restarted. A desktop opened after such a one has always
+// drawn. So the first time, the page ends it and opens it again by itself,
+// marked in the address; the second time, it says so.
+export const pictureWait = 5000;
+export const againMark = '#again';
+export function noPictureStep(pictured, again) {
+  if (pictured) return 'fine';
+  return again ? 'say' : 'again';
+}
+
 // The Windows scale nearest the screen's, 100% for anything unusable.
 export function nearestScale(ratio) {
   if (!Number.isFinite(ratio) || ratio <= 0) return 1;
