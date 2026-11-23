@@ -80,6 +80,29 @@ the desktop on the GPU. H.264 is decoded by the browser's own decoder
 A desktop that has not drawn within 20 seconds of Open ends with a clear
 message ("The desktop did not start"), and Reconnect tries again.
 
+Windows sometimes connects a desktop and does not show it. Its own log says
+why: the session manager stalls on the new connection (TerminalServices-
+LocalSessionManager event 36, "An error occurred when transitioning from
+CsrConnected in response to EvCsrInitialized", 0x80004005). It was seen when
+a desktop to the same account arrived 0.3 to 3 seconds after the last one
+ended (the gateway's settle, `BROWSER-RDP-PROXY.md`, makes that rare), and
+after Keybash itself restarted. Windows ends the stalled connection itself,
+up to a minute later. Ending it sooner does not help: a desktop opened before
+Windows gives up stalls too. The one opened after has always drawn.
+- So after five seconds with no picture the page says it is waiting for
+  Windows, and keeps the desktop open.
+- When Windows ends a desktop that never drew, the page waits three seconds
+  and opens it again once, marked `#again` in the address. The mark goes from
+  the address at once, and the page says why it opened again.
+- If that one is ended with no picture too, or no picture comes within 75
+  seconds, the page says so, and Connect again tries once more.
+- A picture is a frame of the graphics pipeline, or a bitmap IronRDP drew
+  itself, so a server without the pipeline is never opened again. Any other
+  ending (the person's own, sign-out, a refusal, a lost connection) is never
+  retried.
+- The page stores nothing for this: the mark alone carries it across the
+  reload.
+
 ## The clipboard
 
 The setup turns the clipboard on; the proxy keeps it to text

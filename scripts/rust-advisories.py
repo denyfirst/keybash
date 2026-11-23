@@ -49,6 +49,15 @@ REVIEWED = {
     "RUSTSEC-2026-0580": "heapless",
     "RUSTSEC-2026-0581": "heapless",
     "RUSTSEC-2026-0582": "heapless",
+    # url 2.5.8 (a stack overflow in Url::origin on nested blob: URLs, of 20
+    # November 2026, fixed in 2.5.9). The proxy's own lock takes 2.5.9; this
+    # line is for the browser module, which IronRDP's lock at the pinned
+    # commit builds with 2.5.8. Nothing compiled calls Url::origin or
+    # url::quirks::origin: the crates that use url (ironrdp-web,
+    # ironrdp-connector and sspi) only parse a Kerberos KDC address, and the
+    # page never gives one. Drop this line when IronRDP's lock moves to url
+    # 2.5.9 or later (the freshness check watches its releases).
+    "RUSTSEC-2026-0592": "url",
 }
 
 

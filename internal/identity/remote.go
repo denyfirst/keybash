@@ -71,7 +71,39 @@ type remoteConfig struct {
 	seen                map[string]string // fingerprint each RDP server last showed
 	rdp                 RDPWorker
 	leases              map[[32]byte]*remoteLease
+	// desktopEnds is when the last desktop to each server and Windows
+	// account ended; desktopSettle how long the next one waits after it
+	// (see settleDesktopLocked).
+	desktopEnds   map[string]time.Time
+	desktopSettle time.Duration
 }
+
+// desktopSettle is how long Windows needs after a desktop to one account
+// ends before it starts the next one's picture. Measured on 2026-11-22
+// against Windows Server 2025: a desktop opened 0.3 s after the last one
+// ended got "Connected" and no picture; one opened 0.8 s after drew.
+const desktopSettle = 1500 * time.Millisecond
+
+// settleDesktopLocked says how long a desktop to key must wait for the last
+// one to settle, and forgets ends that have settled.
+func (c *remoteConfig) settleDesktopLocked(key string, now time.Time) time.Duration {
+	for k, ended := range c.desktopEnds {
+		if now.Sub(ended) >= c.desktopSettle {
+			delete(c.desktopEnds, k)
+		}
+	}
+	if ended, ok := c.desktopEnds[key]; ok {
+		return c.desktopSettle - now.Sub(ended)
+	}
+	return 0
+}
+
+// desktopKey names a server and a Windows account; Windows' user names
+// ignore case.
+func desktopKey(target, username string) string {
+	return target + "\x00" + strings.ToLower(username)
+}
+
 type remoteLease struct {
 	session                                         [32]byte
 	owner, connection, credential, target, approval string // approval: the target's when granted
@@ -97,7 +129,8 @@ func NewRemoteLabWithLimits(origin string, store *Store, targets []RemoteTarget,
 	if !limits.Valid() || len(targets) > 256 {
 		return nil, errRefused
 	}
-	config := &remoteConfig{limits: limits, targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease), scan: scanHostKey, scanRDP: scanCertificate, seen: make(map[string]string)}
+	config := &remoteConfig{limits: limits, targets: make(map[string]RemoteTarget), sockets: make(map[string]int), ssh: worker, rdp: rdp, leases: make(map[[32]byte]*remoteLease), scan: scanHostKey, scanRDP: scanCertificate, seen: make(map[string]string),
+		desktopEnds: make(map[string]time.Time), desktopSettle: desktopSettle}
 	seen := make(map[string]bool, len(targets))
 	var addresses []netip.Addr
 	for _, t := range targets {
