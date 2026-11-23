@@ -141,6 +141,18 @@ Following `ENGINEERING.md`, with sabotage both ways:
   - `GET /api/shared` and `POST /api/remote/open-shared` for people on the list;
   - the checks at grant and redeem.
   The page comes in phases 2 and 3; until then nothing on the website uses it.
+- **Phase 2** (Servers page):
+  - A server's row says whether it shares a key or a password, and for which
+    user. A key's row also says whether it is in use, or whether a new key is
+    waiting.
+  - An administrator's "Share a key" (SSH) or "Share a password" (RDP) opens a
+    sheet that shares one. For SSH they may choose a password instead of a key.
+  - Afterwards the sheet shows a key's command for the server, with its own
+    Copy. It makes a new key, shows that key's command too, and then uses it
+    or keeps the current one. A password is changed in the same sheet.
+  - "Stop sharing" asks first.
+  - A typed password is emptied from the page as soon as it is sent.
+  - Auditors see the row's line and no actions.
 
 ## Limits
 

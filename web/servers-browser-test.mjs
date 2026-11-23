@@ -11,6 +11,10 @@ await context.addInitScript(() => { globalThis.copiedText = []; Object.definePro
 const page = await context.newPage(); const errors = [], external = [];
 page.on('pageerror', error => errors.push(error.name));
 page.on('request', request => { if (!request.url().startsWith(config.Origin + '/')) external.push('external request'); });
+// What the API answers while shared credentials are handled, searched for
+// secrets at the end. Only then: reading every answer slows the whole run.
+const answers = [];
+const listen = response => { if (response.url().startsWith(config.Origin + '/api/')) answers.push(response.text().catch(() => '')); };
 function otp(seed, counter) {
   // Independent RFC 4226/6238 test oracle, never shipped by the application.
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = '';
@@ -70,6 +74,44 @@ try {
   await page.locator('#access-people label').filter({ hasText: 'alice' }).locator('input').check(); await page.locator('#access-form button[type=submit]').click();
   await page.locator('#access-dialog').waitFor({ state: 'hidden' }); await settled();
   assert.match(await row('Build box').locator('.server-access').textContent(), /^Can use it: alice$/);
+
+  stage = 'shared key';
+  page.on('response', listen);
+  await row('Build box').getByRole('button', { name: 'Share a key', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#shared-title').textContent(), 'Share a key on Build box');
+  assert(await page.locator('#shared-secret-field').isHidden(), 'a key made here asked for a password');
+  await page.locator('#shared-user').fill('deploy'); await page.locator('#shared-submit').click();
+  await page.locator('#shared-manage').waitFor({ state: 'visible' }); await settled();
+  const sharedLine = /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash-shared' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/;
+  const firstKey = await page.locator('#shared-command').textContent(); assert.match(firstKey, sharedLine);
+  assert.match(await sheetNotice('shared-dialog').textContent(), /^Key made\. Add its line on Build box/);
+  assert.match(await row('Build box').locator('.server-shared').textContent(), /^Shared key for user deploy · not on the server yet$/);
+  // The command's own Copy copies it whole.
+  await page.locator('#shared-key > .command-box .copy-chip').click(); await page.waitForFunction(() => copiedText.length === 1); await settled();
+  assert.equal(await page.evaluate(() => copiedText[0]), firstKey, 'Copy took other text than the command');
+  await page.evaluate(() => { copiedText.length = 0; });
+  // A new key waits beside the current one until the switch.
+  await page.locator('#shared-new').click(); await page.locator('#shared-next-box').waitFor({ state: 'visible' }); await settled();
+  const nextKey = await page.locator('#shared-next-command').textContent(); assert.match(nextKey, sharedLine); assert.notEqual(nextKey, firstKey);
+  assert.equal(await page.locator('#shared-command').textContent(), firstKey, 'a new key replaced the current one before the switch');
+  assert(await page.locator('#shared-new').isHidden(), 'a second new key was offered while one waits');
+  assert.match(await row('Build box').locator('.server-shared').textContent(), / · a new key is waiting$/);
+  await page.locator('#shared-switch').click(); await sheetNotice('shared-dialog').filter({ hasText: /uses the new key now/ }).waitFor(); await settled();
+  assert.equal(await page.locator('#shared-command').textContent(), nextKey, 'the switch did not make the new key the one used');
+  assert(await page.locator('#shared-next-box').isHidden() && await page.locator('#shared-new').isVisible(), 'the sheet still showed a waiting key');
+  // A waiting key can be dropped; the current one stays.
+  await page.locator('#shared-new').click(); await page.locator('#shared-next-box').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#shared-keep').click(); await sheetNotice('shared-dialog').filter({ hasText: /^The new key was destroyed\. The current one stays\.$/ }).waitFor(); await settled();
+  assert.equal(await page.locator('#shared-command').textContent(), nextKey);
+  // Stopping asks first; then the server has none.
+  await page.locator('#shared-stop').click(); await page.locator('#delete-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#delete-title').textContent(), 'Stop sharing on this server?');
+  await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: /^Build box has no shared key or password any more\.$/ }).waitFor(); await settled();
+  assert.equal(await row('Build box').locator('.server-shared').count(), 0, 'a stopped shared key still shows');
+  assert.equal(await row('Build box').getByRole('button', { name: 'Share a key', exact: true }).count(), 1);
+  // Every OpenSSH private key's body begins with this (base64 of openssh-key-v1).
+  assert.doesNotMatch(await page.content(), /b3BlbnNzaC1rZXktdjE/, 'the page held a private key');
+  page.off('response', listen);
 
   stage = 'connection form';
   await page.locator('.rail-item[data-page=connections]').click(); await page.waitForURL(config.Origin + '/'); await settled();
@@ -165,8 +207,30 @@ try {
   await page.locator('#notice').filter({ hasText: /^Side is checked now\.$/ }).waitFor();
   assert.equal(await row('Side').locator('.server-state').textContent(), 'Ready');
 
+  stage = 'desktop: shared password';
+  const sharedPassword = 'Synthetic-desk-password-41c9';
+  page.on('response', listen);
+  await row('Desk').getByRole('button', { name: 'Share a password', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
+  assert(await page.locator('#shared-kind').isHidden(), 'a desktop offered a key');
+  assert(await page.locator('#shared-secret-field').isVisible(), 'a desktop did not ask for its password');
+  await page.locator('#shared-user').fill('kbtest'); await page.locator('#shared-secret').fill(sharedPassword); await page.locator('#shared-submit').click();
+  await page.locator('#shared-password-form').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#shared-secret').inputValue(), '', 'the typed password stayed on the page');
+  assert.match(await page.locator('#shared-summary').textContent(), /^For user kbtest on the server\. Set by alice on /);
+  assert.match(await row('Desk').locator('.server-shared').textContent(), /^Shared password for user kbtest$/);
+  assert.equal(await row('Desk').getByRole('button', { name: 'Shared password', exact: true }).count(), 1);
+  await page.locator('#shared-password').fill(`${sharedPassword}-2`); await page.locator('#shared-password-form button[type=submit]').click();
+  await sheetNotice('shared-dialog').filter({ hasText: /^Keybash uses the new password from now on\.$/ }).waitFor(); await settled();
+  assert.equal(await page.locator('#shared-password').inputValue(), '', 'the new password stayed on the page');
+  await page.locator('#shared-close').click(); await page.locator('#shared-dialog').waitFor({ state: 'hidden' });
+  page.off('response', listen);
+  // Nothing the page holds, or any answer it got, carries the password.
+  assert.doesNotMatch(await page.content(), new RegExp(sharedPassword));
+  assert(answers.length >= 10, 'the answers were not searched');
+  for (const answer of await Promise.all(answers)) assert(!answer.includes(sharedPassword) && !answer.includes('b3BlbnNzaC1rZXktdjE') && !answer.includes('PRIVATE KEY'), 'an answer carried a shared secret');
+
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop, renewal and unchecked desktop passed');
+  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop, renewal, unchecked desktop, shared key and shared password passed');
 } catch (error) {
   console.log('Servers browser stage:', stage, error.code === 'ERR_ASSERTION' ? error.message : error.name);
   if (process.env.KEYBASH_SERVERS_SCREENSHOT) await page.screenshot({ path: process.env.KEYBASH_SERVERS_SCREENSHOT });

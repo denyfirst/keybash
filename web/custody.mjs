@@ -211,6 +211,7 @@ const confirmKinds = {
   block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their keys and passwords stay.', path: id => `/api/users/${id}/block`, method: 'POST', word: 'Block' },
   newcode: { title: 'Make a new invite code?', hint: 'The earlier code stops working at once. You get a new one to give them.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Make new code' },
   server: { title: 'Remove this server?', hint: 'Open sessions to it end at once, and connections to it stop working. People’s keys and passwords stay. This cannot be undone.', path: id => `/api/servers/${id}`, word: 'Remove' },
+  shared: { title: 'Stop sharing on this server?', hint: 'Sessions that use the shared key or password end at once, and nobody connects with it any more. A key is destroyed; take its line off the server too. This cannot be undone.', path: id => `/api/servers/${id}/shared`, word: 'Stop sharing' },
 };
 function askConfirm(kind, record) {
   pendingDelete = { kind, id: record.id, name: record.name };
@@ -558,7 +559,16 @@ const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length
   fingerprintOK(s.fingerprint) && (s.protocol === 'rdp' || sshPrintOK(s.fingerprint)) && typeof s.available === 'boolean' &&
   (s.certificate === undefined || ['current', 'soon', 'expired', 'changed'].includes(s.certificate)) && (s.expires === undefined || Number.isInteger(s.expires)) &&
   (s.unchecked === undefined || s.unchecked === true && s.protocol === 'rdp') &&
-  Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added);
+  Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added) && sharedOK(s.shared, s.protocol);
+// A server's shared credential (ADR 0009) as the page gets it: its kind, the
+// account, a key's line for the server and who set it. Never its secret.
+const sharedLineOK = value => typeof value === 'string' && value.length < 240 && /^restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash-shared$/.test(value);
+const sharedOK = (x, protocol) => x === undefined || typeof x === 'object' && x !== null && typeof x.username === 'string' && x.username.length >= 1 && x.username.length <= 128 &&
+  idOK(x.set_by) && Number.isInteger(x.set) && (x.kind === 'ssh-key' ? protocol === 'ssh' && sharedLineOK(x.line) && sshPrintOK(x.fingerprint) && (x.used === undefined || x.used === true) &&
+    (x.next === undefined ? x.next_fingerprint === undefined : sharedLineOK(x.next) && sshPrintOK(x.next_fingerprint) && x.next_fingerprint !== x.fingerprint)
+    : x.kind === 'password' && [x.line, x.fingerprint, x.used, x.next, x.next_fingerprint].every(value => value === undefined));
+// What an administrator runs once on the server, as the account people sign in as.
+const sharedCommand = line => `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
 const serversOK = data => Array.isArray(data?.networks) && data.networks.length <= 64 && data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) && typeof data.adding === 'boolean' && typeof data.ssh === 'boolean' && typeof data.rdp === 'boolean' &&
   Array.isArray(data.servers) && data.servers.length <= 256 && data.servers.every(serverOK) && typeof data.names === 'object' && data.names !== null &&
   Object.entries(data.names).every(([id, name]) => idOK(id) && typeof name === 'string' && /^[a-z0-9._-]{1,64}$/.test(name));
@@ -627,6 +637,11 @@ function serverRow(server) {
   const listed = server.access.map(id => names.get(id)).filter(Boolean).sort();
   who.textContent = listed.length ? `Can use it: ${listed.join(', ')}` : 'Nobody can use it yet.';
   titles.append(print, who);
+  if (server.shared) {
+    const shared = server.shared, line = document.createElement('p'); line.className = 'server-access server-shared';
+    line.textContent = shared.kind === 'ssh-key' ? `Shared key for user ${shared.username} · ${shared.used ? 'in use' : 'not on the server yet'}${shared.next ? ' · a new key is waiting' : ''}` : `Shared password for user ${shared.username}`;
+    titles.append(line);
+  }
   if (server.certificate === 'current') { const until = document.createElement('p'); until.className = 'server-access'; until.textContent = `Certificate until ${dayOf(server.expires)}`; titles.append(until); }
   const whoChecks = role === 'admin' ? 'you check it' : 'an administrator checks it';
   const said = {
@@ -649,6 +664,7 @@ function serverRow(server) {
   if (needsChecking(server)) button('Check identity', '', check);
   else if (server.available && server.unchecked) button('Check now', '', check);
   button('Who can use it', 'secondary', () => openAccess(server));
+  button(server.shared ? (server.shared.kind === 'ssh-key' ? 'Shared key' : 'Shared password') : server.protocol === 'ssh' ? 'Share a key' : 'Share a password', 'ghost', () => openShared(server));
   button('Rename', 'ghost', () => openRename(server));
   if (server.available && !needsChecking(server) && !server.unchecked) button('Check identity', 'ghost', check);
   button('Remove', 'ghost destructive', () => askConfirm('server', server));
@@ -707,6 +723,85 @@ function showAccess(server) {
   $('access-people').replaceChildren(legend, ...choices);
   $('access-dialog').showModal();
 }
+// The shared credential's sheet: share one, then see its line, replace it and
+// stop sharing it. A password is typed here once and the field is emptied as
+// soon as it is sent.
+let sharedServer = null, sharedKind = 'ssh-key';
+function chooseSharedKind(kind) {
+  sharedKind = kind;
+  document.querySelectorAll('#shared-kind .segment').forEach(segment => segment.setAttribute('aria-pressed', String(segment.dataset.kind === kind)));
+  $('shared-secret-field').hidden = kind !== 'password'; $('shared-secret').required = kind === 'password'; $('shared-secret').value = '';
+  $('shared-kind-hint').textContent = kind === 'ssh-key' ? 'Keybash makes the key and keeps it. You add its line on the server once; the key itself never leaves Keybash.' :
+    'Type the account’s password once. It is never shown again, to anyone. When someone who knew it leaves, change it on the server, then here.';
+}
+document.querySelectorAll('#shared-kind .segment').forEach(segment => segment.addEventListener('click', () => { if (!busy) chooseSharedKind(segment.dataset.kind); }));
+function openShared(server) { if (!busy) showShared(server); }
+function showShared(server) {
+  const shared = server.shared, key = shared?.kind === 'ssh-key';
+  sharedServer = server; dialogNotice(''); $('shared-secret').value = ''; $('shared-password').value = '';
+  $('shared-title').textContent = shared ? `${key ? 'Shared key' : 'Shared password'} of ${server.name}` : `Share ${server.protocol === 'ssh' ? 'a key' : 'a password'} on ${server.name}`;
+  $('shared-form').hidden = Boolean(shared); $('shared-manage').hidden = !shared;
+  if (!shared) {
+    $('shared-form').reset(); $('shared-kind').hidden = server.protocol !== 'ssh';
+    chooseSharedKind(server.protocol === 'ssh' ? 'ssh-key' : 'password');
+  } else {
+    $('shared-summary').textContent = `For user ${shared.username} on the server. Set by ${names.get(shared.set_by) ?? 'an account since deleted'} on ${dayOf(shared.set)}.`;
+    $('shared-key').hidden = !key; $('shared-password-form').hidden = key;
+    if (key) {
+      $('shared-key-state').textContent = shared.used ? 'In use: it has opened a session on the server. To add it to the account again, run this there:' : 'Not on the server yet. Run this once on the server, as that user:';
+      $('shared-command').textContent = sharedCommand(shared.line);
+      $('shared-next-box').hidden = !shared.next; $('shared-new').hidden = Boolean(shared.next);
+      $('shared-next-command').textContent = shared.next ? sharedCommand(shared.next) : '';
+    } else $('shared-password-user').value = shared.username;
+  }
+  if (!$('shared-dialog').open) $('shared-dialog').showModal();
+  (shared ? $('shared-close') : $('shared-user')).focus();
+}
+// After a change the sheet shows the server as it is now.
+async function refreshShared(id) {
+  const server = (await loadServers()).find(item => item.id === id);
+  if (server && $('shared-dialog').open) showShared(server);
+}
+bind('shared-form', async () => {
+  const server = sharedServer, kind = sharedKind;
+  if (!server) return;
+  const username = $('shared-user').value.trim(), secret = kind === 'password' ? $('shared-secret').value : '';
+  $('shared-secret').value = '';
+  await request(`/api/servers/${server.id}/shared`, 'POST', { kind, username, secret });
+  await refreshShared(server.id);
+  notice(kind === 'ssh-key' ? `Key made. Add its line on ${server.name}; then people on the list connect with it.` : `People on the list of ${server.name} now connect with this password.`);
+});
+bind('shared-password-form', async () => {
+  const server = sharedServer;
+  if (!server) return;
+  const username = $('shared-password-user').value.trim(), secret = $('shared-password').value;
+  $('shared-password').value = '';
+  await request(`/api/servers/${server.id}/shared-password`, 'POST', { username, secret });
+  await refreshShared(server.id); notice('Keybash uses the new password from now on.');
+});
+click('shared-new', async () => {
+  const server = sharedServer;
+  if (!server) return;
+  await request(`/api/servers/${server.id}/shared-next`, 'POST', {});
+  await refreshShared(server.id); notice('A new key is waiting. Add its line on the server, then switch to it.');
+});
+// The switch names the key this sheet showed, so a key made again elsewhere
+// meanwhile is never switched to unseen.
+click('shared-switch', async () => {
+  const server = sharedServer, fingerprint = server?.shared?.next_fingerprint;
+  if (!sshPrintOK(fingerprint)) return;
+  await request(`/api/servers/${server.id}/shared-switch`, 'POST', { fingerprint });
+  await refreshShared(server.id); notice(`${server.name} uses the new key now. The old key is destroyed: its line can come off the server.`);
+});
+click('shared-keep', async () => {
+  const server = sharedServer;
+  if (!server) return;
+  await request(`/api/servers/${server.id}/shared-next`, 'DELETE', {});
+  await refreshShared(server.id); notice('The new key was destroyed. The current one stays.');
+});
+$('shared-stop')?.addEventListener('click', () => { const server = sharedServer; if (!server || busy) return; $('shared-dialog').close(); askConfirm('shared', server); });
+document.querySelectorAll('.shared-close').forEach(close => close.addEventListener('click', () => $('shared-dialog').close()));
+$('shared-dialog')?.addEventListener('close', () => { sharedServer = null; $('shared-secret').value = ''; $('shared-password').value = ''; });
 function openRename(server) {
   if (busy) return;
   pendingServer = server; $('rename-name').value = server.name; dialogNotice(''); $('rename-dialog').showModal(); $('rename-name').focus();
@@ -1091,6 +1186,7 @@ click('confirm-delete', async () => {
   if (kind === 'credential') { hideSecret(); await loadRecords(); notice('Deleted.'); }
   else if (kind === 'connection') { await loadConnections(); notice('Deleted.'); }
   else if (kind === 'server') { await loadServers(); notice(`${name} was removed.`); }
+  else if (kind === 'shared') { await loadServers(); notice(`${name} has no shared key or password any more.`); }
   else {
     await loadUsers();
     if (kind === 'newcode') showCode(reply?.code, name, kind);
