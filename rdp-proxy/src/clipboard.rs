@@ -21,7 +21,7 @@ use ironrdp_core::encode_vec;
 use ironrdp_pdu::mcs;
 use ironrdp_pdu::x224::X224;
 
-use crate::policy::Refusal;
+use crate::refusal::Refusal;
 
 /// Text crossing the clipboard, measured in UTF-8: the gateway's own limit.
 pub const MAX_TEXT: usize = 32 * 1024;
@@ -140,15 +140,15 @@ impl Clipboard {
         } else {
             &mut self.browser
         };
-        let total = usize::try_from(u32_at(chunk, 0)?).map_err(|_| Refusal("clipboard chunk"))?;
+        let total = usize::try_from(u32_at(chunk, 0)?).map_err(|_| Refusal::ClipboardChunk)?;
         let flags = u32_at(chunk, 4)?;
         let body = &chunk[8..];
         if flags & !(FIRST | LAST | SHOW_PROTOCOL) != 0 || body.is_empty() {
-            return Err(Refusal("clipboard chunk"));
+            return Err(Refusal::ClipboardChunk);
         }
         if flags & FIRST != 0 {
             if side.gathering.is_some() || !(8..=MAX_COUNTED).contains(&total) {
-                return Err(Refusal("clipboard chunk order"));
+                return Err(Refusal::ClipboardChunkOrder);
             }
             let oversize = total > MAX_MESSAGE;
             // Only a text response may be larger than a message is kept, and
@@ -158,7 +158,7 @@ impl Clipboard {
                     || u16_at(body, 2)? != RESPONSE_OK
                     || usize::try_from(u32_at(body, 4)?).ok() != Some(total - 8))
             {
-                return Err(Refusal("clipboard message too large"));
+                return Err(Refusal::ClipboardTooLarge);
             }
             side.gathering = Some(Gathering {
                 total,
@@ -168,26 +168,26 @@ impl Clipboard {
                 oversize,
             });
         }
-        let gathering = side.gathering.as_mut().ok_or(Refusal("clipboard chunk order"))?;
+        let gathering = side.gathering.as_mut().ok_or(Refusal::ClipboardChunkOrder)?;
         if total != gathering.total || (flags & SHOW_PROTOCOL != 0) != gathering.show_protocol {
-            return Err(Refusal("clipboard chunk"));
+            return Err(Refusal::ClipboardChunk);
         }
         gathering.received += body.len();
         if gathering.received > gathering.total {
-            return Err(Refusal("clipboard chunk"));
+            return Err(Refusal::ClipboardChunk);
         }
         if !gathering.oversize {
             gathering.data.extend_from_slice(body);
         }
         let done = gathering.received == gathering.total;
         if done != (flags & LAST != 0) {
-            return Err(Refusal("clipboard chunk order"));
+            return Err(Refusal::ClipboardChunkOrder);
         }
         if !done {
             return Ok(None);
         }
         let Some(whole) = side.gathering.take() else {
-            return Err(Refusal("clipboard chunk order"));
+            return Err(Refusal::ClipboardChunkOrder);
         };
         let message = if whole.oversize {
             Whole::OversizeText
@@ -215,7 +215,7 @@ impl Clipboard {
         let (kind, flags) = (u16_at(&message, 0)?, u16_at(&message, 2)?);
         let body = &message[8..];
         if usize::try_from(u32_at(&message, 4)?).ok() != Some(body.len()) {
-            return Err(Refusal("clipboard message length"));
+            return Err(Refusal::ClipboardLength);
         }
         if !from_server && !self.open {
             return before_open(kind, flags, body);
@@ -223,7 +223,7 @@ impl Clipboard {
         match kind {
             CAPABILITIES => {
                 if !general_set(flags, body)? || me.capabilities {
-                    return Err(Refusal("clipboard capabilities"));
+                    return Err(Refusal::ClipboardCapabilities);
                 }
                 let general = u32_at(body, 12)? & USE_LONG_FORMAT_NAMES;
                 me.capabilities = true;
@@ -238,7 +238,7 @@ impl Clipboard {
             }
             FORMAT_LIST => {
                 if flags & !ASCII_NAMES != 0 {
-                    return Err(Refusal("clipboard format list"));
+                    return Err(Refusal::ClipboardFormatList);
                 }
                 me.offers_text = offers_text(body, long, flags & ASCII_NAMES != 0)?;
                 let mut out = Vec::new();
@@ -254,10 +254,10 @@ impl Clipboard {
             }
             FORMAT_DATA_REQUEST => {
                 if flags != 0 || body.len() != 4 || u32_at(body, 0)? != CF_UNICODETEXT {
-                    return Err(Refusal("clipboard request for anything but text"));
+                    return Err(Refusal::ClipboardNotText);
                 }
                 if me.pending >= MAX_PENDING {
-                    return Err(Refusal("clipboard requests unanswered"));
+                    return Err(Refusal::ClipboardUnanswered);
                 }
                 me.pending += 1;
                 Ok(Some(message))
@@ -273,12 +273,12 @@ impl Clipboard {
                             _ => written(FORMAT_DATA_RESPONSE, RESPONSE_FAIL, &[]).map(Some),
                         }
                     }
-                    _ => Err(Refusal("clipboard response")),
+                    _ => Err(Refusal::ClipboardResponse),
                 }
             }
             // The browser's temporary directory is for files; Windows never hears it.
             TEMPORARY_DIRECTORY if !from_server && flags == 0 && body.len() == 520 => Ok(None),
-            _ => Err(Refusal("clipboard message not allowed")),
+            _ => Err(Refusal::ClipboardNotAllowed),
         }
     }
 }
@@ -293,11 +293,11 @@ impl Clipboard {
 fn before_open(kind: u16, flags: u16, body: &[u8]) -> Result<Option<Vec<u8>>, Refusal> {
     match kind {
         CAPABILITIES if general_set(flags, body)? => Ok(None),
-        CAPABILITIES => Err(Refusal("clipboard capabilities")),
+        CAPABILITIES => Err(Refusal::ClipboardCapabilities),
         // Long or short names depend on Windows' capabilities; it is not read.
         FORMAT_LIST if flags & !ASCII_NAMES == 0 => Ok(None),
         TEMPORARY_DIRECTORY if flags == 0 && body.len() == 520 => Ok(None),
-        _ => Err(Refusal("clipboard before Windows' is open")),
+        _ => Err(Refusal::ClipboardBeforeOpen),
     }
 }
 
@@ -313,10 +313,7 @@ fn general_set(flags: u16, body: &[u8]) -> Result<bool, Refusal> {
 
 /// A response must answer a request the other side is waiting on.
 fn asked(asker: &mut Side) -> Result<(), Refusal> {
-    asker.pending = asker
-        .pending
-        .checked_sub(1)
-        .ok_or(Refusal("clipboard data nobody asked for"))?;
+    asker.pending = asker.pending.checked_sub(1).ok_or(Refusal::ClipboardUnasked)?;
     Ok(())
 }
 
@@ -325,7 +322,7 @@ fn offers_text(body: &[u8], long: bool, ascii: bool) -> Result<bool, Refusal> {
     let mut text = false;
     if long {
         if ascii {
-            return Err(Refusal("clipboard format list"));
+            return Err(Refusal::ClipboardFormatList);
         }
         let mut rest = body;
         while !rest.is_empty() {
@@ -335,13 +332,13 @@ fn offers_text(body: &[u8], long: bool, ascii: bool) -> Result<bool, Refusal> {
             let end = rest
                 .chunks_exact(2)
                 .position(|unit| unit == [0, 0])
-                .ok_or(Refusal("clipboard format name"))?;
+                .ok_or(Refusal::ClipboardFormatName)?;
             rest = &rest[2 * end + 2..];
             text |= id == CF_UNICODETEXT;
         }
     } else {
         if !body.len().is_multiple_of(36) {
-            return Err(Refusal("clipboard format list"));
+            return Err(Refusal::ClipboardFormatList);
         }
         for entry in body.chunks_exact(36) {
             text |= u32_at(entry, 0)? == CF_UNICODETEXT;
@@ -371,7 +368,7 @@ fn text(data: &[u8]) -> Option<Vec<u8>> {
 
 /// A clipboard message: type, flags, length and body.
 fn written(kind: u16, flags: u16, body: &[u8]) -> Result<Vec<u8>, Refusal> {
-    let length = u32::try_from(body.len()).map_err(|_| Refusal("clipboard message"))?;
+    let length = u32::try_from(body.len()).map_err(|_| Refusal::ClipboardMessage)?;
     let mut out = Vec::with_capacity(8 + body.len());
     out.extend_from_slice(&kind.to_le_bytes());
     out.extend_from_slice(&flags.to_le_bytes());
@@ -389,7 +386,7 @@ fn encode(
     show_protocol: bool,
     message: &[u8],
 ) -> Result<Vec<Vec<u8>>, Refusal> {
-    let total = u32::try_from(message.len()).map_err(|_| Refusal("clipboard message"))?;
+    let total = u32::try_from(message.len()).map_err(|_| Refusal::ClipboardMessage)?;
     let parts: Vec<&[u8]> = message.chunks(CHUNK).collect();
     let mut out = Vec::with_capacity(parts.len());
     for (i, part) in parts.iter().enumerate() {
@@ -418,18 +415,18 @@ fn encode(
                 user_data,
             })
         };
-        out.push(encode_vec(&X224(pdu)).map_err(|_| Refusal("clipboard message"))?);
+        out.push(encode_vec(&X224(pdu)).map_err(|_| Refusal::ClipboardMessage)?);
     }
     Ok(out)
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Result<u16, Refusal> {
-    let b = bytes.get(at..at + 2).ok_or(Refusal("clipboard message"))?;
+    let b = bytes.get(at..at + 2).ok_or(Refusal::ClipboardMessage)?;
     Ok(u16::from_le_bytes([b[0], b[1]]))
 }
 
 fn u32_at(bytes: &[u8], at: usize) -> Result<u32, Refusal> {
-    let b = bytes.get(at..at + 4).ok_or(Refusal("clipboard message"))?;
+    let b = bytes.get(at..at + 4).ok_or(Refusal::ClipboardMessage)?;
     Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 

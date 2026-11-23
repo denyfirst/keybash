@@ -20,6 +20,7 @@ use std::cell::{Cell, RefCell};
 use crate::channels::{Channels, Pass, Splitter};
 use crate::frame::{self, Ended, FrameError, Kind};
 use crate::policy;
+use crate::refusal::{Refusal, Side};
 use crate::setup::Setup;
 
 /// The browser's RDCleanPath request is small; anything larger is refused.
@@ -32,30 +33,64 @@ pub struct Trust {
     pub name: crate::pin::Name,
 }
 
-/// How a session ended: with a word for the gateway, or quietly because the
+/// How a session ended: with a word for the gateway, refused (the side that
+/// sent what the proxy does not accept, and what), or quietly because the
 /// gateway or the browser went away.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Fail {
     End(Ended),
+    Refused(Side, Refusal),
     Quiet,
+}
+
+impl Fail {
+    fn browser(refusal: Refusal) -> Self {
+        Fail::Refused(Side::Browser, refusal)
+    }
+
+    fn windows(refusal: Refusal) -> Self {
+        Fail::Refused(Side::Windows, refusal)
+    }
+
+    pub fn keybash(refusal: Refusal) -> Self {
+        Fail::Refused(Side::Keybash, refusal)
+    }
+
+    /// The Ended frame's payload, when the gateway is to hear why: the end's
+    /// code, or for a refusal `frame::REFUSED`, the side and the refusal.
+    /// Fixed codes only: nothing that came from either side.
+    pub fn ended(&self) -> Option<Vec<u8>> {
+        match self {
+            Fail::End(end) => Some(vec![*end as u8]),
+            Fail::Refused(side, refusal) => Some(vec![frame::REFUSED, *side as u8, *refusal as u8]),
+            Fail::Quiet => None,
+        }
+    }
 }
 
 impl From<FrameError> for Fail {
     fn from(e: FrameError) -> Self {
         match e {
             FrameError::Closed => Fail::Quiet,
-            FrameError::Malformed => Fail::End(Ended::Refused),
+            FrameError::Malformed => Fail::keybash(Refusal::GatewayFrame),
         }
     }
 }
 
-const REFUSED: Fail = Fail::End(Ended::Refused);
-
-/// Appends the next browser message; anything but a browser frame ends it.
-async fn browser_bytes<R: AsyncRead + Unpin>(gateway: &mut R, into: &mut Vec<u8>, most: usize) -> Result<(), Fail> {
+/// Appends the next browser message; anything but a browser frame ends it,
+/// and so does a total past `most`, as `too_large`.
+async fn browser_bytes<R: AsyncRead + Unpin>(
+    gateway: &mut R,
+    into: &mut Vec<u8>,
+    most: usize,
+    too_large: Refusal,
+) -> Result<(), Fail> {
     let (kind, payload) = frame::read(gateway).await?;
-    if kind != Kind::Browser || into.len() + payload.len() > most {
-        return Err(REFUSED);
+    if kind != Kind::Browser {
+        return Err(Fail::keybash(Refusal::GatewayFrame));
+    }
+    if into.len() + payload.len() > most {
+        return Err(Fail::browser(too_large));
     }
     into.extend_from_slice(&payload);
     Ok(())
@@ -65,34 +100,40 @@ async fn browser_bytes<R: AsyncRead + Unpin>(gateway: &mut R, into: &mut Vec<u8>
 async fn rdcleanpath_request<R: AsyncRead + Unpin>(gateway: &mut R, inbuf: &mut Vec<u8>) -> Result<Vec<u8>, Fail> {
     let request = loop {
         match RDCleanPathPdu::detect(inbuf) {
-            DetectionResult::Detected { total_length, .. } if total_length > MAX_REQUEST => return Err(REFUSED),
+            DetectionResult::Detected { total_length, .. } if total_length > MAX_REQUEST => {
+                return Err(Fail::browser(Refusal::RdcleanpathTooLarge));
+            }
             DetectionResult::Detected { total_length, .. } if inbuf.len() >= total_length => {
                 break inbuf.drain(..total_length).collect::<Vec<u8>>();
             }
             DetectionResult::Detected { .. } | DetectionResult::NotEnoughBytes => {}
-            DetectionResult::Failed => return Err(REFUSED),
+            DetectionResult::Failed => return Err(Fail::browser(Refusal::RdcleanpathRequest)),
         }
-        browser_bytes(gateway, inbuf, MAX_REQUEST).await?;
+        browser_bytes(gateway, inbuf, MAX_REQUEST, Refusal::RdcleanpathTooLarge).await?;
     };
     let message = RDCleanPathPdu::from_der(&request)
-        .map_err(|_| REFUSED)?
+        .map_err(|_| Fail::browser(Refusal::RdcleanpathRequest))?
         .into_message()
-        .map_err(|_| REFUSED)?;
+        .map_err(|_| Fail::browser(Refusal::RdcleanpathRequest))?;
     // The destination and the token are not used: the target and the access
     // are the gateway's. Anything that would change the connection is refused.
     let RDCleanPathMessage::Request {
-        preconnection_blob: None,
-        server_auth: None,
+        preconnection_blob,
+        server_auth,
         x224_connection_request,
         ..
     } = message
     else {
-        return Err(REFUSED);
+        return Err(Fail::browser(Refusal::RdcleanpathRequest));
     };
+    if preconnection_blob.is_some() || server_auth.is_some() {
+        return Err(Fail::browser(Refusal::ConnectionChange));
+    }
     let x224 = x224_connection_request.as_bytes().to_vec();
-    let X224(request) = decode::<X224<nego::ConnectionRequest>>(&x224).map_err(|_| REFUSED)?;
+    let X224(request) =
+        decode::<X224<nego::ConnectionRequest>>(&x224).map_err(|_| Fail::browser(Refusal::X224Request))?;
     if request.protocol != nego::SecurityProtocol::SSL {
-        return Err(REFUSED);
+        return Err(Fail::browser(Refusal::SecurityNotTls));
     }
     Ok(x224)
 }
@@ -125,13 +166,18 @@ where
 {
     // Everything up to the checked Connect Initial has a deadline: a browser,
     // or a server, that stalls the handshake cannot hold a worker.
+    // The side the handshake waits on, for a handshake that runs out of time.
     let clipboard = setup.clipboard;
     let (user, domain) = (setup.user.clone(), setup.domain.clone());
-    let handshake = tokio::time::timeout(HANDSHAKE_WAIT, handshake(gateway_in, gateway_out, setup, trust, target));
+    let waiting = Cell::new(Side::Browser);
+    let handshake = tokio::time::timeout(
+        HANDSHAKE_WAIT,
+        handshake(gateway_in, gateway_out, setup, trust, target, &waiting),
+    );
     let (tls, checked, names, rest) = match handshake.await {
         Ok(Ok(ready)) => ready,
         Ok(Err(fail)) => return fail,
-        Err(_) => return REFUSED,
+        Err(_) => return Fail::Refused(waiting.get(), Refusal::HandshakeTooSlow),
     };
     let (mut from_windows, mut to_windows) = tokio::io::split(tls);
     if to_windows.write_all(&checked).await.is_err() {
@@ -215,10 +261,10 @@ async fn pass_browser_bytes<W: AsyncWrite + Unpin>(
     windows: &mut W,
     writing: &Cell<bool>,
 ) -> Result<(), Fail> {
-    let pdus = splitter.push(bytes).map_err(|_| REFUSED)?;
+    let pdus = splitter.push(bytes).map_err(Fail::browser)?;
     let mut out = Vec::new();
     for (action, pdu) in &pdus {
-        match channels.borrow_mut().browser_pdu(*action, pdu).map_err(|_| REFUSED)? {
+        match channels.borrow_mut().browser_pdu(*action, pdu).map_err(Fail::browser)? {
             Pass::Unchanged => out.extend_from_slice(pdu),
             Pass::Instead(instead) => instead.iter().for_each(|p| out.extend_from_slice(p)),
         }
@@ -245,23 +291,28 @@ type Ready = (
 
 /// Returns TLS with Windows after NLA, the checked Connect Initial, the static
 /// channel names it asks for, and any browser bytes that came after it.
+/// `waiting` names the side each step waits on.
 async fn handshake<R, W>(
     gateway_in: &mut R,
     gateway_out: &mut W,
     setup: Setup,
     trust: &Trust,
     target: SocketAddr,
+    waiting: &Cell<Side>,
 ) -> Result<Ready, Fail>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    let internal = || Fail::keybash(Refusal::Internal);
     let clipboard = setup.clipboard;
     let mut inbuf = Vec::new();
+    waiting.set(Side::Browser);
     rdcleanpath_request(gateway_in, &mut inbuf).await?;
 
     // Windows: X.224 asking for NLA, TLS against the pinned certificate, then
     // CredSSP with the credentials only this process holds.
+    waiting.set(Side::Windows);
     let tcp = TcpStream::connect(target)
         .await
         .map_err(|_| Fail::End(Ended::Unreachable))?;
@@ -271,45 +322,47 @@ where
     // is made by a connector that has no user name; the connector with the
     // credentials then follows the same confirmation, and its own request is
     // never sent.
-    let local = "127.0.0.1:0".parse().map_err(|_| REFUSED)?;
+    let local = "127.0.0.1:0".parse().map_err(|_| internal())?;
     let mut nameless = ClientConnector::new(crate::config::connector_config(), local);
     let mut framed = ironrdp_tokio::TokioFramed::new(tcp);
     let mut buf = WriteBuf::new();
-    nameless.step_no_input(&mut buf).map_err(|_| REFUSED)?;
+    nameless.step_no_input(&mut buf).map_err(|_| internal())?;
     framed
         .write_all(buf.filled())
         .await
         .map_err(|_| Fail::End(Ended::Unreachable))?;
-    let hint = nameless.next_pdu_hint().ok_or(REFUSED)?;
+    let hint = nameless.next_pdu_hint().ok_or_else(internal)?;
     let confirm = framed
         .read_by_hint(hint)
         .await
         .map_err(|_| Fail::End(Ended::Unreachable))?;
     let mut connector = ClientConnector::new(windows_config(&setup), local);
     let mut unsent = WriteBuf::new();
-    connector.step_no_input(&mut unsent).map_err(|_| REFUSED)?;
+    connector.step_no_input(&mut unsent).map_err(|_| internal())?;
     drop(unsent);
     buf.clear();
-    connector.step(&confirm, None, &mut buf).map_err(|_| REFUSED)?;
+    connector
+        .step(&confirm, None, &mut buf)
+        .map_err(|_| Fail::windows(Refusal::X224Confirm))?;
     let X224(nego::ConnectionConfirm::Response {
         flags,
         protocol: selected,
-    }) = decode::<X224<nego::ConnectionConfirm>>(&confirm).map_err(|_| REFUSED)?
+    }) = decode::<X224<nego::ConnectionConfirm>>(&confirm).map_err(|_| Fail::windows(Refusal::X224Confirm))?
     else {
-        return Err(REFUSED);
+        return Err(Fail::windows(Refusal::X224Confirm));
     };
     if !selected.intersects(nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX)
         || !connector.should_perform_security_upgrade()
     {
-        return Err(REFUSED);
+        return Err(Fail::windows(Refusal::NlaNotSelected));
     }
     let (tcp, leftover) = framed.into_inner();
     if !leftover.is_empty() {
-        return Err(REFUSED);
+        return Err(Fail::windows(Refusal::BytesBeforeTls));
     }
     let tls = crate::pin::connect(tcp, &trust.certificate, &trust.name)
         .await
-        .map_err(|_| Fail::End(Ended::CertificateChanged))?;
+        .map_err(|_| Fail::windows(Refusal::Certificate))?;
     // The verifier accepted only the pinned bytes; the leaf is compared again,
     // as sent, before any credential leaves this process.
     let leaf = tls
@@ -317,20 +370,21 @@ where
         .1
         .peer_certificates()
         .and_then(|c| c.first())
-        .ok_or(REFUSED)?
+        .ok_or_else(|| Fail::windows(Refusal::Certificate))?
         .to_vec();
     if leaf != trust.certificate {
-        return Err(Fail::End(Ended::CertificateChanged));
+        return Err(Fail::windows(Refusal::Certificate));
     }
-    let server_public_key = crate::pin::public_key(&trust.certificate).map_err(|_| REFUSED)?;
+    let server_public_key =
+        crate::pin::public_key(&trust.certificate).map_err(|_| Fail::keybash(Refusal::TrustFiles))?;
     connector.mark_security_upgrade_as_done();
     if !connector.should_perform_credssp() {
-        return Err(REFUSED);
+        return Err(internal());
     }
     let mut framed = ironrdp_tokio::TokioFramed::new(tls);
     let (sequence, ts_request) =
         CredsspSequence::init_for_connector(&connector, ServerName::from(trust.name.host()), server_public_key, None)
-            .map_err(|_| REFUSED)?;
+            .map_err(|_| internal())?;
     let sequence =
         ironrdp_tokio::perform_credssp_with_context(&mut framed, &mut NoNetwork, &mut buf, sequence, ts_request)
             .await
@@ -342,7 +396,7 @@ where
     drop(setup);
     let (tls, leftover) = framed.into_inner();
     if !leftover.is_empty() {
-        return Err(REFUSED);
+        return Err(Fail::windows(Refusal::BytesAfterNla));
     }
 
     // The browser hears that TLS was selected, with the pinned certificate.
@@ -350,32 +404,34 @@ where
         flags,
         protocol: nego::SecurityProtocol::SSL,
     }))
-    .map_err(|_| REFUSED)?;
+    .map_err(|_| internal())?;
     let response = RDCleanPathPdu::new_response(trust.name.host().to_owned(), confirm, [trust.certificate.clone()])
         .and_then(|pdu| pdu.to_der())
-        .map_err(|_| REFUSED)?;
+        .map_err(|_| internal())?;
+    waiting.set(Side::Browser);
     frame::write(gateway_out, Kind::Desktop, &response)
         .await
         .map_err(|_| Fail::Quiet)?;
 
     // The browser's Connect Initial, checked and re-encoded for Windows.
+    let too_large = Refusal::ConnectInitialTooLarge;
     let total = loop {
         if inbuf.len() >= 4 {
             if inbuf[0] != 3 {
-                return Err(REFUSED);
+                return Err(Fail::browser(Refusal::ConnectInitial));
             }
             break usize::from(u16::from_be_bytes([inbuf[2], inbuf[3]]));
         }
-        browser_bytes(gateway_in, &mut inbuf, policy::MAX_CONNECT_INITIAL).await?;
+        browser_bytes(gateway_in, &mut inbuf, policy::MAX_CONNECT_INITIAL, too_large).await?;
     };
     if !(7..=policy::MAX_CONNECT_INITIAL).contains(&total) {
-        return Err(REFUSED);
+        return Err(Fail::browser(Refusal::ConnectInitial));
     }
     while inbuf.len() < total {
-        browser_bytes(gateway_in, &mut inbuf, policy::MAX_CONNECT_INITIAL).await?;
+        browser_bytes(gateway_in, &mut inbuf, policy::MAX_CONNECT_INITIAL, too_large).await?;
     }
     let first: Vec<u8> = inbuf.drain(..total).collect();
-    let (checked, names) = policy::connect_initial(&first, selected, clipboard).map_err(|_| REFUSED)?;
+    let (checked, names) = policy::connect_initial(&first, selected, clipboard).map_err(Fail::browser)?;
     Ok((tls, checked, names, inbuf))
 }
 
@@ -393,7 +449,7 @@ async fn upstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                     return fail;
                 }
             }
-            Ok(_) => return REFUSED,
+            Ok(_) => return Fail::keybash(Refusal::GatewayFrame),
             Err(e) => return e.into(),
         }
     }
@@ -412,15 +468,16 @@ async fn downstream<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             Ok(0) | Err(_) => return Fail::End(Ended::Remote),
             Ok(n) => n,
         };
-        let Ok(pdus) = splitter.push(&chunk[..n]) else {
-            return REFUSED;
+        let pdus = match splitter.push(&chunk[..n]) {
+            Ok(pdus) => pdus,
+            Err(refusal) => return Fail::windows(refusal),
         };
         out.clear();
         for (action, pdu) in &pdus {
             match channels.borrow_mut().server_pdu(*action, pdu) {
                 Ok(Pass::Unchanged) => out.extend_from_slice(pdu),
                 Ok(Pass::Instead(instead)) => instead.iter().for_each(|p| out.extend_from_slice(p)),
-                Err(_) => return REFUSED,
+                Err(refusal) => return Fail::windows(refusal),
             }
         }
         for part in out.chunks(frame::MAX_PAYLOAD) {
@@ -587,9 +644,8 @@ mod tests {
             Fail::Quiet => "quietly",
             Fail::End(Ended::Credentials) => "credentials",
             Fail::End(Ended::Unreachable) => "unreachable",
-            Fail::End(Ended::CertificateChanged) => "certificate changed",
-            Fail::End(Ended::Refused) => "refused",
             Fail::End(Ended::Remote) => "remote ended",
+            Fail::Refused(_, refusal) => refusal.word(),
         }
     }
 
@@ -667,7 +723,7 @@ mod tests {
                 name: Name::ExactLeaf,
             };
             let (fail, ()) = tokio::join!(run(&mut proxy_in, &mut proxy_out, setup, &trust, target), peer);
-            assert_eq!(fail, Fail::End(Ended::CertificateChanged));
+            assert_eq!(fail, Fail::windows(Refusal::Certificate));
         });
     }
 
@@ -711,25 +767,35 @@ mod tests {
                     .and_then(|p| p.to_der())
                     .expect("request")
             };
-            for (what, request) in [
+            for (what, request, expected) in [
                 (
                     "CredSSP from the browser",
                     with(x224(nego::SecurityProtocol::HYBRID), None),
+                    Fail::browser(Refusal::SecurityNotTls),
                 ),
                 (
                     "TLS and CredSSP",
                     with(x224(nego::SecurityProtocol::SSL | nego::SecurityProtocol::HYBRID), None),
+                    Fail::browser(Refusal::SecurityNotTls),
                 ),
                 (
                     "standard RDP security",
                     with(x224(nego::SecurityProtocol::empty()), None),
+                    Fail::browser(Refusal::SecurityNotTls),
                 ),
                 (
                     "a preconnection blob",
                     with(x224(nego::SecurityProtocol::SSL), Some("blob".into())),
+                    Fail::browser(Refusal::ConnectionChange),
                 ),
-                ("not DER", b"GET / HTTP/1.1\r\n\r\n".to_vec()),
-                ("cut short", good[..good.len() - 1].to_vec()),
+                // RDCleanPath's detection waits for more of what is not DER,
+                // until the browser's time runs out.
+                (
+                    "not DER",
+                    b"GET / HTTP/1.1\r\n\r\n".to_vec(),
+                    Fail::browser(Refusal::HandshakeTooSlow),
+                ),
+                ("cut short", good[..good.len() - 1].to_vec(), Fail::Quiet),
             ] {
                 let fail = if what == "cut short" {
                     // The rest never comes: the browser leaves.
@@ -756,14 +822,8 @@ mod tests {
                 } else {
                     refused(request).await
                 };
-                assert!(
-                    matches!(fail, Fail::End(Ended::Refused) | Fail::Quiet),
-                    "{what}: {}",
-                    fail_word(&fail)
-                );
-                if what != "cut short" {
-                    assert_eq!(fail, Fail::End(Ended::Refused), "{what}");
-                }
+                // Each refusal names the browser and what it sent.
+                assert_eq!(fail, expected, "{what}: {}", fail_word(&fail));
             }
         });
     }
@@ -876,7 +936,7 @@ mod tests {
                 .await
                 .expect("the proxy let a layout outside the bounds pass")
                 .expect("proxy task");
-            assert_eq!(fail, Fail::End(Ended::Refused));
+            assert_eq!(fail, Fail::browser(Refusal::DisplayLayoutOutOfBounds));
         });
     }
 
@@ -1244,7 +1304,8 @@ mod tests {
     fn an_end_on_keybash_side_says_goodbye_to_windows() {
         run_async(async {
             // The browser goes away; the browser sends what only Windows may.
-            for (sends, stays, end) in [(None, false, Fail::Quiet), (Some(Kind::Desktop), true, REFUSED)] {
+            let gateway_frame = Fail::keybash(Refusal::GatewayFrame);
+            for (sends, stays, end) in [(None, false, Fail::Quiet), (Some(Kind::Desktop), true, gateway_frame)] {
                 let (fail, heard) = relay_end(sends, stays, true).await;
                 assert_eq!(fail, end);
                 let X224(message) = decode::<X224<McsMessage<'_>>>(&heard).expect("an MCS PDU");
@@ -1262,5 +1323,128 @@ mod tests {
             assert_eq!(fail, Fail::End(Ended::Remote));
             assert!(heard.is_empty(), "the relay wrote to a Windows that had ended");
         });
+    }
+
+    /// A TPKT header that claims 4 bytes: shorter than any PDU.
+    const TOO_SHORT: [u8; 4] = [3, 0, 0, 4];
+
+    /// How a relay ends when the browser, or Windows, sends `bytes`.
+    async fn relay_refusal(from_browser: Option<&[u8]>, from_windows: Option<&[u8]>) -> Fail {
+        let (mut browser, mut proxy_in) = duplex(64 * 1024);
+        let (mut proxy_out, _browser_reads) = duplex(64 * 1024);
+        let (mut windows_writes, mut from_windows_pipe) = duplex(64 * 1024);
+        let (mut to_windows, _windows_reads) = duplex(64 * 1024);
+        if let Some(bytes) = from_browser {
+            frame::write(&mut browser, Kind::Browser, bytes).await.expect("browser");
+        }
+        if let Some(bytes) = from_windows {
+            windows_writes.write_all(bytes).await.expect("Windows");
+        }
+        let channels = RefCell::new(Channels::new(vec!["drdynvc".into()], false));
+        relay(
+            &mut proxy_in,
+            &mut proxy_out,
+            &mut from_windows_pipe,
+            &mut to_windows,
+            &channels,
+            &[],
+        )
+        .await
+    }
+
+    /// A refusal names the side that sent what was refused, the same bytes
+    /// either way, and what it was.
+    #[test]
+    fn a_refusal_names_the_side_that_sent_it() {
+        run_async(async {
+            assert_eq!(
+                relay_refusal(Some(&TOO_SHORT), None).await,
+                Fail::browser(Refusal::PduFraming)
+            );
+            assert_eq!(
+                relay_refusal(None, Some(&TOO_SHORT)).await,
+                Fail::windows(Refusal::PduFraming)
+            );
+            // Bytes the browser sent before the relay, after its Connect
+            // Initial, are the browser's too.
+            let (_browser, mut proxy_in) = duplex(1024);
+            let (mut proxy_out, _reads) = duplex(1024);
+            let (_windows, mut from_windows) = duplex(1024);
+            let (mut to_windows, _heard) = duplex(1024);
+            let channels = RefCell::new(Channels::new(Vec::new(), false));
+            let fail = relay(
+                &mut proxy_in,
+                &mut proxy_out,
+                &mut from_windows,
+                &mut to_windows,
+                &channels,
+                &TOO_SHORT,
+            )
+            .await;
+            assert_eq!(fail, Fail::browser(Refusal::PduFraming));
+        });
+    }
+
+    /// A handshake that runs out of time names the side it waited on: the
+    /// browser that never sends its request, or Windows that never answers.
+    #[test]
+    fn a_stalled_handshake_names_the_side_it_waited_on() {
+        run_async(async {
+            let trust = || Trust {
+                certificate: crate::pin::tests::certificate_der(),
+                name: Name::ExactLeaf,
+            };
+            let setup = || {
+                let password = crate::setup::tests::test_password(12, 9, false);
+                crate::setup::parse(&crate::setup::encode("u", "", &password, false)).expect("setup")
+            };
+            let silent_browser = async {
+                let (_to_proxy, mut proxy_in) = duplex(1024);
+                let (mut proxy_out, _from) = duplex(1024);
+                let (trust, target) = (trust(), "127.0.0.1:9".parse().expect("addr"));
+                run(&mut proxy_in, &mut proxy_out, setup(), &trust, target).await
+            };
+            let silent_windows = async {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listen");
+                let target = listener.local_addr().expect("addr");
+                let (mut to_proxy, mut proxy_in) = duplex(64 * 1024);
+                let (mut proxy_out, _from) = duplex(64 * 1024);
+                let (_, request) = rdcleanpath_request_from_browser();
+                frame::write(&mut to_proxy, Kind::Browser, &request)
+                    .await
+                    .expect("write");
+                let trust = trust();
+                let proxy = run(&mut proxy_in, &mut proxy_out, setup(), &trust, target);
+                // Windows takes the connection and says nothing.
+                let (fail, accepted) = tokio::join!(proxy, listener.accept());
+                drop(accepted);
+                fail
+            };
+            let (browser, windows) = tokio::join!(silent_browser, silent_windows);
+            assert_eq!(browser, Fail::browser(Refusal::HandshakeTooSlow));
+            assert_eq!(windows, Fail::windows(Refusal::HandshakeTooSlow));
+        });
+    }
+
+    /// The Ended frame holds fixed codes and nothing else: one byte for an
+    /// end, three for a refusal, none when the session ended quietly.
+    #[test]
+    fn the_ended_frame_holds_codes_only() {
+        assert_eq!(Fail::End(Ended::Credentials).ended(), Some(vec![1]));
+        assert_eq!(Fail::End(Ended::Unreachable).ended(), Some(vec![3]));
+        assert_eq!(Fail::End(Ended::Remote).ended(), Some(vec![6]));
+        assert_eq!(Fail::Quiet.ended(), None);
+        assert_eq!(
+            Fail::windows(Refusal::ClipboardFormatList).ended(),
+            Some(vec![5, 2, 31])
+        );
+        for side in [Side::Browser, Side::Windows, Side::Keybash] {
+            for &refusal in Refusal::ALL {
+                assert_eq!(
+                    Fail::Refused(side, refusal).ended(),
+                    Some(vec![frame::REFUSED, side as u8, refusal as u8])
+                );
+            }
+        }
     }
 }

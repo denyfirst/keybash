@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"io"
 	"net"
 	"net/netip"
 	"net/url"
@@ -91,6 +92,9 @@ type Lab struct {
 	networks, protected []netip.Prefix
 	watchEvery          time.Duration // see WatchCertificates; 0: never
 	background          sync.WaitGroup
+	// Where a refused desktop's line goes; see Journal. nil: nowhere.
+	journal   io.Writer
+	journalMu sync.Mutex
 }
 
 func usernameInput(value string) bool {

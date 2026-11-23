@@ -36,9 +36,12 @@ most 64 KiB:
   browser, unchanged.
 - **Desktop**, proxy to gateway: bytes for the browser, sent as one binary
   message.
-- **Ended**, proxy to gateway: one fixed code: credentials refused (which for
-  now also covers an account Windows refuses), unreachable, certificate
-  changed, refused, remote ended. The gateway maps it to the end-reason words
+- **Ended**, proxy to gateway: one fixed code: credentials refused (1, which
+  for now also covers an account Windows refuses), unreachable (3), remote
+  ended (6); or, for a refusal, exactly three bytes: 5, the side that sent
+  what was refused, and what it was, as codes from a fixed list (below, "Why
+  a desktop was refused"). 4, once a certificate change, is not sent: that is
+  a refusal by Windows now. The gateway maps the end to the end-reason words
   it already has, and shows nothing else.
 
 The proxy reads the pinned certificate from `/run/keybash/approved.pem` and
@@ -55,8 +58,8 @@ the server name from `/run/keybash/name`, as FreeRDP does now.
    no routing cookie: nothing about the account (user name, domain, password)
    crosses the network before TLS. It then completes TLS 1.2 or 1.3 with its own verifier (`rdp-proxy/src/pin.rs`):
    - the leaf certificate must be byte for byte the pinned one, inside its
-     validity dates, or the session ends as "certificate changed" before any
-     credential is sent;
+     validity dates, or the session ends as "refused" (Windows, "certificate
+     or TLS") before any credential is sent;
    - the handshake signature is still checked with that certificate's key, so
      the pinned certificate alone, which is public, does not pass;
    - no platform roots, no resumption, no key log.
@@ -186,6 +189,54 @@ The proxy relays both ways and checks what it passes on
 What the proxy cannot check is the video content: graphics-pipeline records
 and H.264 reach the browser's WebAssembly and its sandboxed decoder (ADR 0008,
 Decision).
+
+## Why a desktop was refused
+
+The page says only "refused". An administrator finds why in the gateway's
+journal, one line for each desktop that ended so:
+
+```text
+journalctl -u keybash-gateway | grep 'desktop refused'
+desktop refused: side=windows reason="clipboard capabilities"
+```
+
+- `side` is who sent what was refused: `browser`, `windows`, or `keybash` for
+  Keybash's own parts (the gateway's frames, the setup, the trust files, the
+  proxy's own state). `unknown` is a code outside the list.
+- `reason` is a word from a fixed list. The proxy refuses with a code
+  (`rdp-proxy/src/refusal.rs`), and only the side's and the refusal's codes
+  cross, in the Ended frame. The proxy's binary holds no words at all.
+- The gateway names the codes from its own copy of the list
+  (`internal/rdplab/refusals.go`); a test reads the proxy's file and compares
+  the two, code for code. A code outside the list is `unknown`. An Ended frame
+  of any other shape, a malformed frame, or a kind the proxy never sends is
+  the gateway's own refusal: `side=keybash reason="proxy frame"`.
+- A browser message that is not binary, or empty, is refused by the gateway
+  itself: `side=browser reason="desktop message not binary"`.
+- A handshake that runs out of its 30 seconds names the side it was waiting
+  on, with `handshake too slow`.
+- The line is written only when the page was told "refused", once per
+  desktop. Other endings (credentials, unreachable, remote ended, sign-out,
+  idle) write nothing.
+- Nothing from the session reaches the line: no clipboard text, no user name,
+  password, server, address, person or proof. Before it is written, the
+  gateway checks the words again (`terminalweb.Refusal.Line`): a side outside
+  the four, or a word of anything but letters, digits, spaces and `.'-`, or
+  over 64 bytes, is written as `unknown`, and the line is always one line.
+- The proxy's standard error, and the worker's, stay discarded: the codes are
+  the only way out. The gateway writes the line to its standard error, which
+  the service keeps in the journal (`StandardError=journal`).
+
+Examples:
+
+| Line | What happened |
+|---|---|
+| `side=windows reason="clipboard capabilities"` | Windows' clipboard program, rdpclip, started over after the clipboard opened, and its second capabilities ended the desktop |
+| `side=browser reason="clipboard before Windows' is open"` | the page sent clipboard data before Windows' clipboard opened |
+| `side=windows reason="certificate or TLS"` | Windows showed another certificate than the approved one, or its TLS failed, at the proxy's own check |
+| `side=windows reason="NLA not selected"` | Windows did not select NLA |
+| `side=browser reason="display layout outside the bounds"` | the page asked for a layout beyond the desktop bounds |
+| `side=windows reason="handshake too slow"` | Windows did not finish its part of the handshake within 30 seconds |
 
 ## Order of pull requests
 

@@ -50,15 +50,23 @@ const (
 	desktopWriteWait = 10 * time.Second
 )
 
-func messageEndReason(ctx context.Context, stream MessageStream) Reason {
+// messageEnd is why a desktop ended: the session's cause, else the stream's
+// own word. When the stream's word is "refused", the stream names what.
+func messageEnd(ctx context.Context, stream MessageStream) (Reason, Refusal) {
 	var cause Reason
 	if errors.As(context.Cause(ctx), &cause) && reasons[cause] {
-		return cause
+		return cause, Refusal{}
 	}
-	if r := stream.Reason(); reasons[r] {
-		return r
+	r := stream.Reason()
+	if !reasons[r] {
+		return "", Refusal{}
 	}
-	return ""
+	if s, ok := stream.(RefusingStream); ok && r == ReasonRefused {
+		if refusal, named := s.Refusal(); named {
+			return r, refusal
+		}
+	}
+	return r, Refusal{}
 }
 
 // RelayMessages relays an ALREADY authorized desktop socket to its stream.
@@ -69,7 +77,10 @@ func messageEndReason(ctx context.Context, stream MessageStream) Reason {
 // "refused". Past the per-second budget the relay waits for the next second
 // before reading on. Cancellation closes both sides, says why, and
 // joins both directions.
-func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStream, admit func([]byte) bool) {
+//
+// It returns the reason the page was told, and for "refused" which side sent
+// what, in fixed words (Refusal), so the caller can write it to the journal.
+func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStream, admit func([]byte) bool) (Reason, Refusal) {
 	if ctx == nil || conn == nil || stream == nil || admit == nil {
 		if conn != nil {
 			_ = conn.CloseNow()
@@ -77,7 +88,7 @@ func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStre
 		if stream != nil {
 			_ = stream.Close()
 		}
-		return
+		return "", Refusal{}
 	}
 	session := ctx
 	ctx, cancel := context.WithCancelCause(ctx)
@@ -86,16 +97,30 @@ func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStre
 	defer stream.Close()
 	conn.SetReadLimit(MaxMessage)
 	closed := make(chan struct{})
+	// Set before closed is closed, read after: the page's reason and, for a
+	// refusal, what.
+	var told Reason
+	var refusal Refusal
 	context.AfterFunc(ctx, func() {
 		defer close(closed)
 		_ = stream.Close()
-		reason := messageEndReason(session, stream)
+		reason, named := messageEnd(session, stream)
 		var own Reason
 		if errors.As(context.Cause(ctx), &own) && reason == "" {
 			reason = own
+			if own == ReasonRefused {
+				named = browserMessageRefused
+			}
 		}
 		if code, ok := closeCodes[reason]; ok {
 			_ = conn.Close(code, string(reason))
+			told = reason
+		}
+		if told == ReasonRefused {
+			refusal = named
+			if refusal == (Refusal{}) {
+				refusal = unknownRefusal
+			}
 		}
 		_ = conn.CloseNow()
 	})
@@ -156,6 +181,7 @@ func RelayMessages(ctx context.Context, conn *websocket.Conn, stream MessageStre
 	}
 	joined.Wait()
 	<-closed
+	return told, refusal
 }
 
 // waitFor waits d, or until ctx ends; it reports whether d passed.

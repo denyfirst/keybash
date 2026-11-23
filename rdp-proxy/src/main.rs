@@ -15,13 +15,15 @@ mod frame;
 mod fuzz;
 mod pin;
 mod policy;
+mod refusal;
 mod session;
 mod setup;
 
 use std::process::ExitCode;
 use std::time::Duration;
 
-use frame::{Ended, Kind};
+use frame::Kind;
+use refusal::Refusal;
 use session::{Fail, Trust};
 
 const BRIDGE: &str = "127.0.0.1:3390";
@@ -37,14 +39,14 @@ async fn start<R: tokio::io::AsyncRead + Unpin>(gateway: &mut R) -> Result<(setu
         .await
         .map_err(|_| Fail::Quiet)??;
     if kind != Kind::Setup {
-        return Err(Fail::End(Ended::Refused));
+        return Err(Fail::keybash(Refusal::Setup));
     }
-    let setup = setup::parse(&payload).map_err(|_| Fail::End(Ended::Refused))?;
+    let setup = setup::parse(&payload).map_err(|_| Fail::keybash(Refusal::Setup))?;
     let certificate = std::fs::read(PINNED).ok().and_then(|pem| pin::certificate(&pem).ok());
     let name = std::fs::read(NAME).ok().and_then(|raw| pin::name(&raw).ok());
     match (certificate, name) {
         (Some(certificate), Some(name)) => Ok((setup, Trust { certificate, name })),
-        _ => Err(Fail::End(Ended::Refused)),
+        _ => Err(Fail::keybash(Refusal::TrustFiles)),
     }
 }
 
@@ -69,8 +71,10 @@ fn main() -> ExitCode {
             Ok((setup, trust)) => session::run(&mut input, &mut output, setup, &trust, bridge).await,
             Err(fail) => fail,
         };
-        if let Fail::End(code) = fail {
-            let _ = frame::write(&mut output, Kind::Ended, &[code as u8]).await;
+        // Why it ended, in fixed codes (crate::refusal): the proxy writes
+        // nothing else about a session anywhere.
+        if let Some(payload) = fail.ended() {
+            let _ = frame::write(&mut output, Kind::Ended, &payload).await;
         }
     });
     ExitCode::SUCCESS

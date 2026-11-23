@@ -12,7 +12,8 @@ use ironrdp_pdu::x224::{X224, X224Data};
 use ironrdp_pdu::{Action, find_size, mcs};
 
 use crate::clipboard::Clipboard;
-use crate::policy::{Refusal, desktop_allowed};
+use crate::policy::desktop_allowed;
+use crate::refusal::Refusal;
 
 /// What goes on in place of a PDU that passed its checks.
 #[derive(Debug, PartialEq, Eq)]
@@ -51,7 +52,7 @@ impl Splitter {
         self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
         loop {
-            let Some(info) = find_size(&self.buf).map_err(|_| Refusal("PDU framing"))? else {
+            let Some(info) = find_size(&self.buf).map_err(|_| Refusal::PduFraming)? else {
                 break;
             };
             // No PDU is shorter than its own header: 7 bytes of TPKT and X.224, 2 of fast-path.
@@ -59,7 +60,7 @@ impl Splitter {
             // kept here so it holds if that changes.
             let least = if info.action == Action::X224 { 7 } else { 2 };
             if info.length < least || info.length > MAX_PDU {
-                return Err(Refusal("PDU size"));
+                return Err(Refusal::PduSize);
             }
             if self.buf.len() < info.length {
                 break;
@@ -67,7 +68,7 @@ impl Splitter {
             out.push((info.action, self.buf.drain(..info.length).collect()));
         }
         if self.buf.len() > MAX_PDU {
-            return Err(Refusal("PDU size"));
+            return Err(Refusal::PduSize);
         }
         Ok(out)
     }
@@ -143,7 +144,7 @@ impl Channels {
             return self.connect_response(pdu).map(|()| Pass::Unchanged);
         }
         match decode::<X224<mcs::McsMessage<'_>>>(pdu)
-            .map_err(|_| Refusal("MCS from Windows"))?
+            .map_err(|_| Refusal::McsFromWindows)?
             .0
         {
             mcs::McsMessage::AttachUserConfirm(confirm) => {
@@ -165,10 +166,10 @@ impl Channels {
                         .chunk(true, data.initiator_id, data.channel_id, &data.user_data, now)?;
                     Ok(Pass::Instead(pdus))
                 } else {
-                    Err(Refusal("data on a channel not allowed"))
+                    Err(Refusal::ChannelDataNotAllowed)
                 }
             }
-            _ => Err(Refusal("MCS from Windows")),
+            _ => Err(Refusal::McsFromWindows),
         }
     }
 
@@ -178,7 +179,7 @@ impl Channels {
             return Ok(Pass::Unchanged); // input events
         }
         match decode::<X224<mcs::McsMessage<'_>>>(pdu)
-            .map_err(|_| Refusal("MCS from the browser"))?
+            .map_err(|_| Refusal::McsFromBrowser)?
             .0
         {
             mcs::McsMessage::ErectDomainRequest(_)
@@ -189,7 +190,7 @@ impl Channels {
                 if known.contains(&Some(join.channel_id)) {
                     Ok(Pass::Unchanged)
                 } else {
-                    Err(Refusal("joining a channel not allowed"))
+                    Err(Refusal::JoinNotAllowed)
                 }
             }
             mcs::McsMessage::SendDataRequest(data) => {
@@ -206,10 +207,10 @@ impl Channels {
                         .chunk(false, data.initiator_id, data.channel_id, &data.user_data, now)?;
                     Ok(Pass::Instead(pdus))
                 } else {
-                    Err(Refusal("data on a channel not allowed"))
+                    Err(Refusal::ChannelDataNotAllowed)
                 }
             }
-            _ => Err(Refusal("MCS from the browser")),
+            _ => Err(Refusal::McsFromBrowser),
         }
     }
 
@@ -226,15 +227,15 @@ impl Channels {
         use ironrdp_pdu::rdp::client_info::{ClientInfoFlags, Credentials};
         use ironrdp_pdu::rdp::headers::BasicSecurityHeaderFlags;
 
-        let (user, domain) = self.account.clone().ok_or(Refusal("no account for the Client Info"))?;
-        let mut pdu = decode::<ClientInfoPdu>(data).map_err(|_| Refusal("Client Info"))?;
+        let (user, domain) = self.account.clone().ok_or(Refusal::NoAccount)?;
+        let mut pdu = decode::<ClientInfoPdu>(data).map_err(|_| Refusal::ClientInfo)?;
         let info = &mut pdu.client_info;
         if pdu.security_header.flags != BasicSecurityHeaderFlags::INFO_PKT
             || !info.alternate_shell.is_empty()
             || !info.work_dir.is_empty()
             || info.flags.contains(ClientInfoFlags::RAIL)
         {
-            return Err(Refusal("Client Info asks for more than the desktop"));
+            return Err(Refusal::ClientInfoTooMuch);
         }
         info.credentials = Credentials {
             username: user,
@@ -243,13 +244,13 @@ impl Channels {
         };
         info.password_cookie = None;
         info.extra_info.optional_data = without_reconnect_cookie(&info.extra_info.optional_data);
-        let written = ironrdp_core::encode_vec(&pdu).map_err(|_| Refusal("Client Info"))?;
+        let written = ironrdp_core::encode_vec(&pdu).map_err(|_| Refusal::ClientInfo)?;
         let out = ironrdp_core::encode_vec(&X224(mcs::McsMessage::SendDataRequest(mcs::SendDataRequest {
             initiator_id: initiator,
             channel_id: channel,
             user_data: std::borrow::Cow::Owned(written),
         })))
-        .map_err(|_| Refusal("Client Info"))?;
+        .map_err(|_| Refusal::ClientInfo)?;
         self.client_info = true;
         Ok(Pass::Instead(vec![out]))
     }
@@ -257,18 +258,17 @@ impl Channels {
     /// Windows' MCS Connect Response numbers the channels the browser asked
     /// for, in the same order.
     fn connect_response(&mut self, pdu: &[u8]) -> Result<(), Refusal> {
-        let X224(carrier) = decode::<X224<X224Data<'_>>>(pdu).map_err(|_| Refusal("not an X.224 data PDU"))?;
-        let response =
-            decode::<mcs::ConnectResponse>(&carrier.data).map_err(|_| Refusal("not an MCS Connect Response"))?;
+        let X224(carrier) = decode::<X224<X224Data<'_>>>(pdu).map_err(|_| Refusal::NotX224Data)?;
+        let response = decode::<mcs::ConnectResponse>(&carrier.data).map_err(|_| Refusal::NotConnectResponse)?;
         let network = &response.conference_create_response.gcc_blocks().network;
         if network.channel_ids.len() != self.names.len() {
-            return Err(Refusal("channel numbering"));
+            return Err(Refusal::ChannelNumbering);
         }
         for (name, &id) in self.names.iter().zip(&network.channel_ids) {
             match name.as_str() {
                 "drdynvc" => self.drdynvc = Some(id),
                 "cliprdr" if self.clipboard => self.cliprdr = Some(id),
-                _ => return Err(Refusal("static channel not allowed")),
+                _ => return Err(Refusal::StaticChannelNotAllowed),
             }
         }
         self.io = Some(network.io_channel);
@@ -278,11 +278,11 @@ impl Channels {
     /// One chunk of a `drdynvc` message. Its dynamic channel PDU starts in the
     /// first chunk, so that is where it is checked; the rest follow it.
     fn svc(&mut self, from_server: bool, data: &[u8]) -> Result<(), Refusal> {
-        let header = data.get(..8).ok_or(Refusal("channel chunk"))?;
+        let header = data.get(..8).ok_or(Refusal::ChannelChunk)?;
         let total = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
         let flags = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
         if flags & CHANNEL_PACKET_COMPRESSED != 0 || total > MAX_SVC_MESSAGE {
-            return Err(Refusal("channel chunk"));
+            return Err(Refusal::ChannelChunk);
         }
         let first = flags & CHANNEL_FLAG_FIRST != 0;
         let last = flags & CHANNEL_FLAG_LAST != 0;
@@ -293,7 +293,7 @@ impl Channels {
         };
         if first == chunks.open {
             // A first chunk inside a message, or a later one outside it.
-            return Err(Refusal("channel chunk order"));
+            return Err(Refusal::ChannelChunkOrder);
         }
         chunks.open = !last;
         if first {
@@ -305,28 +305,28 @@ impl Channels {
     /// The dynamic channel PDU at the start of a `drdynvc` message
     /// (MS-RDPEDYC 2.2).
     fn dynamic(&mut self, from_server: bool, pdu: &[u8]) -> Result<(), Refusal> {
-        let (&header, rest) = pdu.split_first().ok_or(Refusal("dynamic channel PDU"))?;
+        let (&header, rest) = pdu.split_first().ok_or(Refusal::DynamicChannelPdu)?;
         let cmd = header >> 4;
         let id_size = match header & 0x03 {
             0 => 1,
             1 => 2,
             2 => 4,
-            _ => return Err(Refusal("dynamic channel PDU")),
+            _ => return Err(Refusal::DynamicChannelPdu),
         };
         if cmd == 0x05 {
             return Ok(()); // capabilities, both ways
         }
-        let id_bytes = rest.get(..id_size).ok_or(Refusal("dynamic channel PDU"))?;
+        let id_bytes = rest.get(..id_size).ok_or(Refusal::DynamicChannelPdu)?;
         let id = id_bytes.iter().rev().fold(0u32, |n, &b| n << 8 | u32::from(b));
         let body = &rest[id_size..];
         match (cmd, from_server) {
             // Create: Windows names the channel; the browser answers.
             (0x01, true) => {
-                let end = body.iter().position(|&b| b == 0).ok_or(Refusal("channel name"))?;
-                let name = std::str::from_utf8(&body[..end]).map_err(|_| Refusal("channel name"))?;
+                let end = body.iter().position(|&b| b == 0).ok_or(Refusal::ChannelName)?;
+                let name = std::str::from_utf8(&body[..end]).map_err(|_| Refusal::ChannelName)?;
                 let allowed = name == GRAPHICS || name == DISPLAY;
                 if self.dvc.contains_key(&id) {
-                    return Err(Refusal("dynamic channel reused"));
+                    return Err(Refusal::DynamicChannelReused);
                 }
                 self.dvc.insert(
                     id,
@@ -338,7 +338,7 @@ impl Channels {
                 Ok(())
             }
             (0x01, false) => {
-                let status = body.get(..4).ok_or(Refusal("create response"))?;
+                let status = body.get(..4).ok_or(Refusal::CreateResponse)?;
                 let failed = i32::from_le_bytes([status[0], status[1], status[2], status[3]]) < 0;
                 match self.dvc.remove(&id) {
                     Some(Dvc::Requested { .. }) if failed => Ok(()),
@@ -346,26 +346,26 @@ impl Channels {
                         self.dvc.insert(id, Dvc::Open { display });
                         Ok(())
                     }
-                    _ => Err(Refusal("opening a dynamic channel not allowed")),
+                    _ => Err(Refusal::DynamicChannelNotAllowed),
                 }
             }
             // Data: only on a channel the browser opened.
             (0x02 | 0x03 | 0x06 | 0x07, _) => match self.dvc.get(&id) {
                 Some(Dvc::Open { display: true }) if !from_server => {
                     if cmd != 0x03 {
-                        return Err(Refusal("display layout fragmented or compressed"));
+                        return Err(Refusal::DisplayLayoutFragmented);
                     }
                     display_layout(body)
                 }
                 Some(Dvc::Open { .. }) => Ok(()),
-                _ => Err(Refusal("data on a dynamic channel not open")),
+                _ => Err(Refusal::DynamicChannelNotOpen),
             },
             // Close, either way.
             (0x04, _) => {
                 self.dvc.remove(&id);
                 Ok(())
             }
-            _ => Err(Refusal("dynamic channel command")),
+            _ => Err(Refusal::DynamicChannelCommand),
         }
     }
 }
@@ -394,15 +394,15 @@ fn without_reconnect_cookie(
 /// one primary monitor at the origin, within the desktop bounds.
 fn display_layout(pdu: &[u8]) -> Result<(), Refusal> {
     let word = |at: usize| -> Result<u32, Refusal> {
-        let b = pdu.get(at..at + 4).ok_or(Refusal("display layout"))?;
+        let b = pdu.get(at..at + 4).ok_or(Refusal::DisplayLayout)?;
         Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     };
     // Header: type and length; then the entry size and the count.
     if word(0)? != 2 || usize::try_from(word(4)?).ok() != Some(pdu.len()) || word(8)? != 40 || word(12)? != 1 {
-        return Err(Refusal("display layout"));
+        return Err(Refusal::DisplayLayout);
     }
     if pdu.len() != 16 + 40 {
-        return Err(Refusal("display layout"));
+        return Err(Refusal::DisplayLayout);
     }
     let (flags, left, top, width, height) = (word(16)?, word(20)?, word(24)?, word(28)?, word(32)?);
     let (scale, device) = (word(48)?, word(52)?);
@@ -413,7 +413,7 @@ fn display_layout(pdu: &[u8]) -> Result<(), Refusal> {
         _ => false,
     };
     if flags != 1 || left != 0 || top != 0 || !size_ok || !matches!(device, 0 | 100 | 140 | 180) {
-        return Err(Refusal("display layout outside the bounds"));
+        return Err(Refusal::DisplayLayoutOutOfBounds);
     }
     Ok(())
 }

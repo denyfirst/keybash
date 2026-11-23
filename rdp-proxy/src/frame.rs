@@ -13,7 +13,9 @@ pub enum Kind {
     Browser = 2,
     /// Proxy to gateway: bytes for the browser, one binary message.
     Desktop = 3,
-    /// Proxy to gateway: why the session ended, one byte from `Ended`.
+    /// Proxy to gateway: why the session ended: one byte from `Ended`, or
+    /// for a refusal three: `REFUSED`, the side and the refusal's code
+    /// (crate::refusal). Fixed codes only, never bytes from the session.
     Ended = 4,
 }
 
@@ -29,7 +31,8 @@ impl Kind {
     }
 }
 
-/// Why a session ended, as the gateway names it with one fixed word.
+/// Why a session ended other than by a refusal, as the gateway names it with
+/// one fixed word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ended {
     /// Windows did not accept the stored user name or password, or refused
@@ -37,13 +40,14 @@ pub enum Ended {
     Credentials = 1,
     /// Windows could not be reached through the bridge.
     Unreachable = 3,
-    /// Windows showed a certificate other than the pinned one.
-    CertificateChanged = 4,
-    /// Something crossed the proxy that it does not accept.
-    Refused = 5,
     /// Windows ended the session.
     Remote = 6,
 }
+
+/// The first byte of a refusal's Ended frame: something crossed the proxy
+/// that it does not accept. The side and the refusal's code follow. 4, once a
+/// certificate change, is not sent: that is a refusal by Windows now.
+pub const REFUSED: u8 = 5;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FrameError {
@@ -101,13 +105,11 @@ mod tests {
         run(async {
             let mut buf = Vec::new();
             write(&mut buf, Kind::Browser, b"hello").await.expect("write");
-            write(&mut buf, Kind::Ended, &[Ended::Refused as u8])
-                .await
-                .expect("write");
+            write(&mut buf, Kind::Ended, &[REFUSED, 2, 31]).await.expect("write");
             write(&mut buf, Kind::Setup, &[]).await.expect("write");
             let mut r = buf.as_slice();
             assert_eq!(read(&mut r).await, Ok((Kind::Browser, b"hello".to_vec())));
-            assert_eq!(read(&mut r).await, Ok((Kind::Ended, vec![5])));
+            assert_eq!(read(&mut r).await, Ok((Kind::Ended, vec![5, 2, 31])));
             assert_eq!(read(&mut r).await, Ok((Kind::Setup, vec![])));
             assert_eq!(read(&mut r).await, Err(FrameError::Closed));
         });

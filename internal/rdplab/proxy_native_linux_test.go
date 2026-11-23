@@ -69,6 +69,12 @@ func nativeProxyChild(t *testing.T, ctx context.Context, cancel context.CancelFu
 		if err == nil || s.Reason() != terminalweb.ReasonRefused {
 			t.Fatalf("a refused server ended as %q", s.Reason())
 		}
+		// The refusal crossed the sandbox as codes and names Windows and
+		// what it showed or selected.
+		refusal, named := s.Refusal()
+		if !named || refusal.Side != "windows" || (refusal.What != "certificate or TLS" && refusal.What != "NLA not selected") {
+			t.Fatalf("a refused server was named %+v", refusal)
+		}
 		return
 	default:
 		t.Fatalf("unknown proxy mode %q", mode)

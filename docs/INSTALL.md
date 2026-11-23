@@ -295,6 +295,20 @@ A server's row also says when its certificate ends, two weeks ahead. If a
 certificate has ended and Windows has not made a new one, restart Remote Desktop
 Services on the server; Windows then makes one.
 
+### When a desktop ends as "refused"
+
+Keybash ended the desktop because the browser or Windows sent something it
+does not accept. The page says only "refused"; the gateway's journal says
+which side sent what, in one line per desktop, as root:
+
+```sh
+journalctl -u keybash-gateway | grep 'desktop refused'
+```
+
+For example `desktop refused: side=windows reason="clipboard capabilities"`.
+The words come from a fixed list and never hold anything from the session
+(`BROWSER-RDP-PROXY.md`, "Why a desktop was refused").
+
 ### Servers from `targets.json`
 
 At the first start of this version, every server in `/etc/keybash/targets.json`

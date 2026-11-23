@@ -25,8 +25,11 @@ const (
 	proxySetup      byte = 1 // gateway to proxy, once, first
 	proxyBrowser    byte = 2 // gateway to proxy: one browser message
 	proxyDesktop    byte = 3 // proxy to gateway: bytes for the browser
-	proxyEnded      byte = 4 // proxy to gateway: why it ended, one byte
+	proxyEnded      byte = 4 // proxy to gateway: why it ended (proxyEnd)
 	proxyMaxPayload      = 64 * 1024
+
+	// An Ended frame's first byte for a refusal; the side and what follow.
+	proxyRefused byte = 5
 )
 
 var (
@@ -118,15 +121,28 @@ func containsNUL(s string) bool {
 	return false
 }
 
-// proxyReasons maps the proxy's end codes to the words the pages know. A
-// certificate change after the gateway's own probe passed, and any code the
-// gateway does not know, is "refused".
+// proxyReasons maps the proxy's one-byte end codes to the words the pages
+// know. A refusal is never one byte (proxyEnd).
 var proxyReasons = map[byte]terminalweb.Reason{
 	1: terminalweb.ReasonCredentials,
 	3: terminalweb.ReasonUnreachable,
-	4: terminalweb.ReasonRefused,
-	5: terminalweb.ReasonRefused,
 	6: terminalweb.ReasonRemoteEnded,
+}
+
+// proxyEnd reads an Ended frame: one byte for an end that is not a refusal,
+// or exactly three for a refusal: proxyRefused, the side and what, named with
+// the words in refusals.go. Any other end, including a refusal without its
+// codes, is "refused" as the proxy's own fault (proxyFrameRefused).
+func proxyEnd(payload []byte) (terminalweb.Reason, terminalweb.Refusal) {
+	switch {
+	case len(payload) == 1:
+		if reason, known := proxyReasons[payload[0]]; known {
+			return reason, terminalweb.Refusal{}
+		}
+	case len(payload) == 3 && payload[0] == proxyRefused:
+		return terminalweb.ReasonRefused, proxyRefusal(payload[1], payload[2])
+	}
+	return terminalweb.ReasonRefused, proxyFrameRefused
 }
 
 // ProxyStream is one browser desktop through the proxy: whole messages each
@@ -134,19 +150,26 @@ var proxyReasons = map[byte]terminalweb.Reason{
 type ProxyStream struct {
 	conn   net.Conn
 	write  sync.Mutex
-	reason atomic.Pointer[terminalweb.Reason]
+	ended  atomic.Pointer[streamEnd]
 	closed atomic.Bool
+}
+
+// streamEnd is why a stream ended, and, when that is "refused", which side
+// sent what, in fixed words.
+type streamEnd struct {
+	reason  terminalweb.Reason
+	refusal terminalweb.Refusal
 }
 
 func newProxyStream(conn net.Conn) *ProxyStream { return &ProxyStream{conn: conn} }
 
-func (s *ProxyStream) end(r terminalweb.Reason) {
-	s.reason.CompareAndSwap(nil, &r)
+func (s *ProxyStream) end(r terminalweb.Reason, refusal terminalweb.Refusal) {
+	s.ended.CompareAndSwap(nil, &streamEnd{reason: r, refusal: refusal})
 }
 
 // ReadMessage returns the next bytes for the browser. When the proxy says why
 // it ended, or anything malformed arrives, it returns an error and Reason says
-// why.
+// why; for a refusal, Refusal says what.
 func (s *ProxyStream) ReadMessage() ([]byte, error) {
 	kind, payload, err := readProxyFrame(s.conn)
 	switch {
@@ -154,20 +177,16 @@ func (s *ProxyStream) ReadMessage() ([]byte, error) {
 		return nil, errProxyClosed
 	case err != nil:
 		if !s.closed.Load() {
-			s.end(terminalweb.ReasonRefused)
+			s.end(terminalweb.ReasonRefused, proxyFrameRefused)
 		}
 		return nil, errNative
 	case kind == proxyDesktop && len(payload) > 0:
 		return payload, nil
-	case kind == proxyEnded && len(payload) == 1:
-		reason, known := proxyReasons[payload[0]]
-		if !known {
-			reason = terminalweb.ReasonRefused
-		}
-		s.end(reason)
+	case kind == proxyEnded:
+		s.end(proxyEnd(payload))
 		return nil, errProxyClosed
 	default:
-		s.end(terminalweb.ReasonRefused)
+		s.end(terminalweb.ReasonRefused, proxyFrameRefused)
 		return nil, errNative
 	}
 }
@@ -184,11 +203,22 @@ func (s *ProxyStream) WriteMessage(p []byte) error {
 
 // Reason says why the proxy ended the desktop, if it said.
 func (s *ProxyStream) Reason() terminalweb.Reason {
-	if r := s.reason.Load(); r != nil {
-		return *r
+	if e := s.ended.Load(); e != nil {
+		return e.reason
 	}
 	return ""
 }
+
+// Refusal names, in fixed words, which side sent what was refused, when the
+// desktop ended as "refused".
+func (s *ProxyStream) Refusal() (terminalweb.Refusal, bool) {
+	if e := s.ended.Load(); e != nil && e.reason == terminalweb.ReasonRefused {
+		return e.refusal, true
+	}
+	return terminalweb.Refusal{}, false
+}
+
+var _ terminalweb.RefusingStream = (*ProxyStream)(nil)
 
 // Close ends the worker; it unblocks every read and write.
 func (s *ProxyStream) Close() error {
