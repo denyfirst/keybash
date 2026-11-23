@@ -10,6 +10,7 @@
 //!   text of at most 32 KiB in UTF-8, paced as the gateway paces it. Otherwise
 //!   the side that asked gets a failure, and the session goes on.
 //! - Files, locks and the temporary directory never pass.
+//! - Nothing from the browser passes before Windows' clipboard is open.
 //!
 //! Anything malformed ends the session as "refused".
 
@@ -107,6 +108,9 @@ impl Side {
 pub struct Clipboard {
     server: Side,
     browser: Side,
+    /// Windows' clipboard is open: it has sent its Monitor Ready, after which
+    /// the browser's clipboard may speak (MS-RDPECLIP 1.3.2.1).
+    open: bool,
 }
 
 impl Clipboard {
@@ -213,16 +217,12 @@ impl Clipboard {
         if usize::try_from(u32_at(&message, 4)?).ok() != Some(body.len()) {
             return Err(Refusal("clipboard message length"));
         }
+        if !from_server && !self.open {
+            return before_open(kind, flags, body);
+        }
         match kind {
             CAPABILITIES => {
-                // One general capability set: count, pad, type, length, version, flags.
-                let well_formed = flags == 0
-                    && body.len() == 16
-                    && u16_at(body, 0)? == 1
-                    && u16_at(body, 4)? == 1
-                    && u16_at(body, 6)? == 12
-                    && matches!(u32_at(body, 8)?, 1 | 2);
-                if !well_formed || me.capabilities {
+                if !general_set(flags, body)? || me.capabilities {
                     return Err(Refusal("clipboard capabilities"));
                 }
                 let general = u32_at(body, 12)? & USE_LONG_FORMAT_NAMES;
@@ -232,7 +232,10 @@ impl Clipboard {
                 out.extend_from_slice(&general.to_le_bytes());
                 written(CAPABILITIES, 0, &out).map(Some)
             }
-            MONITOR_READY if from_server && flags == 0 && body.is_empty() => Ok(Some(message)),
+            MONITOR_READY if from_server && flags == 0 && body.is_empty() => {
+                self.open = true;
+                Ok(Some(message))
+            }
             FORMAT_LIST => {
                 if flags & !ASCII_NAMES != 0 {
                     return Err(Refusal("clipboard format list"));
@@ -278,6 +281,34 @@ impl Clipboard {
             _ => Err(Refusal("clipboard message not allowed")),
         }
     }
+}
+
+/// A browser message before Windows' clipboard is open. Windows speaks first,
+/// and its clipboard may never open: rdpclip can stop answering a session.
+/// IronRDP still sends its capabilities, temporary directory and format list
+/// with the first paste, and again with each paste until Windows answers.
+/// Those three are checked as far as they can be and dropped, so the paste
+/// fails on the page and the desktop goes on. Nothing is recorded: they come
+/// again once Windows' clipboard opens. Anything else ends the session.
+fn before_open(kind: u16, flags: u16, body: &[u8]) -> Result<Option<Vec<u8>>, Refusal> {
+    match kind {
+        CAPABILITIES if general_set(flags, body)? => Ok(None),
+        CAPABILITIES => Err(Refusal("clipboard capabilities")),
+        // Long or short names depend on Windows' capabilities; it is not read.
+        FORMAT_LIST if flags & !ASCII_NAMES == 0 => Ok(None),
+        TEMPORARY_DIRECTORY if flags == 0 && body.len() == 520 => Ok(None),
+        _ => Err(Refusal("clipboard before Windows' is open")),
+    }
+}
+
+/// One general capability set: count, pad, type, length, version, flags.
+fn general_set(flags: u16, body: &[u8]) -> Result<bool, Refusal> {
+    Ok(flags == 0
+        && body.len() == 16
+        && u16_at(body, 0)? == 1
+        && u16_at(body, 4)? == 1
+        && u16_at(body, 6)? == 12
+        && matches!(u32_at(body, 8)?, 1 | 2))
 }
 
 /// A response must answer a request the other side is waiting on.
@@ -478,13 +509,19 @@ mod tests {
         )))
     }
 
-    /// Both sides have said everything IronRDP and Windows say: long names.
-    fn ready(now: Instant) -> Clipboard {
+    /// Both sides have said everything IronRDP and Windows say, in their
+    /// order: Windows' capabilities and Monitor Ready, then the browser's.
+    fn opened(flags: ClipboardGeneralCapabilityFlags, now: Instant) -> Clipboard {
         let mut clip = Clipboard::default();
-        let all = ClipboardGeneralCapabilityFlags::all();
-        through(&mut clip, true, &caps(all), CHUNK, now).expect("server caps");
-        through(&mut clip, false, &caps(all), CHUNK, now).expect("client caps");
+        through(&mut clip, true, &caps(flags), CHUNK, now).expect("server caps");
+        through(&mut clip, true, &pdu(&ClipboardPdu::MonitorReady), CHUNK, now).expect("monitor ready");
+        through(&mut clip, false, &caps(flags), CHUNK, now).expect("client caps");
         clip
+    }
+
+    /// Long names, as IronRDP and Windows agree.
+    fn ready(now: Instant) -> Clipboard {
+        opened(ClipboardGeneralCapabilityFlags::all(), now)
     }
 
     fn list(formats: &[ClipboardFormat], long: bool) -> Vec<u8> {
@@ -586,10 +623,7 @@ mod tests {
         assert!(formats_of(&out, true).is_empty());
 
         // Short names when either side lacks long names.
-        let mut short = Clipboard::default();
-        let plain = caps(ClipboardGeneralCapabilityFlags::empty());
-        through(&mut short, true, &plain, CHUNK, now).expect("caps");
-        through(&mut short, false, &plain, CHUNK, now).expect("caps");
+        let mut short = opened(ClipboardGeneralCapabilityFlags::empty(), now);
         // Short names hold at most 15 UTF-16 characters and a NUL.
         let short_named = [
             ClipboardFormat::new(ClipboardFormatId::new(7)),
@@ -740,6 +774,67 @@ mod tests {
         assert!(through(&mut ready(now), true, &ready_pdu, CHUNK, now).is_ok());
         let answer = pdu(&ClipboardPdu::FormatListResponse(FormatListResponse::Ok));
         assert!(through(&mut ready(now), false, &answer, CHUNK, now).is_ok());
+    }
+
+    /// Windows' clipboard may never open: rdpclip can stop answering a
+    /// session. What IronRDP sends with each paste before it does is checked
+    /// and dropped, and the session goes on. Once Windows' clipboard opens,
+    /// the same messages pass.
+    #[test]
+    fn the_browser_waits_for_windows_clipboard_to_open() {
+        let now = Instant::now();
+        let all = ClipboardGeneralCapabilityFlags::all();
+        let directory = pdu(&ClipboardPdu::TemporaryDirectory(
+            ClientTemporaryDirectory::new("C:\\Temp").expect("dir"),
+        ));
+        let text = [ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)];
+        let paste = [caps(all), directory.clone(), list(&text, true)];
+        let mut clip = Clipboard::default();
+        // IronRDP's first paste and its second: dropped, nothing recorded.
+        for _ in 0..2 {
+            for message in &paste {
+                assert_eq!(through(&mut clip, false, message, CHUNK, now).expect("dropped"), None);
+            }
+        }
+        // Still checked: malformed capabilities, a list with other flags, and
+        // any other message.
+        let mut bad_caps = caps(all);
+        bad_caps[16] = 3;
+        let mut flagged = list(&text, true);
+        flagged[2] = 0x01;
+        let answer = pdu(&ClipboardPdu::FormatListResponse(FormatListResponse::Ok));
+        for message in [&bad_caps, &flagged, &request(), &answer] {
+            assert!(through(&mut Clipboard::default(), false, message, CHUNK, now).is_err());
+        }
+        // Windows' capabilities alone do not open it; its Monitor Ready does.
+        through(&mut clip, true, &caps(all), CHUNK, now)
+            .expect("server caps")
+            .expect("passed");
+        assert_eq!(
+            through(&mut clip, false, &list(&text, true), CHUNK, now).expect("dropped"),
+            None
+        );
+        through(&mut clip, true, &pdu(&ClipboardPdu::MonitorReady), CHUNK, now)
+            .expect("ready")
+            .expect("passed");
+        // IronRDP then says it all again, and it passes.
+        let out = through(&mut clip, false, &caps(all), CHUNK, now)
+            .expect("caps")
+            .expect("passed");
+        let ClipboardPdu::Capabilities(passed) = decode::<ClipboardPdu<'_>>(&out).expect("decodes") else {
+            panic!("not capabilities");
+        };
+        assert_eq!(passed.flags(), ClipboardGeneralCapabilityFlags::USE_LONG_FORMAT_NAMES);
+        assert_eq!(
+            through(&mut clip, false, &directory, CHUNK, now).expect("dropped"),
+            None
+        );
+        let out = through(&mut clip, false, &list(&text, true), CHUNK, now)
+            .expect("list")
+            .expect("passed");
+        assert_eq!(formats_of(&out, true), vec![13]);
+        // Its capabilities still come once.
+        assert!(through(&mut clip, false, &caps(all), CHUNK, now).is_err());
     }
 
     #[test]

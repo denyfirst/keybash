@@ -92,3 +92,13 @@ export function pointerCursor(url, hotspotX, hotspotY, scale) {
 export function windowsLines(text) {
   return text.replace(/\r\n|\r|\n/g, '\r\n');
 }
+
+// A paste Windows did not take. No answer at all means Windows' clipboard
+// never opened for this desktop: its rdpclip can stop answering a session,
+// even across new connections, until the person signs out of Windows.
+export const pasteWait = 3000;
+export function pasteNotice(answer) {
+  return answer === 'silent'
+    ? 'Windows did not take the text. If this keeps happening, sign out of Windows, then connect again.'
+    : 'The text could not be pasted.';
+}

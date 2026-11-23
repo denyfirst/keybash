@@ -132,7 +132,22 @@ The proxy relays both ways and checks what it passes on
     fails any of these reaches the asker as a failure, and the session goes on.
     A response over 64 KiB is counted, never kept;
   - file contents, locks and anything else end the session; the browser's
-    temporary directory, which is only for files, never reaches Windows.
+    temporary directory, which is only for files, never reaches Windows;
+  - the browser's clipboard speaks only after Windows' clipboard opens with
+    its Monitor Ready (MS-RDPECLIP 1.3.2.1). Windows' clipboard program,
+    rdpclip, can stop answering a session, even across new connections, and
+    IronRDP still sends its capabilities, temporary directory and format list
+    with each paste. Before Windows' clipboard opens, those three are checked
+    and dropped, so the paste fails on the page and the desktop goes on;
+    anything else from the browser ends the session. Nothing is recorded, so
+    IronRDP says them again once Windows' clipboard opens.
+    - Seen on 2026-11-23 against the test VM's Windows Server 2025: the proxy
+      heard nothing from Windows on `cliprdr`, and every paste ended the
+      desktop as "refused". Restarting rdpclip in the session opened the
+      clipboard, and the paste went through.
+    - Windows' capabilities still come once per desktop. If rdpclip starts
+      over after the clipboard opened, its second capabilities end the
+      desktop, and the next connection opens the clipboard again.
 - Revocation, the idle limit and sign-out end the session as they do now.
   The gateway closes the pipes, and the manager ends the worker.
 - A desktop that ends on Keybash's side tells Windows so, as a client ends a
