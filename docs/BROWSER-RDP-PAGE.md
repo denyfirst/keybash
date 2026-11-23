@@ -167,7 +167,8 @@ guacd and FreeRDP use leaves, each part in its own pull request:
   sandbox is the native lab's (2b); the whole path meets Windows with the
   page in 3d.
 - **3d.** The page: `/remote/rdp/<id>` serves `remote-desktop.html`, IronRDP
-  in place of guacd, with the same session bar:
+  in place of guacd, with the same session bar. A server's shared password
+  (ADR 0009) opens the same page at `/remote/shared/rdp/<server>`:
   - **The module** loads under the page's own policy, which alone adds
     `'wasm-unsafe-eval'`. The page's one WebSocket opens only to the desktop
     endpoint. IronRDP does not pass the socket's close on, so the page reads

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"net"
@@ -381,7 +382,7 @@ func TestSharedCredentialOpensOnlyForPeopleOnTheList(t *testing.T) {
 	open(bob, 401)
 	f.alice.expect("POST", "/api/servers/"+id+"/shared", sharedSet("ssh-key", "deploy", ""), 204)
 	first, _ := f.store.readShared(id)
-	if rows := listed(); len(rows) != 1 || rows[0] != (sharedConnection{Server: id, Name: "Web", Protocol: "ssh", Username: "deploy", Available: true}) {
+	if rows := listed(); len(rows) != 1 || rows[0] != (sharedConnection{Server: id, Name: "Web", Protocol: "ssh", Username: "deploy", Trust: "verified"}) {
 		t.Fatalf("shared list: %+v", rows)
 	}
 	// An auditor holds no credential; malformed requests open nothing.
@@ -460,6 +461,98 @@ func TestSharedCredentialOpensOnlyForPeopleOnTheList(t *testing.T) {
 	f.alice.expect("DELETE", "/api/servers/"+id, "{}", 204)
 	ended(ctx, "removing the server")
 	open(bob, 401)
+}
+
+// The page that opens a shared credential is served only to someone who could
+// open it: on the list, of a server that has one, for the protocol in its path.
+// It is marked so that it opens with open-shared.
+func TestSharedSessionPageOpensOnlyForPeopleOnTheList(t *testing.T) {
+	f, scans := serversFixture(t)
+	id, _ := addServerFixture(t, f.alice, scans, "Web", "10.20.0.7:22")
+	bob, b := f.person("bob", roleUser)
+	dave, _ := f.person("dave", roleAuditor)
+	page := "/remote/shared/ssh/" + id
+	access := func(action string) {
+		t.Helper()
+		f.alice.expect("POST", "/api/servers/"+id+"/"+action, inputJSON(map[string]string{"account": b.ID}), 204)
+	}
+	access("grant")
+	bob.expect("GET", page, "", 404)
+	f.alice.expect("POST", "/api/servers/"+id+"/shared", sharedSet("ssh-key", "deploy", ""), 204)
+	w := bob.expect("GET", page, "", 200)
+	body := w.Body.String()
+	start := strings.Index(body, "<body ")
+	if start < 0 || !strings.HasPrefix(body[start:], `<body data-owned-remote="ssh" data-connection="`+id+`" data-shared="1" `) || strings.Count(body, "data-shared") != 1 {
+		t.Fatal("the shared page is not marked to open the server's shared credential")
+	}
+	if policy := w.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "; script-src 'self'; ") {
+		t.Fatalf("a shared terminal page may compile WebAssembly: %s", policy)
+	}
+	// Another protocol, a server's ID as a connection's, other shapes, and
+	// people not on the list: nothing.
+	for _, path := range []string{"/remote/shared/rdp/" + id, "/remote/ssh/" + id, "/remote/shared/ssh/" + strings.Repeat("e", 32), "/remote/shared/ssh/" + strings.ToUpper(id), "/remote/shared/" + id, "/remote/shared/ssh/" + id + "/", "/remote/shared/shared/ssh/" + id} {
+		if w := bob.expect("GET", path, "", 404); strings.Contains(w.Body.String(), "data-owned-remote") {
+			t.Fatalf("%s served a session page", path)
+		}
+	}
+	f.alice.expect("GET", page, "", 404)
+	dave.expect("GET", page, "", 404)
+	// Taken off the list, or the credential removed: gone again.
+	access("revoke")
+	bob.expect("GET", page, "", 404)
+	access("grant")
+	bob.expect("GET", page, "", 200)
+	f.alice.expect("DELETE", "/api/servers/"+id+"/shared", "{}", 204)
+	bob.expect("GET", page, "", 404)
+}
+
+// A shared desktop's card follows its server: ready; stopped while Windows
+// shows another certificate than the pin; unavailable once the pin ends, and
+// then nothing opens.
+func TestSharedDesktopFollowsItsCertificate(t *testing.T) {
+	f, reads, _ := desktopFixture(t)
+	endpoint := "10.20.0.8:3389"
+	pin := windowsLeaf(t, func(c *x509.Certificate) { c.NotAfter = f.now.Add(10 * time.Minute) })
+	reads.set(endpoint, pin)
+	f.alice.expect("POST", "/api/servers/scan", rdpFields("", "10.20.0.8", "3389", ""), 200)
+	var made struct{ ID string }
+	if json.Unmarshal(f.alice.expect("POST", "/api/servers", rdpFields("Desk", "10.20.0.8", "3389", certificatePrint(pin)), 200).Body.Bytes(), &made) != nil || !validID(made.ID) {
+		t.Fatal("desktop was not added")
+	}
+	id := made.ID
+	bob, b := f.person("bob", roleUser)
+	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": b.ID}), 204)
+	f.alice.expect("POST", "/api/servers/"+id+"/shared", sharedSet("password", "kbtest", "Synthetic-desk-password-7d2e"), 204)
+	trust := func() string {
+		t.Helper()
+		var rows []sharedConnection
+		if json.Unmarshal(bob.expect("GET", "/api/shared", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 || rows[0].Server != id || rows[0].Protocol != "rdp" || rows[0].Username != "kbtest" {
+			t.Fatal("shared desktop not listed")
+		}
+		return rows[0].Trust
+	}
+	read := func() { t.Helper(); f.l.readCertificates(context.Background()) }
+	read()
+	if trust() != "verified" {
+		t.Fatal("a shared desktop showing its pin is not ready")
+	}
+	bob.expect("GET", "/remote/shared/rdp/"+id, "", 200)
+	reads.set(endpoint, windowsLeaf(t, nil))
+	read()
+	if trust() != "stopped" {
+		t.Fatal("a shared desktop showing another certificate is not stopped")
+	}
+	reads.set(endpoint, pin)
+	read()
+	if trust() != "verified" {
+		t.Fatal("a shared desktop showing its pin again is not ready")
+	}
+	f.now = f.now.Add(11 * time.Minute)
+	if trust() != "unavailable" {
+		t.Fatal("a shared desktop past its pin is not unavailable")
+	}
+	bob.expect("GET", "/remote/shared/rdp/"+id, "", 404)
+	bob.expect("POST", "/api/remote/open-shared", inputJSON(map[string]string{"server": id}), 401)
 }
 
 // sharedSSHWorker opens an echo terminal and remembers what it was given.

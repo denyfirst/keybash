@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"os"
@@ -34,7 +35,8 @@ func TestBrowserServersPage(t *testing.T) {
 	server := httptest.NewUnstartedServer(nil)
 	origin := "https://" + server.Listener.Addr().String()
 	catalog := catalogSSHFixture(t)
-	l, e := NewRemoteLabWithLimits(origin, store, []RemoteTarget{catalog}, echoSSHWorker{}, &desktopWorker{}, sessionlimits.Default(), TargetNetworks(serverNetworks, serverProtected), WatchCertificates(24*time.Hour))
+	desk := &desktopWorker{}
+	l, e := NewRemoteLabWithLimits(origin, store, []RemoteTarget{catalog}, echoSSHWorker{}, desk, sessionlimits.Default(), TargetNetworks(serverNetworks, serverProtected), WatchCertificates(24*time.Hour))
 	if e != nil {
 		t.Fatal("servers browser fixture refused")
 	}
@@ -50,11 +52,37 @@ func TestBrowserServersPage(t *testing.T) {
 	l.remote.scan = scans.scan
 	l.remote.scanRDP = reads.scan
 	l.mu.Unlock()
-	server.Config.Handler = l
+	control, e := token()
+	if e != nil {
+		t.Fatal("fixture control failed")
+	}
+	// The desktop shared with a password: whether its proxy was asked to sign
+	// in, as whom, and whether with the password set last. Only this test can
+	// ask, and the password itself is never in the answer.
+	sharedPassword := "Synthetic-desk-password-41c9"
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/__fixture/desktop" {
+			if r.Method != "GET" || r.Header.Get("X-Fixture-Control") != control {
+				w.WriteHeader(403)
+				return
+			}
+			desk.mu.Lock()
+			answer := struct {
+				Calls    int32  `json:"calls"`
+				Username string `json:"username"`
+				Password bool   `json:"password"`
+			}{desk.calls.Load(), desk.username, desk.password == sharedPassword+"-2"}
+			desk.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(answer)
+			return
+		}
+		l.ServeHTTP(w, r)
+	})
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	server.StartTLS()
 	defer server.Close()
-	config, _ := json.Marshal(struct{ Origin, Code, Password, Catalog, Fingerprint, Desktop, Renewed, Side string }{origin, code, alicePassword, catalog.ID, ssh.FingerprintSHA256(key), certificatePrint(first), certificatePrint(renewed), certificatePrint(side)})
+	config, _ := json.Marshal(struct{ Origin, Code, Password, Catalog, Fingerprint, Desktop, Renewed, Side, Control, SharedPassword string }{origin, code, alicePassword, catalog.ID, ssh.FingerprintSHA256(key), certificatePrint(first), certificatePrint(renewed), certificatePrint(side), control, sharedPassword})
 	command := exec.CommandContext(ctx, "node", filepath.Join("..", "..", "web", "servers-browser-test.mjs")) // #nosec G204 -- fixed synthetic browser driver and stdin-only fixture data.
 	command.Stdin = bytes.NewReader(config)
 	command.Stderr = os.Stderr

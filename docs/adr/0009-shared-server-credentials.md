@@ -153,6 +153,17 @@ Following `ENGINEERING.md`, with sabotage both ways:
   - "Stop sharing" asks first.
   - A typed password is emptied from the page as soon as it is sent.
   - Auditors see the row's line and no actions.
+- **Phase 3** (Connections page):
+  - Everyone on a server's list sees a card for its shared credential,
+    marked "Shared by your administrator", before their own connections. It
+    shows the account's user name and nothing else, and needs no setup.
+  - The card says "Ready", "Server changed" (a desktop shows another
+    certificate than its pin, so nothing is sent until an administrator
+    checks it) or "Unavailable". Only a ready card offers to connect.
+  - Connect opens `/remote/shared/ssh/{server}` or `/remote/shared/rdp/{server}`
+    in its own tab. The page is served only to someone who could open the
+    credential, and it opens it by the server's ID through `open-shared`.
+  - The page refuses a shared row with any field it does not show.
 
 ## Limits
 
