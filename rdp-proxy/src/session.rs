@@ -341,19 +341,25 @@ where
     connector.step_no_input(&mut unsent).map_err(|_| internal())?;
     drop(unsent);
     buf.clear();
+    // Windows' answer is read before the connector takes it, so an answer
+    // without NLA (TLS alone, standard RDP security, or a negotiation failure)
+    // is named so; only bytes that are no answer at all are the confirm's.
+    let X224(answer) =
+        decode::<X224<nego::ConnectionConfirm>>(&confirm).map_err(|_| Fail::windows(Refusal::X224Confirm))?;
+    let nego::ConnectionConfirm::Response {
+        flags,
+        protocol: selected,
+    } = answer
+    else {
+        return Err(Fail::windows(Refusal::NlaNotSelected));
+    };
+    if !selected.intersects(nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX) {
+        return Err(Fail::windows(Refusal::NlaNotSelected));
+    }
     connector
         .step(&confirm, None, &mut buf)
         .map_err(|_| Fail::windows(Refusal::X224Confirm))?;
-    let X224(nego::ConnectionConfirm::Response {
-        flags,
-        protocol: selected,
-    }) = decode::<X224<nego::ConnectionConfirm>>(&confirm).map_err(|_| Fail::windows(Refusal::X224Confirm))?
-    else {
-        return Err(Fail::windows(Refusal::X224Confirm));
-    };
-    if !selected.intersects(nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX)
-        || !connector.should_perform_security_upgrade()
-    {
+    if !connector.should_perform_security_upgrade() {
         return Err(Fail::windows(Refusal::NlaNotSelected));
     }
     let (tcp, leftover) = framed.into_inner();
@@ -1423,6 +1429,72 @@ mod tests {
             let (browser, windows) = tokio::join!(silent_browser, silent_windows);
             assert_eq!(browser, Fail::browser(Refusal::HandshakeTooSlow));
             assert_eq!(windows, Fail::windows(Refusal::HandshakeTooSlow));
+        });
+    }
+
+    /// How the handshake ends when Windows answers the X.224 request with
+    /// `answer` and then waits.
+    async fn windows_answers(answer: Vec<u8>) -> Fail {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listen");
+        let target = listener.local_addr().expect("addr");
+        let windows = async move {
+            let (mut s, _) = listener.accept().await.expect("accept");
+            let mut request = [0u8; 64];
+            let _ = s.read(&mut request).await;
+            s.write_all(&answer).await.expect("answer");
+            let mut rest = [0u8; 4096];
+            let _ = s.read(&mut rest).await;
+        };
+        let (mut to_proxy, mut proxy_in) = duplex(64 * 1024);
+        let (mut proxy_out, _from_proxy) = duplex(64 * 1024);
+        let (_, request) = rdcleanpath_request_from_browser();
+        frame::write(&mut to_proxy, Kind::Browser, &request)
+            .await
+            .expect("write");
+        let password = crate::setup::tests::test_password(10, 12, false);
+        let setup = crate::setup::parse(&crate::setup::encode("u", "", &password, false)).expect("setup");
+        let trust = Trust {
+            certificate: crate::pin::tests::certificate_der(),
+            name: Name::ExactLeaf,
+        };
+        let (fail, ()) = tokio::join!(run(&mut proxy_in, &mut proxy_out, setup, &trust, target), windows);
+        fail
+    }
+
+    /// Windows that answers without NLA, as it does with TLS alone, standard
+    /// RDP security, or a negotiation failure, is named so, before TLS; an
+    /// answer that is no Connection Confirm at all is the confirm's fault.
+    #[test]
+    fn windows_without_nla_is_named_so() {
+        run_async(async {
+            let selects = |protocol| {
+                encode_vec(&X224(nego::ConnectionConfirm::Response {
+                    flags: nego::ResponseFlags::empty(),
+                    protocol,
+                }))
+                .expect("confirm")
+            };
+            // RDP_NEG_FAILURE (type 3), SSL_NOT_ALLOWED_BY_SERVER (2).
+            let failure = vec![3, 0, 0, 19, 14, 0xd0, 0, 0, 0, 1, 0, 3, 0, 8, 0, 2, 0, 0, 0];
+            // A data PDU where the Connection Confirm should be.
+            let not_a_confirm = vec![3, 0, 0, 11, 2, 0xf0, 0x80, 1, 2, 3, 4];
+            for (what, answer, expected) in [
+                (
+                    "standard RDP security",
+                    selects(nego::SecurityProtocol::empty()),
+                    Fail::windows(Refusal::NlaNotSelected),
+                ),
+                (
+                    "TLS alone",
+                    selects(nego::SecurityProtocol::SSL),
+                    Fail::windows(Refusal::NlaNotSelected),
+                ),
+                ("a negotiation failure", failure, Fail::windows(Refusal::NlaNotSelected)),
+                ("no confirm", not_a_confirm, Fail::windows(Refusal::X224Confirm)),
+            ] {
+                let fail = windows_answers(answer).await;
+                assert_eq!(fail, expected, "{what}: {}", fail_word(&fail));
+            }
         });
     }
 

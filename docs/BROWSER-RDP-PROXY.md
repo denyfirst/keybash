@@ -234,7 +234,7 @@ Examples:
 | `side=windows reason="clipboard capabilities"` | Windows' clipboard program, rdpclip, started over after the clipboard opened, and its second capabilities ended the desktop |
 | `side=browser reason="clipboard before Windows' is open"` | the page sent clipboard data before Windows' clipboard opened |
 | `side=windows reason="certificate or TLS"` | Windows showed another certificate than the approved one, or its TLS failed, at the proxy's own check |
-| `side=windows reason="NLA not selected"` | Windows did not select NLA |
+| `side=windows reason="NLA not selected"` | Windows answered without NLA: it selected TLS alone or standard RDP security, or refused the negotiation |
 | `side=browser reason="display layout outside the bounds"` | the page asked for a layout beyond the desktop bounds |
 | `side=windows reason="handshake too slow"` | Windows did not finish its part of the handshake within 30 seconds |
 
