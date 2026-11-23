@@ -54,7 +54,7 @@ type backupBucket struct {
 	optional bool
 }
 
-var backupBuckets = []backupBucket{{1, metaBucket, false}, {2, accountBucket, false}, {3, nameBucket, false}, {4, credentialBucket, false}, {5, connectionBucket, true}, {6, serverBucket, true}, {7, preferenceBucket, true}}
+var backupBuckets = []backupBucket{{1, metaBucket, false}, {2, accountBucket, false}, {3, nameBucket, false}, {4, credentialBucket, false}, {5, connectionBucket, true}, {6, serverBucket, true}, {7, preferenceBucket, true}, {8, sharedBucket, true}}
 
 type backupFile struct {
 	Header, Sealed []byte // Header is also the sealed body's associated data
@@ -266,6 +266,15 @@ func (s *Store) verifyAll(tx *bolt.Tx) (BackupSummary, error) {
 		}
 	}
 	summary.Servers = len(servers)
+	// Each shared credential is its own listed server's, and reads.
+	if b := tx.Bucket(sharedBucket); b != nil {
+		if b.ForEach(func(k, _ []byte) error {
+			_, _, e := s.shared(tx, string(k))
+			return e
+		}) != nil {
+			return BackupSummary{}, errRefused
+		}
+	}
 	return summary, nil
 }
 

@@ -68,11 +68,12 @@ database's exclusive lock, so the service is stopped while `backup` or
 ## What a backup is
 
 A logical copy of every custody namespace (state, accounts, name index,
-credentials, connections, servers, and each account's chosen look), read in
-one transaction. Before anything is written, every record is read as the
-service would read it: the state's tag, each account, one name-index entry
-per account, each credential, connection and look with an existing owner (a
-look under its own account's name only), and the write quotas (256 accounts,
+credentials, connections, servers, servers' shared credentials, and each
+account's chosen look), read in one transaction. Before anything is written,
+every record is read as the service would read it: the state's tag, each
+account, one name-index entry per account, each credential, connection and
+look with an existing owner (a look under its own account's name only), each
+shared credential under its own listed server, and the write quotas (256 accounts,
 256 credentials per owner and 4096 overall, 128 connections per owner and
 2048 overall, one look per account). A store holding any other namespace, a nested one, or a record that
 does not read is refused rather than backed up in part.

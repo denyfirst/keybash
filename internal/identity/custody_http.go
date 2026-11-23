@@ -440,7 +440,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	// An auditor holds no key or password and reaches no server; only an
 	// administrator sees how this copy is installed.
-	servers := strings.HasPrefix(r.URL.Path, "/api/credentials") || r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || strings.HasPrefix(r.URL.Path, "/api/remote/")
+	servers := strings.HasPrefix(r.URL.Path, "/api/credentials") || r.URL.Path == "/api/shared" || r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || strings.HasPrefix(r.URL.Path, "/api/remote/")
 	if servers && !l.serversLocked(s) || r.URL.Path == "/api/installation" && l.roleLocked(s) != roleAdmin {
 		l.mu.Unlock()
 		refuse(w, 403)
@@ -452,7 +452,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, data)
 		return
 	}
-	if r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/capacity" {
+	if r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || r.URL.Path == "/api/shared" || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/open-shared" || r.URL.Path == "/api/remote/capacity" {
 		l.remoteHTTP(w, r, id, s)
 		return
 	}
