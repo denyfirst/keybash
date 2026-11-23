@@ -242,6 +242,18 @@ server:
    minutes.
 3. **Who can use it:** nobody, administrators included, until you choose.
    Taking someone off ends their open sessions to that server at once.
+4. **How they sign in:** without this, each person on the list signs in with
+   their own key or password, saved under Keys & passwords. Here you can set
+   one for everyone instead; they then find the server ready on their
+   Connections page and connect without ever seeing it.
+   - **New key (safer):** Keybash makes a key and keeps it, and nobody ever
+     sees it. Run the line the page shows once on the server, as that account.
+   - **Password:** the account's own password, typed once. Anyone who already
+     knows it can still sign in without Keybash, so change it when one of them
+     leaves, on the server and then here.
+
+   The page offers the account names your own connections to that server use.
+   It cannot list the server's accounts: it would have to sign in first.
 
 A Windows desktop (**Desktop (RDP)**, on an installation built with
 `--with-rdp`) uses the certificate Windows makes for itself:
@@ -263,6 +275,7 @@ A Windows desktop (**Desktop (RDP)**, on an installation built with
    the Windows passwords people send. **Check now** on its row compares it
    later, with the same command.
 3. **Who can use it**, as above.
+4. **How they sign in**, as above. A desktop takes a password only.
 
 Each row also has **Rename**, **Check identity** (accept a new host key or
 certificate, for example after a reinstall, in the same way; open sessions end

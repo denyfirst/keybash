@@ -164,6 +164,22 @@ Following `ENGINEERING.md`, with sabotage both ways:
     in its own tab. The page is served only to someone who could open the
     credential, and it opens it by the server's ID through `open-shared`.
   - The page refuses a shared row with any field it does not show.
+- **Words, after first use** (2026-11-23). On the test server "share" read as
+  a second way to choose people, the same as the list. The page now asks the
+  two questions apart, each in its own words:
+  - The row says who can use the server, then how they sign in: "Each person
+    signs in with their own key or password", or "Keybash signs them in as
+    deploy, with a key it made" (or "with a password it keeps").
+  - The button and its sheet are "How they sign in". The sheet says what it
+    changes, shows who is on the list with "Change who" (the list's own
+    sheet), and calls the field "Account on the server": an account there, not
+    a person in Keybash. The kinds are "New key (safer)" and "Password", each
+    saying what it costs, and the button says what it does.
+  - Keybash cannot list a server's accounts without signing in first, with
+    what is being set. The sheet offers the names the administrator's own
+    connections to that server sign in as; it reads nothing new to do so.
+  - Stopping is "Stop signing them in". A shared card reads "Set up by your
+    administrator".
 
 ## Limits
 
