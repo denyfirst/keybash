@@ -353,6 +353,10 @@ func (s *Store) deleteServer(actor, id string) error {
 		if w.Removed {
 			return errMissing
 		}
+		// Its shared credential goes with it.
+		if dropShared(tx, id) != nil {
+			return errRefused
+		}
 		if !w.FromFile {
 			return tx.Bucket(serverBucket).Delete([]byte(id))
 		}

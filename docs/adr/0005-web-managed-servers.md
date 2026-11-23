@@ -105,7 +105,7 @@ the same power, so their reach needs a limit the gateway cannot lift.
 - An administrator can attach one credential to a server for its users.
 - They connect with it without ever seeing it: no reveal, no export.
 - It needs its own design: rotation, who can replace it, and how a removed
-  person loses it.
+  person loses it. That design is ADR 0009.
 
 ## Progress
 

@@ -107,9 +107,14 @@ func desktopKey(target, username string) string {
 type remoteLease struct {
 	session                                         [32]byte
 	owner, connection, credential, target, approval string // approval: the target's when granted
-	expires                                         time.Time
-	active                                          bool
-	cancel                                          context.CancelCauseFunc // the cause is a terminalweb.Reason the page can show
+	// shared names the server whose shared credential this lease uses (ADR
+	// 0009), bound to the credential's generation when granted; connection and
+	// credential are then empty.
+	shared     string
+	generation uint64
+	expires    time.Time
+	active     bool
+	cancel     context.CancelCauseFunc // the cause is a terminalweb.Reason the page can show
 }
 
 // NewRemoteLab adds ownership authorization to the existing loopback TLS lab.
@@ -259,9 +264,15 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	if e != nil || !compatible(t, credential) {
 		return "", errRefused
 	}
+	return l.issueLeaseLocked(s, &remoteLease{session: id, owner: s.owner, connection: record, credential: c.Credential, target: c.Target, approval: approvalFingerprint(t)})
+}
+
+// issueLeaseLocked stores a one-use lease for s within the capacity limits
+// and returns its token. It expires in 30 seconds.
+func (l *Lab) issueLeaseLocked(s *session, lease *remoteLease) (string, error) {
 	count := 0
-	for _, lease := range l.remote.leases {
-		if lease.owner == s.owner {
+	for _, other := range l.remote.leases {
+		if other.owner == s.owner {
 			count++
 		}
 	}
@@ -276,7 +287,8 @@ func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
 	if l.remote.leases[key] != nil {
 		return "", errRefused
 	}
-	l.remote.leases[key] = &remoteLease{session: id, owner: s.owner, connection: record, credential: c.Credential, target: c.Target, approval: approvalFingerprint(t), expires: l.now().Add(30 * time.Second)}
+	lease.expires = l.now().Add(30 * time.Second)
+	l.remote.leases[key] = lease
 	s.last = l.now()
 	return raw, nil
 }
@@ -292,6 +304,15 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 	lease := l.remote.leases[key]
 	if lease == nil || lease.active || lease.session != id || lease.owner != s.owner || !l.now().Before(lease.expires) {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
+	}
+	if lease.shared != "" {
+		target, credential, ok := l.sharedLocked(s, lease.shared)
+		if !ok || lease.target != lease.shared || approvalFingerprint(target) != lease.approval || credential.Generation != lease.generation {
+			return nil, RemoteTarget{}, Credential{}, nil, errRefused
+		}
+		ctx, cancel := context.WithCancelCause(s.ctx)
+		lease.active, lease.cancel = true, cancel
+		return lease, target, credential.Current, ctx, nil
 	}
 	c, e := l.store.readConnection(s.owner, lease.connection)
 	if e != nil || c.Credential != lease.credential || c.Target != lease.target {
@@ -417,7 +438,11 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	// An SSH stream exists only after the server took the key and opened a
 	// terminal, so a key made here is now known to be on a server.
 	if credential.Generated && !credential.Used {
-		_ = l.store.markKeyUsed(lease.owner, lease.credential)
+		if lease.shared != "" {
+			_ = l.store.markSharedUsed(lease.shared, credential.Fingerprint)
+		} else {
+			_ = l.store.markKeyUsed(lease.owner, lease.credential)
+		}
 	}
 	if socket.Write(ctx, websocket.MessageText, []byte(`{"type":"ready"}`)) != nil {
 		_ = stream.Close()
@@ -553,6 +578,41 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 			rows = append(rows, row)
 		}
 		result = rows
+		return
+	}
+	// The servers this person connects to with a shared credential (ADR 0009).
+	if r.Method == "GET" && r.URL.Path == "/api/shared" {
+		rows, e := l.sharedConnectionsLocked(s)
+		if e != nil {
+			status = 503
+			return
+		}
+		result = rows
+		return
+	}
+	// Opening one is like opening an approved connection: the administrator
+	// confirmed the server's identity when adding it.
+	if r.Method == "POST" && r.URL.Path == "/api/remote/open-shared" {
+		fields, ok := readFields(w, r, 1024, "server")
+		if !ok {
+			status = 400
+			return
+		}
+		raw, e := l.grantSharedLocked(id, fields["server"])
+		if e != nil {
+			status = 401
+			if e == errRemoteCapacity {
+				markRemoteCapacity(w)
+				status = 503
+			}
+			if e == errLimited {
+				status = 429
+			}
+			return
+		}
+		result = struct {
+			Lease string `json:"lease"`
+		}{raw}
 		return
 	}
 	// Opening an already approved connection needs only the ready session

@@ -178,6 +178,9 @@ type serverView struct {
 	Access      []string `json:"access"`                // who may use it
 	AddedBy     string   `json:"added_by,omitempty"`    // empty when it came from the server file
 	Added       int64    `json:"added"`
+	// Shared is the server's shared credential as an administrator or
+	// auditor may see it (ADR 0009): never its secret.
+	Shared *sharedView `json:"shared,omitempty"`
 }
 type serversView struct {
 	Networks []string          `json:"networks"`
@@ -195,6 +198,10 @@ func (l *Lab) serversViewLocked(admin bool) (serversView, error) {
 		return serversView{}, e
 	}
 	accounts, e := l.store.listAccounts(l.now())
+	if e != nil {
+		return serversView{}, e
+	}
+	shared, e := l.store.listShared()
 	if e != nil {
 		return serversView{}, e
 	}
@@ -223,6 +230,10 @@ func (l *Lab) serversViewLocked(admin bool) (serversView, error) {
 		}
 		for _, id := range append(slices.Clone(w.Access), w.AddedBy) {
 			named(id)
+		}
+		if c, ok := shared[w.ID]; ok {
+			row.Shared = c.view()
+			named(c.SetBy)
 		}
 		view.Servers = append(view.Servers, row)
 	}
@@ -572,6 +583,51 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			return
 		}
 		e = l.store.setServerAccess(actor, server, fields["account"], action == "grant")
+	// The shared credential (ADR 0009): set once, a password replaced at
+	// once, a key replaced in two steps, removed. Nothing here answers with
+	// its secret; the page reads the summary again.
+	case action == "shared" && r.Method == "POST":
+		fields, ok := readFields(w, r, 8192, "kind", "username", "secret")
+		defer clear(fields)
+		if !ok || !sharedRequest(fields["kind"], fields["username"], fields["secret"]) {
+			status = 400
+			return
+		}
+		e = l.store.setShared(actor, server, fields["kind"], fields["username"], fields["secret"], l.now())
+	case action == "shared-password" && r.Method == "POST":
+		fields, ok := readFields(w, r, 8192, "username", "secret")
+		defer clear(fields)
+		if !ok || !sharedRequest("password", fields["username"], fields["secret"]) {
+			status = 400
+			return
+		}
+		e = l.store.replaceSharedPassword(actor, server, fields["username"], fields["secret"], l.now())
+	case action == "shared-next" && (r.Method == "POST" || r.Method == "DELETE"):
+		if _, ok := readFields(w, r, 1024); !ok {
+			status = 400
+			return
+		}
+		if r.Method == "POST" {
+			e = l.store.nextSharedKey(actor, server, l.now())
+		} else {
+			e = l.store.dropNextSharedKey(actor, server, l.now())
+		}
+	case action == "shared-switch" && r.Method == "POST":
+		fields, ok := readFields(w, r, 1024, "fingerprint")
+		if !ok || !validFingerprint(fields["fingerprint"]) {
+			status = 400
+			return
+		}
+		e = l.store.switchSharedKey(actor, server, fields["fingerprint"], l.now())
+	case action == "shared" && r.Method == "DELETE":
+		if _, ok := readFields(w, r, 1024); !ok {
+			status = 400
+			return
+		}
+		if e = l.store.removeShared(actor, server); e == nil {
+			// Nobody connects with it any more, from this moment.
+			l.revokeSharedLocked(server)
+		}
 	case action == "" && r.Method == "DELETE":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
