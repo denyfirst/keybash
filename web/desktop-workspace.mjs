@@ -9,6 +9,24 @@
 // scales only (rdp-proxy/src/policy.rs).
 export const desktopScales = [1, 1.25, 1.5, 1.75, 2];
 
+// A desktop that connected but shows no picture. Windows' session manager
+// sometimes stalls when a desktop arrives soon after another to the same
+// account ended (its event 36, "CsrConnected ... EvCsrInitialized"). Ending it
+// does not help: Windows ends the stalled connection itself after up to a
+// minute, and a desktop opened before then stalls too. The one opened after
+// has always drawn. So after pictureWait the page says it is waiting; when
+// Windows ends a desktop that never drew, the page opens it again once, after
+// reopenWait, marked in the address; the second time, and at pictureLimit, it
+// says so.
+export const pictureWait = 5000;
+export const pictureLimit = 75000;
+export const reopenWait = 3000;
+export const againMark = '#again';
+export function endWithoutPicture(pictured, word, again) {
+  if (pictured || word !== 'remote-ended') return 'end';
+  return again ? 'say' : 'reopen';
+}
+
 // The Windows scale nearest the screen's, 100% for anything unusable.
 export function nearestScale(ratio) {
   if (!Number.isFinite(ratio) || ratio <= 0) return 1;

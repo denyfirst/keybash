@@ -162,6 +162,9 @@ func desktopFixtureAt(t *testing.T, origin string) (*adminLab, *fixtureCertifica
 	l.mu.Lock()
 	l.now = func() time.Time { return f.now }
 	l.remote.scanRDP = reads.scan
+	// The lab's clock stands still here: desktops do not wait for each
+	// other except in the test of that wait.
+	l.remote.desktopSettle = 0
 	l.mu.Unlock()
 	f.alice = &custodyClient{t: t, l: l}
 	f.alice.login()
@@ -674,6 +677,72 @@ func TestADesktopStopsBeforeTheServerWhenItsCertificateChanged(t *testing.T) {
 	reads.set("10.20.0.8:3389", windowsLeaf(t, nil))
 	if connect() != "open" || reads.count() != before {
 		t.Fatal("a desktop read the server without the watch")
+	}
+}
+
+// Windows needs a moment after a desktop to one account ends before it starts
+// the next one's picture, so a desktop opened at once waits out the rest of
+// the settle, before anything reaches the server; one opened after it does
+// not wait.
+func TestADesktopOpenedAtOnceWaitsForTheLastOneToSettle(t *testing.T) {
+	const settle = 600 * time.Millisecond
+	server, origin := tlsFixture(t)
+	f, reads, worker := desktopFixtureAt(t, origin)
+	startTLS(t, server, f.l)
+	f.l.mu.Lock()
+	f.l.remote.desktopSettle = settle
+	f.l.mu.Unlock()
+	id, _ := addDesktop(t, f, reads, "Desk", "10.20.0.8:3389")
+	bob, b := f.person("bob", roleUser)
+	record := desktopConnection(t, f, bob, b, id)
+	// open returns how long a desktop took from its request to its echo, and
+	// waits until the gateway has finished with it.
+	open := func() time.Duration {
+		t.Helper()
+		raw := grantFixture(t, bob, record)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		socket, e := dialDesktop(ctx, server, origin, http.Header{"Origin": []string{origin}, "Cookie": []string{bob.cookie.String()}})
+		if e != nil {
+			t.Fatal("valid socket refused")
+		}
+		began := time.Now()
+		if socket.Write(ctx, websocket.MessageBinary, desktopRequest(t, bob.csrf+"."+raw)) != nil || socket.Write(ctx, websocket.MessageBinary, []byte("synthetic rdp")) != nil {
+			t.Fatal("request write failed")
+		}
+		if _, data, e := socket.Read(ctx); e != nil || string(data) != "synthetic rdp" {
+			t.Fatalf("the desktop did not open: %v", e)
+		}
+		took := time.Since(began)
+		_ = socket.Close(websocket.StatusNormalClosure, "")
+		for until := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			f.l.mu.Lock()
+			finished := len(f.l.remote.sockets) == 0
+			f.l.mu.Unlock()
+			if finished {
+				break
+			}
+			if time.Now().After(until) {
+				t.Fatal("the desktop did not finish")
+			}
+		}
+		return took
+	}
+	if took := open(); took >= settle {
+		t.Fatalf("the first desktop waited %v", took)
+	}
+	calls := worker.calls.Load()
+	if took := open(); took < settle-100*time.Millisecond {
+		t.Fatalf("a desktop opened at once waited only %v", took)
+	}
+	if worker.calls.Load() != calls+1 {
+		t.Fatal("the waiting desktop did not reach the proxy once")
+	}
+	f.l.mu.Lock()
+	f.now = f.now.Add(settle)
+	f.l.mu.Unlock()
+	if took := open(); took >= settle/2 {
+		t.Fatalf("a desktop opened after the settle waited %v", took)
 	}
 }
 

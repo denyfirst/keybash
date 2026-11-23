@@ -107,6 +107,25 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
 	defer stopSocket()
+	// Windows needs a moment after a desktop to the same account ends before
+	// it starts the next one's picture: one opened at once, after a reload, a
+	// closed tab or Connect again, got "Connected" and a black screen. The
+	// next one waits out the rest of desktopSettle, and this one's end is
+	// noted when it returns.
+	settleKey := desktopKey(target.ID, credential.Username)
+	l.mu.Lock()
+	settle := l.remote.settleDesktopLocked(settleKey, l.now())
+	l.mu.Unlock()
+	defer func() { l.mu.Lock(); l.remote.desktopEnds[settleKey] = l.now(); l.mu.Unlock() }()
+	if settle > 0 {
+		wait := time.NewTimer(settle)
+		select {
+		case <-wait.C:
+		case <-ctx.Done():
+			wait.Stop()
+			return
+		}
+	}
 	// The certificate read runs while the proxy's sandbox starts. The proxy
 	// dials the server only once it has the RDCleanPath request, and that
 	// waits for the read below: a person whose server shows another

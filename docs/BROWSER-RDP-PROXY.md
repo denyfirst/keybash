@@ -135,6 +135,38 @@ The proxy relays both ways and checks what it passes on
     temporary directory, which is only for files, never reaches Windows.
 - Revocation, the idle limit and sign-out end the session as they do now.
   The gateway closes the pipes, and the manager ends the worker.
+- A desktop that ends on Keybash's side tells Windows so, as a client ends a
+  session. That covers a closed tab, a reload, Disconnect, and a browser
+  message the proxy refuses. The proxy sends the MCS Disconnect Provider
+  Ultimatum (user requested) and TLS's close, at a PDU boundary and within one
+  second. A write to Windows cut part way through a PDU leaves nothing to add.
+  - On a normal close the gateway closes both pipes first, so nothing more
+    crosses between the browser and the proxy. It revokes the lease only once
+    the worker has finished, or after two seconds; the worker waits up to one
+    second for its bridge to pass those last bytes on.
+  - A lease revoked from outside is killed at once, as before.
+  - Tests: `an_end_on_keybash_side_says_goodbye_to_windows`,
+    `an_end_from_windows_says_nothing_more`,
+    `TestAClosedDesktopEndsBeforeItsLeaseIsRevoked` and
+    `TestAClosedDesktopIsRevokedWithinTheGoodbyeWait`.
+- Windows needs a moment after a desktop to one account ends before it starts
+  the next one's picture. Measured on 2026-11-22 against Windows Server 2025,
+  with the goodbye above or without it:
+  - a desktop opened again at once (a reload, a closed tab, Connect again, a
+    picture change) got "Connected" and a black screen. Windows sent the
+    connection sequence and nothing more;
+  - opened 0.3 s after the last one ended, it was black; 0.8 s after, it drew;
+  - immediate reloads alternated between a picture and a black screen.
+  - So the gateway notes when each desktop to a server and Windows account
+    ends, and the next one to them waits out the rest of 1.5 seconds before
+    anything reaches the server (`TestADesktopOpenedAtOnceWaitsForTheLastOneToSettle`).
+  - A desktop to another account, or one opened later, does not wait.
+  - The settle makes it rare, not impossible: one in ten reloads was still
+    black, and a desktop opened 3 seconds after a long one ended was black
+    once. Windows' log names the stall (event 36, `CsrConnected` /
+    `EvCsrInitialized`), and Windows ends such a connection itself within a
+    minute; the desktop page waits for that and opens the desktop again once
+    (`BROWSER-RDP-PAGE.md`).
 
 What the proxy cannot check is the video content: graphics-pipeline records
 and H.264 reach the browser's WebAssembly and its sandboxed decoder (ADR 0008,
