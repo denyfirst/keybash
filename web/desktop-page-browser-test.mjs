@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { checkBarFits } from './bar-fit-check.mjs';
 
 // The desktop page on IronRDP against a test proxy (desktop_browser_test.go).
 const config = JSON.parse(readFileSync(0, 'utf8'));
@@ -55,6 +56,10 @@ try {
   assert.equal((await page.request.post(config.Origin + '/__fixture/server-changed', { headers: { 'X-Fixture-Control': config.Control } })).status(), 204);
   await page.locator('#reconnect').click();
   await notice('This server now shows a different certificate, so Keybash did not connect and sent it no password.');
+
+  // 4. The bar keeps one line at every width, whatever it says.
+  stage = 'the bar at every width';
+  await checkBarFits(page, 'Desktop', 'Waiting for Windows');
 
   stage = 'what the page touched';
   assert.equal(sockets.length, 3);

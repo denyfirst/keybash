@@ -112,6 +112,14 @@ body.session-page main { padding: 0; }
 .session .tools > button.end:not(.secondary):not(.ghost):hover:not(:disabled) { color: #ffffff; background: color-mix(in srgb, var(--term-brand) 82%, #000000); }
 .size { font-family: var(--mono); font-size: 0.72rem; font-weight: 400; white-space: nowrap; color: var(--term-faint); }
 .tools > .size { padding: 0 0.5rem; }
+/* Steps the bar takes, in order, when its parts do not fit on one line
+   (sessionChrome in remote.mjs). A hidden label is still read out. */
+.bar.fit-1 :is(.session-mark, .size) { display: none; }
+.bar.fit-2 :is(#special, #fullscreen) .label,
+.bar.fit-3 :is(#copy, #paste) .label,
+.bar.fit-4 .tools .label { position: absolute; width: 1px; height: 1px; overflow: hidden; white-space: nowrap; clip-path: inset(50%); }
+.bar.fit-5 #status { font-size: 0; gap: 0; }
+.bar.fit-5 .session-kind { display: none; }
 
 /* What is open fills the rest of the window. */
 .work { position: relative; display: flex; flex: 1; min-height: 0; }
