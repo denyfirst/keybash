@@ -65,9 +65,18 @@ func nativeProxyChild(t *testing.T, ctx context.Context, cancel context.CancelFu
 			t.Fatalf("a wrong password ended as %q", s.Reason())
 		}
 		return
-	case "proxy-refusal":
+	case "proxy-refusal", "proxy-refusal-nla":
 		if err == nil || s.Reason() != terminalweb.ReasonRefused {
 			t.Fatalf("a refused server ended as %q", s.Reason())
+		}
+		// The refusal crossed the sandbox as codes and names Windows and
+		// what it showed (its certificate or TLS) or selected (not NLA).
+		want := terminalweb.Refusal{Side: "windows", What: "certificate or TLS"}
+		if mode == "proxy-refusal-nla" {
+			want.What = "NLA not selected"
+		}
+		if refusal, named := s.Refusal(); !named || refusal != want {
+			t.Fatalf("a refused server was named %+v, want %+v", refusal, want)
 		}
 		return
 	default:
@@ -128,7 +137,8 @@ func serveNativeManager(t *testing.T, ctx context.Context, c ManagerConfig) {
 //     dialled;
 //   - a server showing another certificate, one past or before its dates, an
 //     old TLS version, or a protocol other than NLA, ends as "refused" before
-//     any credential leaves the proxy.
+//     any credential leaves the proxy, named "certificate or TLS" or
+//     "NLA not selected".
 func TestNativeRDPManagerProxyMeetsNLAInTheSandbox(t *testing.T) {
 	c := nativeManagerFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
@@ -187,7 +197,12 @@ func TestNativeRDPManagerProxyMeetsNLAInTheSandbox(t *testing.T) {
 			identity = rawIdentity(t, name, refusal.shown.Certificate[0])
 		}
 		address, noCredentials := nativeTLSRefusalPeer(t, refusal.shown, refusal.version, refusal.selected)
-		output, failed := tryManagedGateway(c, address, identity, "proxy-refusal", 65533)
+		// A server that selects anything but NLA (2) is named for that.
+		mode := "proxy-refusal"
+		if refusal.selected != 2 {
+			mode = "proxy-refusal-nla"
+		}
+		output, failed := tryManagedGateway(c, address, identity, mode, 65533)
 		// The peer's evidence first: whether anything after TLS left the proxy.
 		select {
 		case err := <-noCredentials:

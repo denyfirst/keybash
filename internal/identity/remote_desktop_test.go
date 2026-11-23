@@ -22,12 +22,16 @@ import (
 
 // fixtureMessages plays the proxy for a browser desktop: it keeps the first
 // message (the RDCleanPath request the gateway forwards) and echoes the rest.
+// It can end by itself, with the proxy's reason and refusal (endItself).
 type fixtureMessages struct {
-	first chan []byte
-	echo  chan []byte
-	done  chan struct{}
-	once  sync.Once
-	count atomic.Int32
+	first   chan []byte
+	echo    chan []byte
+	done    chan struct{}
+	once    sync.Once
+	count   atomic.Int32
+	mu      sync.Mutex
+	reason  terminalweb.Reason
+	refusal terminalweb.Refusal
 }
 
 func newFixtureMessages() *fixtureMessages {
@@ -56,8 +60,25 @@ func (m *fixtureMessages) ReadMessage() ([]byte, error) {
 	}
 }
 
-func (m *fixtureMessages) Reason() terminalweb.Reason { return "" }
-func (m *fixtureMessages) Close() error               { m.once.Do(func() { close(m.done) }); return nil }
+func (m *fixtureMessages) Reason() terminalweb.Reason {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reason
+}
+func (m *fixtureMessages) Refusal() (terminalweb.Refusal, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.refusal, m.reason == terminalweb.ReasonRefused
+}
+func (m *fixtureMessages) Close() error { m.once.Do(func() { close(m.done) }); return nil }
+
+// endItself ends the desktop as the proxy does, saying why.
+func (m *fixtureMessages) endItself(reason terminalweb.Reason, refusal terminalweb.Refusal) {
+	m.mu.Lock()
+	m.reason, m.refusal = reason, refusal
+	m.mu.Unlock()
+	_ = m.Close()
+}
 
 // x224Request is IronRDP's X.224 connection request for TLS alone.
 var x224Request = []byte{0x03, 0x00, 0x00, 0x13, 0x0e, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00}

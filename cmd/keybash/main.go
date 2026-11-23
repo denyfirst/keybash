@@ -269,7 +269,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			var worker identity.RDPWorker
 			if command == "serve-remote-lab" {
 				worker = rdplab.ManagerWorker{SocketPath: *rdpManager}
-				options = append(options, identity.WatchCertificates(time.Hour))
+				// A refused desktop's reason, in fixed words, goes to the
+				// journal through standard error (identity.Journal).
+				options = append(options, identity.WatchCertificates(time.Hour), identity.Journal(os.Stderr))
 			}
 			lab, e = identity.NewRemoteLabWithLimits(origin, store, targets, sshtransport.ManagerWorker{SocketPath: *manager}, worker, limits, options...)
 		} else {

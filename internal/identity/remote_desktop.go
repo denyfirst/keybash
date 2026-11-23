@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"crypto/subtle"
+	"io"
 	"net/http"
 	"time"
 
@@ -19,6 +20,31 @@ func desktopToken(token string) (csrf, lease string, ok bool) {
 		return "", "", false
 	}
 	return token[:43], token[44:], true
+}
+
+// Journal has the gateway write one line to w for each desktop that ended as
+// "refused": which side sent what Keybash does not accept, in fixed words
+// (terminalweb.Refusal.Line). The service gives it standard error, which
+// systemd keeps in the gateway's journal. Nothing else about a desktop is
+// written: no person, server, address or anything from the session.
+func Journal(w io.Writer) Option {
+	return func(l *Lab) error {
+		if w == nil || l.journal != nil {
+			return errRefused
+		}
+		l.journal = w
+		return nil
+	}
+}
+
+// noteRefusal writes a refused desktop's line, one whole line at a time.
+func (l *Lab) noteRefusal(r terminalweb.Refusal) {
+	if l.journal == nil {
+		return
+	}
+	l.journalMu.Lock()
+	defer l.journalMu.Unlock()
+	_, _ = io.WriteString(l.journal, r.Line())
 }
 
 // fastPathInput is a browser message that starts with a fast-path input PDU:
@@ -177,7 +203,7 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	// reason.
 	stopOwner()
 	stopSocket()
-	terminalweb.RelayMessages(ctx, socket, stream, func(message []byte) bool {
+	reason, refusal := terminalweb.RelayMessages(ctx, socket, stream, func(message []byte) bool {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		if ctx.Err() != nil || l.readyLocked(id, false) == nil {
@@ -188,4 +214,7 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 		}
 		return true
 	})
+	if reason == terminalweb.ReasonRefused {
+		l.noteRefusal(refusal)
+	}
 }

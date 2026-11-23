@@ -8,14 +8,13 @@ use ironrdp_pdu::gcc::{ClientGccBlocks, ConferenceCreateRequest};
 use ironrdp_pdu::x224::{X224, X224Data};
 use ironrdp_pdu::{mcs, nego};
 
+use crate::refusal::Refusal;
+
 /// A Connect Initial larger than this is refused before decoding.
 pub const MAX_CONNECT_INITIAL: usize = 16 * 1024;
 
 /// Windows' scales Keybash opens desktops at: `identity.desktopDPIs` as percent.
 const SCALES: [u32; 5] = [100, 125, 150, 175, 200];
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Refusal(pub &'static str);
 
 /// The desktops Keybash opens, at one of Windows' scales: even, at least 200 by
 /// 200, at most full HD times the scale. The desktop page asks for no more
@@ -51,27 +50,26 @@ pub fn connect_initial(
     clipboard: bool,
 ) -> Result<(Vec<u8>, Vec<String>), Refusal> {
     if tpkt.len() > MAX_CONNECT_INITIAL {
-        return Err(Refusal("Connect Initial too large"));
+        return Err(Refusal::ConnectInitialTooLarge);
     }
-    let X224(carrier) = decode::<X224<X224Data<'_>>>(tpkt).map_err(|_| Refusal("not an X.224 data PDU"))?;
-    let mut initial =
-        decode::<mcs::ConnectInitial>(&carrier.data).map_err(|_| Refusal("not an MCS Connect Initial"))?;
+    let X224(carrier) = decode::<X224<X224Data<'_>>>(tpkt).map_err(|_| Refusal::NotX224Data)?;
+    let mut initial = decode::<mcs::ConnectInitial>(&carrier.data).map_err(|_| Refusal::NotConnectInitial)?;
     let mut blocks: ClientGccBlocks = initial.conference_create_request.gcc_blocks().clone();
 
     let core = &mut blocks.core;
     if core.optional_data.server_selected_protocol != Some(nego::SecurityProtocol::SSL) {
-        return Err(Refusal("the browser must have been told TLS"));
+        return Err(Refusal::NotToldTls);
     }
     core.optional_data.server_selected_protocol = Some(selected);
     let scale = core.optional_data.desktop_scale_factor.unwrap_or(100);
     if !desktop_allowed(core.desktop_width, core.desktop_height, scale) {
-        return Err(Refusal("desktop size outside the bounds"));
+        return Err(Refusal::DesktopSize);
     }
     if !matches!(core.optional_data.device_scale_factor, None | Some(100 | 140 | 180)) {
-        return Err(Refusal("device scale factor"));
+        return Err(Refusal::DeviceScale);
     }
     if blocks.monitor.is_some() || blocks.monitor_extended.is_some() {
-        return Err(Refusal("monitor layout"));
+        return Err(Refusal::MonitorLayout);
     }
     blocks.cluster = None;
     blocks.multi_transport_channel = None;
@@ -83,16 +81,16 @@ pub fn connect_initial(
             .name
             .as_str()
             .map(str::to_ascii_lowercase)
-            .ok_or(Refusal("channel name"))?;
+            .ok_or(Refusal::ChannelName)?;
         if !channel_allowed(&name, clipboard) || seen.contains(&name) {
-            return Err(Refusal("static channel not allowed"));
+            return Err(Refusal::StaticChannelNotAllowed);
         }
         seen.push(name);
     }
 
-    initial.conference_create_request = ConferenceCreateRequest::new(blocks).map_err(|_| Refusal("encode"))?;
-    let body = encode_vec(&initial).map_err(|_| Refusal("encode"))?;
-    let pdu = encode_vec(&X224(X224Data { data: Cow::Owned(body) })).map_err(|_| Refusal("encode"))?;
+    initial.conference_create_request = ConferenceCreateRequest::new(blocks).map_err(|_| Refusal::Encode)?;
+    let body = encode_vec(&initial).map_err(|_| Refusal::Encode)?;
+    let pdu = encode_vec(&X224(X224Data { data: Cow::Owned(body) })).map_err(|_| Refusal::Encode)?;
     Ok((pdu, seen))
 }
 
@@ -276,7 +274,7 @@ pub(crate) mod tests {
         ] {
             assert_eq!(
                 connect_initial(&with(names), nego::SecurityProtocol::HYBRID, clipboard),
-                Err(Refusal("static channel not allowed")),
+                Err(Refusal::StaticChannelNotAllowed),
                 "{names:?} clipboard {clipboard}"
             );
         }
