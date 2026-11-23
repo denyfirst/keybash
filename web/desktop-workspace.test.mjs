@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopScales, nearestScale, pictureScale, scaledSize, rateLimiter, pastePacer, windowsLines, pointerCursor } from './desktop-workspace.mjs';
+import { desktopScales, nearestScale, pictureScale, scaledSize, rateLimiter, pastePacer, windowsLines, pointerCursor, pasteWait, pasteNotice } from './desktop-workspace.mjs';
 
 test('the picture: sharp is the screen\'s scale, smooth is 100%, and with no choice smooth from 175% up', () => {
   for (const [ratio, sharp] of [[1, 1], [1.25, 1.25], [1.5, 1.5], [1.75, 1.75], [2, 2], [2.625, 2], [NaN, 1]]) {
@@ -85,3 +85,11 @@ test('pasted text reaches Windows with CRLF line ends', () => {
   assert.equal(windowsLines('\r\n\r\n'), '\r\n\r\n');
 });
 
+
+test('a paste Windows never answered says what helps; a refused one says it plainly', () => {
+  assert.match(pasteNotice('silent'), /sign out of Windows/);
+  for (const answer of ['refused', 'taken', '', undefined]) {
+    assert.equal(pasteNotice(answer), 'The text could not be pasted.', String(answer));
+  }
+  assert.ok(pasteWait >= 1000 && pasteWait <= 5000);
+});

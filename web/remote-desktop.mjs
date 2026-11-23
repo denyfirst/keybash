@@ -5,7 +5,7 @@
 import init, { setup, SessionBuilder, DesktopSize, Extension, InputTransaction, DeviceEvent, ClipboardData, RotationUnit } from './vendor/ironrdp/ironrdp_web.js';
 import { createRenderer } from './remote-desktop-gfx.mjs';
 import { scanCode, sendsRepeat, modifierChanges, ctrlAltDel, ctrlV, mouseButton, desktopPoint, wheelPixels, wheelStep, pointerPNG, closeReason } from './remote-desktop-input.mjs';
-import { pictureScale, scaledSize, nearestScale, pointerCursor, pastePacer, windowsLines } from './desktop-workspace.mjs';
+import { pictureScale, scaledSize, nearestScale, pointerCursor, pastePacer, windowsLines, pasteWait, pasteNotice } from './desktop-workspace.mjs';
 import { inspectPaste } from './paste.mjs';
 import { remoteProof, savePicture, remoteErrorMessage, identityChangedMessage, endingMessage, enterFullscreen, watchFullscreen, nameSession, sessionChrome } from './remote.mjs';
 
@@ -255,7 +255,7 @@ async function copy(asked = false) {
 // remote's own Ctrl+V pastes it; no Enter is added. Pastes are paced.
 const pastes = pastePacer();
 let answered = null;
-function formatListAnswered(ok) { answered?.(ok === true); answered = null; }
+function formatListAnswered(ok) { answered?.(ok === true ? 'taken' : 'refused'); answered = null; }
 async function deliver(text) {
   if (!live) return;
   text = windowsLines(text);
@@ -263,7 +263,7 @@ async function deliver(text) {
   if (!pastes()) { $('notice').textContent = 'Paste skipped: one at a time, please.'; return; }
   releaseAll();
   const epoch = generation;
-  const accepted = new Promise(resolve => { answered = resolve; setTimeout(() => resolve(false), 3000); });
+  const accepted = new Promise(resolve => { answered = resolve; setTimeout(() => resolve('silent'), pasteWait); });
   const data = new ClipboardData();
   try {
     data.addText('text/plain', text);
@@ -276,7 +276,8 @@ async function deliver(text) {
     data.free();
   }
   // Windows has to take the text before its Ctrl+V asks for it.
-  if (!(await accepted)) { if (live && epoch === generation) $('notice').textContent = 'The text could not be pasted.'; return; }
+  const answer = await accepted;
+  if (answer !== 'taken') { if (live && epoch === generation) $('notice').textContent = pasteNotice(answer); return; }
   if (!live || epoch !== generation) return;
   send(...ctrlV.map(DeviceEvent.keyPressed), ...[...ctrlV].reverse().map(DeviceEvent.keyReleased));
   desktop.focus({ preventScroll: true });

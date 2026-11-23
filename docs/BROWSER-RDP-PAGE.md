@@ -89,6 +89,11 @@ The setup turns the clipboard on; the proxy keeps it to text
   own clipboard by itself. Copy shows it in the copy panel, as now;
 - Paste reads the person's own clipboard only when they press it, shows the
   text for review, and sends it only when they confirm.
+- A paste Windows does not take within three seconds is not typed. If
+  Windows never answered, the notice says to sign out of Windows if this
+  keeps happening: Windows' clipboard program, rdpclip, can stop answering a
+  session, even across new connections, and only a new sign-in starts it
+  again. The proxy keeps the desktop open meanwhile (`BROWSER-RDP-PROXY.md`).
 
 ## What leaves
 
