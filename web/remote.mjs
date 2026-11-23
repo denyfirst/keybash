@@ -48,10 +48,25 @@ export function watchFullscreen(button,changed=()=>{}){
 // covered. The bar also comes back while it has focus or a menu is open.
 // Short messages fade; once the session has ended its reason stays, with
 // Connect again for an owned session.
-const handleRest=180;
+// The bar keeps one line at any width. When its parts do not fit, the least
+// needed step out first, each step keeping the ones before it: the wordmark
+// and the size; the labels of full screen and Ctrl+Alt+Del, then of copy and
+// paste, then every label; last the status word (its dot stays) and the kind.
+// A tool keeps its name for screen readers and in its title. The connection's
+// name keeps a few letters before anything steps out. The bar fits again
+// whenever its width or its words change.
+const handleRest=180,fitSteps=['fit-1','fit-2','fit-3','fit-4','fit-5'],nameRoom=80;
 export function sessionChrome(){
  const session=document.querySelector('.session'),bar=session.querySelector('.bar'),handle=session.querySelector('.bar-handle'),notice=document.getElementById('notice'),reconnect=document.getElementById('reconnect');
  let hideTimer=0,restTimer=0,noticeTimer=0;
+ const start=bar.querySelector('.bar-start'),tools=bar.querySelector('.tools'),name=bar.querySelector('.session-name');
+ const over=el=>el.scrollWidth>el.clientWidth+1;
+ const fits=()=>!over(bar)&&!over(start)&&!over(tools)&&(!name||name.clientWidth>=Math.min(name.scrollWidth,nameRoom));
+ const fit=()=>{bar.classList.remove(...fitSteps);for(const step of fitSteps){if(fits())return;bar.classList.add(step);}};
+ new ResizeObserver(fit).observe(session);
+ new MutationObserver(fit).observe(bar,{childList:true,characterData:true,subtree:true,attributes:true,attributeFilter:['hidden']});
+ document.fonts?.ready.then(fit);
+ fit();
  const full=()=>session.classList.contains('full');
  const show=()=>{clearTimeout(hideTimer);clearTimeout(restTimer);session.classList.add('bar-shown');};
  const hide=(delay=900)=>{clearTimeout(hideTimer);hideTimer=setTimeout(()=>{if(full()&&!bar.matches(':hover, :focus-within')&&!session.querySelector('.menu:not([hidden])'))session.classList.remove('bar-shown');},delay);};

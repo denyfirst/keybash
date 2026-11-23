@@ -17,6 +17,24 @@ and work as they do now:
 - special keys (Ctrl+Alt+Del), fullscreen, disconnect and reconnect;
 - the end reasons, in the same words.
 
+The bar keeps one line at any width, on the desktop and the terminal page
+alike (`sessionChrome` in `remote.mjs`). When its parts do not fit, the least
+needed step out first, in this order:
+
+1. the wordmark and the size;
+2. the labels of full screen and Ctrl+Alt+Del;
+3. the labels of copy and paste;
+4. every label;
+5. the status word, whose dot stays, and the kind.
+
+A tool without its label keeps its name for screen readers and in its title.
+The connection's name keeps at least a few letters before anything steps
+out. The bar fits again when the window's width or the bar's words change:
+"Waiting for Windows" is longer than "Connected". Both pages' browser tests
+narrow the bar from 1,600 pixels to a phone's width and back, with the
+longer word too. At every width nothing may overlap or leave the bar, and a
+wide bar must show everything again.
+
 What changes is underneath: Windows' RDP reaches the page, and IronRDP draws
 the desktop on the GPU. H.264 is decoded by the browser's own decoder
 (WebCodecs), as Keybash's IronRDP patch already provides.
