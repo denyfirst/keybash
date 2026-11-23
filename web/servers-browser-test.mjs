@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
 const config = JSON.parse(readFileSync(0, 'utf8'));
 assert.equal(new URL(config.Origin).hostname, '127.0.0.1');
-const browser = await chromium.launch({ headless: true, ...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
+const browser = await chromium.launch({ headless: true, args: ['--disable-3d-apis'], ...(process.env.KEYBASH_BROWSER_CHANNEL ? { channel: process.env.KEYBASH_BROWSER_CHANNEL } : {}) });
 const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 1000 } });
 // What the page copies is recorded here, never written to the workstation's clipboard.
 await context.addInitScript(() => { globalThis.copiedText = []; Object.defineProperty(navigator, 'clipboard', { value: { writeText(text) { copiedText.push(text); return Promise.resolve(); } } }); });
@@ -103,12 +103,68 @@ try {
   await page.locator('#shared-new').click(); await page.locator('#shared-next-box').waitFor({ state: 'visible' }); await settled();
   await page.locator('#shared-keep').click(); await sheetNotice('shared-dialog').filter({ hasText: /^The new key was destroyed\. The current one stays\.$/ }).waitFor(); await settled();
   assert.equal(await page.locator('#shared-command').textContent(), nextKey);
-  // Stopping asks first; then the server has none.
+  await page.locator('#shared-close').click(); await page.locator('#shared-dialog').waitFor({ state: 'hidden' });
+
+  stage = 'shared card';
+  // Everyone on the list finds it ready on their Connections page, and sees
+  // nothing of it but its user name.
+  await page.locator('.rail-item[data-page=connections]').click(); await page.waitForURL(config.Origin + '/'); await settled();
+  const sharedCard = page.locator('.server-card[data-shared]'); await sharedCard.waitFor();
+  assert.equal(await sharedCard.count(), 1);
+  assert.equal(await sharedCard.locator('.server-name').textContent(), 'Build box');
+  assert.equal(await sharedCard.locator('.server-kind').textContent(), 'Terminal (SSH) · Shared by your administrator');
+  assert.equal(await sharedCard.locator('.trust-state').textContent(), 'Ready');
+  assert.match(await sharedCard.locator('.server-screen').textContent(), /^deploy@Build box ~ \$ /);
+  assert.equal(await sharedCard.getByRole('button').count(), 0, 'a shared card offered to change it');
+  assert(await page.locator('#first-steps').isHidden(), 'the first steps showed beside a shared server');
+  const buildBox = await sharedCard.getAttribute('data-shared');
+  const connect = sharedCard.getByRole('link', { name: 'Connect', exact: true });
+  assert.equal(await connect.getAttribute('href'), `/remote/shared/ssh/${buildBox}`);
+
+  stage = 'shared card states';
+  // A card offers to connect only when ready. The page takes no field it does
+  // not show, so a row with another one is refused whole, as are two rows for
+  // one server.
+  const listed = { server: buildBox, name: 'Build box', protocol: 'ssh', username: 'deploy', trust: 'verified' };
+  const answerShared = rows => page.route(config.Origin + '/api/shared', route => route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body: JSON.stringify(rows) }));
+  for (const [trust, words, help] of [['stopped', 'Server changed', /shows a different certificate/], ['unavailable', 'Unavailable', /does not open right now/]]) {
+    await answerShared([{ ...listed, trust }]); await page.reload(); await sharedCard.waitFor(); await settled();
+    assert.equal(await sharedCard.locator('.trust-state').textContent(), words);
+    assert.match(await sharedCard.locator('.server-help').textContent(), help);
+    assert.equal(await sharedCard.getByRole('link').count(), 0, `a ${trust} shared card offered to connect`);
+    await page.unroute(config.Origin + '/api/shared');
+  }
+  for (const rows of [[{ ...listed, secret: 'synthetic' }], [listed, listed]]) {
+    await answerShared(rows); await page.reload(); await settled();
+    await page.locator('#notice').filter({ hasText: /./ }).waitFor();
+    assert.equal(await sharedCard.count(), 0, 'the page showed shared rows it should refuse');
+    await page.unroute(config.Origin + '/api/shared');
+  }
+  await page.reload(); await sharedCard.waitFor(); await settled();
+
+  stage = 'shared terminal';
+  const [terminal] = await Promise.all([page.waitForEvent('popup'), connect.click()]);
+  terminal.on('pageerror', error => errors.push(error.name)); terminal.on('response', listen);
+  terminal.on('request', request => { if (!request.url().startsWith(config.Origin + '/')) external.push('external request'); });
+  await terminal.waitForFunction(() => document.title === 'Build box · Keybash');
+  await terminal.locator('#status').filter({ hasText: /^Connected$/ }).waitFor();
+  await terminal.locator('.xterm-helper-textarea').focus(); await terminal.keyboard.type('shared-key-echo');
+  await terminal.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('shared-key-echo'));
+  // The key worked once, so the Servers page says it is in use.
+  await page.locator('.rail-item[data-page=servers]').click(); await page.waitForURL(config.Origin + '/servers'); await row('Build box').waitFor(); await settled();
+  assert.match(await row('Build box').locator('.server-shared').textContent(), /^Shared key for user deploy · in use$/);
+
+  stage = 'stop sharing';
+  // Stopping asks first; then the server has none, and the open session ends.
+  await row('Build box').getByRole('button', { name: 'Shared key', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
   await page.locator('#shared-stop').click(); await page.locator('#delete-dialog').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#delete-title').textContent(), 'Stop sharing on this server?');
   await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: /^Build box has no shared key or password any more\.$/ }).waitFor(); await settled();
   assert.equal(await row('Build box').locator('.server-shared').count(), 0, 'a stopped shared key still shows');
   assert.equal(await row('Build box').getByRole('button', { name: 'Share a key', exact: true }).count(), 1);
+  await terminal.locator('#notice').filter({ hasText: /^This server, this connection or your access to it changed, so this session ended\.$/ }).waitFor();
+  await terminal.close();
+  assert.equal((await page.request.get(`${config.Origin}/remote/shared/ssh/${buildBox}`)).status(), 404, 'a stopped shared key still opened a page');
   // Every OpenSSH private key's body begins with this (base64 of openssh-key-v1).
   assert.doesNotMatch(await page.content(), /b3BlbnNzaC1rZXktdjE/, 'the page held a private key');
   page.off('response', listen);
@@ -118,6 +174,7 @@ try {
   const options = await page.locator('#connection-target option').allTextContents();
   assert(options.includes('Build box · SSH'), 'the server given to alice is not offered');
   assert(!options.includes('Catalog box · SSH'), 'a server nobody gave alice is offered');
+  assert.equal(await page.locator('.server-card[data-shared]').count(), 0, 'a stopped shared key still shows on Connections');
 
   stage = 'remove';
   await page.locator('.rail-item[data-page=servers]').click(); await page.waitForURL(config.Origin + '/servers'); await row('Build box').waitFor(); await settled();
@@ -208,7 +265,7 @@ try {
   assert.equal(await row('Side').locator('.server-state').textContent(), 'Ready');
 
   stage = 'desktop: shared password';
-  const sharedPassword = 'Synthetic-desk-password-41c9';
+  const sharedPassword = config.SharedPassword;
   page.on('response', listen);
   await row('Desk').getByRole('button', { name: 'Share a password', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
   assert(await page.locator('#shared-kind').isHidden(), 'a desktop offered a key');
@@ -223,6 +280,29 @@ try {
   await sheetNotice('shared-dialog').filter({ hasText: /^Keybash uses the new password from now on\.$/ }).waitFor(); await settled();
   assert.equal(await page.locator('#shared-password').inputValue(), '', 'the new password stayed on the page');
   await page.locator('#shared-close').click(); await page.locator('#shared-dialog').waitFor({ state: 'hidden' });
+
+  stage = 'desktop: shared card';
+  // Put on Desk's list, alice finds it on her Connections page. Its desktop
+  // starts with the password set last, which the page never had.
+  await row('Desk').getByRole('button', { name: 'Who can use it', exact: true }).click(); await page.locator('#access-dialog').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#access-people label').filter({ hasText: 'alice' }).locator('input').check(); await page.locator('#access-form button[type=submit]').click();
+  await page.locator('#access-dialog').waitFor({ state: 'hidden' }); await settled();
+  await page.locator('.rail-item[data-page=connections]').click(); await page.waitForURL(config.Origin + '/'); await settled();
+  const deskCard = page.locator('.server-card[data-shared]'); await deskCard.waitFor();
+  assert.equal(await deskCard.count(), 1);
+  assert.equal(await deskCard.locator('.server-kind').textContent(), 'Desktop (RDP) · Shared by your administrator');
+  assert.equal(await deskCard.locator('.server-screen').textContent(), 'kbtest@Desk · desktop');
+  const deskID = await deskCard.getAttribute('data-shared');
+  assert.equal(await deskCard.getByRole('link', { name: 'Connect', exact: true }).getAttribute('href'), `/remote/shared/rdp/${deskID}`);
+  const asked = async () => (await page.request.get(config.Origin + '/__fixture/desktop', { headers: { 'X-Fixture-Control': config.Control } })).json();
+  assert.equal((await asked()).calls, 0, 'a desktop started before it was opened');
+  const [desktop] = await Promise.all([page.waitForEvent('popup'), deskCard.getByRole('link', { name: 'Connect', exact: true }).click()]);
+  desktop.on('pageerror', error => errors.push(error.name)); desktop.on('response', listen); desktop.on('request', request => { if (!request.url().startsWith(config.Origin + '/')) external.push('external request'); });
+  await desktop.waitForFunction(() => document.title === 'Desk · Keybash');
+  let started; for (let tries = 0; tries < 100 && !(started = await asked()).calls; tries++) await desktop.waitForTimeout(100);
+  assert.deepEqual(started, { calls: 1, username: 'kbtest', password: true }, 'the desktop did not start with the shared password');
+  assert.doesNotMatch(await desktop.content(), new RegExp(sharedPassword), 'the desktop page held the password');
+  await desktop.close();
   page.off('response', listen);
   // Nothing the page holds, or any answer it got, carries the password.
   assert.doesNotMatch(await page.content(), new RegExp(sharedPassword));
@@ -230,7 +310,7 @@ try {
   for (const answer of await Promise.all(answers)) assert(!answer.includes(sharedPassword) && !answer.includes('b3BlbnNzaC1rZXktdjE') && !answer.includes('PRIVATE KEY'), 'an answer carried a shared secret');
 
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop, renewal, unchecked desktop, shared key and shared password passed');
+  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop, renewal, unchecked desktop, shared key and shared password, and their cards and sessions passed');
 } catch (error) {
   console.log('Servers browser stage:', stage, error.code === 'ERR_ASSERTION' ? error.message : error.name);
   if (process.env.KEYBASH_SERVERS_SCREENSHOT) await page.screenshot({ path: process.env.KEYBASH_SERVERS_SCREENSHOT });

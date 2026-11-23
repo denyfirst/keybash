@@ -417,11 +417,15 @@ func (l *Lab) revokeSharedLocked(server string) {
 // sharedConnection is one server a person connects to with its shared
 // credential: its account name, and nothing of the secret.
 type sharedConnection struct {
-	Server    string `json:"server"`
-	Name      string `json:"name"`
-	Protocol  string `json:"protocol"`
-	Username  string `json:"username"`
-	Available bool   `json:"available"`
+	Server   string `json:"server"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Username string `json:"username"`
+	// Trust is what the card says, in the words of a person's own
+	// connections: "verified" (ready), "stopped" (a desktop shows another
+	// certificate than its pin, so nothing is sent until an administrator
+	// checks it) or "unavailable".
+	Trust string `json:"trust"`
 }
 
 // sharedConnectionsLocked lists them for s's person: every server on whose
@@ -437,8 +441,14 @@ func (l *Lab) sharedConnectionsLocked(s *session) ([]sharedConnection, error) {
 		if !ok {
 			continue
 		}
-		rows = append(rows, sharedConnection{Server: server, Name: t.Name, Protocol: t.Protocol, Username: c.Current.Username,
-			Available: usableTarget(t, l.now()) && compatible(t, c.Current)})
+		trust := "unavailable"
+		if usableTarget(t, l.now()) && compatible(t, c.Current) {
+			trust = "verified"
+			if l.certificateChangedLocked(t) {
+				trust = "stopped"
+			}
+		}
+		rows = append(rows, sharedConnection{Server: server, Name: t.Name, Protocol: t.Protocol, Username: c.Current.Username, Trust: trust})
 	}
 	slices.SortFunc(rows, func(a, b sharedConnection) int {
 		if order := strings.Compare(a.Name, b.Name); order != 0 {

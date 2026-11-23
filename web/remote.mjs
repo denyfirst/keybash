@@ -1,4 +1,7 @@
 export const ownedRemote = Boolean(document.body.dataset.ownedRemote);
+// A server's shared credential (ADR 0009): the page's record is then the
+// server's ID, opened with open-shared and named from the shared list.
+const sharedRemote = document.body.dataset.shared === '1';
 async function json(path, method='GET', body, csrf='') {
   const response=await fetch(path,{method,headers:{'Content-Type':'application/json','X-Keybash-Request':'1','X-Keybash-CSRF':csrf},body:body===undefined?undefined:JSON.stringify(body),credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)});
   if(response.status===503&&response.headers.get('X-Keybash-Capacity')==='full')throw Object.assign(new Error('capacity'),{code:'capacity'});
@@ -86,7 +89,7 @@ export function sessionChrome(){
 // told apart. A missing or oversized list keeps the generic title.
 export async function nameSession(kind){
  const record=document.body.dataset.connection;
- try{const rows=await json('/api/connections');const row=Array.isArray(rows)?rows.find(item=>item?.id===record):null;
+ try{const rows=await json(sharedRemote?'/api/shared':'/api/connections');const row=Array.isArray(rows)?rows.find(item=>(sharedRemote?item?.server:item?.id)===record):null;
   if(typeof row?.name!=='string'||!row.name||row.name.length>160)return;
   document.title=`${row.name} · ${kind}`;document.getElementById('tab-name').textContent=row.name;
  }catch{}
@@ -101,6 +104,6 @@ export async function savePicture(picture){
 export async function remoteProof(){
  const record=document.body.dataset.connection;if(!/^[a-f0-9]{32}$/.test(record??''))throw new Error('invalid connection');
  const session=await json('/api/session');if(session.stage!=='ready'||!/^[A-Za-z0-9_-]{43}$/.test(session.csrf??''))throw new Error('session refused');
- const data=await json('/api/remote/open','POST',{connection:record},session.csrf);if(!/^[A-Za-z0-9_-]{43}$/.test(data.lease??''))throw new Error('lease refused');
+ const data=sharedRemote?await json('/api/remote/open-shared','POST',{server:record},session.csrf):await json('/api/remote/open','POST',{connection:record},session.csrf);if(!/^[A-Za-z0-9_-]{43}$/.test(data.lease??''))throw new Error('lease refused');
  return {csrf:session.csrf,lease:data.lease};
 }

@@ -372,6 +372,42 @@ function emptyState(title, text, picture = 'terminal', action) {
 }
 const trustWords = { verified: 'Ready', changed: 'Identity changed', stopped: 'Server changed', unverified: 'Needs approval', unavailable: 'Unavailable' };
 const trustHelp = { changed: 'The administrator changed this server’s identity. Review it before connecting.', stopped: 'This server now shows a different certificate, so Keybash will not connect and sends it no password. Your administrator can see this and has to check it.', unverified: 'Review and accept this server’s identity before connecting.', unavailable: 'This server is not open to you right now: it was removed, you were taken off it, or its certificate has ended.' };
+// Who signs in where, as the prompt it opens to: a terminal's, or a desktop's.
+function serverScreen(who, where, protocol) {
+  const screen = document.createElement('p'); screen.className = 'server-screen';
+  const part = (className, text, hidden) => { const span = document.createElement('span'); span.className = className; span.textContent = text; if (hidden) span.setAttribute('aria-hidden', 'true'); return span; };
+  screen.append(part('who', who), part('at', '@'), part('where', where));
+  if (protocol === 'rdp') screen.append(part('tail', ' · desktop', true));
+  else screen.append(part('tail', ' ~ $ ', true), part('cursor', '▍', true));
+  return screen;
+}
+// A server an administrator shares with this person (ADR 0009), as the page
+// gets it: the server, its account, and whether it opens. Nothing else, and
+// never its secret, so a row with any other field is refused.
+const sharedRowOK = x => typeof x === 'object' && x !== null && Object.keys(x).length === 5 && idOK(x.server) && typeof x.name === 'string' && x.name.length >= 1 && x.name.length <= 160 &&
+  ['ssh', 'rdp'].includes(x.protocol) && typeof x.username === 'string' && x.username.length >= 1 && x.username.length <= 128 && ['verified', 'stopped', 'unavailable'].includes(x.trust);
+const sharedHelp = { stopped: trustHelp.stopped, unavailable: 'This server does not open right now, for example because its certificate has ended. Your administrator can see this.' };
+// It opens with the server's own key or password, which this person never
+// sees: nothing to set up, review or delete here, as the administrator looks
+// after it.
+function sharedCard(row) {
+  const card = document.createElement('article'); card.className = 'server-card'; card.dataset.shared = row.server; card.dataset.trust = row.trust;
+  const head = document.createElement('div'); head.className = 'server-card-head';
+  const tile = document.createElement('span'); tile.className = 'server-icon'; tile.append(glyph(row.protocol === 'rdp' ? 'rdp' : 'ssh', 'server-glyph'));
+  const titles = document.createElement('div'); titles.className = 'server-titles';
+  const name = document.createElement('h3'); name.className = 'server-name'; name.textContent = row.name;
+  const kind = document.createElement('p'); kind.className = 'server-kind'; kind.textContent = `${row.protocol === 'rdp' ? 'Desktop (RDP)' : 'Terminal (SSH)'} · Shared by your administrator`;
+  titles.append(name, kind);
+  const state = document.createElement('span'); state.className = 'trust-state pill'; state.dataset.trust = row.trust; state.textContent = trustWords[row.trust];
+  head.append(tile, titles, state); card.append(head, serverScreen(row.username, row.name, row.protocol));
+  if (sharedHelp[row.trust]) { const help = document.createElement('p'); help.className = 'server-help'; help.textContent = sharedHelp[row.trust]; card.append(help); }
+  if (row.trust === 'verified') {
+    const actions = document.createElement('div'); actions.className = 'server-actions';
+    const link = document.createElement('a'); link.className = 'connect'; link.href = `/remote/shared/${row.protocol}/${row.server}`; link.target = '_blank'; link.rel = 'noopener';
+    link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link); card.append(actions);
+  }
+  return card;
+}
 // A connection as a card: what it is, who it signs in as, whether it is
 // ready, and the one action that matters most.
 function serverCard(record, target) {
@@ -392,14 +428,8 @@ function serverCard(record, target) {
   titles.append(name, kind);
   const state = document.createElement('span'); state.className = 'trust-state pill'; state.dataset.trust = record.trust; state.textContent = trustWords[record.trust];
   head.append(tile, titles, state); card.append(head);
-  // Who signs in where, as the prompt it opens to: a terminal's, or a desktop's.
   const login = owned.get(record.credential);
-  const screen = document.createElement('p'); screen.className = 'server-screen';
-  const part = (className, text, hidden) => { const span = document.createElement('span'); span.className = className; span.textContent = text; if (hidden) span.setAttribute('aria-hidden', 'true'); return span; };
-  screen.append(part('who', login ? login.username : 'removed key'), part('at', '@'), part('where', target ? target.name : 'removed server'));
-  if (target?.protocol === 'rdp') screen.append(part('tail', ' · desktop', true));
-  else screen.append(part('tail', ' ~ $ ', true), part('cursor', '▍', true));
-  card.append(screen);
+  card.append(serverScreen(login ? login.username : 'removed key', target ? target.name : 'removed server', target?.protocol));
   if (trustHelp[record.trust]) { const help = document.createElement('p'); help.className = 'server-help'; help.textContent = trustHelp[record.trust]; card.append(help); }
   const actions = document.createElement('div'); actions.className = 'server-actions';
   if (target && record.trust === 'verified') {
@@ -414,9 +444,12 @@ function serverCard(record, target) {
 async function loadConnections() {
   const previous = $('connection-target').value;
   selectedTarget = null; ++targetGeneration; updateTrustButtons(); $('connections').replaceChildren();
-  const targets = await request('/api/targets'), connections = await request('/api/connections');
+  const targets = await request('/api/targets'), connections = await request('/api/connections'), shared = await request('/api/shared');
   if (!Array.isArray(targets) || targets.length > 256 || !Array.isArray(connections) || connections.length > 128) throw new Error('invalid connections');
+  if (!Array.isArray(shared) || shared.length > 256 || !shared.every(sharedRowOK) || new Set(shared.map(row => row.server)).size !== shared.length) throw new Error('invalid shared');
   const approved = new Map(), options = document.createDocumentFragment(), rows = document.createDocumentFragment();
+  // Servers shared by an administrator come first: they need no setup.
+  for (const row of shared) rows.append(sharedCard(row));
   for (const target of targets) {
     if (!idOK(target.id) || approved.has(target.id) || typeof target.name !== 'string' || target.name.length > 160 || !['ssh', 'rdp'].includes(target.protocol)) throw new Error('invalid target');
     approved.set(target.id, target); const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.protocol.toUpperCase()}`; options.append(option);
@@ -428,8 +461,9 @@ async function loadConnections() {
   catalog = approved; $('connection-target').replaceChildren(options); if (approved.has(previous)) $('connection-target').value = previous; $('connections').replaceChildren(rows);
   // With no connection yet, the first steps say what to do, and which is done.
   const hasRecords = $('connection-credential').options.length > 0;
-  $('first-steps').hidden = connections.length > 0; $('first-step-key').dataset.done = String(hasRecords);
-  if (!connections.length) {
+  // A shared server is already something to connect to.
+  $('first-steps').hidden = connections.length > 0 || shared.length > 0; $('first-step-key').dataset.done = String(hasRecords);
+  if (!connections.length && !shared.length) {
     let start;
     if (hasRecords) { start = document.createElement('button'); start.type = 'button'; start.textContent = 'Create your first connection'; start.addEventListener('click', () => $('new-connection').click()); }
     $('connections').append(emptyState('No connections yet', hasRecords ? 'Create one to open a terminal on your server.' : 'Add a key or password first, then create a connection.', 'terminal', start));

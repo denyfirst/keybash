@@ -118,6 +118,8 @@ type desktopWorker struct {
 	literal bool
 	pinned  []byte
 	last    *fixtureMessages
+	// The account and password it was last asked to sign in with.
+	username, password string
 	// start is how long the proxy's sandbox takes to start.
 	start time.Duration
 	// refuse makes the proxy fail to start.
@@ -133,6 +135,7 @@ func (d *desktopWorker) OpenBrowserRDP(ctx context.Context, r RDPRequest) (termi
 	m := newFixtureMessages()
 	d.mu.Lock()
 	d.literal, d.pinned, d.last = r.Target.Literal(), r.Certificate, m
+	d.username, d.password = r.Username, r.Password
 	d.mu.Unlock()
 	go func() { <-ctx.Done(); _ = m.Close() }()
 	return m, nil
