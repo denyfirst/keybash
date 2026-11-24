@@ -1,7 +1,6 @@
 import { systems } from '/systems.mjs';
 const $ = id => document.getElementById(id);
-let csrf = '', busy = false, secretTimer, pendingDelete = null, remoteEnabled = false, setupRequired = false, role = 'user', pendingPerson = null, pendingServer = null;
-let scanned = null, catalog = new Map(), selectedTarget = null, targetGeneration = 0, reviewing = null, reviewGeneration = 0, owned = new Map(), ownConnections = [];
+let csrf = '', busy = false, pendingDelete = null, remoteEnabled = false, setupRequired = false, role = 'user', pendingPerson = null, pendingServer = null, scanned = null, self = '';
 // The page's answer goes where the person is looking: into the open sheet
 // that asked, or under the page.
 const notice = text => {
@@ -11,14 +10,10 @@ const notice = text => {
 const dialogNotice = text => document.querySelectorAll('.dialog-notice').forEach(el => { el.textContent = text; });
 const sections = ['enroll', 'challenge', 'recovery', 'vault'];
 const idOK = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
-function hideSecret() {
-  clearTimeout(secretTimer);
-  for (const id of ['revealed-secret', 'revealed-passphrase']) if ($(id)) $(id).value = '';
-  if ($('secret-dialog')?.open) $('secret-dialog').close();
-}
+// A typed password or code leaves the page as soon as it is sent, and when the
+// page goes out of view.
 function clearInputs() {
   document.querySelectorAll('input[type=password], input[autocomplete=one-time-code]').forEach(el => { el.value = ''; });
-  for (const id of ['credential-key', 'key-file']) if ($(id)) $(id).value = '';
   document.querySelectorAll('.code-boxes').forEach(box => { box.dataset.filled = '0'; });
 }
 // The six boxes follow the one field: digits only, the next box lit.
@@ -45,8 +40,8 @@ function showSeed(secret, rows) {
   $('qr-start').hidden = true; $('seed-panel').hidden = false;
 }
 function clearAll() {
-  hideSecret(); clearInputs(); closeReview(); hideSeed(); csrf = ''; catalog.clear(); selectedTarget = null; ++targetGeneration; pendingPerson = null; pendingServer = null; scanned = null;
-  for (const id of ['account', 'account-name', 'focus-account', 'records', 'connections', 'connection-server', 'people', 'person-code', 'servers', 'server-networks']) if ($(id)) $(id).textContent = '';
+  clearInputs(); hideSeed(); csrf = ''; pendingPerson = null; pendingServer = null; scanned = null; pendingDelete = null;
+  for (const id of ['account', 'account-name', 'focus-account', 'access', 'people', 'person-code', 'servers', 'server-networks', 'server-card', 'accounts', 'person-card', 'person-access', 'key-command', 'key-next-command']) if ($(id)) $(id).textContent = '';
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
@@ -68,7 +63,7 @@ async function request(path, method = 'GET', value, retried = false) {
     const reader = response.body.getReader(); const chunks = []; let size = 0;
     while (true) {
       const { value: part, done } = await reader.read(); if (done) break;
-      size += part.byteLength; if (size > 192 * 1024) { await reader.cancel(); throw new Error('response too large'); }
+      size += part.byteLength; if (size > 512 * 1024) { await reader.cancel(); throw new Error('response too large'); }
       chunks.push(part);
     }
     const bytes = new Uint8Array(size); let offset = 0;
@@ -113,7 +108,6 @@ function stepUp() {
   return stepping;
 }
 function errorMessage(error) {
-  hideSecret();
   if (error.status === 'cancelled') return 'Confirmation cancelled. Nothing changed.';
   if (error.status === 'ended') return 'Too many wrong codes: this session was closed. Sign in again.';
   if (error.status === 'code-shape') return 'That code is incomplete: it has 43 letters, digits, - and _. Paste the whole code again.';
@@ -132,12 +126,15 @@ function errorMessage(error) {
   if (error.status === 'print-differs') return 'That is not what the server shows, so nothing changed. Check that you ran the command on this server and copied the whole line. If it still differs, someone may be between Keybash and the server: do not connect.';
   if (error.status === 'print-shape') return 'Paste the whole line the command printed: it starts with SHA256: and has 64 more letters and digits.';
   if (error.status === 'last-admin') return 'At least one administrator must remain.';
+  if (error.status === 'account-taken') return 'This server already has an account with that name. Choose it from the list instead.';
+  if (error.status === 'account-full') return 'That was not allowed: a server holds at most 16 accounts, and an auditor signs in to none.';
   if (error.status === 403) return 'That is not allowed. Reload the page and try again.';
+  if (error.status === 404) return 'That is not here any more. Reload the page.';
   if (error.status === 428) return 'This needs confirmation with your phone. Try again.';
   if (error.status === 409) return 'The server details changed meanwhile. Reload the page and check again.';
   if (error.status === 429) return 'Too many attempts. Wait a moment.';
   if (error.status === 401) return 'Not accepted, or your session ended. Check the code, and sign in again if needed.';
-  if (error.status === 400) return 'That input was not accepted. Check the password, code or key format.';
+  if (error.status === 400) return 'That input was not accepted. Check the name and the password.';
   return 'That did not go through. Check your connection and reload the page.';
 }
 async function run(action) {
@@ -147,7 +144,7 @@ async function run(action) {
   const buttons = [...document.querySelectorAll('button')].filter(el => !el.closest('#stepup-dialog')); buttons.forEach(el => { el.disabled = true; });
   document.body.dataset.busy = '';
   try { await action(); } catch (error) { notice(errorMessage(error)); }
-  finally { busy = false; delete document.body.dataset.busy; buttons.forEach(el => { el.disabled = false; }); updateTrustButtons(); }
+  finally { busy = false; delete document.body.dataset.busy; buttons.forEach(el => { el.disabled = false; }); }
 }
 function bind(id, action) {
   $(id)?.addEventListener('submit', event => { event.preventDefault(); void run(action); });
@@ -176,124 +173,13 @@ document.addEventListener('click', event => {
 });
 function showCodes(data) {
   if (!Array.isArray(data?.codes) || data.codes.length !== 10 || !data.codes.every(code => typeof code === 'string' && /^[A-Za-z0-9_-]{22}$/.test(code))) throw new Error('invalid codes');
-  clearInputs(); hideSecret(); hideSeed();
+  clearInputs(); hideSeed();
   sections.forEach(id => { $(id).hidden = id !== 'recovery'; });
   $('heading').textContent = 'Your recovery codes are ready';
   $('recovery-codes').value = data.codes.join('\n');
 }
-// A key or password as a row: what it is, who it signs in as, and what can be
-// done with it. The secret itself is never part of the row.
-function recordRow(record) {
-  const row = document.createElement('article'); row.className = 'record'; row.dataset.kind = record.generated ? 'generated' : record.kind;
-  // A key made here looks like any key once it has opened a session on a server.
-  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.append(glyph(record.generated && !record.used ? 'made' : record.kind, 'server-glyph'));
-  const titles = document.createElement('div'); titles.className = 'record-titles';
-  const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = record.name;
-  const meta = document.createElement('p'); meta.className = 'record-meta';
-  meta.textContent = `${record.kind === 'ssh-key' ? 'SSH key' : 'Password'} · ${record.username ? `user ${record.username}` : 'no user'}`;
-  titles.append(name, meta);
-  if (record.generated) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = record.used ? 'Made in Keybash · in use' : 'Made in Keybash · not on a server yet'; titles.append(badge); }
-  if (record.fingerprint) {
-    const line = document.createElement('p'); line.className = 'record-print';
-    const print = document.createElement('code'); print.className = 'fingerprint'; print.textContent = record.fingerprint; print.title = 'Key fingerprint';
-    line.append(print); titles.append(line);
-  }
-  row.append(tile, titles);
-  const actions = document.createElement('div'); actions.className = 'record-actions'; row.append(actions);
-  return { row, actions };
-}
-// One sheet asks before anything is deleted or taken away: a key or password,
-// a connection, or a person's account or access.
-const confirmKinds = {
-  credential: { title: 'Delete this key or password?', hint: 'Connections that sign in with it stop working. This cannot be undone.', path: id => `/api/credentials/${id}` },
-  connection: { title: 'Delete this connection?', hint: 'The key or password it signs in with stays under Keys & passwords. This cannot be undone.', path: id => `/api/connections/${id}` },
-  person: { title: 'Delete this person?', hint: 'Their account goes, with their keys, passwords and connections, and they are signed out at once. This cannot be undone.', path: id => `/api/users/${id}` },
-  block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their keys and passwords stay.', path: id => `/api/users/${id}/block`, method: 'POST', word: 'Block' },
-  newcode: { title: 'Make a new invite code?', hint: 'The earlier code stops working at once. You get a new one to give them.', path: id => `/api/users/${id}/reset`, method: 'POST', word: 'Make new code' },
-  server: { title: 'Remove this server?', hint: 'Open sessions to it end at once, and connections to it stop working. People’s keys and passwords stay. This cannot be undone.', path: id => `/api/servers/${id}`, word: 'Remove' },
-  shared: { title: 'Stop signing people in to this server?', hint: 'Sessions Keybash signed in end at once. People on the list then need their own key or password to connect. A key is destroyed; take its line off the server too. This cannot be undone.', path: id => `/api/servers/${id}/shared`, word: 'Stop signing them in' },
-};
-function askConfirm(kind, record) {
-  pendingDelete = { kind, id: record.id, name: record.name };
-  $('delete-title').textContent = confirmKinds[kind].title; $('delete-hint').textContent = confirmKinds[kind].hint; $('delete-name').textContent = record.name;
-  $('confirm-delete').textContent = confirmKinds[kind].word ?? 'Delete';
-  $('delete-dialog').showModal();
-}
-async function loadRecords() {
-  const records = await request('/api/credentials');
-  if (!Array.isArray(records) || records.length > 256) throw new Error('invalid records');
-  $('records').replaceChildren();
-  for (const record of records) {
-    if (!idOK(record.id) || typeof record.name !== 'string' || !['password', 'ssh-key'].includes(record.kind) || typeof record.username !== 'string' || typeof record.fingerprint !== 'string' || record.generated !== undefined && (record.generated !== true || !publicOK(record.public)) || record.used !== undefined && (record.used !== true || record.generated !== true)) throw new Error('invalid record');
-    const { row, actions } = recordRow(record);
-    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost destructive'; remove.textContent = 'Delete';
-    remove.addEventListener('click', () => askConfirm('credential', record));
-    // A key made here is never shown; its row offers the install command instead,
-    // quietly once the key has opened a session on a server.
-    if (record.generated) {
-      const install = document.createElement('button'); install.type = 'button'; install.className = record.used ? 'ghost' : 'secondary'; install.textContent = record.used ? 'Add to another server' : 'Add to server';
-      install.addEventListener('click', () => showInstall(record.public));
-      actions.append(install, remove); $('records').append(row); continue;
-    }
-    const reveal = document.createElement('button'); reveal.type = 'button'; reveal.className = 'secondary'; reveal.textContent = 'Show';
-    reveal.addEventListener('click', () => { void run(async () => {
-      hideSecret();
-      const item = await request(`/api/credentials/${record.id}/reveal`, 'POST', {});
-      if (item?.id !== record.id || typeof item.secret !== 'string' || item.secret.length > 65536 || typeof item.passphrase !== 'string' || item.passphrase.length > 1024 || typeof item.name !== 'string') throw new Error('invalid secret');
-      if (document.visibilityState !== 'visible') return;
-      $('secret-title').textContent = item.name; $('revealed-secret').value = item.secret; $('revealed-passphrase').value = item.passphrase;
-      $('copy-passphrase').hidden = !item.passphrase; $('revealed-passphrase').hidden = !item.passphrase;
-      $('secret-dialog').showModal(); secretTimer = setTimeout(hideSecret, 60000);
-    }); });
-    actions.append(reveal, remove); $('records').append(row);
-  }
-  if (!records.length) {
-    const start = document.createElement('button'); start.type = 'button'; start.textContent = 'Add your first key or password'; start.addEventListener('click', () => openRecordDialog('password'));
-    $('records').append(emptyState('No keys or passwords yet', 'Save a server user’s password or SSH key, or let Keybash make a new SSH key for you.', 'key', start));
-  }
-  owned = new Map(records.map(record => [record.id, record]));
-  if(remoteEnabled){$('connection-credential').replaceChildren();for(const record of records){const option=document.createElement('option');option.value=record.id;option.textContent=`${record.name} · ${record.kind === 'ssh-key' ? 'SSH key' : 'Password'}`;$('connection-credential').append(option);}await loadConnections();}
-}
-const fingerprintOK = value => typeof value === 'string' && (/^SHA256:[A-Za-z0-9+/]{43}$/.test(value) || /^SHA256:[a-f0-9]{64}$/.test(value));
-function updateTrustButtons() {
-  if ($('connection-save')) $('connection-save').disabled = busy || !selectedTarget?.available || selectedTarget.id !== $('connection-target').value;
-  if ($('trust-save')) $('trust-save').disabled = busy || !reviewing?.target.available;
-}
-function validateTarget(data, id) {
-  if (data?.id !== id || typeof data.name !== 'string' || data.name.length > 160 || !['ssh', 'rdp'].includes(data.protocol) || typeof data.hostname !== 'string' || !/^[a-z0-9.:-]{1,253}$/.test(data.hostname) || !Number.isInteger(data.port) || data.port < 1 || data.port > 65535 || !Array.isArray(data.addresses) || !data.addresses.length || data.addresses.length > 16 || !data.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) || typeof data.algorithm !== 'string' || data.algorithm.length > 80 || !fingerprintOK(data.fingerprint) || typeof data.approval !== 'string' || !/^[a-f0-9]{64}$/.test(data.approval) || typeof data.available !== 'boolean') throw new Error('invalid server identity');
-  if (catalog.get(id)?.protocol !== data.protocol || data.protocol === 'ssh' && !/^SHA256:[A-Za-z0-9+/]{43}$/.test(data.fingerprint) || data.protocol === 'rdp' && !/^SHA256:[a-f0-9]{64}$/.test(data.fingerprint) ||
-    data.unchecked !== undefined && (data.unchecked !== true || data.protocol !== 'rdp')) throw new Error('inconsistent server identity');
-  return data;
-}
-// An IPv6 address is written in brackets before its port.
-const hostPort = (host, port) => `${host.includes(':') ? `[${host}]` : host}:${port}`;
-function serverText(data) {
-  return `Address: ${hostPort(data.hostname, data.port)} · ${data.protocol.toUpperCase()}\nIP: ${data.addresses.join(', ')}\nIdentity (fingerprint): ${data.fingerprint}${data.unchecked ? '\nNot checked: your administrator added this identity without comparing it on the server’s own screen.' : ''}${data.available ? '' : '\nThis server identity cannot be used right now.'}`;
-}
-async function chooseTarget() {
-  const id = $('connection-target').value, generation = ++targetGeneration;
-  selectedTarget = null; $('connection-server').textContent = 'Checking the server…'; updateTrustButtons();
-  if (!idOK(id)) { $('connection-server').textContent = 'No server is open to you yet. Ask your administrator to let you use one.'; return; }
-  try {
-    const target = validateTarget(await request(`/api/targets/${id}`), id);
-    if (generation !== targetGeneration || $('connection-target').value !== id) return;
-    selectedTarget = target; $('connection-server').textContent = serverText(target);
-  } finally { updateTrustButtons(); }
-}
-function closeReview() {
-  ++reviewGeneration; reviewing = null;
-  if ($('trust-dialog')?.open) $('trust-dialog').close();
-  updateTrustButtons();
-}
-async function openReview(record) {
-  closeReview(); const generation = ++reviewGeneration;
-  $('trust-title').textContent = record.name; $('trust-server').textContent = 'Checking the server…';
-  $('trust-previous').textContent = record.fingerprint ? `Identity you accepted before: ${record.fingerprint}` : 'This connection has no accepted identity yet.';
-  $('trust-dialog').showModal(); updateTrustButtons();
-  const target = validateTarget(await request(`/api/targets/${record.target}`), record.target);
-  if (generation !== reviewGeneration || !$('trust-dialog').open) return;
-  reviewing = {record, target}; $('trust-server').textContent = serverText(target); updateTrustButtons();
-}
+
+// ── Pictures ─────────────────────────────────────────────────────────────
 // Icons are drawn with DOM calls, like everything else the page builds.
 const svgNS = 'http://www.w3.org/2000/svg';
 // Two tones, as on the menu: a soft body ('soft:'), solid marks ('dot:') and lines.
@@ -304,9 +190,11 @@ const icons = {
   play: ['dot:M8 6.3v11.4a1.2 1.2 0 0 0 1.8 1l9-5.7a1.2 1.2 0 0 0 0-2L9.8 5.3A1.2 1.2 0 0 0 8 6.3z'],
   password: ['soft:M5 7h14a2.5 2.5 0 0 1 2.5 2.5v5A2.5 2.5 0 0 1 19 17H5a2.5 2.5 0 0 1-2.5-2.5v-5A2.5 2.5 0 0 1 5 7z', 'dot:M7.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M12 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M16.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z'],
   'ssh-key': keyIcon,
-  // A key made here, with a spark: it waits to be added to a server.
+  // A key made here, with a spark: it waits to be put on its server.
   made: [...keyIcon, 'dot:M6 2.4l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z'],
   key: keyIcon,
+  back: ['M14.5 6l-6 6 6 6'],
+  close: ['M7 7l10 10', 'M17 7L7 17'],
 };
 function glyph(name, className) {
   const svg = document.createElementNS(svgNS, 'svg');
@@ -337,7 +225,13 @@ function paintTile(tile, name) {
   const tone = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
   if (tone < 0.05) tile.dataset.tone = 'dark'; else if (tone < 0.12) tile.dataset.tone = 'dim'; else if (tone > 0.45) tile.dataset.tone = 'light';
 }
-let pickedSystem = '';
+// A server's tile: the mark an administrator chose, its kind until then.
+function serverTile(server, element = 'span') {
+  const tile = document.createElement(element); tile.className = 'server-icon';
+  if (systems[server.system]) { paintTile(tile, server.system); tile.append(systemMark(server.system)); }
+  else tile.append(glyph(server.protocol === 'rdp' ? 'rdp' : 'ssh', 'server-glyph'));
+  return tile;
+}
 function systemGrid(container, chosen, choose) {
   container.replaceChildren();
   for (const name of Object.keys(systems)) {
@@ -347,15 +241,6 @@ function systemGrid(container, chosen, choose) {
     const label = document.createElement('span'); label.className = 'system-label'; label.textContent = systems[name].title;
     option.append(tile, label); option.addEventListener('click', () => choose(name)); container.append(option);
   }
-}
-function openSystemPicker(record) {
-  if (busy) return;
-  $('system-title').textContent = `What runs on ${record.name}?`;
-  systemGrid($('system-grid'), record.system, name => { void run(async () => {
-    await request(`/api/connections/${record.id}/system`, 'POST', { system: name });
-    $('system-dialog').close(); await loadConnections();
-  }); });
-  $('system-dialog').showModal();
 }
 // An empty page shows what will live there: a small waiting terminal, or a key.
 function emptyState(title, text, picture = 'terminal', action) {
@@ -370,8 +255,6 @@ function emptyState(title, text, picture = 'terminal', action) {
   const body = document.createElement('p'); body.className = 'hint'; body.textContent = text;
   box.append(heading, body); if (action) box.append(action); return box;
 }
-const trustWords = { verified: 'Ready', changed: 'Identity changed', stopped: 'Server changed', unverified: 'Needs approval', unavailable: 'Unavailable' };
-const trustHelp = { changed: 'The administrator changed this server’s identity. Review it before connecting.', stopped: 'This server now shows a different certificate, so Keybash will not connect and sends it no password. Your administrator can see this and has to check it.', unverified: 'Review and accept this server’s identity before connecting.', unavailable: 'This server is not open to you right now: it was removed, you were taken off it, or its certificate has ended.' };
 // Who signs in where, as the prompt it opens to: a terminal's, or a desktop's.
 function serverScreen(who, where, protocol) {
   const screen = document.createElement('p'); screen.className = 'server-screen';
@@ -381,231 +264,81 @@ function serverScreen(who, where, protocol) {
   else screen.append(part('tail', ' ~ $ ', true), part('cursor', '▍', true));
   return screen;
 }
-// A server an administrator shares with this person (ADR 0009), as the page
-// gets it: the server, its account, and whether it opens. Nothing else, and
-// never its secret, so a row with any other field is refused.
-const sharedRowOK = x => typeof x === 'object' && x !== null && Object.keys(x).length === 5 && idOK(x.server) && typeof x.name === 'string' && x.name.length >= 1 && x.name.length <= 160 &&
-  ['ssh', 'rdp'].includes(x.protocol) && typeof x.username === 'string' && x.username.length >= 1 && x.username.length <= 128 && ['verified', 'stopped', 'unavailable'].includes(x.trust);
-const sharedHelp = { stopped: trustHelp.stopped, unavailable: 'This server does not open right now, for example because its certificate has ended. Your administrator can see this.' };
-// It opens with the server's own key or password, which this person never
-// sees: nothing to set up, review or delete here, as the administrator looks
-// after it.
-function sharedCard(row) {
-  const card = document.createElement('article'); card.className = 'server-card'; card.dataset.shared = row.server; card.dataset.trust = row.trust;
-  const head = document.createElement('div'); head.className = 'server-card-head';
-  const tile = document.createElement('span'); tile.className = 'server-icon'; tile.append(glyph(row.protocol === 'rdp' ? 'rdp' : 'ssh', 'server-glyph'));
-  const titles = document.createElement('div'); titles.className = 'server-titles';
-  const name = document.createElement('h3'); name.className = 'server-name'; name.textContent = row.name;
-  const kind = document.createElement('p'); kind.className = 'server-kind'; kind.textContent = `${row.protocol === 'rdp' ? 'Desktop (RDP)' : 'Terminal (SSH)'} · Set up by your administrator`;
-  titles.append(name, kind);
-  const state = document.createElement('span'); state.className = 'trust-state pill'; state.dataset.trust = row.trust; state.textContent = trustWords[row.trust];
-  head.append(tile, titles, state); card.append(head, serverScreen(row.username, row.name, row.protocol));
-  if (sharedHelp[row.trust]) { const help = document.createElement('p'); help.className = 'server-help'; help.textContent = sharedHelp[row.trust]; card.append(help); }
+const make = (tag, className, text) => { const element = document.createElement(tag); if (className) element.className = className; if (text !== undefined) element.textContent = text; return element; };
+const buttonIn = (parent, text, style, act) => { const b = make('button', style, text); b.type = 'button'; b.addEventListener('click', act); parent.append(b); return b; };
+// A link inside the workspace: it changes the page without leaving it.
+function pageLink(path, text, className) {
+  const link = make('a', className, text); link.href = path; link.dataset.page = '';
+  return link;
+}
+const kindWords = protocol => protocol === 'rdp' ? 'Desktop (RDP)' : 'Terminal (SSH)';
+const dayOf = seconds => new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+// An IPv6 address is written in brackets before its port.
+const hostPort = (host, port) => `${host.includes(':') ? `[${host}]` : host}:${port}`;
+
+// ── Your servers: one card per account the person is on ─────────────────
+// A row as the page gets it: the account, its server and whether it opens.
+// Nothing else, and never a secret, so a row with any other field is refused.
+const accessKeys = ['account', 'server', 'name', 'protocol', 'username', 'trust', 'unchecked', 'system'];
+const accessRowOK = x => typeof x === 'object' && x !== null && Object.keys(x).every(key => accessKeys.includes(key)) && idOK(x.account) && idOK(x.server) &&
+  typeof x.name === 'string' && x.name.length >= 1 && x.name.length <= 160 && ['ssh', 'rdp'].includes(x.protocol) && typeof x.username === 'string' && x.username.length >= 1 && x.username.length <= 128 &&
+  ['verified', 'stopped', 'unavailable'].includes(x.trust) && (x.unchecked === undefined || x.unchecked === true && x.protocol === 'rdp') && (x.system === undefined || Object.hasOwn(systems, x.system));
+const trustWords = { verified: 'Ready', stopped: 'Server changed', unavailable: 'Unavailable' };
+const trustHelp = {
+  stopped: 'This server now shows a different certificate, so Keybash will not connect and sends it no password. Your administrator can see this and has to check it.',
+  unavailable: 'This server does not open right now: it is outside the networks Keybash may reach, or its certificate has ended. Your administrator can see this.',
+};
+function accessCard(row) {
+  const card = make('article', 'server-card'); card.dataset.account = row.account; card.dataset.trust = row.trust;
+  const head = make('div', 'server-card-head'), titles = make('div', 'server-titles');
+  titles.append(make('h3', 'server-name', row.name), make('p', 'server-kind', [kindWords(row.protocol), systems[row.system]?.title].filter(Boolean).join(' · ')));
+  const state = make('span', 'trust-state pill', trustWords[row.trust]); state.dataset.trust = row.trust;
+  head.append(serverTile(row), titles, state); card.append(head, serverScreen(row.username, row.name, row.protocol));
+  const help = [trustHelp[row.trust], row.unchecked ? 'Not checked: your administrator added this desktop without comparing it on its own screen.' : ''].filter(Boolean).join(' ');
+  if (help) card.append(make('p', 'server-help', help));
   if (row.trust === 'verified') {
-    const actions = document.createElement('div'); actions.className = 'server-actions';
-    const link = document.createElement('a'); link.className = 'connect'; link.href = `/remote/shared/${row.protocol}/${row.server}`; link.target = '_blank'; link.rel = 'noopener';
+    const actions = make('div', 'server-actions');
+    // Each session opens in its own tab.
+    const link = make('a', 'connect'); link.href = `/remote/${row.protocol}/${row.account}`; link.target = '_blank'; link.rel = 'noopener';
     link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link); card.append(actions);
   }
   return card;
 }
-// A connection as a card: what it is, who it signs in as, whether it is
-// ready, and the one action that matters most.
-function serverCard(record, target) {
-  const card = document.createElement('article'); card.className = 'server-card'; card.dataset.connection = record.id; card.dataset.trust = record.trust;
-  const head = document.createElement('div'); head.className = 'server-card-head';
-  // The tile shows the system's mark once one is chosen, the protocol until
-  // then; it is also the way to choose.
-  const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'server-icon';
-  tile.title = record.system ? `${systems[record.system]?.title ?? 'System'} · change` : 'Choose the system';
-  tile.setAttribute('aria-label', tile.title);
-  if (systems[record.system]) { paintTile(tile, record.system); tile.append(systemMark(record.system)); }
-  else tile.append(glyph(target?.protocol === 'rdp' ? 'rdp' : 'ssh', 'server-glyph'));
-  tile.addEventListener('click', () => openSystemPicker(record));
-  const titles = document.createElement('div'); titles.className = 'server-titles';
-  const name = document.createElement('h3'); name.className = 'server-name'; name.textContent = record.name;
-  const kind = document.createElement('p'); kind.className = 'server-kind';
-  kind.textContent = [target ? (target.protocol === 'rdp' ? 'Desktop (RDP)' : 'Terminal (SSH)') : 'Removed server', systems[record.system]?.title].filter(Boolean).join(' · ');
-  titles.append(name, kind);
-  const state = document.createElement('span'); state.className = 'trust-state pill'; state.dataset.trust = record.trust; state.textContent = trustWords[record.trust];
-  head.append(tile, titles, state); card.append(head);
-  const login = owned.get(record.credential);
-  card.append(serverScreen(login ? login.username : 'removed key', target ? target.name : 'removed server', target?.protocol));
-  if (trustHelp[record.trust]) { const help = document.createElement('p'); help.className = 'server-help'; help.textContent = trustHelp[record.trust]; card.append(help); }
-  const actions = document.createElement('div'); actions.className = 'server-actions';
-  if (target && record.trust === 'verified') {
-    const link = document.createElement('a'); link.className = 'connect'; link.href = `/remote/${target.protocol}/${record.id}`; link.target = '_blank'; link.rel = 'noopener'; /* each session in its own tab */
-    link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
-  }
-  if (target && record.trust !== 'stopped') { const review = document.createElement('button'); review.type = 'button'; review.className = 'secondary'; review.textContent = 'Server identity'; review.addEventListener('click', () => { void run(() => openReview(record)); }); actions.append(review); }
-  const remove = document.createElement('button'); remove.textContent = 'Delete'; remove.type = 'button'; remove.className = 'ghost destructive'; remove.addEventListener('click', () => askConfirm('connection', record));
-  actions.append(remove); card.append(actions);
-  return card;
-}
-async function loadConnections() {
-  const previous = $('connection-target').value;
-  selectedTarget = null; ++targetGeneration; updateTrustButtons(); $('connections').replaceChildren();
-  const targets = await request('/api/targets'), connections = await request('/api/connections'), shared = await request('/api/shared');
-  if (!Array.isArray(targets) || targets.length > 256 || !Array.isArray(connections) || connections.length > 128) throw new Error('invalid connections');
-  if (!Array.isArray(shared) || shared.length > 256 || !shared.every(sharedRowOK) || new Set(shared.map(row => row.server)).size !== shared.length) throw new Error('invalid shared');
-  const approved = new Map(), options = document.createDocumentFragment(), rows = document.createDocumentFragment();
-  // Servers shared by an administrator come first: they need no setup.
-  for (const row of shared) rows.append(sharedCard(row));
-  for (const target of targets) {
-    if (!idOK(target.id) || approved.has(target.id) || typeof target.name !== 'string' || target.name.length > 160 || !['ssh', 'rdp'].includes(target.protocol)) throw new Error('invalid target');
-    approved.set(target.id, target); const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.protocol.toUpperCase()}`; options.append(option);
-  }
-  for (const record of connections) {
-    if (!idOK(record.id) || typeof record.name !== 'string' || record.name.length > 160 || !idOK(record.target) || !idOK(record.credential) || typeof record.revision !== 'string' || !/^[1-9][0-9]{0,9}$/.test(record.revision) || !['verified', 'changed', 'stopped', 'unverified', 'unavailable'].includes(record.trust) || record.fingerprint !== '' && !fingerprintOK(record.fingerprint) || record.trust === 'verified' && !fingerprintOK(record.fingerprint)) throw new Error('invalid connection');
-    rows.append(serverCard(record, approved.get(record.target)));
-  }
-  catalog = approved; ownConnections = connections; $('connection-target').replaceChildren(options); if (approved.has(previous)) $('connection-target').value = previous; $('connections').replaceChildren(rows);
-  // With no connection yet, the first steps say what to do, and which is done.
-  const hasRecords = $('connection-credential').options.length > 0;
-  // A shared server is already something to connect to.
-  $('first-steps').hidden = connections.length > 0 || shared.length > 0; $('first-step-key').dataset.done = String(hasRecords);
-  if (!connections.length && !shared.length) {
+async function loadAccess() {
+  const rows = await request('/api/access');
+  if (!Array.isArray(rows) || rows.length > 4096 || !rows.every(accessRowOK) || new Set(rows.map(row => row.account)).size !== rows.length) throw new Error('invalid access');
+  $('access').replaceChildren(...rows.map(accessCard));
+  if (!rows.length) {
     let start;
-    if (hasRecords) { start = document.createElement('button'); start.type = 'button'; start.textContent = 'Create your first connection'; start.addEventListener('click', () => $('new-connection').click()); }
-    $('connections').append(emptyState('No connections yet', hasRecords ? 'Create one to open a terminal on your server.' : 'Add a key or password first, then create a connection.', 'terminal', start));
+    if (role === 'admin') start = pageLink('/servers', 'Open Servers', 'button-link');
+    $('access').append(emptyState('No servers yet', role === 'admin' ? 'Put yourself on a server’s account, on the Servers page, to connect from here.' : 'Your administrator gives you servers to use. They appear here, ready to open.', 'terminal', start));
   }
-  await chooseTarget();
 }
-// One document, four pages: the path picks what a ready session sees. Without
-// an operator catalog there is nothing to connect to, so "/" shows the keys.
-const pages = {
-  connections: { path: '/', panel: 'connections-panel', title: 'Connections', lead: 'Your servers, one click from a terminal.' },
-  keys: { path: '/keys', panel: 'records-panel', title: 'Keys & passwords', lead: 'What you sign in to servers with, encrypted on this server.' },
-  account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, your phone authenticator and your recovery codes.' },
-  installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, and how to update it.' },
-  servers: { path: '/servers', panel: 'servers-panel', title: 'Servers', lead: 'Where people here connect, and who may use each server.' },
-  users: { path: '/users', panel: 'users-panel', title: 'Users', lead: 'Who signs in here, and what each person may do.' },
-};
-// Which pages each role sees, in rail order; the first is where a role lands.
-// The server refuses the rest whatever the page shows.
-const access = { user: ['connections', 'keys', 'account'], admin: ['connections', 'keys', 'servers', 'users', 'installation', 'account'], auditor: ['servers', 'account'] };
-const roleWords = { user: 'User', admin: 'Administrator', auditor: 'Auditor' };
-const stateWords = { active: 'Active', setup: 'Setting up phone', invited: 'Invited', expired: 'Code expired', blocked: 'Blocked' };
-const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
-// A one-time code from an administrator or the operator, as pasted: spaces
-// around it are dropped, and a code of the wrong shape is refused here, before
-// it costs an attempt. Only its field is cleared then, so the passwords typed
-// beside it need not be typed again.
-function pastedCode(id) {
-  const code = $(id).value.trim();
-  if (codeOK(code)) return code;
-  $(id).value = ''; throw Object.assign(new Error('code shape'), { status: 'code-shape' });
-}
-// The one-time code for an invite or a reset, shown once to give to the person.
-// With the steps that person takes: an invite is accepted with "I have an
-// invite"; after a reset they sign in as usual and the phone setup asks for
-// the code. Each step is text, with the words they click in bold.
-const codeSteps = {
-  invite: [['Give them the code apart from their username, for example by phone.'], ['On the Keybash sign-in page they choose ', 'I have an invite', ', enter both and choose their own password.'], ['Then they set up their phone. The code works once and expires in 72 hours.']],
-  reset: [['Give them the code by another channel, for example by phone.'], ['They sign in as usual with their own username and password, not with ', 'I have an invite', '.'], ['Keybash then asks for this code and shows a new QR code for their phone. The code works once and expires in 72 hours.']],
-  password: [['Give them the code by another channel, for example by phone.'], ['On the Keybash sign-in page they choose ', 'Forgot password?', ' and enter their username, this code and the current code from their phone.'], ['Then they choose a new password. The code works once and expires in 72 hours.']],
-};
-const codeDialogs = {
-  invite: { title: name => `Invite for ${name}`, lead: name => `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
-  newcode: { title: name => `New invite code for ${name}`, lead: name => `This code is shown only now and replaces the earlier one. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
-  reset: { title: name => `New phone code for ${name}`, lead: name => `This code is shown only now. ${name} signs in with their own password, then enters it to set up a new phone. The code alone opens nothing.`, steps: codeSteps.reset },
-  password: { title: name => `Password reset code for ${name}`, lead: name => `This code is shown only now. ${name} needs it with the current code on their phone to choose a new password: the code alone opens nothing.`, steps: codeSteps.password },
-  restart: { title: name => `New invite for ${name}`, lead: name => `${name}’s keys, passwords and connections were deleted. This code is shown only now; with it, ${name} chooses a new password and sets up a phone.`, steps: codeSteps.invite },
-};
-// What a person lost decides the reset: a phone keeps the password, a
-// password keeps the phone, and losing both starts the account over.
-const resetKinds = {
-  phone: { path: 'reset', word: 'Make phone code', dialog: 'reset', done: name => `${name}’s phone was reset.` },
-  password: { path: 'password', word: 'Make password code', dialog: 'password', done: name => `${name} has a password reset code.` },
-  restart: { path: 'restart', word: 'Start over', dialog: 'restart', done: name => `${name} starts over: their keys, passwords and connections were deleted.` },
-};
-function chooseReset() {
-  const kind = document.querySelector('input[name=reset-kind]:checked')?.value;
-  if (!Object.hasOwn(resetKinds, kind)) return;
-  $('reset-submit').textContent = resetKinds[kind].word; $('reset-submit').classList.toggle('danger', kind === 'restart');
-}
-function openReset(person) {
-  if (busy) return;
-  pendingPerson = person; $('reset-title').textContent = `Reset access for ${person.username}`; dialogNotice('');
-  document.querySelectorAll('input[name=reset-kind]').forEach(input => { input.checked = input.value === 'phone'; });
-  chooseReset(); $('reset-dialog').showModal();
-}
-function showCode(code, name, kind) {
-  if (!codeOK(code) || !Object.hasOwn(codeDialogs, kind)) throw new Error('invalid code');
-  const dialog = codeDialogs[kind];
-  $('code-title').textContent = dialog.title(name); $('code-lead').textContent = dialog.lead(name);
-  $('code-steps').replaceChildren(...dialog.steps.map(parts => {
-    const step = document.createElement('li');
-    parts.forEach((part, i) => { if (i % 2) { const strong = document.createElement('strong'); strong.textContent = part; step.append(strong); } else step.append(part); });
-    return step;
-  }));
-  $('person-code').textContent = code; $('code-dialog').showModal();
-}
-function openRole(person) {
-  if (busy) return;
-  pendingPerson = person; $('role-title').textContent = `Change role for ${person.username}`; dialogNotice('');
-  document.querySelectorAll('input[name=person-role]').forEach(input => { input.checked = input.value === person.role; });
-  $('role-dialog').showModal();
-}
-// A person as a row: who, which role, in what state, and what can be done.
-// Nothing about their password, phone or keys is ever part of it.
-function personRow(person, self) {
-  const row = document.createElement('article'); row.className = 'record person'; row.dataset.person = person.id;
-  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.setAttribute('aria-hidden', 'true'); tile.textContent = person.username[0];
-  const titles = document.createElement('div'); titles.className = 'record-titles';
-  const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = person.username;
-  const meta = document.createElement('p'); meta.className = 'record-meta'; meta.textContent = roleWords[person.role];
-  titles.append(name, meta);
-  if (self) { const badge = document.createElement('span'); badge.className = 'record-badge'; badge.textContent = 'You'; titles.append(badge); }
-  const state = document.createElement('span'); state.className = 'pill person-state'; state.dataset.state = person.state; state.textContent = stateWords[person.state];
-  const actions = document.createElement('div'); actions.className = 'record-actions';
-  row.append(tile, titles, state, actions);
-  if (self) return row; // your own password and phone are on Account
-  const button = (text, style, act) => { const b = document.createElement('button'); b.type = 'button'; b.className = style; b.textContent = text; b.addEventListener('click', act); actions.append(b); };
-  const record = { id: person.id, name: person.username };
-  button('Change role', 'secondary', () => openRole(person));
-  if (person.state === 'blocked') button('Unblock', 'ghost', () => { void run(async () => { await request(`/api/users/${person.id}/unblock`, 'POST', {}); await loadUsers(); notice(`${person.username} can sign in again.`); }); });
-  else button('Block', 'ghost', () => askConfirm('block', record));
-  const invited = ['invited', 'expired'].includes(person.state);
-  if (invited) button('New code', 'ghost', () => askConfirm('newcode', record));
-  else button('Reset access…', 'ghost', () => openReset(person));
-  button('Delete', 'ghost destructive', () => askConfirm('person', record));
-  return row;
-}
-// Everyone on this installation, as the Users page lists them.
-async function loadPeople() {
-  const data = await request('/api/users');
-  if (!idOK(data?.self) || !Array.isArray(data.accounts) || data.accounts.length > 256) throw new Error('invalid users');
-  for (const person of data.accounts) {
-    if (!idOK(person.id) || typeof person.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(person.username) || !Object.hasOwn(roleWords, person.role) || !Object.hasOwn(stateWords, person.state)) throw new Error('invalid person');
-  }
-  return data;
-}
-async function loadUsers() {
-  const data = await loadPeople(), rows = document.createDocumentFragment();
-  for (const person of data.accounts) rows.append(personRow(person, person.id === data.self));
-  $('people').replaceChildren(rows);
-}
-// The Servers page: each server, where it is, its pinned identity, and who
-// may use it. Administrators change it; auditors read it.
+
+// ── Servers, their accounts and the people on each ───────────────────────
+// The Servers page and each server's own page read the same list.
+// Administrators change it; auditors read it.
 const sshPrintOK = value => typeof value === 'string' && /^SHA256:[A-Za-z0-9+/]{43}$/.test(value);
+const fingerprintOK = value => typeof value === 'string' && (sshPrintOK(value) || /^SHA256:[a-f0-9]{64}$/.test(value));
+// A key's line for the account's authorized_keys, as Keybash writes it.
+const lineOK = value => typeof value === 'string' && value.length < 240 && /^restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash$/.test(value);
+const accountOK = (a, protocol) => typeof a === 'object' && a !== null && idOK(a.id) && typeof a.username === 'string' && a.username.length >= 1 && a.username.length <= 128 &&
+  Array.isArray(a.people) && a.people.length <= 256 && a.people.every(idOK) && idOK(a.set_by) && Number.isInteger(a.set) &&
+  (a.kind === 'ssh-key' ? protocol === 'ssh' && lineOK(a.line) && sshPrintOK(a.fingerprint) && (a.used === undefined || a.used === true) &&
+    (a.next === undefined ? a.next_fingerprint === undefined : lineOK(a.next) && sshPrintOK(a.next_fingerprint) && a.next_fingerprint !== a.fingerprint)
+    : a.kind === 'password' && [a.line, a.fingerprint, a.used, a.next, a.next_fingerprint].every(value => value === undefined));
 const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length <= 160 && ['ssh', 'rdp'].includes(s.protocol) && typeof s.hostname === 'string' && /^[a-z0-9.:-]{1,253}$/.test(s.hostname) &&
   Number.isInteger(s.port) && s.port >= 1 && s.port <= 65535 && Array.isArray(s.addresses) && s.addresses.length >= 1 && s.addresses.length <= 16 && s.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) &&
   fingerprintOK(s.fingerprint) && (s.protocol === 'rdp' || sshPrintOK(s.fingerprint)) && typeof s.available === 'boolean' &&
   (s.certificate === undefined || ['current', 'soon', 'expired', 'changed'].includes(s.certificate)) && (s.expires === undefined || Number.isInteger(s.expires)) &&
-  (s.unchecked === undefined || s.unchecked === true && s.protocol === 'rdp') &&
-  Array.isArray(s.access) && s.access.length <= 256 && s.access.every(idOK) && (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added) && sharedOK(s.shared, s.protocol);
-// A server's shared credential (ADR 0009) as the page gets it: its kind, the
-// account, a key's line for the server and who set it. Never its secret.
-const sharedLineOK = value => typeof value === 'string' && value.length < 240 && /^restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash-shared$/.test(value);
-const sharedOK = (x, protocol) => x === undefined || typeof x === 'object' && x !== null && typeof x.username === 'string' && x.username.length >= 1 && x.username.length <= 128 &&
-  idOK(x.set_by) && Number.isInteger(x.set) && (x.kind === 'ssh-key' ? protocol === 'ssh' && sharedLineOK(x.line) && sshPrintOK(x.fingerprint) && (x.used === undefined || x.used === true) &&
-    (x.next === undefined ? x.next_fingerprint === undefined : sharedLineOK(x.next) && sshPrintOK(x.next_fingerprint) && x.next_fingerprint !== x.fingerprint)
-    : x.kind === 'password' && [x.line, x.fingerprint, x.used, x.next, x.next_fingerprint].every(value => value === undefined));
-// What an administrator runs once on the server, as the account people sign in as.
-const sharedCommand = line => `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
+  (s.unchecked === undefined || s.unchecked === true && s.protocol === 'rdp') && (s.system === undefined || Object.hasOwn(systems, s.system)) &&
+  Array.isArray(s.accounts) && s.accounts.length <= 16 && s.accounts.every(a => accountOK(a, s.protocol)) && new Set(s.accounts.map(a => a.id)).size === s.accounts.length &&
+  (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added);
 const serversOK = data => Array.isArray(data?.networks) && data.networks.length <= 64 && data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) && typeof data.adding === 'boolean' && typeof data.ssh === 'boolean' && typeof data.rdp === 'boolean' &&
   Array.isArray(data.servers) && data.servers.length <= 256 && data.servers.every(serverOK) && typeof data.names === 'object' && data.names !== null &&
   Object.entries(data.names).every(([id, name]) => idOK(id) && typeof name === 'string' && /^[a-z0-9._-]{1,64}$/.test(name));
+// What an administrator runs once on the server, as the account people sign in as.
+const keyCommand = line => `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
 // The command an administrator runs on a Windows server: the fingerprint of the
 // certificate Remote Desktop uses now. Fixed text, the same for every server.
 const windowsCommand = `$t = (Get-CimInstance -Namespace root/cimv2/TerminalServices -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-Tcp'").SSLCertificateSHA1Hash; $c = Get-ChildItem Cert:\\LocalMachine -Recurse | Where-Object Thumbprint -eq $t | Select-Object -First 1; 'SHA256:' + -join ([Security.Cryptography.SHA256]::Create().ComputeHash($c.RawData) | ForEach-Object { $_.ToString('x2') })`;
@@ -618,7 +351,6 @@ function pastedPrint(id) {
   if (/^SHA256:[A-Fa-f0-9]{64}$/.test(value)) return `SHA256:${value.slice(7).toLowerCase()}`;
   throw Object.assign(new Error('print shape'), { status: 'print-shape' });
 }
-const dayOf = seconds => new Date(seconds * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 const needsChecking = server => server.certificate === 'changed' || server.certificate === 'expired';
 // An administrator is told on every page: a mark on the rail and a line above
 // the page. There is no mail yet, so this is seen at the next sign-in.
@@ -630,50 +362,53 @@ function paintAttention(servers) {
   $('rail-attention').textContent = String(count); $('rail-attention').setAttribute('aria-label', `${count} ${count === 1 ? 'server needs' : 'servers need'} checking`);
   $('attention-text').textContent = count > 1 ? `${count} servers need checking. Nobody can connect to them until you do.` :
     `${needing[0].name} ${needing[0].certificate === 'changed' ? 'shows a different certificate' : 'has a certificate that ended'}. Nobody can connect to it until you check it.`;
-  $('attention-open').hidden = location.pathname === '/servers';
+  $('attention-open').hidden = location.pathname.startsWith('/servers');
 }
 // On the other pages the same check runs behind the page; failing it changes nothing there.
 async function checkAttention() {
   try { const data = await request('/api/servers'); if (serversOK(data)) paintAttention(data.servers); } catch { /* the Servers page itself reports this */ }
 }
-let people = new Map(), names = new Map(), serverKinds = { ssh: true, rdp: false }, serverProtocol = 'ssh';
-async function loadServers() {
+let people = new Map(), names = new Map(), serverKinds = { ssh: true, rdp: false }, serverProtocol = 'ssh', serverList = [], networks = [], adding = false;
+const nameOf = id => id === self ? `${names.get(id) ?? 'you'} (you)` : names.get(id) ?? 'someone since deleted';
+// Everyone on this installation, as the People page lists them. Only an
+// administrator reads it.
+const roleWords = { user: 'User', admin: 'Administrator', auditor: 'Auditor' };
+const stateWords = { active: 'Active', setup: 'Setting up phone', invited: 'Invited', expired: 'Code expired', blocked: 'Blocked' };
+async function loadPeople() {
+  const data = await request('/api/users');
+  if (!idOK(data?.self) || !Array.isArray(data.accounts) || data.accounts.length > 256) throw new Error('invalid users');
+  for (const person of data.accounts) {
+    if (!idOK(person.id) || typeof person.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(person.username) || !Object.hasOwn(roleWords, person.role) || !Object.hasOwn(stateWords, person.state)) throw new Error('invalid person');
+  }
+  people = new Map(data.accounts.map(person => [person.id, person]));
+  for (const person of data.accounts) names.set(person.id, person.username);
+  return data;
+}
+async function loadServerList() {
   const data = await request('/api/servers');
   if (!serversOK(data)) throw new Error('invalid servers');
   names = new Map(Object.entries(data.names));
-  serverKinds = { ssh: data.ssh, rdp: data.rdp };
+  serverKinds = { ssh: data.ssh, rdp: data.rdp }; networks = data.networks; adding = data.adding; serverList = data.servers;
   // Only an administrator chooses people, so only they need the full list.
-  people = role === 'admin' ? new Map((await loadPeople()).accounts.map(person => [person.id, person])) : new Map();
+  if (role === 'admin') await loadPeople();
   paintAttention(data.servers);
-  $('add-server').hidden = !data.adding;
-  const code = text => { const element = document.createElement('code'); element.textContent = text; return element; };
-  const option = code('upgrade.sh --target-networks=…');
-  if (data.networks.length) $('server-networks').replaceChildren('Servers can be added inside ', ...data.networks.flatMap((n, i) => i ? [', ', code(n)] : [code(n)]), '. To allow other networks, run ', option, ' on the Keybash server.');
-  else $('server-networks').replaceChildren('This installation names no networks for servers, so none can be added here. On the Keybash server, run ', option, ' (see Installation).');
-  $('server-networks').hidden = role !== 'admin';
-  const rows = document.createDocumentFragment();
-  for (const server of data.servers) rows.append(serverRow(server));
-  $('servers').replaceChildren(rows);
-  if (!data.servers.length) $('servers').append(emptyState('No servers yet', role === 'admin' ? 'Add one, then choose who may use it.' : 'An administrator adds servers here.', 'terminal'));
   return data.servers;
 }
-function serverRow(server) {
-  const row = document.createElement('article'); row.className = 'record server-row'; row.dataset.server = server.id;
-  const tile = document.createElement('span'); tile.className = 'record-icon'; tile.append(glyph(server.protocol, 'server-glyph'));
-  const titles = document.createElement('div'); titles.className = 'record-titles';
-  const name = document.createElement('h3'); name.className = 'record-name'; name.textContent = server.name;
-  const where = server.addresses.length === 1 && server.addresses[0] === server.hostname ? '' : ` (${server.addresses.join(', ')})`;
-  const meta = document.createElement('p'); meta.className = 'record-meta'; meta.textContent = `${server.protocol.toUpperCase()} · ${hostPort(server.hostname, server.port)}${where}`;
-  titles.append(name, meta);
-  const print = document.createElement('p'); print.className = 'record-print';
-  const code = document.createElement('code'); code.className = 'fingerprint'; code.textContent = server.fingerprint; code.title = 'Identity (fingerprint)'; print.append(code);
-  const who = document.createElement('p'); who.className = 'server-access server-who';
-  const listed = server.access.map(id => names.get(id)).filter(Boolean).sort();
-  who.textContent = listed.length ? `Can use it: ${listed.join(', ')}` : 'Nobody can use it yet.';
-  titles.append(print, who);
-  // Who may connect, then how they sign in: two questions, one line each.
-  const signIn = document.createElement('p'); signIn.className = 'server-access server-sign-in'; signIn.textContent = signInWords(server.shared); titles.append(signIn);
-  if (server.certificate === 'current') { const until = document.createElement('p'); until.className = 'server-access'; until.textContent = `Certificate until ${dayOf(server.expires)}`; titles.append(until); }
+const serverById = id => serverList.find(server => server.id === id);
+// The people who may be put on an account: everyone but auditors, you first.
+const eligible = () => [...people.values()].filter(person => person.role !== 'auditor').sort((a, b) => (b.id === self) - (a.id === self) || a.username.localeCompare(b.username));
+function accountsLine(server) {
+  if (!server.accounts.length) return 'No accounts yet: nobody can connect.';
+  const who = new Set(server.accounts.flatMap(a => a.people));
+  const list = server.accounts.map(a => a.username).join(', ');
+  return `${server.accounts.length === 1 ? 'Account' : `${server.accounts.length} accounts`}: ${list} · ${who.size ? `${who.size} ${who.size === 1 ? 'person signs in' : 'people sign in'}` : 'nobody on them yet'}`;
+}
+function stateOf(server) {
+  const name = needsChecking(server) ? server.certificate : !server.available ? 'unreachable' : server.unchecked ? 'unchecked' : server.certificate === 'soon' ? 'soon' : 'ready';
+  const pill = make('span', 'pill server-state', { changed: 'Identity changed', expired: 'Certificate ended', unreachable: 'Not reachable', unchecked: 'Not checked', soon: 'Ending soon', ready: 'Ready' }[name]); pill.dataset.state = name;
+  return pill;
+}
+function serverNote(server) {
   const whoChecks = role === 'admin' ? 'you check it' : 'an administrator checks it';
   const said = {
     changed: `It shows a different certificate, usually because Windows renewed its own. Nobody can connect until ${whoChecks}.`,
@@ -681,26 +416,266 @@ function serverRow(server) {
     soon: `Its certificate ends on ${dayOf(server.expires ?? 0)}. Windows renews it by itself; Keybash then asks ${role === 'admin' ? 'you' : 'an administrator'} to check the new one.`,
   }[server.certificate] ?? (server.available ? '' : 'Nobody can connect to it now: it is outside the networks this Keybash may reach, or its identity cannot be used.');
   const unchecked = server.unchecked && !needsChecking(server) ? `Added without comparing it on the server’s own screen, so Keybash cannot be sure it is your server. ${role === 'admin' ? 'Check it now to be sure.' : 'An administrator can check it.'}` : '';
-  const stateName = needsChecking(server) ? server.certificate : !server.available ? 'unreachable' : server.unchecked ? 'unchecked' : server.certificate === 'soon' ? 'soon' : 'ready';
-  const state = document.createElement('span'); state.className = 'pill server-state'; state.dataset.state = stateName;
-  state.textContent = { changed: 'Identity changed', expired: 'Certificate ended', unreachable: 'Not reachable', unchecked: 'Not checked', soon: 'Ending soon', ready: 'Ready' }[stateName];
-  const actions = document.createElement('div'); actions.className = 'record-actions';
-  row.append(tile, titles, state, actions);
-  const note = [said, unchecked].filter(Boolean).join(' ');
-  if (note) { const help = document.createElement('p'); help.className = 'server-help server-note'; help.textContent = note; row.append(help); }
-  if (role !== 'admin') return row;
-  const button = (text, style, act) => { const b = document.createElement('button'); b.type = 'button'; b.className = style; b.textContent = text; b.addEventListener('click', act); actions.append(b); };
-  const check = () => { void run(() => openIdentity(server)); };
+  return [said, unchecked].filter(Boolean).join(' ');
+}
+// The Servers page: one row per server, with what matters at a glance.
+function serverRow(server) {
+  const row = make('article', 'record server-row'); row.dataset.server = server.id;
+  const titles = make('div', 'record-titles'), name = make('h3', 'record-name');
+  name.append(pageLink(`/servers/${server.id}`, server.name, 'record-link'));
+  const where = server.addresses.length === 1 && server.addresses[0] === server.hostname ? '' : ` (${server.addresses.join(', ')})`;
+  titles.append(name, make('p', 'record-meta', `${kindWords(server.protocol)} · ${hostPort(server.hostname, server.port)}${where}`));
+  const accounts = make('p', 'server-access server-accounts', accountsLine(server)); accounts.dataset.empty = String(!server.accounts.length); titles.append(accounts);
+  const actions = make('div', 'record-actions');
+  row.append(serverTile(server), titles, stateOf(server), actions);
+  const note = serverNote(server);
+  if (note) row.append(make('p', 'server-help server-note', note));
   // What needs doing comes first, and looks like it.
-  if (needsChecking(server)) button('Check identity', '', check);
-  else if (server.available && server.unchecked) button('Check now', '', check);
-  button('Who can use it', 'secondary', () => openAccess(server));
-  button('How they sign in', 'ghost', () => openShared(server));
-  button('Rename', 'ghost', () => openRename(server));
-  if (server.available && !needsChecking(server) && !server.unchecked) button('Check identity', 'ghost', check);
-  button('Remove', 'ghost destructive', () => askConfirm('server', server));
+  if (role === 'admin' && needsChecking(server)) buttonIn(actions, 'Check identity', '', () => { void run(() => openIdentity(server)); });
+  actions.append(pageLink(`/servers/${server.id}`, role === 'admin' ? 'Open' : 'View', 'button-link secondary'));
   return row;
 }
+async function loadServers() {
+  const servers = await loadServerList();
+  $('add-server').hidden = !adding;
+  const code = text => make('code', '', text);
+  const option = code('upgrade.sh --target-networks=…');
+  if (networks.length) $('server-networks').replaceChildren('Servers can be added inside ', ...networks.flatMap((n, i) => i ? [', ', code(n)] : [code(n)]), '. To allow other networks, run ', option, ' on the Keybash server.');
+  else $('server-networks').replaceChildren('This installation names no networks for servers, so none can be added here. On the Keybash server, run ', option, ' (see Installation).');
+  $('server-networks').hidden = role !== 'admin';
+  $('servers').replaceChildren(...servers.map(serverRow));
+  if (!servers.length) $('servers').append(emptyState('No servers yet', role === 'admin' ? 'Add one, then the account people sign in as.' : 'An administrator adds servers here.', 'terminal'));
+  return servers;
+}
+
+// ── One server's own page ────────────────────────────────────────────────
+let shownServer = null;
+function serverHead(server) {
+  const card = make('article', 'record server-row server-detail'); card.dataset.server = server.id;
+  const titles = make('div', 'record-titles');
+  const where = server.addresses.length === 1 && server.addresses[0] === server.hostname ? '' : ` (${server.addresses.join(', ')})`;
+  titles.append(make('h2', 'record-name', 'Identity'), make('p', 'record-meta', `${kindWords(server.protocol)} · ${hostPort(server.hostname, server.port)}${where}`));
+  const print = make('p', 'record-print'), code = make('code', 'fingerprint', server.fingerprint); code.title = 'Identity (fingerprint)'; print.append(code); titles.append(print);
+  if (server.certificate === 'current') titles.append(make('p', 'server-access', `Certificate until ${dayOf(server.expires)}`));
+  titles.append(make('p', 'server-access', server.added_by ? `Added by ${nameOf(server.added_by)} on ${dayOf(server.added)}` : `From the server file, ${dayOf(server.added)}`));
+  const actions = make('div', 'record-actions');
+  const tile = serverTile(server, role === 'admin' ? 'button' : 'span');
+  if (role === 'admin') { tile.type = 'button'; tile.title = systems[server.system] ? `${systems[server.system].title} · change` : 'Choose what runs on it'; tile.setAttribute('aria-label', tile.title); tile.addEventListener('click', () => openSystemPicker(server)); }
+  card.append(tile, titles, stateOf(server), actions);
+  const note = serverNote(server);
+  if (note) card.append(make('p', 'server-help server-note', note));
+  if (role !== 'admin') return card;
+  const check = () => { void run(() => openIdentity(server)); };
+  if (needsChecking(server)) buttonIn(actions, 'Check identity', '', check);
+  else if (server.available && server.unchecked) buttonIn(actions, 'Check now', '', check);
+  buttonIn(actions, 'Rename', 'ghost', () => openRename(server));
+  if (server.available && !needsChecking(server) && !server.unchecked) buttonIn(actions, 'Check identity', 'ghost', check);
+  buttonIn(actions, 'Remove', 'ghost destructive', () => askConfirm('server', { id: server.id, name: server.name }));
+  return card;
+}
+// One account: its name on the server, how Keybash signs in as it, and the
+// people who may.
+function accountCard(server, account) {
+  const card = make('article', 'server-account'); card.dataset.account = account.id; card.dataset.kind = account.kind;
+  const head = make('div', 'server-account-head');
+  const tile = make('span', 'record-icon'); tile.append(glyph(account.kind === 'password' ? 'password' : account.used ? 'ssh-key' : 'made', 'server-glyph'));
+  const titles = make('div', 'record-titles');
+  titles.append(make('h3', 'record-name server-account-name', account.username));
+  const how = account.kind === 'password' ? 'Password kept by Keybash' : `Key made by Keybash · ${account.used ? 'on the server' : 'not on the server yet'}${account.next ? ' · a new key is waiting' : ''}`;
+  const kind = make('p', 'record-meta server-account-how', how); kind.dataset.waiting = String(account.kind === 'ssh-key' && !account.used); titles.append(kind);
+  head.append(tile, titles); card.append(head);
+  const who = make('div', 'people-chips'); who.append(make('span', 'chips-label', 'Signs in with it'));
+  if (!account.people.length) who.append(make('span', 'chips-none', 'Nobody yet'));
+  for (const id of [...account.people].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))) {
+    const chip = make('span', 'person-chip'); chip.dataset.person = id;
+    chip.append(make('span', 'chip-avatar', (names.get(id) ?? '?')[0]), make('span', 'chip-name', nameOf(id)));
+    who.append(chip);
+  }
+  card.append(who, make('p', 'server-account-set', `Set by ${nameOf(account.set_by)} on ${dayOf(account.set)}`));
+  const actions = make('div', 'server-account-actions');
+  if (role === 'admin') buttonIn(actions, account.people.length ? 'Change who' : 'Choose who', 'secondary', () => openPeople(server, account));
+  if (account.kind === 'ssh-key') buttonIn(actions, account.used || role !== 'admin' ? 'Key line' : 'Put the key on the server', account.used || role !== 'admin' ? 'ghost' : '', () => showKey(server, account));
+  else if (role === 'admin') buttonIn(actions, 'Change password', 'ghost', () => openSecret(server, account));
+  if (role === 'admin') buttonIn(actions, 'Remove', 'ghost destructive', () => askConfirm('account', { id: account.id, name: `${account.username} on ${server.name}`, server: server.id }));
+  if (actions.childElementCount) card.append(actions);
+  return card;
+}
+function paintServer(server) {
+  shownServer = server ?? null;
+  $('accounts').replaceChildren(); $('server-card').replaceChildren();
+  $('add-account').hidden = !server || role !== 'admin';
+  if (!server) {
+    $('heading').textContent = 'Server not found'; $('lead').textContent = 'It was removed, or the address is wrong.';
+    return;
+  }
+  $('heading').textContent = server.name; document.title = `Keybash · ${server.name}`; $('topbar-page').textContent = server.name;
+  $('lead').textContent = `${kindWords(server.protocol)}${systems[server.system] ? ` · ${systems[server.system].title}` : ''}`;
+  $('server-card').append(serverHead(server));
+  $('accounts').append(...server.accounts.map(account => accountCard(server, account)));
+  if (!server.accounts.length) {
+    let start;
+    if (role === 'admin') { start = make('button', '', 'Add the first account'); start.type = 'button'; start.addEventListener('click', () => openAccountForm(server)); }
+    $('accounts').append(emptyState('No accounts yet', role === 'admin' ? 'Add the account people sign in to this server as, and who may use it. Until then nobody can connect.' : 'Nobody can connect until an administrator adds an account.', 'key', start));
+  }
+}
+async function loadServerPage(id) {
+  await loadServerList();
+  paintServer(serverById(id));
+}
+// After a change the page shows the server as it is now, and an open sheet
+// follows it.
+async function refreshServer(id) {
+  await loadServerList();
+  const server = serverById(id);
+  if (route.name === 'server' && route.id === id) paintServer(server);
+  else if (route.name === 'servers') await loadServers();
+  else if (route.name === 'person') paintPerson(people.get(route.id));
+  return server;
+}
+
+// ── Adding an account ────────────────────────────────────────────────────
+let accountServer = null, accountKind = 'ssh-key';
+function chooseAccountKind(kind) {
+  accountKind = kind;
+  document.querySelectorAll('#account-kind .segment').forEach(segment => segment.setAttribute('aria-pressed', String(segment.dataset.kind === kind)));
+  $('account-secret-field').hidden = kind !== 'password'; $('account-secret').required = kind === 'password'; $('account-secret').value = '';
+  $('account-kind-hint').textContent = kind === 'ssh-key' ? 'Keybash makes a new key and keeps it; you put its line on the server once. Nobody ever sees the key, so nobody can take it along.' :
+    `${accountServer?.protocol === 'rdp' ? 'A desktop signs in with a password. ' : ''}Typed once here and never shown again. Anyone who already knows it can still sign in without Keybash: when one of them leaves, change it on the server, then here.`;
+  $('account-submit').textContent = kind === 'ssh-key' ? 'Make the key' : 'Save the password';
+}
+document.querySelectorAll('#account-kind .segment').forEach(segment => segment.addEventListener('click', () => { if (!busy) chooseAccountKind(segment.dataset.kind); }));
+// People as ticks: everyone who may be put on an account, you first.
+function peopleChoices(container, legend, chosen) {
+  const choices = eligible().map(person => {
+    const label = make('label', 'role-option'), input = make('input'); input.type = 'checkbox'; input.value = person.id; input.checked = chosen.has(person.id);
+    const text = make('span', 'role-text'); text.append(make('strong', '', person.id === self ? `${person.username} (you)` : person.username), make('span', '', roleWords[person.role]));
+    label.append(input, text); return label;
+  });
+  container.replaceChildren(make('legend', '', legend), ...choices);
+}
+function openAccountForm(server, afterAdding = false) {
+  if (busy || role !== 'admin') return;
+  accountServer = server; dialogNotice(''); $('account-form').reset();
+  $('account-title').textContent = `Add an account on ${server.name}`;
+  $('account-lead').textContent = afterAdding ? `${server.name} was added. Now the account people sign in as: until it has one, nobody can connect.` :
+    'Each account is one way in. People ticked here sign in as it, and never see its key or password.';
+  $('account-user-hint').textContent = `The name you type to sign in on ${server.name}, for example ${server.protocol === 'rdp' ? 'Administrator' : 'root or deploy'}. It must already exist there.`;
+  $('account-kind').hidden = server.protocol !== 'ssh';
+  // Someone alone here is ticked already: there is nobody else to choose.
+  const others = eligible();
+  peopleChoices($('account-people'), 'Who signs in with it', new Set(others.length === 1 ? [others[0].id] : []));
+  chooseAccountKind(server.protocol === 'ssh' ? 'ssh-key' : 'password');
+  $('account-dialog').showModal(); $('account-user').focus();
+}
+$('add-account')?.addEventListener('click', () => { if (shownServer) openAccountForm(shownServer); });
+$('account-cancel')?.addEventListener('click', () => $('account-dialog').close());
+$('account-dialog')?.addEventListener('close', () => { accountServer = null; $('account-secret').value = ''; });
+bind('account-form', async () => {
+  const server = accountServer, kind = accountKind;
+  if (!server) return;
+  const username = $('account-user').value.trim(), secret = kind === 'password' ? $('account-secret').value : '';
+  const chosen = [...document.querySelectorAll('#account-people input:checked')].map(input => input.value).filter(idOK);
+  $('account-secret').value = '';
+  let made;
+  try { made = await request(`/api/servers/${server.id}/accounts`, 'POST', { kind, username, secret, people: chosen.join(',') }); }
+  catch (error) { throw error.status === 409 ? Object.assign(new Error('taken'), { status: 'account-taken' }) : error.status === 403 ? Object.assign(new Error('full'), { status: 'account-full' }) : error; }
+  if (!idOK(made?.id)) throw new Error('invalid account');
+  $('account-dialog').close();
+  const now = await refreshServer(server.id), account = now?.accounts.find(a => a.id === made.id);
+  if (account?.kind === 'ssh-key') { showKey(now, account, true); return; }
+  notice(chosen.length ? `${username} on ${server.name} is ready: the people you ticked can connect now.` : `${username} on ${server.name} is saved. Choose who signs in with it.`);
+});
+
+// ── A key's line, and replacing the key ──────────────────────────────────
+let keyAccount = null;
+function showKey(server, account, fresh = false) {
+  keyAccount = { server: server.id, account: account.id }; dialogNotice('');
+  const admin = role === 'admin';
+  $('key-title').textContent = fresh ? 'Now put the key on the server' : `The key for ${account.username}`;
+  $('key-lead').textContent = account.used ? `In use: it has opened a session on ${server.name}. To put it on the account again, run this there, as ${account.username}:` :
+    `Not on the server yet. Run this once on ${server.name}, as ${account.username}. Until then nobody can sign in with it.`;
+  $('key-command-head').textContent = `Shell on ${server.name}, as ${account.username}`; $('key-command').textContent = keyCommand(account.line);
+  $('key-next').hidden = !account.next; $('key-new').hidden = !admin || Boolean(account.next);
+  for (const id of ['key-keep', 'key-switch']) $(id).hidden = !admin;
+  if (account.next) {
+    $('key-next-lead').textContent = 'A new key is waiting. Run this on the server too, then use it: the current key keeps working until you do.';
+    $('key-next-head').textContent = `Shell on ${server.name}, as ${account.username}`; $('key-next-command').textContent = keyCommand(account.next);
+  } else $('key-next-command').textContent = '';
+  if (!$('key-dialog').open) $('key-dialog').showModal();
+  $('key-close').focus();
+}
+async function keyChange(path, method, body, said) {
+  const at = keyAccount;
+  if (!at) return;
+  await request(`/api/servers/${at.server}/accounts/${at.account}/${path}`, method, body);
+  const server = await refreshServer(at.server), account = server?.accounts.find(a => a.id === at.account);
+  if (account && $('key-dialog').open) showKey(server, account);
+  notice(said);
+}
+click('key-new', () => keyChange('next', 'POST', {}, 'A new key is waiting. Put its line on the server, then use it.'));
+// The switch names the key this sheet showed, so a key made again elsewhere
+// meanwhile is never switched to unseen.
+click('key-switch', async () => {
+  const at = keyAccount, account = serverById(at?.server)?.accounts.find(a => a.id === at.account);
+  if (!sshPrintOK(account?.next_fingerprint)) return;
+  await keyChange('switch', 'POST', { fingerprint: account.next_fingerprint }, 'The new key is in use. The old key is destroyed: its line can come off the server.');
+});
+click('key-keep', () => keyChange('next', 'DELETE', {}, 'The new key was destroyed. The current one stays.'));
+$('key-close')?.addEventListener('click', () => $('key-dialog').close());
+$('key-dialog')?.addEventListener('close', () => { keyAccount = null; });
+
+// ── A password changed on the server, then here ──────────────────────────
+let secretAccount = null;
+function openSecret(server, account) {
+  if (busy) return;
+  secretAccount = { server: server.id, account: account.id, name: `${account.username} on ${server.name}` }; dialogNotice('');
+  $('secret-title').textContent = `New password for ${account.username}`; $('secret-new').value = '';
+  $('secret-dialog').showModal(); $('secret-new').focus();
+}
+$('secret-cancel')?.addEventListener('click', () => $('secret-dialog').close());
+$('secret-dialog')?.addEventListener('close', () => { secretAccount = null; $('secret-new').value = ''; });
+bind('secret-form', async () => {
+  const at = secretAccount, secret = $('secret-new').value;
+  $('secret-new').value = '';
+  if (!at) return;
+  await request(`/api/servers/${at.server}/accounts/${at.account}/password`, 'POST', { secret });
+  $('secret-dialog').close(); await refreshServer(at.server); notice(`Keybash uses the new password for ${at.name} from the next session on.`);
+});
+
+// ── Who signs in with an account ─────────────────────────────────────────
+let peopleAccount = null;
+function openPeople(server, account) {
+  if (busy) return;
+  peopleAccount = { server: server.id, account: account.id, had: [...account.people], name: `${account.username} on ${server.name}` }; dialogNotice('');
+  $('people-title').textContent = `Who signs in as ${account.username}?`;
+  peopleChoices($('people-choices'), 'People', new Set(account.people));
+  $('people-dialog').showModal();
+}
+$('people-cancel')?.addEventListener('click', () => $('people-dialog').close());
+$('people-dialog')?.addEventListener('close', () => { peopleAccount = null; });
+bind('people-form', async () => {
+  const at = peopleAccount;
+  if (!at) return;
+  const chosen = new Set([...document.querySelectorAll('#people-choices input:checked')].map(input => input.value).filter(idOK));
+  const base = `/api/servers/${at.server}/accounts/${at.account}`;
+  for (const id of chosen) if (!at.had.includes(id)) await request(`${base}/grant`, 'POST', { person: id });
+  for (const id of at.had) if (!chosen.has(id)) await request(`${base}/revoke`, 'POST', { person: id });
+  $('people-dialog').close(); await refreshServer(at.server); notice(`Saved who signs in as ${at.name}.`);
+});
+
+// ── What runs on a server: the mark on its cards ─────────────────────────
+function openSystemPicker(server) {
+  if (busy) return;
+  $('system-title').textContent = `What runs on ${server.name}?`;
+  systemGrid($('system-grid'), server.system, name => { void run(async () => {
+    await request(`/api/servers/${server.id}/system`, 'POST', { system: name });
+    $('system-dialog').close(); await refreshServer(server.id);
+  }); });
+  $('system-dialog').showModal();
+}
+$('system-cancel')?.addEventListener('click', () => $('system-dialog').close());
+
+// ── Adding, renaming and checking a server ───────────────────────────────
 // Why a server request was refused, in the words of the step that asked.
 function serverError(error, adding = false, protocol = 'ssh') {
   const rdp = protocol === 'rdp';
@@ -733,135 +708,12 @@ $('identity-verify')?.addEventListener('change', () => { identityVerify(); if ($
 function chooseServerKind(protocol) {
   serverProtocol = protocol; const rdp = protocol === 'rdp';
   document.querySelectorAll('#server-kind .segment').forEach(segment => segment.setAttribute('aria-pressed', String(segment.dataset.protocol === protocol)));
-  $('server-lead').textContent = rdp ? 'Keybash compares the server’s certificate with a line you bring from the server’s own screen, so nobody in between can pass for it. Nobody can use the server until you choose who may.' : 'Keybash reads the server’s SSH identity, and you compare it on the server’s own console before it is added. Nobody can use the server until you choose who may.';
+  $('server-lead').textContent = rdp ? 'Keybash compares the server’s certificate with a line you bring from the server’s own screen, so nobody in between can pass for it. Next you add the account people sign in as.' : 'Keybash reads the server’s SSH identity, and you compare it on the server’s own console before it is added. Next you add the account people sign in as.';
   $('server-port-label').textContent = rdp ? 'RDP port' : 'SSH port';
   if (['', '22', '3389'].includes($('server-port').value)) $('server-port').value = rdp ? '3389' : '22';
   serverStep(false);
 }
 document.querySelectorAll('#server-kind .segment').forEach(segment => segment.addEventListener('click', () => { if (!busy) chooseServerKind(segment.dataset.protocol); }));
-function openAccess(server) { if (!busy) showAccess(server); }
-function showAccess(server) {
-  pendingServer = server; $('access-title').textContent = `Who can use ${server.name}?`; dialogNotice('');
-  const legend = document.createElement('legend'); legend.textContent = 'People';
-  const choices = [...people.values()].filter(person => person.role !== 'auditor').sort((a, b) => a.username.localeCompare(b.username)).map(person => {
-    const label = document.createElement('label'); label.className = 'role-option';
-    const input = document.createElement('input'); input.type = 'checkbox'; input.value = person.id; input.checked = server.access.includes(person.id);
-    const text = document.createElement('span'); text.className = 'role-text';
-    const strong = document.createElement('strong'); strong.textContent = person.username;
-    const role = document.createElement('span'); role.textContent = roleWords[person.role];
-    text.append(strong, role); label.append(input, text); return label;
-  });
-  $('access-people').replaceChildren(legend, ...choices);
-  $('access-dialog').showModal();
-}
-// How a server's people sign in (ADR 0009). Who may connect is the list; this
-// sheet is the other question: each with their own key or password, or one
-// that Keybash keeps for the server. A password is typed here once and the
-// field is emptied as soon as it is sent.
-let sharedServer = null, sharedKind = 'ssh-key';
-function signInWords(shared) {
-  if (!shared) return 'Each person signs in with their own key or password.';
-  if (shared.kind === 'password') return `Keybash signs them in as ${shared.username}, with a password it keeps.`;
-  return `Keybash signs them in as ${shared.username}, with a key it made · ${shared.used ? 'in use' : 'not on the server yet'}${shared.next ? ' · a new key is waiting' : ''}`;
-}
-function chooseSharedKind(kind) {
-  sharedKind = kind;
-  document.querySelectorAll('#shared-kind .segment').forEach(segment => segment.setAttribute('aria-pressed', String(segment.dataset.kind === kind)));
-  $('shared-secret-field').hidden = kind !== 'password'; $('shared-secret').required = kind === 'password'; $('shared-secret').value = '';
-  $('shared-kind-hint').textContent = kind === 'ssh-key' ? 'Keybash makes a new key and keeps it; you add its line to the server once. Nobody ever sees the key, so nobody can take it along.' :
-    `${sharedServer?.protocol === 'rdp' ? 'A desktop signs in with a password. ' : ''}The account’s own password, typed once and never shown again. Anyone who already knows it can still sign in without Keybash: when one of them leaves, change it on the server, then here.`;
-  $('shared-submit').textContent = kind === 'ssh-key' ? 'Make the key' : 'Save the password';
-}
-document.querySelectorAll('#shared-kind .segment').forEach(segment => segment.addEventListener('click', () => { if (!busy) chooseSharedKind(segment.dataset.kind); }));
-// Keybash cannot list a server's accounts: it would have to sign in first,
-// with what is being set here. It offers the names this administrator's own
-// connections to that server sign in as, to pick instead of typing.
-function paintSharedNames(server) {
-  const usernames = ownConnections.filter(c => c.target === server.id).map(c => owned.get(c.credential)?.username).filter(name => typeof name === 'string' && name.length >= 1 && name.length <= 128);
-  const chips = [...new Set(usernames)].sort().slice(0, 6).map(name => {
-    const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'secondary name-chip'; chip.textContent = name;
-    chip.addEventListener('click', () => { $('shared-user').value = name; ($('shared-secret-field').hidden ? $('shared-submit') : $('shared-secret')).focus(); });
-    return chip;
-  });
-  const label = document.createElement('span'); label.textContent = 'Your own connections there sign in as';
-  $('shared-names').replaceChildren(label, ...chips); $('shared-names').hidden = !chips.length;
-}
-function openShared(server) { if (!busy) showShared(server); }
-function showShared(server) {
-  const shared = server.shared, key = shared?.kind === 'ssh-key';
-  sharedServer = server; dialogNotice(''); $('shared-secret').value = ''; $('shared-password').value = '';
-  $('shared-title').textContent = `How people sign in to ${server.name}`;
-  $('shared-lead').textContent = shared ? 'Keybash signs everyone on the list in with this. They connect in one click from their Connections page, and nobody, you included, ever sees it.' :
-    'Now each person on the list signs in with their own key or password. Instead, Keybash can sign them all in with one that you set here: they connect in one click, and nobody, you included, ever sees it.';
-  const listed = server.access.map(id => names.get(id)).filter(Boolean).sort();
-  $('shared-who').textContent = listed.length ? `Who can use it: ${listed.join(', ')}` : 'Nobody can use it yet.';
-  $('shared-change-who').textContent = listed.length ? 'Change who' : 'Choose who';
-  $('shared-form').hidden = Boolean(shared); $('shared-manage').hidden = !shared;
-  if (!shared) {
-    $('shared-form').reset(); $('shared-kind').hidden = server.protocol !== 'ssh';
-    $('shared-user-hint').textContent = `The name you would type to sign in on ${server.name}. It is an account on that server, not a person in Keybash.`;
-    paintSharedNames(server);
-    chooseSharedKind(server.protocol === 'ssh' ? 'ssh-key' : 'password');
-  } else {
-    $('shared-summary').textContent = `Keybash signs them in as ${shared.username}, with ${key ? 'a key it made' : 'a password it keeps'}. Set by ${names.get(shared.set_by) ?? 'an account since deleted'} on ${dayOf(shared.set)}.`;
-    $('shared-key').hidden = !key; $('shared-password-form').hidden = key;
-    if (key) {
-      $('shared-key-state').textContent = shared.used ? 'In use: it has opened a session on the server. To add it to the account again, run this there:' : 'Not on the server yet. Run this once on the server, as that user:';
-      $('shared-command').textContent = sharedCommand(shared.line);
-      $('shared-next-box').hidden = !shared.next; $('shared-new').hidden = Boolean(shared.next);
-      $('shared-next-command').textContent = shared.next ? sharedCommand(shared.next) : '';
-    } else $('shared-password-user').value = shared.username;
-  }
-  if (!$('shared-dialog').open) $('shared-dialog').showModal();
-  (shared ? $('shared-close') : $('shared-user')).focus();
-}
-// After a change the sheet shows the server as it is now.
-async function refreshShared(id) {
-  const server = (await loadServers()).find(item => item.id === id);
-  if (server && $('shared-dialog').open) showShared(server);
-}
-bind('shared-form', async () => {
-  const server = sharedServer, kind = sharedKind;
-  if (!server) return;
-  const username = $('shared-user').value.trim(), secret = kind === 'password' ? $('shared-secret').value : '';
-  $('shared-secret').value = '';
-  await request(`/api/servers/${server.id}/shared`, 'POST', { kind, username, secret });
-  await refreshShared(server.id);
-  notice(kind === 'ssh-key' ? `Key made. Add its line on ${server.name}; then people on the list connect with it.` : `People on the list of ${server.name} now connect with this password.`);
-});
-bind('shared-password-form', async () => {
-  const server = sharedServer;
-  if (!server) return;
-  const username = $('shared-password-user').value.trim(), secret = $('shared-password').value;
-  $('shared-password').value = '';
-  await request(`/api/servers/${server.id}/shared-password`, 'POST', { username, secret });
-  await refreshShared(server.id); notice('Keybash uses the new password from now on.');
-});
-click('shared-new', async () => {
-  const server = sharedServer;
-  if (!server) return;
-  await request(`/api/servers/${server.id}/shared-next`, 'POST', {});
-  await refreshShared(server.id); notice('A new key is waiting. Add its line on the server, then switch to it.');
-});
-// The switch names the key this sheet showed, so a key made again elsewhere
-// meanwhile is never switched to unseen.
-click('shared-switch', async () => {
-  const server = sharedServer, fingerprint = server?.shared?.next_fingerprint;
-  if (!sshPrintOK(fingerprint)) return;
-  await request(`/api/servers/${server.id}/shared-switch`, 'POST', { fingerprint });
-  await refreshShared(server.id); notice(`${server.name} uses the new key now. The old key is destroyed: its line can come off the server.`);
-});
-click('shared-keep', async () => {
-  const server = sharedServer;
-  if (!server) return;
-  await request(`/api/servers/${server.id}/shared-next`, 'DELETE', {});
-  await refreshShared(server.id); notice('The new key was destroyed. The current one stays.');
-});
-// Who may connect is the other sheet; the server goes along to it.
-$('shared-change-who')?.addEventListener('click', () => { const server = sharedServer; if (!server || busy) return; $('shared-dialog').close(); showAccess(server); });
-$('shared-stop')?.addEventListener('click', () => { const server = sharedServer; if (!server || busy) return; $('shared-dialog').close(); askConfirm('shared', server); });
-document.querySelectorAll('.shared-close').forEach(close => close.addEventListener('click', () => $('shared-dialog').close()));
-$('shared-dialog')?.addEventListener('close', () => { sharedServer = null; $('shared-secret').value = ''; $('shared-password').value = ''; });
 function openRename(server) {
   if (busy) return;
   pendingServer = server; $('rename-name').value = server.name; dialogNotice(''); $('rename-dialog').showModal(); $('rename-name').focus();
@@ -882,7 +734,7 @@ async function openIdentity(server) {
   if (pendingServer !== server || !$('identity-dialog').open) return;
   if (rdp) {
     // What was just read also settles the mark on the page.
-    await loadServers();
+    await refreshServer(server.id);
     if (data.same && server.certificate === 'expired') { $('identity-now').textContent = 'The same certificate, and it has ended. Restart Remote Desktop Services on the server: Windows then makes a new one.'; return; }
     if (data.same && !server.unchecked) { $('identity-now').textContent = 'The same certificate: nothing to do.'; return; }
     // A different certificate is accepted with the check, or without it if the
@@ -891,7 +743,7 @@ async function openIdentity(server) {
     scanned = { id: server.id, rdp: true, same: data.same };
     $('identity-now').textContent = data.same ? 'The same certificate, not checked yet.' : 'A different certificate.';
     $('identity-why').textContent = data.same ? 'Keybash kept this certificate without comparing it on the server’s own screen. Compare it now to be sure it is your server.' : 'Usually this means Windows renewed its own certificate, but someone in between would look the same. So check it on the server.';
-    $('identity-after').textContent = data.same ? 'If it matches, the server is marked checked. Nothing else changes for anyone.' : 'If it matches, the new identity is pinned. Open sessions to this server end, and each person accepts it on their connection.';
+    $('identity-after').textContent = data.same ? 'If it matches, the server is marked checked. Nothing else changes for anyone.' : 'If it matches, the new identity is pinned for everyone. Open sessions to this server end, and new ones use it.';
     $('identity-verify').checked = true; $('identity-verify-choice').hidden = data.same; identityVerify();
     $('identity-paste').hidden = false; $('identity-submit').hidden = false; $('identity-answer').focus();
     return;
@@ -931,19 +783,11 @@ bind('server-form', async () => {
   catch (error) { if (error.status === 409 && !rdp) serverStep(false); throw serverError(error, !unchecked, protocol); }
   if (!idOK(made?.id)) throw new Error('invalid server');
   $('server-dialog').close();
-  const added = (await loadServers()).find(server => server.id === made.id);
-  notice(`${name} was added${unchecked ? ', not checked' : ''}. Nobody can use it yet: choose who may.`);
-  if (added) showAccess(added);
-});
-$('access-cancel')?.addEventListener('click', () => $('access-dialog').close());
-$('access-dialog')?.addEventListener('close', () => { pendingServer = null; });
-bind('access-form', async () => {
-  const server = pendingServer;
-  if (!server) return;
-  const chosen = new Set([...document.querySelectorAll('#access-people input:checked')].map(input => input.value).filter(idOK));
-  for (const id of chosen) if (!server.access.includes(id)) await request(`/api/servers/${server.id}/grant`, 'POST', { account: id });
-  for (const id of server.access) if (!chosen.has(id)) await request(`/api/servers/${server.id}/revoke`, 'POST', { account: id });
-  $('access-dialog').close(); await loadServers(); notice(`Saved who can use ${server.name}.`);
+  // Straight on to the server's own page and its first account.
+  await go(`/servers/${made.id}`);
+  const added = serverById(made.id);
+  if (added) { busy = false; openAccountForm(added, true); busy = true; }
+  notice(`${name} was added${unchecked ? ', not checked' : ''}.`);
 });
 $('rename-cancel')?.addEventListener('click', () => $('rename-dialog').close());
 $('rename-dialog')?.addEventListener('close', () => { pendingServer = null; });
@@ -951,7 +795,7 @@ bind('rename-form', async () => {
   const server = pendingServer, name = $('rename-name').value.trim();
   if (!server) return;
   if (name !== server.name) await request(`/api/servers/${server.id}/name`, 'POST', { name });
-  $('rename-dialog').close(); await loadServers(); notice('Renamed.');
+  $('rename-dialog').close(); await refreshServer(server.id); notice('Renamed.');
 });
 $('identity-cancel')?.addEventListener('click', () => $('identity-dialog').close());
 $('identity-dialog')?.addEventListener('close', () => { pendingServer = null; scanned = null; });
@@ -964,9 +808,212 @@ bind('identity-form', async () => {
   else if (!$('identity-same').checked) { notice('Compare the fingerprint on the server’s console first, then tick the box.'); return; }
   try { await request(`/api/servers/${server.id}/key`, 'POST', { fingerprint }); }
   catch (error) { throw serverError(error, true, server.protocol); }
-  $('identity-dialog').close(); await loadServers();
-  notice(next.same ? `${server.name} is checked now.` : `New identity pinned for ${server.name}${unchecked ? ', not checked' : ''}. Open sessions to it were closed; each person accepts it on their connection.`);
+  $('identity-dialog').close(); await refreshServer(server.id);
+  notice(next.same ? `${server.name} is checked now.` : `New identity pinned for ${server.name}${unchecked ? ', not checked' : ''}. Open sessions to it were closed; new ones use it.`);
 });
+
+// ── People ───────────────────────────────────────────────────────────────
+const codeOK = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+// A one-time code from an administrator or the operator, as pasted: spaces
+// around it are dropped, and a code of the wrong shape is refused here, before
+// it costs an attempt. Only its field is cleared then, so the passwords typed
+// beside it need not be typed again.
+function pastedCode(id) {
+  const code = $(id).value.trim();
+  if (codeOK(code)) return code;
+  $(id).value = ''; throw Object.assign(new Error('code shape'), { status: 'code-shape' });
+}
+// The one-time code for an invite or a reset, shown once to give to the person.
+// With the steps that person takes: an invite is accepted with "I have an
+// invite"; after a reset they sign in as usual and the phone setup asks for
+// the code. Each step is text, with the words they click in bold.
+const codeSteps = {
+  invite: [['Give them the code apart from their username, for example by phone.'], ['On the Keybash sign-in page they choose ', 'I have an invite', ', enter both and choose their own password.'], ['Then they set up their phone. The code works once and expires in 72 hours.']],
+  reset: [['Give them the code by another channel, for example by phone.'], ['They sign in as usual with their own username and password, not with ', 'I have an invite', '.'], ['Keybash then asks for this code and shows a new QR code for their phone. The code works once and expires in 72 hours.']],
+  password: [['Give them the code by another channel, for example by phone.'], ['On the Keybash sign-in page they choose ', 'Forgot password?', ' and enter their username, this code and the current code from their phone.'], ['Then they choose a new password. The code works once and expires in 72 hours.']],
+};
+const codeDialogs = {
+  invite: { title: name => `Invite for ${name}`, lead: name => `This code is shown only now. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
+  newcode: { title: name => `New invite code for ${name}`, lead: name => `This code is shown only now and replaces the earlier one. With it, ${name} chooses their own password: you never learn it.`, steps: codeSteps.invite },
+  reset: { title: name => `New phone code for ${name}`, lead: name => `This code is shown only now. ${name} signs in with their own password, then enters it to set up a new phone. The code alone opens nothing.`, steps: codeSteps.reset },
+  password: { title: name => `Password reset code for ${name}`, lead: name => `This code is shown only now. ${name} needs it with the current code on their phone to choose a new password: the code alone opens nothing.`, steps: codeSteps.password },
+  restart: { title: name => `New invite for ${name}`, lead: name => `${name}’s password and phone stopped working. This code is shown only now; with it, ${name} chooses a new password and sets up a phone. Their servers stay.`, steps: codeSteps.invite },
+};
+// What a person lost decides the reset: a phone keeps the password, a
+// password keeps the phone, and losing both starts the account over.
+const resetKinds = {
+  phone: { path: 'reset', word: 'Make phone code', dialog: 'reset', done: name => `${name}’s phone was reset.` },
+  password: { path: 'password', word: 'Make password code', dialog: 'password', done: name => `${name} has a password reset code.` },
+  restart: { path: 'restart', word: 'Start over', dialog: 'restart', done: name => `${name} starts over with a new invite. Their servers stay.` },
+};
+function chooseReset() {
+  const kind = document.querySelector('input[name=reset-kind]:checked')?.value;
+  if (!Object.hasOwn(resetKinds, kind)) return;
+  $('reset-submit').textContent = resetKinds[kind].word; $('reset-submit').classList.toggle('danger', kind === 'restart');
+}
+function openReset(person) {
+  if (busy) return;
+  pendingPerson = person; $('reset-title').textContent = `Reset access for ${person.username}`; dialogNotice('');
+  document.querySelectorAll('input[name=reset-kind]').forEach(input => { input.checked = input.value === 'phone'; });
+  chooseReset(); $('reset-dialog').showModal();
+}
+function showCode(code, name, kind) {
+  if (!codeOK(code) || !Object.hasOwn(codeDialogs, kind)) throw new Error('invalid code');
+  const dialog = codeDialogs[kind];
+  $('code-title').textContent = dialog.title(name); $('code-lead').textContent = dialog.lead(name);
+  $('code-steps').replaceChildren(...dialog.steps.map(parts => {
+    const step = document.createElement('li');
+    parts.forEach((part, i) => { if (i % 2) step.append(make('strong', '', part)); else step.append(part); });
+    return step;
+  }));
+  $('person-code').textContent = code; $('code-dialog').showModal();
+}
+function openRole(person) {
+  if (busy) return;
+  pendingPerson = person; $('role-title').textContent = `Change role for ${person.username}`; dialogNotice('');
+  document.querySelectorAll('input[name=person-role]').forEach(input => { input.checked = input.value === person.role; });
+  $('role-dialog').showModal();
+}
+// Where a person signs in: every account that lists them, on every server.
+const signInsOf = id => serverList.flatMap(server => server.accounts.filter(account => account.people.includes(id)).map(account => ({ server, account })));
+// A person as a row: who, which role, in what state, and where they sign in.
+// Nothing about their password or phone is ever part of it.
+function personRow(person) {
+  const row = make('article', 'record person'); row.dataset.person = person.id;
+  const tile = make('span', 'record-icon', person.username[0]); tile.setAttribute('aria-hidden', 'true');
+  const titles = make('div', 'record-titles'), name = make('h3', 'record-name');
+  name.append(pageLink(`/users/${person.id}`, person.username, 'record-link'));
+  titles.append(name, make('p', 'record-meta', roleWords[person.role]));
+  if (person.id === self) titles.append(make('span', 'record-badge', 'You'));
+  const where = signInsOf(person.id);
+  if (remoteEnabled) titles.append(make('p', 'server-access', person.role === 'auditor' ? 'Signs in to no server' : where.length ? `Signs in to ${where.map(({ server, account }) => `${server.name} as ${account.username}`).join(', ')}` : 'No servers yet'));
+  const state = make('span', 'pill person-state', stateWords[person.state]); state.dataset.state = person.state;
+  const actions = make('div', 'record-actions'); actions.append(pageLink(`/users/${person.id}`, 'Open', 'button-link secondary'));
+  row.append(tile, titles, state, actions);
+  return row;
+}
+async function loadUsers() {
+  if (remoteEnabled) await loadServerList();
+  await loadPeople();
+  $('people').replaceChildren(...[...people.values()].map(personRow));
+}
+// One person's own page: where they sign in, and their access to Keybash.
+function paintPerson(person) {
+  $('person-card').replaceChildren(); $('person-access').replaceChildren(); $('give-access').hidden = true;
+  if (!person) { $('heading').textContent = 'Person not found'; $('lead').textContent = 'They were deleted, or the address is wrong.'; return; }
+  $('heading').textContent = person.username; document.title = `Keybash · ${person.username}`; $('topbar-page').textContent = person.username;
+  $('lead').textContent = `${roleWords[person.role]} · ${stateWords[person.state]}`;
+  const card = make('article', 'record person person-detail'); card.dataset.person = person.id;
+  const tile = make('span', 'record-icon', person.username[0]); tile.setAttribute('aria-hidden', 'true');
+  const titles = make('div', 'record-titles');
+  titles.append(make('h2', 'record-name', 'Access to Keybash'), make('p', 'record-meta', person.id === self ? 'This is you: your own password and phone are on Account.' : 'Their own password and the authenticator on their phone. Nobody else ever sees either.'));
+  const state = make('span', 'pill person-state', stateWords[person.state]); state.dataset.state = person.state;
+  const actions = make('div', 'record-actions');
+  card.append(tile, titles, state, actions);
+  if (person.id !== self) {
+    const record = { id: person.id, name: person.username };
+    buttonIn(actions, 'Change role', 'secondary', () => openRole(person));
+    if (person.state === 'blocked') buttonIn(actions, 'Unblock', 'ghost', () => { void run(async () => { await request(`/api/users/${person.id}/unblock`, 'POST', {}); await loadPersonPage(person.id); notice(`${person.username} can sign in again.`); }); });
+    else buttonIn(actions, 'Block', 'ghost', () => askConfirm('block', record));
+    if (['invited', 'expired'].includes(person.state)) buttonIn(actions, 'New code', 'ghost', () => askConfirm('newcode', record));
+    else buttonIn(actions, 'Reset access…', 'ghost', () => openReset(person));
+    buttonIn(actions, 'Delete', 'ghost destructive', () => askConfirm('person', record));
+  }
+  $('person-card').append(card);
+  if (!remoteEnabled) return;
+  if (person.role === 'auditor') { $('person-access').append(make('p', 'hint', 'Auditors see servers and who may use them, and sign in to none.')); return; }
+  $('give-access').hidden = false;
+  const where = signInsOf(person.id);
+  for (const { server, account } of where) {
+    const item = make('article', 'record access-item'); item.dataset.account = account.id;
+    const titles = make('div', 'record-titles'), name = make('h3', 'record-name');
+    name.append(pageLink(`/servers/${server.id}`, server.name, 'record-link'));
+    titles.append(name, make('p', 'record-meta', `as ${account.username} · ${account.kind === 'password' ? 'password kept by Keybash' : 'key made by Keybash'}`));
+    const actions = make('div', 'record-actions');
+    buttonIn(actions, 'Take off', 'ghost destructive', () => askConfirm('revoke', { id: account.id, name: `${person.username} as ${account.username} on ${server.name}`, server: server.id, person: person.id }));
+    item.append(serverTile(server), titles, actions);
+    $('person-access').append(item);
+  }
+  if (!where.length) {
+    const start = make('button', '', 'Give access'); start.type = 'button'; start.addEventListener('click', () => openGive(person));
+    $('person-access').append(emptyState('No servers yet', `${person.username} signs in to no server. Give them an account on one.`, 'terminal', start));
+  }
+}
+async function loadPersonPage(id) {
+  if (remoteEnabled) await loadServerList(); else await loadPeople();
+  paintPerson(people.get(id));
+}
+// Giving access from a person's page: a server, then one of its accounts.
+let givePerson = null;
+function paintGive() {
+  const server = serverById($('give-server').value), person = givePerson;
+  const legend = make('legend', '', 'Account on the server');
+  const choices = (server?.accounts ?? []).map((account, i) => {
+    const label = make('label', 'role-option'), input = make('input'); input.type = 'radio'; input.name = 'give-account'; input.value = account.id;
+    const on = account.people.includes(person.id); input.disabled = on; input.checked = !on && !$('give-accounts').querySelector('input:checked:not(:disabled)') && i === server.accounts.findIndex(a => !a.people.includes(person.id));
+    const text = make('span', 'role-text'); text.append(make('strong', '', account.username), make('span', '', on ? `${person.username} is on it already` : account.kind === 'password' ? 'Password kept by Keybash' : 'Key made by Keybash'));
+    label.append(input, text); return label;
+  });
+  $('give-accounts').replaceChildren(legend, ...choices);
+  const none = !server?.accounts.length;
+  $('give-none').hidden = !none; $('give-accounts').hidden = none;
+  if (none && server) $('give-none').replaceChildren(`${server.name} has no account yet. Add one on `, pageLink(`/servers/${server.id}`, 'its page', ''), '.');
+  $('give-submit').disabled = !choices.some(label => label.querySelector('input:not(:disabled)'));
+}
+function openGive(person) {
+  if (busy) return;
+  givePerson = person; dialogNotice('');
+  $('give-title').textContent = `Give ${person.username} access`;
+  $('give-server').replaceChildren(...serverList.map(server => { const option = make('option', '', `${server.name} · ${kindWords(server.protocol)}`); option.value = server.id; return option; }));
+  paintGive(); $('give-dialog').showModal(); $('give-server').focus();
+}
+$('give-server')?.addEventListener('change', paintGive);
+$('give-access')?.addEventListener('click', () => { const person = people.get(route.id); if (person) openGive(person); });
+$('give-cancel')?.addEventListener('click', () => $('give-dialog').close());
+$('give-dialog')?.addEventListener('close', () => { givePerson = null; });
+bind('give-form', async () => {
+  const person = givePerson, server = serverById($('give-server').value), account = $('give-accounts').querySelector('input:checked:not(:disabled)')?.value;
+  if (!person || !server || !idOK(account)) return;
+  await request(`/api/servers/${server.id}/accounts/${account}/grant`, 'POST', { person: person.id });
+  $('give-dialog').close(); await loadPersonPage(person.id);
+  notice(`${person.username} can connect to ${server.name} now.`);
+});
+
+// ── One sheet asks before anything is deleted or taken away ─────────────
+const confirmKinds = {
+  person: { title: 'Delete this person?', hint: 'Their account goes, they are taken off every server account, and they are signed out at once. This cannot be undone.', path: x => `/api/users/${x.id}` },
+  block: { title: 'Block this person?', hint: 'They are signed out at once and cannot sign in until you unblock them. Their servers stay.', path: x => `/api/users/${x.id}/block`, method: 'POST', word: 'Block' },
+  newcode: { title: 'Make a new invite code?', hint: 'The earlier code stops working at once. You get a new one to give them.', path: x => `/api/users/${x.id}/reset`, method: 'POST', word: 'Make new code' },
+  server: { title: 'Remove this server?', hint: 'Open sessions to it end at once, and its accounts go with it: their keys are destroyed and their passwords forgotten. This cannot be undone.', path: x => `/api/servers/${x.id}`, word: 'Remove' },
+  account: { title: 'Remove this account?', hint: 'Nobody can sign in as it any more, and open sessions through it end at once. A key is destroyed: take its line off the server too. This cannot be undone.', path: x => `/api/servers/${x.server}/accounts/${x.id}`, word: 'Remove' },
+  revoke: { title: 'Take them off this account?', hint: 'Their open sessions through it end at once. You can put them on again later.', path: x => `/api/servers/${x.server}/accounts/${x.id}/revoke`, method: 'POST', body: x => ({ person: x.person }), word: 'Take off' },
+};
+function askConfirm(kind, record) {
+  pendingDelete = { kind, ...record };
+  $('delete-title').textContent = confirmKinds[kind].title; $('delete-hint').textContent = confirmKinds[kind].hint; $('delete-name').textContent = record.name;
+  $('confirm-delete').textContent = confirmKinds[kind].word ?? 'Delete';
+  $('delete-dialog').showModal();
+}
+click('confirm-delete', async () => {
+  const pending = pendingDelete ?? {}; pendingDelete = null; $('delete-dialog').close();
+  const kind = confirmKinds[pending.kind];
+  if (!kind || !idOK(pending.id) || ['account', 'revoke'].includes(pending.kind) && !idOK(pending.server) || pending.kind === 'revoke' && !idOK(pending.person)) return;
+  const reply = await request(kind.path(pending), kind.method ?? 'DELETE', kind.body ? kind.body(pending) : {});
+  if (pending.kind === 'server') { await go('/servers'); notice(`${pending.name} was removed.`); }
+  else if (pending.kind === 'account') { await refreshServer(pending.server); notice(`${pending.name} was removed.`); }
+  else if (pending.kind === 'revoke') { await refreshServer(pending.server); notice(`Taken off: ${pending.name}.`); }
+  else if (pending.kind === 'person') { await go('/users'); notice(`${pending.name} was deleted.`); }
+  else {
+    await reloadPersonOrList(pending.id);
+    if (pending.kind === 'newcode') showCode(reply?.code, pending.name, pending.kind);
+    notice(pending.kind === 'block' ? `${pending.name} is blocked and signed out.` : `${pending.name} has a new invite code.`);
+  }
+});
+$('cancel-delete')?.addEventListener('click', () => $('delete-dialog').close());
+$('delete-dialog')?.addEventListener('close', () => { pendingDelete = null; });
+async function reloadPersonOrList(id) { if (route.name === 'person') await loadPersonPage(id); else await loadUsers(); }
+
+// ── Installation ─────────────────────────────────────────────────────────
 // What this copy runs and serves comes from the server; the commands on the
 // page are fixed text, the same for every installation.
 async function loadInstallation() {
@@ -975,33 +1022,89 @@ async function loadInstallation() {
     typeof data.modified !== 'boolean' || typeof data.ssh !== 'boolean' || typeof data.rdp !== 'boolean' || !Number.isInteger(data.servers) || data.servers < 0 || data.servers > 256) throw new Error('invalid installation');
   if (data.revision) {
     const link = document.createElement('a'); link.href = `https://github.com/denyfirst/keybash/commit/${data.revision}`; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    const code = document.createElement('code'); code.textContent = data.revision.slice(0, 7); link.append(code);
+    link.append(make('code', '', data.revision.slice(0, 7)));
     const notes = [];
     if (data.built) notes.push(`built ${new Date(data.built).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}`);
     if (data.modified) notes.push('with local changes');
     $('install-version').replaceChildren(link, notes.length ? ` · ${notes.join(' · ')}` : '');
   } else $('install-version').textContent = 'Not recorded in this build.';
   const kinds = data.ssh && data.rdp ? 'SSH and RDP' : data.ssh ? 'SSH' : data.rdp ? 'RDP' : '';
-  $('install-serves').textContent = kinds ? `${kinds}, to ${data.servers} ${data.servers === 1 ? 'server' : 'servers'} on the Servers page.` : 'Keys and passwords only: this copy connects to no server.';
+  $('install-serves').textContent = kinds ? `${kinds}, to ${data.servers} ${data.servers === 1 ? 'server' : 'servers'} on the Servers page.` : 'No servers: this copy connects to none.';
   // An installation with RDP is rebuilt with its runtime.
   if (data.rdp && !$('command-build').textContent.endsWith(' --with-rdp')) $('command-build').textContent += ' --with-rdp';
 }
+
+// ── Pages ────────────────────────────────────────────────────────────────
+// One document, a page per path: the path picks what a ready session sees.
+// A server's and a person's own pages sit under their lists.
+const pages = {
+  access: { path: '/', panel: 'access-panel', title: 'Your servers', lead: 'Open one, and Keybash signs you in. You never see its key or password.' },
+  servers: { path: '/servers', panel: 'servers-panel', title: 'Servers', lead: 'Each server, the accounts on it, and who signs in with each.' },
+  server: { under: 'servers', panel: 'server-panel', title: 'Server', lead: '' },
+  users: { path: '/users', panel: 'users-panel', title: 'People', lead: 'Who signs in to Keybash, what each may do, and where.' },
+  person: { under: 'users', panel: 'person-panel', title: 'Person', lead: '' },
+  account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, your phone authenticator and your recovery codes.' },
+  installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, and how to update it.' },
+};
+// Which pages each role sees; the first is where a role lands. The server
+// refuses the rest whatever the page shows.
+const access = { user: ['access', 'account'], admin: ['access', 'servers', 'server', 'users', 'person', 'installation', 'account'], auditor: ['servers', 'server', 'account'] };
+const route = { name: '', id: '' };
+function pageOf(path) {
+  for (const [name, page] of Object.entries(pages)) if (page.path === path) return { name, id: '' };
+  const detail = /^\/(servers|users)\/([a-f0-9]{32})$/.exec(path);
+  if (detail) return { name: detail[1] === 'servers' ? 'server' : 'person', id: detail[2] };
+  return { name: 'access', id: '' };
+}
 function showPage(ready) {
-  // Without an operator catalog there is nothing to connect to or manage.
-  const allowed = access[role].filter(key => !['connections', 'servers'].includes(key) || remoteEnabled);
-  let name = Object.keys(pages).find(key => pages[key].path === location.pathname) ?? 'connections';
-  if (!allowed.includes(name)) name = allowed[0];
-  for (const [key, page] of Object.entries(pages)) $(page.panel).hidden = !ready || key !== name;
+  // Without servers there is nothing to connect to or manage.
+  const allowed = access[role].filter(key => !['access', 'servers', 'server'].includes(key) || remoteEnabled);
+  let { name, id } = pageOf(location.pathname);
+  if (!allowed.includes(name)) { name = allowed[0]; id = ''; }
+  route.name = name; route.id = id;
+  const page = pages[name], rail = page.under ?? name;
+  for (const [key, each] of Object.entries(pages)) $(each.panel).hidden = !ready || key !== name;
   document.querySelectorAll('.rail-item').forEach(item => {
-    if (item.dataset.page === name) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
+    if (item.dataset.page === rail) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
     item.hidden = !allowed.includes(item.dataset.page);
   });
-  $('new-connection').hidden = !ready || name !== 'connections'; $('add-record').hidden = !ready || name !== 'keys'; $('invite-person').hidden = !ready || name !== 'users'; $('add-server').hidden = true; /* shown once the page knows it can add */
-  $('topbar-page').textContent = $('rail-page').textContent = ready ? pages[name].title : 'Sign-in';
-  $('lead').textContent = ready ? pages[name].lead : ''; $('lead').hidden = !ready;
-  if (ready) { $('heading').textContent = pages[name].title; document.title = `Keybash · ${pages[name].title}`; }
+  $('invite-person').hidden = !ready || name !== 'users'; $('add-server').hidden = true; /* shown once the page knows it can add */
+  const back = $('back-link');
+  back.hidden = !ready || !page.under;
+  if (page.under) { back.replaceChildren(glyph('back', 'button-glyph'), pages[page.under].title); back.href = pages[page.under].path; back.dataset.page = ''; }
+  $('topbar-page').textContent = $('rail-page').textContent = ready ? pages[rail].title : 'Sign-in';
+  $('lead').textContent = ready ? page.lead : ''; $('lead').hidden = !ready || !page.lead && !page.under;
+  if (ready) { $('heading').textContent = page.title; document.title = `Keybash · ${page.title}`; }
   return name;
 }
+// The page's data, for the page now shown.
+async function loadPage() {
+  const page = route.name;
+  if (page === 'access') await loadAccess();
+  else if (page === 'servers') await loadServers();
+  else if (page === 'server') await loadServerPage(route.id);
+  else if (page === 'users') await loadUsers();
+  else if (page === 'person') await loadPersonPage(route.id);
+  else if (page === 'installation') await loadInstallation();
+  if (!['servers', 'server'].includes(page) && role === 'admin' && remoteEnabled) void checkAttention();
+}
+// Moving between pages keeps the document: the address changes, the page
+// shows, and its data loads.
+async function go(path) {
+  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+  if (location.pathname !== path) history.pushState(null, '', path);
+  showPage(true); window.scrollTo(0, 0);
+  await loadPage();
+}
+document.addEventListener('click', event => {
+  const link = event.target.closest?.('a[data-page], .rail-item');
+  if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target) return;
+  const url = new URL(link.href, location.href);
+  if (url.origin !== location.origin || document.body.dataset.stage !== 'ready') return;
+  event.preventDefault(); setMenu(false);
+  void run(() => go(url.pathname));
+});
+window.addEventListener('popstate', () => { if (document.body.dataset.stage === 'ready') { showPage(true); void run(loadPage); } });
 async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage) || !Object.hasOwn(access, data.role)) throw new Error('invalid session');
@@ -1010,15 +1113,14 @@ async function loadAccount() {
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
   $('heading').textContent = data.stage === 'enroll' ? 'Set up your phone' : 'Confirm it’s you';
-  const page = showPage(data.stage === 'ready');
+  showPage(data.stage === 'ready');
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false; document.body.dataset.loaded = '';
-  // An auditor holds no key or password, so there is none to load.
-  if (data.stage === 'ready' && role !== 'auditor') await loadRecords();
-  if (data.stage === 'ready' && page === 'installation') await loadInstallation();
-  if (data.stage === 'ready' && page === 'users') await loadUsers();
-  if (data.stage === 'ready' && page === 'servers') await loadServers();
-  else if (data.stage === 'ready' && role === 'admin' && remoteEnabled) void checkAttention();
+  if (data.stage !== 'ready') return;
+  // Who "you" is, to mark yourself among people.
+  if (role === 'admin') { try { self = (await loadPeople()).self; } catch { self = ''; } }
+  await loadPage();
 }
+
 bind('signin', async () => {
   const username = $('username').value, password = $('password').value; clearInputs();
   await request('/api/session', 'POST', { username, password }); location.replace('/');
@@ -1107,7 +1209,7 @@ bind('reset-form', async () => {
   let reply;
   try { reply = await request(`/api/users/${person.id}/${resetKinds[kind].path}`, 'POST', {}); }
   catch (error) { throw error.status === 409 ? Object.assign(new Error('conflict'), { status: kind === 'password' ? 'no-phone' : 'last-admin' }) : error; }
-  $('reset-dialog').close(); await loadUsers(); showCode(reply?.code, person.username, resetKinds[kind].dialog); notice(resetKinds[kind].done(person.username));
+  $('reset-dialog').close(); await reloadPersonOrList(person.id); showCode(reply?.code, person.username, resetKinds[kind].dialog); notice(resetKinds[kind].done(person.username));
 });
 $('invite-person')?.addEventListener('click', () => {
   if (busy) return;
@@ -1132,8 +1234,8 @@ bind('role-form', async () => {
     try { await request(`/api/users/${person.id}/role`, 'POST', { role: chosen }); }
     catch (error) { throw error.status === 409 ? Object.assign(new Error('last-admin'), { status: 'last-admin' }) : error; }
   }
-  $('role-dialog').close(); await loadUsers();
-  if (chosen !== person.role) notice(`${person.username} is now ${chosen === 'admin' ? 'an administrator' : chosen === 'auditor' ? 'an auditor' : 'a user'}, from their next sign-in.`);
+  $('role-dialog').close(); await reloadPersonOrList(person.id);
+  if (chosen !== person.role) notice(`${person.username} is now ${chosen === 'admin' ? 'an administrator' : chosen === 'auditor' ? 'an auditor, and on no server account' : 'a user'}, from their next sign-in.`);
 });
 click('copy-code', () => copy('person-code', $('copy-code')));
 $('close-code')?.addEventListener('click', () => $('code-dialog').close());
@@ -1152,110 +1254,21 @@ click('begin-enroll', async () => {
 });
 bind('enrollment', async () => { const code = $('enrollment-code').value; clearInputs(); showCodes(await request('/api/mfa/confirm', 'POST', { code })); });
 bind('factor', async () => { const code = $('factor-code').value; clearInputs(); await request('/api/mfa/verify', 'POST', { code }); await loadAccount(); });
-// The one line a server needs: append the key's public half for its user.
-const publicOK = value => typeof value === 'string' && value.length < 200 && /^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/.test(value);
-function showInstall(publicLine) {
-  if (!publicOK(publicLine)) return;
-  $('install-command').textContent = `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${publicLine}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
-  $('install-dialog').showModal();
-}
-bind('generate', async () => {
-  const name = $('generate-name').value, username = $('generate-user').value;
-  const made = await request('/api/credentials/generate', 'POST', { name, username });
-  if (!idOK(made?.id) || !publicOK(made.public)) throw new Error('invalid key');
-  $('generate').reset(); $('record-dialog').close(); await loadRecords(); notice('Key made. Now add it to your server.'); showInstall(made.public);
-});
-// One dialog adds all three kinds: a password, an SSH key, or a key made here.
-let recordKind = 'password';
-function chooseKind(kind) {
-  clearInputs(); recordKind = kind;
-  document.querySelectorAll('#record-dialog .segment').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.kind === kind)));
-  $('credential').hidden = kind === 'generate'; $('generate').hidden = kind !== 'generate';
-  $('key-fields').hidden = kind !== 'ssh-key'; $('password-fields').hidden = kind !== 'password';
-}
-function openRecordDialog(kind) {
-  if (busy) return;
-  $('credential').reset(); $('generate').reset(); chooseKind(kind); dialogNotice('');
-  $('record-dialog').showModal(); $(kind === 'generate' ? 'generate-name' : 'credential-name').focus();
-}
-document.querySelectorAll('#record-dialog .segment').forEach(button => button.addEventListener('click', () => { if (!busy) chooseKind(button.dataset.kind); }));
-document.querySelectorAll('.record-cancel').forEach(button => button.addEventListener('click', () => $('record-dialog').close()));
-$('add-record')?.addEventListener('click', () => openRecordDialog('password'));
-$('record-dialog')?.addEventListener('close', () => { clearInputs(); dialogNotice(''); });
 $('change-password')?.addEventListener('click', () => { if (busy) return; clearInputs(); dialogNotice(''); $('password-dialog').showModal(); $('current-password').focus(); });
 $('password-cancel')?.addEventListener('click', () => $('password-dialog').close());
 $('password-dialog')?.addEventListener('close', clearInputs);
-click('copy-install', () => copy('install-command', $('copy-install')));
-$('new-connection')?.addEventListener('click', () => {
-  if (busy) return;
-  pickedSystem = ''; const choose = name => { pickedSystem = name; systemGrid($('connection-system'), pickedSystem, choose); };
-  systemGrid($('connection-system'), pickedSystem, choose); dialogNotice('');
-  $('connection-dialog').showModal(); $('connection-name').focus();
-});
-$('system-cancel')?.addEventListener('click', () => $('system-dialog').close());
-$('connection-cancel')?.addEventListener('click', () => $('connection-dialog').close());
-$('close-install')?.addEventListener('click', () => $('install-dialog').close());
-bind('credential', async () => {
-  const kind = recordKind;
-  if (!['password', 'ssh-key'].includes(kind)) return;
-  const value = { name: $('credential-name').value, kind, username: $('credential-user').value, secret: $(kind === 'password' ? 'credential-password' : 'credential-key').value, passphrase: kind === 'ssh-key' ? $('credential-passphrase').value : '' };
-  clearInputs(); await request('/api/credentials', 'POST', value); $('credential').reset(); $('record-dialog').close(); await loadRecords(); notice('Encrypted and saved.');
-});
-bind('connection', async () => {
-  // The approval binds this choice to the identity shown; if the catalog
-  // changed meanwhile the server refuses and the page shows the new one.
-  const target = selectedTarget;
-  if (!target?.available || target.id !== $('connection-target').value || !catalog.has(target.id)) throw new Error('server review missing');
-  const made = await request('/api/connections', 'POST', {name: $('connection-name').value, target: target.id, credential: $('connection-credential').value, approval: target.approval});
-  if (idOK(made?.id) && systems[pickedSystem]) await request(`/api/connections/${made.id}/system`, 'POST', { system: pickedSystem });
-  $('connection-name').value = ''; pickedSystem = ''; if ($('connection-dialog').open) $('connection-dialog').close(); await loadConnections(); notice('Connection saved.');
-});
-bind('trust-confirm', async () => {
-  const current = reviewing;
-  if (!current?.target.available) throw new Error('server review missing');
-  await request(`/api/connections/${current.record.id}/trust`, 'POST', {approval: current.target.approval, revision: current.record.revision});
-  closeReview(); await loadConnections(); notice('New identity accepted. This connection’s earlier sessions were closed.');
-});
-$('connection-target')?.addEventListener('change', () => { void chooseTarget().catch(error => notice(errorMessage(error))); });
-$('cancel-trust')?.addEventListener('click', closeReview);
-$('trust-dialog')?.addEventListener('close', closeReview);
-$('key-file')?.addEventListener('change', () => { void run(async () => {
-  const file = $('key-file').files[0]; $('credential-key').value = ''; if (!file) return;
-  if (file.size > 65536) throw Object.assign(new Error('file too large'), { status: 400 });
-  const content = await file.text(); $('key-file').value = '';
-  if (document.visibilityState === 'visible') $('credential-key').value = content;
-}); });
 bind('password-change', async () => {
   const password = $('current-password').value, next = $('new-password').value, confirm = $('confirm-password').value; clearInputs();
   if (next !== confirm) { notice('The new passwords don’t match.'); return; }
   await request('/api/password', 'POST', { password, next }); clearAll(); location.replace('/login');
 });
-click('reset-mfa', async () => { await request('/api/mfa/reset', 'POST', {}); hideSecret(); await loadAccount(); });
+click('reset-mfa', async () => { await request('/api/mfa/reset', 'POST', {}); await loadAccount(); });
 click('regenerate-recovery', async () => { showCodes(await request('/api/mfa/recovery', 'POST', {})); });
 click('saved-recovery', async () => { $('recovery-codes').value = ''; await loadAccount(); });
-const signOut = async () => { hideSecret(); clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); };
+const signOut = async () => { clearInputs(); await request('/api/session', 'DELETE', {}); clearAll(); location.replace('/login'); };
 click('logout', signOut); click('focus-logout', signOut);
 click('copy-seed', () => copy('seed', $('copy-seed'))); click('copy-recovery', () => copy('recovery-codes', $('copy-recovery')));
-click('copy-secret', () => copy('revealed-secret', $('copy-secret'))); click('copy-passphrase', () => copy('revealed-passphrase', $('copy-passphrase')));
-$('hide-secret')?.addEventListener('click', hideSecret);
-$('secret-dialog')?.addEventListener('close', hideSecret);
-click('confirm-delete', async () => {
-  const { kind, id, name } = pendingDelete ?? {}; pendingDelete = null; $('delete-dialog').close();
-  if (!Object.hasOwn(confirmKinds, kind) || !idOK(id)) return;
-  const reply = await request(confirmKinds[kind].path(id), confirmKinds[kind].method ?? 'DELETE', {});
-  if (kind === 'credential') { hideSecret(); await loadRecords(); notice('Deleted.'); }
-  else if (kind === 'connection') { await loadConnections(); notice('Deleted.'); }
-  else if (kind === 'server') { await loadServers(); notice(`${name} was removed.`); }
-  else if (kind === 'shared') { await loadServers(); notice(`Keybash no longer signs anyone in to ${name}. People on its list need their own key or password.`); }
-  else {
-    await loadUsers();
-    if (kind === 'newcode') showCode(reply?.code, name, kind);
-    notice(kind === 'person' ? 'Deleted.' : kind === 'block' ? `${name} is blocked and signed out.` : `${name} has a new invite code.`);
-  }
-});
-$('cancel-delete')?.addEventListener('click', () => $('delete-dialog').close());
-$('delete-dialog')?.addEventListener('close', () => { pendingDelete = null; });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { hideSecret(); clearInputs(); closeReview(); hideSeed(); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearInputs(); hideSeed(); } });
 window.addEventListener('pagehide', clearAll);
 window.addEventListener('pageshow', event => { if (event.persisted) { clearAll(); location.reload(); } });
 void run(async () => {
@@ -1269,6 +1282,6 @@ setInterval(() => {
   if (busy || !csrf || document.visibilityState !== 'visible' || !$('recovery')?.hidden) return;
   void run(async () => {
     try { const data = await request('/api/session'); if (data.csrf !== csrf) throw new Error('session changed'); }
-    catch (error) { hideSecret(); if (error.status === 401) { clearAll(); location.replace('/login'); } else throw error; }
+    catch (error) { if (error.status === 401) { clearAll(); location.replace('/login'); } else throw error; }
   });
 }, 30000);

@@ -22,6 +22,8 @@ import (
 	"github.com/denyfirst/keybash/internal/identity"
 )
 
+// Run drives owned-browser-test.mjs against a lab with target: the browser
+// gives the target an account with secret as its password, and connects.
 func Run(t *testing.T, ctx context.Context, target identity.RemoteTarget, ssh identity.SSHWorker, rdp identity.RDPWorker, secret, node string, env []string) {
 	t.Helper()
 	base := t.TempDir()

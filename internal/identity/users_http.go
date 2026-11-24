@@ -175,13 +175,17 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 		return
 	}
 	// The changed account's open sessions and terminals end now, not at their
-	// next request.
+	// next request, and who may use each server account is read again: a
+	// deleted person and a new auditor are on none.
 	l.mu.Lock()
 	for _, other := range l.sessions {
 		if other.owner == target {
 			l.refreshLocked(other.username)
 			break
 		}
+	}
+	if l.remote != nil {
+		_ = l.reloadServersLocked()
 	}
 	l.mu.Unlock()
 	switch {

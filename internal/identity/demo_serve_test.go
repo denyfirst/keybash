@@ -3,7 +3,7 @@
 package identity
 
 // Go-only interactive preview for a workstation without Node: the same
-// synthetic account, credentials and simulated workers as demo-browser.mjs,
+// synthetic account and simulated workers as demo-browser.mjs,
 // prepared through the store operations the HTTP flow uses and served on a
 // fixed loopback address for a person to open in their own browser. Every
 // seam stays in _test.go; nothing here enters the shipped command.
@@ -15,7 +15,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net"
@@ -84,10 +83,6 @@ func TestInteractiveDemoServe(t *testing.T) {
 	if err != nil {
 		t.Fatal("demo entropy failed")
 	}
-	block, err := ssh.MarshalPrivateKey(key, "ephemeral interactive demo")
-	if err != nil {
-		t.Fatal("demo key encoding failed")
-	}
 	signer, err := ssh.NewSignerFromKey(key)
 	if err != nil {
 		t.Fatal("demo signer failed")
@@ -105,7 +100,7 @@ func TestInteractiveDemoServe(t *testing.T) {
 	}
 	defer lab.Close()
 
-	// The account, factor, credentials and connections are prepared through
+	// The account, factor and server account are prepared through
 	// the same store operations the browser flow reaches, so every boundary
 	// the person then exercises (login, MFA, ownership, trust) is the real one.
 	hash, err := HashPassword(demoServePassword)
@@ -125,25 +120,17 @@ func TestInteractiveDemoServe(t *testing.T) {
 	if err != nil {
 		t.Fatal("demo factor enrollment failed")
 	}
-	for _, sample := range []struct {
-		target RemoteTarget
-		record Credential
-	}{
-		{terminal, Credential{Name: "Linux SSH · UI simulation", Kind: "ssh-key", Username: "synthetic-user", Secret: string(pem.EncodeToMemory(block))}},
-	} {
-		if validateCredential(&sample.record) != nil {
-			t.Fatal("demo credential refused")
-		}
-		id, err := store.putCredential(account.ID, sample.record)
-		if err != nil {
-			t.Fatal("demo credential failed")
-		}
-		if _, err = store.putConnection(account.ID, connection{Name: sample.record.Name, Target: sample.target.ID, Credential: id,
-			Approval: approvalFingerprint(sample.target), Fingerprint: identityFingerprint(sample.target)}); err != nil {
-			t.Fatal("demo connection failed")
-		}
+	// One account on the simulated server, with a key made here, lists the
+	// demo person.
+	if _, err := store.addServerAccount(account.ID, terminal.ID, "ssh-key", "synthetic-user", "", []string{account.ID}, now); err != nil {
+		t.Fatal("demo server account failed")
 	}
-	openTo(t, lab, account.ID)
+	lab.mu.Lock()
+	err = lab.reloadServersLocked()
+	lab.mu.Unlock()
+	if err != nil {
+		t.Fatal("demo reload failed")
+	}
 
 	server.Config.Handler = lab
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{demoServeCertificate(t, endpoint.Addr())}}

@@ -1,8 +1,9 @@
 # 0009 — Shared credentials: people connect with a server's key without seeing it
 
-Date: 2026-11-23. Status: accepted direction, under the maintainer's standing
-delegation for self-hosted features; built in phases, each its own pull
-request. This is phase D of ADR 0005.
+Date: 2026-11-23. Status: replaced by ADR 0010 on 2026-11-24. A server now has
+up to 16 accounts, each with its own people, and access lists and people's own
+credentials are gone. The rules for keeping a secret, below, carry over. This
+was phase D of ADR 0005.
 
 ## Context
 

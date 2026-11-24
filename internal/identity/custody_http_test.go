@@ -63,7 +63,7 @@ func (c *custodyClient) login() {
 	c.expect("POST", "/api/session", inputJSON(map[string]string{"username": "alice", "password": alicePassword}), 204)
 }
 func advance(l *Lab, now *time.Time, d time.Duration) { l.mu.Lock(); *now = now.Add(d); l.mu.Unlock() }
-func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
+func TestCustodyHTTPBootstrapAndMFA(t *testing.T) {
 	s, _, _, code := custodyFixture(t)
 	l, e := NewPersistent("https://127.0.0.1:8443", s)
 	if e != nil {
@@ -75,13 +75,13 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	l.now = func() time.Time { return now }
 	l.mu.Unlock()
 	c := custodyClient{t: t, l: l}
-	c.expect("GET", "/api/credentials", "", 401)
+	c.expect("GET", "/api/access", "", 401)
 	c.expect("POST", "/api/bootstrap", inputJSON(map[string]string{"code": "wrong", "username": "alice", "password": alicePassword}), 401)
 	c.expect("POST", "/api/bootstrap", inputJSON(map[string]string{"code": code, "username": "alice", "password": alicePassword}), 204)
 	c.session("enroll")
 	c.expect("POST", "/api/bootstrap", inputJSON(map[string]string{"code": code, "username": "other", "password": alicePassword}), 401)
-	c.expect("GET", "/api/credentials", "", 403)
-	c.expect("POST", "/api/credentials", `{"name":"x","kind":"password","username":"u","secret":"s","passphrase":""}`, 403)
+	c.expect("GET", "/api/access", "", 403)
+	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": strings.Repeat("a", 32)}), 403)
 	setupCookie := c.cookie
 	w := c.expect("POST", "/api/mfa/enrollment", "{}", 200)
 	var seed struct {
@@ -126,41 +126,31 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 		t.Fatal("completed sign-in did not count as fresh proof")
 	}
 	advance(l, &now, freshProof)
-	c.expect("GET", "/api/credentials", "", 200)
-	// Adding a record needs the ready session only; the checks below run
-	// after the sign-in proof has lapsed.
+	c.expect("GET", "/api/session", "", 200)
+	// Account security asks for fresh proof, with a status the page turns
+	// into a code prompt; the code alone renews it, and a password field
+	// refuses.
 	oldCSRF := c.csrf
 	c.csrf = "wrong"
-	c.expect("POST", "/api/credentials", `{}`, 403)
+	c.expect("POST", "/api/mfa/reset", "{}", 403)
 	c.csrf = oldCSRF
-	c.expect("POST", "/api/credentials", `{"name":"x","name":"y","kind":"password","username":"u","secret":"s","passphrase":""}`, 400)
-	c.expect("POST", "/api/credentials", `{"name":"x","kind":"password","username":"u","secret":"s","passphrase":"","owner":"other"}`, 400)
-	w = c.expect("POST", "/api/credentials", `{"name":"<img src=x>","kind":"password","username":"u","secret":"synthetic-custody-secret","passphrase":""}`, 200)
-	var record struct{ ID string }
-	_ = json.Unmarshal(w.Body.Bytes(), &record)
-	if !validID(record.ID) {
-		t.Fatal("credential not created")
-	}
-	listed := c.expect("GET", "/api/credentials", "", 200)
-	if strings.Contains(listed.Body.String(), "synthetic-custody-secret") {
-		t.Fatal("metadata leaked secret")
-	}
-	// Revealing asks for fresh proof, with a status the page turns into a
-	// code prompt; the code alone renews it, and a password field refuses.
-	if w := c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 428); strings.Contains(w.Body.String(), "synthetic-custody-secret") {
-		t.Fatal("stale reveal leaked the secret")
-	}
+	c.expect("POST", "/api/mfa/reset", "{}", 428)
 	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"password": alicePassword, "code": otpCode(t, seed.Secret, now.Unix()/30)}), 400)
 	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, now.Unix()/30)}), 204)
-	revealed := c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 200)
-	if !strings.Contains(revealed.Body.String(), "synthetic-custody-secret") {
-		t.Fatal("owner reveal failed")
+	stillFresh := func() bool {
+		id, _ := tokenID(c.cookie.Value)
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		return l.readyLocked(id, true) != nil
 	}
-	c.expect("POST", "/api/credentials/"+strings.Repeat("a", 32)+"/reveal", "{}", 404)
 	advance(l, &now, freshProof-time.Second)
-	c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 200) // still inside the step-up window
+	if !stillFresh() {
+		t.Fatal("the step-up window closed early")
+	}
 	advance(l, &now, time.Second)
-	c.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 428)
+	if stillFresh() {
+		t.Fatal("the step-up window stayed open")
+	}
 	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": recovery.Codes[0]}), 204)
 	// Reset enters enrollment but leaves old MFA active until confirmation.
 	c.expect("POST", "/api/mfa/reset", "{}", 204)
@@ -181,8 +171,6 @@ func TestCustodyHTTPBootstrapMFAAndVault(t *testing.T) {
 	c.expect("GET", "/api/session", "", 401)
 	advance(l, &now, 61*time.Second)
 	other.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": recovery.Codes[2]}), 204)
-	other.expect("DELETE", "/api/credentials/"+record.ID, "{}", 204)
-	other.expect("POST", "/api/credentials/"+record.ID+"/reveal", "{}", 404)
 	other.expect("POST", "/api/password", inputJSON(map[string]string{"password": alicePassword, "next": nextPassword}), 204)
 	other.expect("GET", "/api/session", "", 401)
 	c.expect("POST", "/api/session", inputJSON(map[string]string{"username": "alice", "password": alicePassword}), 401)
@@ -295,9 +283,9 @@ func TestWorkspacePagesAreOneDocumentBehindTheSession(t *testing.T) {
 	}
 	defer l.Close()
 	c := custodyClient{t: t, l: l}
-	pages := []string{"/", "/keys", "/account"}
+	pages := []string{"/", "/account", "/servers/" + strings.Repeat("c", 32), "/users/" + strings.Repeat("d", 32)}
 	for _, path := range pages {
-		if w := c.expect("GET", path, "", 303); w.Header().Get("Location") != "/login" || strings.Contains(w.Body.String(), "records-panel") {
+		if w := c.expect("GET", path, "", 303); w.Header().Get("Location") != "/login" || strings.Contains(w.Body.String(), "access-panel") {
 			t.Fatalf("signed-out %s did not go to sign-in", path)
 		}
 	}
@@ -305,7 +293,7 @@ func TestWorkspacePagesAreOneDocumentBehindTheSession(t *testing.T) {
 	var first string
 	for _, path := range pages {
 		w := c.expect("GET", path, "", 200)
-		if w.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(w.Body.String(), `id="records-panel"`) {
+		if w.Header().Get("Content-Type") != "text/html; charset=utf-8" || !strings.Contains(w.Body.String(), `id="access-panel"`) {
 			t.Fatalf("%s did not serve the workspace", path)
 		}
 		if first == "" {
@@ -314,8 +302,8 @@ func TestWorkspacePagesAreOneDocumentBehindTheSession(t *testing.T) {
 			t.Fatalf("%s served another document", path)
 		}
 	}
-	for _, path := range []string{"/keys/", "/Keys", "/account/x", "/connections", "/index.html"} {
-		if w := c.call("GET", path, ""); w.Code == 200 || strings.Contains(w.Body.String(), "records-panel") {
+	for _, path := range []string{"/keys", "/keys/", "/Keys", "/account/x", "/connections", "/index.html", "/servers/" + strings.Repeat("C", 32), "/servers/x", "/users/" + strings.Repeat("d", 32) + "/x", "/servers/"} {
+		if w := c.call("GET", path, ""); w.Code == 200 || strings.Contains(w.Body.String(), "access-panel") {
 			t.Fatalf("%s served the workspace", path)
 		}
 	}
@@ -584,13 +572,13 @@ func TestSignInFreshnessStartsAtPasswordCheck(t *testing.T) {
 		t.Fatal("factor refused")
 	}
 	id, _ = tokenID(raw)
-	fresh := func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.readyLocked(id, true) != nil }
+	stillFresh := func() bool { l.mu.Lock(); defer l.mu.Unlock(); return l.readyLocked(id, true) != nil }
 	advance(l, &now, freshProof-90*time.Second-time.Second)
-	if !fresh() {
+	if !stillFresh() {
 		t.Fatal("sign-in was not fresh within two minutes of the password check")
 	}
 	advance(l, &now, time.Second)
-	if fresh() {
+	if stillFresh() {
 		t.Fatal("sign-in freshness outlived the password check by more than two minutes")
 	}
 }

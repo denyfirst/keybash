@@ -73,7 +73,7 @@ func (s *Store) preference(tx *bolt.Tx, owner string) (preferences, uint64, erro
 	if b == nil {
 		return p, 0, nil
 	}
-	data := b.Get(credentialKey(owner, owner))
+	data := b.Get(preferenceKey(owner))
 	if data == nil {
 		return p, 0, nil
 	}
@@ -135,6 +135,9 @@ func (s *Store) changePreferences(owner string, change func(*preferences)) error
 		if e != nil {
 			return errRefused
 		}
-		return b.Put(credentialKey(owner, owner), sealed)
+		return b.Put(preferenceKey(owner), sealed)
 	})
 }
+
+// preferenceKey is where an account's look is kept: under its own ID.
+func preferenceKey(owner string) []byte { return []byte(owner + "/" + owner) }

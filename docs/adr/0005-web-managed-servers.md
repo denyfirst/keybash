@@ -1,7 +1,8 @@
 # 0005 — Servers managed from the web, with per-user access
 
 Date: 2026-11-02. Status: accepted direction; built in phases, each its own
-pull request.
+pull request. Since ADR 0010 (2026-11-24) a server has accounts with people on
+each instead of an access list, and nobody brings their own credential.
 
 ## Context
 

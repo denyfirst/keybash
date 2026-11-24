@@ -216,42 +216,14 @@ func TestServerRecordsAreCheckedOwnedAndKept(t *testing.T) {
 	if store.renameServer(alice.ID, id, "Web server") != nil {
 		t.Fatal("valid rename refused")
 	}
-	// Access lists stay sorted and hold only accounts that may reach servers.
-	if _, e := store.CreateAccount("carol", bobPassword); e != nil {
-		t.Fatal("fixture account failed")
-	}
-	if _, e := store.CreateAccount("dave", bobPassword); e != nil {
-		t.Fatal("fixture account failed")
-	}
-	setRole(t, store, "dave", roleAuditor)
-	carol, dave := mustLookup(t, store, "carol"), mustLookup(t, store, "dave")
-	for _, person := range []string{carol.ID, bob.ID, alice.ID, bob.ID} {
-		if store.setServerAccess(alice.ID, id, person, true) != nil {
-			t.Fatal("valid grant refused")
-		}
-	}
-	if store.setServerAccess(alice.ID, id, dave.ID, true) == nil || store.setServerAccess(alice.ID, id, strings.Repeat("f", 32), true) != errMissing || store.setServerAccess(bob.ID, id, bob.ID, true) == nil {
-		t.Fatal("an auditor, a missing account or a user's own grant was accepted")
-	}
-	list, _ = store.listServers()
-	w = list[slices.IndexFunc(list, func(w webServer) bool { return w.ID == id })]
-	if len(w.Access) != 3 || !slices.IsSorted(w.Access) || !slices.Contains(w.Access, bob.ID) || slices.Contains(w.Access, dave.ID) {
-		t.Fatalf("access list %v", w.Access)
-	}
-	if store.setServerAccess(alice.ID, id, alice.ID, false) != nil {
-		t.Fatal("valid revoke refused")
-	}
+	ecdsaPublicKey := ecdsaPublic.Marshal()
 	other := hostKeyFixture(t).Marshal()
-	if store.repinServer(alice.ID, id, ecdsaPublic.Marshal()) == nil || store.repinServer(alice.ID, id, other) != nil {
+	if store.repinServer(alice.ID, id, ecdsaPublicKey) == nil || store.repinServer(alice.ID, id, other) != nil {
 		t.Fatal("re-pinning did not take exactly an Ed25519 key")
 	}
-	// Deleting an account takes it off every list, in the same transaction.
-	if store.deleteAccount(alice.ID, carol.ID) != nil {
-		t.Fatal("fixture deletion failed")
-	}
 	list, _ = store.listServers()
 	w = list[slices.IndexFunc(list, func(w webServer) bool { return w.ID == id })]
-	if !slices.Equal(w.Access, []string{bob.ID}) || !bytes.Equal(w.HostKey, other) || w.Name != "Web server" {
+	if len(w.Access) != 0 || !bytes.Equal(w.HostKey, other) || w.Name != "Web server" {
 		t.Fatalf("server after changes: %+v", w)
 	}
 	if store.deleteServer(bob.ID, id) == nil || store.deleteServer(alice.ID, id) != nil || store.deleteServer(alice.ID, id) != errMissing {
@@ -310,7 +282,7 @@ func TestServerRecordsAreSealed(t *testing.T) {
 func TestServersPageIsForFreshAdministrators(t *testing.T) {
 	f, scans := serversFixture(t)
 	view := listServersView(t, f.alice)
-	if !slices.Equal(view.Networks, []string{"10.20.0.0/24"}) || !view.Adding || len(view.Servers) != 1 || view.Servers[0].ID != f.target.ID || !view.Servers[0].Available || view.Servers[0].Access == nil || len(view.Servers[0].Access) != 0 || view.Servers[0].AddedBy != "" {
+	if !slices.Equal(view.Networks, []string{"10.20.0.0/24"}) || !view.Adding || len(view.Servers) != 1 || view.Servers[0].ID != f.target.ID || !view.Servers[0].Available || view.Servers[0].Accounts == nil || len(view.Servers[0].Accounts) != 0 || view.Servers[0].AddedBy != "" {
 		t.Fatalf("servers view %+v", view)
 	}
 	bob, b := f.person("bob", roleUser)
@@ -319,9 +291,12 @@ func TestServersPageIsForFreshAdministrators(t *testing.T) {
 	scan := inputJSON(map[string]string{"protocol": "ssh", "address": "10.20.0.7", "port": "22"})
 	// A user reaches none of it; an auditor reads the list and changes nothing.
 	bob.expect("GET", "/api/servers", "", 403)
-	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/grant", inputJSON(map[string]string{"account": b.ID}), 204)
+	f.alice.expect("POST", accountPath(f.target.ID), accountSet("ssh-key", "deploy", "", b.ID), 200)
+	// The old access list is gone.
+	f.alice.expect("POST", "/api/servers/"+f.target.ID+"/grant", inputJSON(map[string]string{"account": b.ID}), 404)
 	var read serversView
-	if json.Unmarshal(dave.expect("GET", "/api/servers", "", 200).Body.Bytes(), &read) != nil || read.Adding || len(read.Servers) != 1 || !slices.Equal(read.Servers[0].Access, []string{b.ID}) || read.Names[b.ID] != "bob" {
+	if json.Unmarshal(dave.expect("GET", "/api/servers", "", 200).Body.Bytes(), &read) != nil || read.Adding || len(read.Servers) != 1 || len(read.Servers[0].Accounts) != 1 ||
+		!slices.Equal(read.Servers[0].Accounts[0].People, []string{b.ID}) || read.Names[b.ID] != "bob" || read.Names[mustLookup(t, f.store, "alice").ID] != "alice" {
 		t.Fatalf("auditor's view %+v", read)
 	}
 	for _, c := range []*custodyClient{bob, dave} {
@@ -458,7 +433,7 @@ func TestServersAreAddedComparedRenamedRepinnedAndRemoved(t *testing.T) {
 	add(ssh.FingerprintSHA256(first), 200)
 	add(ssh.FingerprintSHA256(first), 409) // already listed
 	row, ok := serverRow(listServersView(t, f.alice), id)
-	if !ok || !row.Available || row.Access == nil || len(row.Access) != 0 || row.Fingerprint != ssh.FingerprintSHA256(key) || row.Hostname != "10.20.0.8" || row.Port != 22 || row.AddedBy != mustLookup(t, f.store, "alice").ID {
+	if !ok || !row.Available || row.Accounts == nil || len(row.Accounts) != 0 || row.Fingerprint != ssh.FingerprintSHA256(key) || row.Hostname != "10.20.0.8" || row.Port != 22 || row.AddedBy != mustLookup(t, f.store, "alice").ID {
 		t.Fatalf("added server row %+v", row)
 	}
 	f.alice.expect("POST", "/api/servers/"+id+"/name", inputJSON(map[string]string{"name": "Build box"}), 204)
@@ -489,149 +464,13 @@ func TestServersAreAddedComparedRenamedRepinnedAndRemoved(t *testing.T) {
 	}
 }
 
-// Who may connect to a web server is its access list, administrators
-// included. Taking a person off, changing the server's key or removing it
-// ends that person's terminal at once.
-func TestServerAccessListDecidesWhoConnects(t *testing.T) {
-	f, scans := serversFixture(t)
-	id, _ := addServerFixture(t, f.alice, scans, "Web", "10.20.0.7:22")
-	bob, b := f.person("bob", roleUser)
-	credential, e := f.store.putCredential(b.ID, Credential{Name: "Synthetic SSH", Kind: "password", Username: "synthetic-user", Secret: "Synthetic remote password"})
-	if e != nil {
-		t.Fatal("fixture credential failed")
-	}
-	targets := func(c *custodyClient) []string {
-		t.Helper()
-		var list []struct{ ID string }
-		if json.Unmarshal(c.expect("GET", "/api/targets", "", 200).Body.Bytes(), &list) != nil {
-			t.Fatal("targets unreadable")
-		}
-		var ids []string
-		for _, item := range list {
-			ids = append(ids, item.ID)
-		}
-		return ids
-	}
-	for _, c := range []*custodyClient{bob, f.alice} {
-		if slices.Contains(targets(c), id) || slices.Contains(targets(c), f.target.ID) {
-			t.Fatal("an unlisted person sees a server")
-		}
-		c.expect("GET", "/api/targets/"+id, "", 404)
-	}
-	// Even the right approval cannot make a connection before access.
-	f.l.mu.Lock()
-	hidden := f.l.remote.targets[id]
-	f.l.mu.Unlock()
-	connect := inputJSON(map[string]string{"name": "Bob's web", "target": id, "credential": credential, "approval": approvalFingerprint(hidden)})
-	bob.expect("POST", "/api/connections", connect, 403)
-	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": b.ID}), 204)
-	if !slices.Contains(targets(bob), id) || slices.Contains(targets(f.alice), id) {
-		t.Fatal("the access list did not decide who sees the server")
-	}
-	var record struct{ ID string }
-	if json.Unmarshal(bob.expect("POST", "/api/connections", connect, 200).Body.Bytes(), &record) != nil || !validID(record.ID) {
-		t.Fatal("a listed person could not connect")
-	}
-	if policy := bob.expect("GET", "/remote/ssh/"+record.ID, "", 200).Header().Get("Content-Security-Policy"); !strings.Contains(policy, "; script-src 'self'; ") {
-		t.Fatalf("a terminal page may compile WebAssembly: %s", policy)
-	}
-	trust := func() string {
-		t.Helper()
-		var rows []struct{ ID, Trust string }
-		if json.Unmarshal(bob.expect("GET", "/api/connections", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 {
-			t.Fatal("connections unreadable")
-		}
-		return rows[0].Trust
-	}
-	open := func() context.Context {
-		t.Helper()
-		raw := grantFixture(t, bob, record.ID)
-		bid, _ := tokenID(bob.cookie.Value)
-		f.l.mu.Lock()
-		_, _, _, ctx, e := f.l.redeemRemoteLocked(bid, raw)
-		f.l.mu.Unlock()
-		if e != nil {
-			t.Fatal("a listed person's lease was refused")
-		}
-		return ctx
-	}
-	ended := func(ctx context.Context, what string) {
-		t.Helper()
-		select {
-		case <-ctx.Done():
-		case <-time.After(time.Second):
-			t.Fatalf("%s did not end the open terminal", what)
-		}
-		if context.Cause(ctx) != terminalweb.ReasonAccessChanged {
-			t.Fatalf("%s ended the terminal without saying the access changed: %v", what, context.Cause(ctx))
-		}
-	}
-	// Taking bob off ends his terminal and his pending leases.
-	ctx := open()
-	pending := grantFixture(t, bob, record.ID)
-	f.alice.expect("POST", "/api/servers/"+id+"/revoke", inputJSON(map[string]string{"account": b.ID}), 204)
-	ended(ctx, "taking the person off")
-	bid, _ := tokenID(bob.cookie.Value)
-	f.l.mu.Lock()
-	if _, _, _, _, e := f.l.redeemRemoteLocked(bid, pending); e == nil {
-		t.Fatal("a lease from before the change was redeemed")
-	}
-	f.l.mu.Unlock()
-	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record.ID}), 401)
-	bob.expect("GET", "/remote/ssh/"+record.ID, "", 404)
-	if trust() != "unavailable" {
-		t.Fatal("a connection to a server taken away is not shown unavailable")
-	}
-	// Back on the list, the same connection works again.
-	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": b.ID}), 204)
-	if trust() != "verified" {
-		t.Fatal("access given back did not restore the connection")
-	}
-	// A new key ends the terminal and needs bob's own approval.
-	ctx = open()
-	next := hostKeyFixture(t)
-	scans.set("10.20.0.7:22", next)
-	f.alice.expect("POST", "/api/servers/"+id+"/key", inputJSON(map[string]string{"fingerprint": ssh.FingerprintSHA256(next)}), 204)
-	ended(ctx, "a new key")
-	if trust() != "changed" {
-		t.Fatal("a re-pinned server is not shown changed")
-	}
-	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record.ID}), 401)
-	var target struct{ Approval string }
-	if json.Unmarshal(bob.expect("GET", "/api/targets/"+id, "", 200).Body.Bytes(), &target) != nil {
-		t.Fatal("target unreadable")
-	}
-	var rows []struct{ Revision string }
-	if json.Unmarshal(bob.expect("GET", "/api/connections", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 {
-		t.Fatal("connections unreadable")
-	}
-	bob.expect("POST", "/api/connections/"+record.ID+"/trust", inputJSON(map[string]string{"approval": target.Approval, "revision": rows[0].Revision}), 204)
-	if trust() != "verified" {
-		t.Fatal("bob could not accept the new key")
-	}
-	// Removing the server ends the terminal and leaves the connection unavailable.
-	ctx = open()
-	f.alice.expect("DELETE", "/api/servers/"+id, "{}", 204)
-	ended(ctx, "removing the server")
-	if trust() != "unavailable" {
-		t.Fatal("a connection to a removed server is not unavailable")
-	}
-	// Access goes only to existing people who may reach servers.
-	id, _ = addServerFixture(t, f.alice, scans, "Second", "10.20.0.8:22")
-	_, d := f.person("dave", roleAuditor)
-	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": d.ID}), 403)
-	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": strings.Repeat("9", 32)}), 404)
-	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": "bob"}), 400)
-	f.alice.expect("POST", "/api/servers/"+strings.Repeat("9", 32)+"/grant", inputJSON(map[string]string{"account": b.ID}), 404)
-}
-
 // Servers come back after a restart, and only inside the networks the gateway
 // is given then.
 func TestServersReloadInsideTheNetworksOfEachStart(t *testing.T) {
 	f, scans := serversFixture(t)
 	id, _ := addServerFixture(t, f.alice, scans, "Web", "10.20.0.7:22")
 	b := func() durableAccount { _, a := f.person("bob", roleUser); return a }()
-	f.alice.expect("POST", "/api/servers/"+id+"/grant", inputJSON(map[string]string{"account": b.ID}), 204)
+	account := accountFixture(t, f.l, id, "deploy", "", b.ID)
 	_ = f.l.Close()
 	for _, start := range []struct {
 		options   []Option
@@ -646,12 +485,12 @@ func TestServersReloadInsideTheNetworksOfEachStart(t *testing.T) {
 			t.Fatal("restart refused")
 		}
 		l.mu.Lock()
-		_, reachable := l.mayUseLocked(b.ID, id)
+		_, reachable := l.mayUseLocked(b.ID, account)
 		view, ve := l.serversViewLocked(true)
 		l.mu.Unlock()
 		_ = l.Close()
 		row, listed := serverRow(view, id)
-		if ve != nil || reachable != start.reachable || !listed || row.Available != start.reachable || !slices.Equal(row.Access, []string{b.ID}) {
+		if ve != nil || reachable != start.reachable || !listed || row.Available != start.reachable || len(row.Accounts) != 1 || !slices.Equal(row.Accounts[0].People, []string{b.ID}) {
 			t.Fatalf("after restart: reachable %v, row %+v", reachable, row)
 		}
 	}
@@ -663,7 +502,7 @@ func TestServersReloadInsideTheNetworksOfEachStart(t *testing.T) {
 	}
 	defer l.Close()
 	l.mu.Lock()
-	_, reachable := l.mayUseLocked(b.ID, id)
+	_, reachable := l.mayUseLocked(b.ID, account)
 	adding := l.remote.ssh != nil
 	l.mu.Unlock()
 	if reachable || adding {
@@ -671,40 +510,47 @@ func TestServersReloadInsideTheNetworksOfEachStart(t *testing.T) {
 	}
 }
 
-func TestBackupCarriesServersAndTheirAccess(t *testing.T) {
+func TestBackupCarriesServersAndTheirAccounts(t *testing.T) {
 	s, key, _ := bootstrapped(t)
 	now := time.Now()
 	alice := mustLookup(t, s, "alice")
 	id, e := s.addServer(alice.ID, "Backup canary server", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), now)
-	if e != nil || s.setServerAccess(alice.ID, id, alice.ID, true) != nil {
+	if e != nil {
 		t.Fatal("fixture server failed")
+	}
+	account, e := s.addServerAccount(alice.ID, id, "ssh-key", "deploy", "", []string{alice.ID}, now)
+	if e != nil {
+		t.Fatal("fixture account failed")
 	}
 	data := backupOf(t, s, now)
 	if bytes.Contains(data, []byte("Backup canary server")) {
 		t.Fatal("backup carries a server name in plaintext")
 	}
 	restored, _, summary, e := restoreStore(emptyDataDir(t), key, data, now)
-	if e != nil || summary.Servers != 1 {
+	if e != nil || summary.Servers != 1 || summary.ServerAccounts != 1 {
 		t.Fatalf("backup with a server not restored: %+v", summary)
 	}
 	defer restored.Close()
 	list, e := restored.listServers()
-	if e != nil || len(list) != 1 || list[0].ID != id || !slices.Equal(list[0].Access, []string{alice.ID}) {
+	if e != nil || len(list) != 1 || list[0].ID != id || len(list[0].Access) != 0 {
 		t.Fatal("restored server differs")
 	}
-	// An access list naming an account that does not exist is not backed up.
+	if a, e := restored.readServerAccount(id, account); e != nil || !slices.Equal(a.People, []string{alice.ID}) || a.Current.Username != "deploy" {
+		t.Fatal("restored account differs")
+	}
+	// An account naming someone who does not exist is not backed up.
 	if s.update(func(tx *bolt.Tx) error {
-		w, e := s.server(tx, id)
+		a, revision, e := s.serverAccount(tx, id, account)
 		if e != nil {
 			return e
 		}
-		w.Access = []string{alice.ID, strings.Repeat("f", 32)}
-		return s.saveServer(tx, w)
+		a.People = []string{alice.ID, strings.Repeat("f", 32)}
+		return s.putServerAccount(tx, a, revision)
 	}) != nil {
 		t.Fatal("fixture change failed")
 	}
 	if _, e := s.Backup(io.Discard, now); e == nil {
-		t.Fatal("a server listing a missing account was backed up")
+		t.Fatal("an account listing a missing person was backed up")
 	}
 }
 
@@ -779,32 +625,5 @@ func TestReadHostKeyTakesOnlyAProvenEd25519Key(t *testing.T) {
 	_ = client.Close()
 	if total := <-written; total > 64<<10 {
 		t.Fatalf("read %d bytes from a server, over the bound", total)
-	}
-}
-
-// openTo puts these accounts on every server's access list, as an
-// administrator would on the Servers page, and reloads the lab.
-func openTo(t *testing.T, l *Lab, owners ...string) {
-	t.Helper()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.store.update(func(tx *bolt.Tx) error {
-		list, e := l.store.servers(tx)
-		if e != nil {
-			return e
-		}
-		for _, w := range list {
-			for _, owner := range owners {
-				if at, listed := slices.BinarySearch(w.Access, owner); !listed && !w.Removed {
-					w.Access = slices.Insert(w.Access, at, owner)
-				}
-			}
-			if e = l.store.saveServer(tx, w); e != nil {
-				return e
-			}
-		}
-		return nil
-	}) != nil || l.reloadServersLocked() != nil {
-		t.Fatal("fixture access failed")
 	}
 }

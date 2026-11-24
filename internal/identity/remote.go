@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -59,9 +57,10 @@ type remoteConfig struct {
 	sockets map[string]int
 	ssh     SSHWorker
 	// targets is every server a lease can reach, rebuilt from the store on
-	// each change (reloadServersLocked); access lists who may use each.
+	// each change (reloadServersLocked); accounts says who may use each
+	// server's accounts, by account ID.
 	targets             map[string]RemoteTarget
-	access              map[string]map[string]bool
+	accounts            map[string]accountInfo
 	unchecked           map[string]bool // RDP servers pinned without the console check
 	networks, protected []netip.Prefix  // see TargetNetworks
 	scan                func(context.Context, *targetguard.NamedTarget) (ssh.PublicKey, error)
@@ -104,25 +103,23 @@ func desktopKey(target, username string) string {
 	return target + "\x00" + strings.ToLower(username)
 }
 
+// remoteLease is one person's way through one account (ADR 0010), bound when
+// granted to the account's generation and the server's approval.
 type remoteLease struct {
-	session                                         [32]byte
-	owner, connection, credential, target, approval string // approval: the target's when granted
-	// shared names the server whose shared credential this lease uses (ADR
-	// 0009), bound to the credential's generation when granted; connection and
-	// credential are then empty.
-	shared     string
-	generation uint64
-	expires    time.Time
-	active     bool
-	cancel     context.CancelCauseFunc // the cause is a terminalweb.Reason the page can show
+	session                          [32]byte
+	owner, account, target, approval string // target: the account's server; approval: its identity when granted
+	generation                       uint64
+	expires                          time.Time
+	active                           bool
+	cancel                           context.CancelCauseFunc // the cause is a terminalweb.Reason the page can show
 }
 
 // NewRemoteLab adds ownership authorization to the existing loopback TLS lab.
 // Stock SSH uses the guarded/pinned connector. A nil RDP launcher refuses RDP.
 // targets are the operator's server file: each moves into the store's server
 // list once (importServers). From then on every server is managed on the
-// Servers page and reached only by the accounts on its access list. Restart
-// kills every pending and active lease. Production isolation and audit
+// Servers page and reached only through its accounts, by the people each
+// lists. Restart kills every pending and active lease. Production isolation and audit
 // remain gates.
 func NewRemoteLab(origin string, store *Store, targets []RemoteTarget, worker SSHWorker, rdp RDPWorker, options ...Option) (*Lab, error) {
 	return NewRemoteLabWithLimits(origin, store, targets, worker, rdp, sessionlimits.Default(), options...)
@@ -218,54 +215,6 @@ func (l *Lab) sweepRemotesLocked() {
 		}
 	}
 }
-func (l *Lab) revokeRemotesLocked(owner, connection, credential string) {
-	if l.remote == nil {
-		return
-	}
-	for key, lease := range l.remote.leases {
-		if lease.owner == owner && (connection != "" && lease.connection == connection || credential != "" && lease.credential == credential) {
-			if lease.cancel != nil {
-				lease.cancel(terminalweb.ReasonAccessChanged)
-			}
-			delete(l.remote.leases, key)
-		}
-	}
-}
-
-// SSH accepts a key or a password; RDP a password. There is no fallback from
-// one to the other: the connection's stored credential is the only one tried.
-func compatible(t RemoteTarget, c Credential) bool {
-	return c.Username != "" && (t.Protocol == "ssh" && (c.Kind == "ssh-key" || c.Kind == "password") || t.Protocol == "rdp" && c.Kind == "password")
-}
-
-// Opening an approved, owned connection needs a ready MFA session, not a
-// fresh password and new code each time: sign-in already proved both factors,
-// and the one-use 30-second lease stays bound to this session and owner.
-// Creating and trusting connections need the same; deleting them, and
-// revealing or deleting secrets, need fresh proof (see freshProof).
-func (l *Lab) grantRemoteLocked(id [32]byte, record string) (string, error) {
-	s := l.readyLocked(id, false)
-	if s == nil || l.remote == nil || !l.serversLocked(s) {
-		return "", errRefused
-	}
-	if !l.attemptLocked("remote:"+s.username, remoteAttempts) {
-		return "", errLimited
-	}
-	l.sweepRemotesLocked()
-	c, e := l.store.readConnection(s.owner, record)
-	if e != nil {
-		return "", errRefused
-	}
-	t, ok := l.targetLocked(s, c.Target)
-	if !ok || !connectionTrusted(c, t, l.now()) {
-		return "", errRefused
-	}
-	credential, e := l.store.readCredential(s.owner, c.Credential)
-	if e != nil || !compatible(t, credential) {
-		return "", errRefused
-	}
-	return l.issueLeaseLocked(s, &remoteLease{session: id, owner: s.owner, connection: record, credential: c.Credential, target: c.Target, approval: approvalFingerprint(t)})
-}
 
 // issueLeaseLocked stores a one-use lease for s within the capacity limits
 // and returns its token. It expires in 30 seconds.
@@ -305,30 +254,13 @@ func (l *Lab) redeemRemoteLocked(id [32]byte, raw string) (*remoteLease, RemoteT
 	if lease == nil || lease.active || lease.session != id || lease.owner != s.owner || !l.now().Before(lease.expires) {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
-	if lease.shared != "" {
-		target, credential, ok := l.sharedLocked(s, lease.shared)
-		if !ok || lease.target != lease.shared || approvalFingerprint(target) != lease.approval || credential.Generation != lease.generation {
-			return nil, RemoteTarget{}, Credential{}, nil, errRefused
-		}
-		ctx, cancel := context.WithCancelCause(s.ctx)
-		lease.active, lease.cancel = true, cancel
-		return lease, target, credential.Current, ctx, nil
-	}
-	c, e := l.store.readConnection(s.owner, lease.connection)
-	if e != nil || c.Credential != lease.credential || c.Target != lease.target {
-		return nil, RemoteTarget{}, Credential{}, nil, errRefused
-	}
-	target, ok := l.targetLocked(s, c.Target)
-	if !ok || approvalFingerprint(target) != lease.approval || !connectionTrusted(c, target, l.now()) {
-		return nil, RemoteTarget{}, Credential{}, nil, errRefused
-	}
-	credential, e := l.store.readCredential(s.owner, c.Credential)
-	if e != nil || !compatible(target, credential) {
+	target, account, ok := l.accountLocked(s, lease.account)
+	if !ok || target.ID != lease.target || approvalFingerprint(target) != lease.approval || account.Generation != lease.generation {
 		return nil, RemoteTarget{}, Credential{}, nil, errRefused
 	}
 	ctx, cancel := context.WithCancelCause(s.ctx)
 	lease.active, lease.cancel = true, cancel
-	return lease, target, credential, ctx, nil
+	return lease, target, account.Current, ctx, nil
 }
 
 // openTerminal opens an SSH terminal in a bounded setup slot, with the stored
@@ -438,11 +370,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	// An SSH stream exists only after the server took the key and opened a
 	// terminal, so a key made here is now known to be on a server.
 	if credential.Generated && !credential.Used {
-		if lease.shared != "" {
-			_ = l.store.markSharedUsed(lease.shared, credential.Fingerprint)
-		} else {
-			_ = l.store.markKeyUsed(lease.owner, lease.credential)
-		}
+		_ = l.store.markAccountUsed(lease.target, lease.account, credential.Fingerprint)
 	}
 	if socket.Write(ctx, websocket.MessageText, []byte(`{"type":"ready"}`)) != nil {
 		_ = stream.Close()
@@ -526,104 +454,20 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		result = l.remote.limits // configured values only; no other owners' usage
 		return
 	}
-	if r.Method == "GET" && r.URL.Path == "/api/targets" {
-		type summary struct {
-			ID       string `json:"id"`
-			Name     string `json:"name"`
-			Protocol string `json:"protocol"`
-		}
-		items := make([]summary, 0, len(l.remote.targets))
-		for id := range l.remote.targets {
-			if t, ok := l.targetLocked(s, id); ok {
-				items = append(items, summary{t.ID, t.Name, t.Protocol})
-			}
-		}
-		slices.SortFunc(items, func(a, b summary) int {
-			if order := strings.Compare(a.Name, b.Name); order != 0 {
-				return order
-			}
-			return strings.Compare(a.ID, b.ID)
-		})
-		result = items
+	// The servers this person reaches, one card per account (ADR 0010).
+	if r.Method == "GET" && r.URL.Path == "/api/access" {
+		result = l.accessLocked(s)
 		return
 	}
-	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/targets/") {
-		record := strings.TrimPrefix(r.URL.Path, "/api/targets/")
-		target, ok := l.targetLocked(s, record)
-		if !validID(record) || !ok {
-			status = 404
-			return
-		}
-		view := describeTarget(target, l.now())
-		view.Unchecked = l.remote.unchecked[target.ID]
-		result = view
-		return
-	}
-	if r.Method == "GET" && r.URL.Path == "/api/connections" {
-		items, e := l.store.listConnections(s.owner)
-		if e != nil {
-			status = 503
-			return
-		}
-		rows := make([]connectionView, 0, len(items))
-		for _, item := range items {
-			// A server this account may no longer use shows as unavailable.
-			target, _ := l.targetLocked(s, item.Target)
-			row := describeConnection(item, target, l.now())
-			// Only an administrator can settle this one: the server shows another
-			// certificate than the pin this person accepted.
-			if row.Trust == "verified" && l.certificateChangedLocked(target) {
-				row.Trust = "stopped"
-			}
-			rows = append(rows, row)
-		}
-		result = rows
-		return
-	}
-	// The servers this person connects to with a shared credential (ADR 0009).
-	if r.Method == "GET" && r.URL.Path == "/api/shared" {
-		rows, e := l.sharedConnectionsLocked(s)
-		if e != nil {
-			status = 503
-			return
-		}
-		result = rows
-		return
-	}
-	// Opening one is like opening an approved connection: the administrator
-	// confirmed the server's identity when adding it.
-	if r.Method == "POST" && r.URL.Path == "/api/remote/open-shared" {
-		fields, ok := readFields(w, r, 1024, "server")
-		if !ok {
-			status = 400
-			return
-		}
-		raw, e := l.grantSharedLocked(id, fields["server"])
-		if e != nil {
-			status = 401
-			if e == errRemoteCapacity {
-				markRemoteCapacity(w)
-				status = 503
-			}
-			if e == errLimited {
-				status = 429
-			}
-			return
-		}
-		result = struct {
-			Lease string `json:"lease"`
-		}{raw}
-		return
-	}
-	// Opening an already approved connection needs only the ready session
-	// (see grantRemoteLocked); everything below changes stored decisions.
+	// Opening one needs only the ready session (see grantRemoteLocked): the
+	// administrator confirmed the server's identity when adding it.
 	if r.Method == "POST" && r.URL.Path == "/api/remote/open" {
-		fields, ok := readFields(w, r, 1024, "connection")
+		fields, ok := readFields(w, r, 1024, "account")
 		if !ok {
 			status = 400
 			return
 		}
-		raw, e := l.grantRemoteLocked(id, fields["connection"])
+		raw, e := l.grantRemoteLocked(id, fields["account"])
 		clear(fields)
 		if e != nil {
 			status = 401
@@ -641,119 +485,5 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		}{raw}
 		return
 	}
-	// Creating a connection or trusting a target binds only an owned
-	// credential to an operator-approved identity, which acceptTargetProof
-	// checks; it is no more than opening needs. Deleting asks for fresh proof.
-	if r.Method == "DELETE" && l.readyLocked(id, true) != s {
-		status = http.StatusPreconditionRequired
-		return
-	}
-	switch {
-	case r.Method == "POST" && r.URL.Path == "/api/connections":
-		fields, ok := readFields(w, r, 2048, "name", "target", "credential", "approval")
-		if !ok {
-			status = 400
-			return
-		}
-		defer clear(fields)
-		target, ok := l.targetLocked(s, fields["target"])
-		if !ok {
-			status = 403
-			return
-		}
-		// The identity is the server list's pin; the person confirms the
-		// snapshot they were shown (approval), not a fingerprint they retype.
-		if !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
-			status = 409
-			return
-		}
-		credential, e := l.store.readCredential(s.owner, fields["credential"])
-		if e != nil || !compatible(target, credential) {
-			status = 403
-			return
-		}
-		if r.Context().Err() != nil {
-			status = 401
-			return
-		}
-		if !l.attemptLocked("trust:"+s.username, trustAttempts) {
-			status = 429
-			return
-		}
-		record, e := l.store.putConnection(s.owner, connection{Name: fields["name"], Target: fields["target"], Credential: fields["credential"], Approval: approvalFingerprint(target), Fingerprint: identityFingerprint(target)})
-		if e != nil {
-			status = 400
-			return
-		}
-		result = struct {
-			ID string `json:"id"`
-		}{record}
-	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/connections/") && strings.HasSuffix(r.URL.Path, "/trust"):
-		record := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/connections/"), "/trust")
-		fields, ok := readFields(w, r, 2048, "approval", "revision")
-		if !ok || !validID(record) {
-			status = 400
-			return
-		}
-		defer clear(fields)
-		row, e := l.store.readConnection(s.owner, record)
-		if e != nil {
-			status = 404
-			return
-		}
-		target, ok := l.targetLocked(s, row.Target)
-		if !ok || !acceptTargetProof(target, identityFingerprint(target), fields["approval"], l.now()) {
-			status = 409
-			return
-		}
-		credential, e := l.store.readCredential(s.owner, row.Credential)
-		if e != nil || !compatible(target, credential) {
-			status = 403
-			return
-		}
-		if r.Context().Err() != nil {
-			status = 401
-			return
-		}
-		if fields["revision"] != strconv.FormatUint(row.Revision, 10) {
-			status = 409
-			return
-		}
-		if !l.attemptLocked("trust:"+s.username, trustAttempts) {
-			status = 429
-			return
-		}
-		if l.store.trustConnection(s.owner, record, fields["revision"], fields["approval"], identityFingerprint(target)) != nil {
-			status = 409
-			return
-		}
-		l.revokeRemotesLocked(s.owner, record, "")
-	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/connections/") && strings.HasSuffix(r.URL.Path, "/system"):
-		// A label only: which mark the card shows. It changes no target,
-		// credential or trust decision, so a ready session is enough.
-		record := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/connections/"), "/system")
-		fields, ok := readFields(w, r, 256, "system")
-		if !ok || !validID(record) || !systemNames[fields["system"]] {
-			status = 400
-			return
-		}
-		if l.store.setConnectionSystem(s.owner, record, fields["system"]) != nil {
-			status = 404
-			return
-		}
-	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/connections/"):
-		record := strings.TrimPrefix(r.URL.Path, "/api/connections/")
-		if _, ok := readFields(w, r, 1024); !ok || !validID(record) {
-			status = 400
-			return
-		}
-		if l.store.deleteConnection(s.owner, record) != nil {
-			status = 404
-			return
-		}
-		l.revokeRemotesLocked(s.owner, record, "")
-		status = 204
-	default:
-		status = 404
-	}
+	status = 404
 }

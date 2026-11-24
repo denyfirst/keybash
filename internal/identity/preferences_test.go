@@ -34,7 +34,7 @@ func TestLookIsKeptWithTheAccountAndArrivesWithThePage(t *testing.T) {
 		c.expect("POST", "/api/preferences", inputJSON(map[string]string{"theme": theme, "menu": menu}), status)
 	}
 	choose("dark", "collapsed", 204)
-	for _, path := range []string{"/", "/keys", "/account", "/installation", "/users", "/servers"} {
+	for _, path := range []string{"/", "/account", "/installation", "/users", "/servers", "/servers/" + strings.Repeat("c", 32)} {
 		if got := root(c, path); got != `<html lang="en" data-theme="dark" data-menu="collapsed">` {
 			t.Fatalf("%s arrived as %s", path, got)
 		}
@@ -48,7 +48,7 @@ func TestLookIsKeptWithTheAccountAndArrivesWithThePage(t *testing.T) {
 	} {
 		c.expect("POST", "/api/preferences", body, 400)
 	}
-	if got := root(c, "/keys"); got != `<html lang="en" data-theme="dark" data-menu="collapsed">` {
+	if got := root(c, "/account"); got != `<html lang="en" data-theme="dark" data-menu="collapsed">` {
 		t.Fatalf("a refused choice changed the look: %s", got)
 	}
 	// Only a ready session of this account, with its proof, chooses.
@@ -173,7 +173,7 @@ func TestLookRecordIsSealedOwnedAndGoesWithTheAccount(t *testing.T) {
 	}
 	var raw []byte
 	_ = s.view(func(tx *bolt.Tx) error {
-		raw = bytes.Clone(tx.Bucket(preferenceBucket).Get(credentialKey(alice.ID, alice.ID)))
+		raw = bytes.Clone(tx.Bucket(preferenceBucket).Get(lookKey(alice.ID, alice.ID)))
 		return nil
 	})
 	if len(raw) == 0 || bytes.Contains(raw, []byte("dark")) || bytes.Contains(raw, []byte("collapsed")) {
@@ -194,10 +194,10 @@ func TestLookRecordIsSealedOwnedAndGoesWithTheAccount(t *testing.T) {
 	// and stops a backup; under her name with his ID it stops one too.
 	var bobs []byte
 	_ = s.view(func(tx *bolt.Tx) error {
-		bobs = bytes.Clone(tx.Bucket(preferenceBucket).Get(credentialKey(bob.ID, bob.ID)))
+		bobs = bytes.Clone(tx.Bucket(preferenceBucket).Get(lookKey(bob.ID, bob.ID)))
 		return nil
 	})
-	put(credentialKey(bob.ID, bob.ID), raw)
+	put(lookKey(bob.ID, bob.ID), raw)
 	if got := s.preferencesOf(bob.ID); got != (preferences{}) {
 		t.Fatalf("a moved record read as %+v", got)
 	}
@@ -207,14 +207,14 @@ func TestLookRecordIsSealedOwnedAndGoesWithTheAccount(t *testing.T) {
 	if _, e := s.Backup(&bytes.Buffer{}, now); e == nil {
 		t.Fatal("a store with a moved look backed up")
 	}
-	put(credentialKey(bob.ID, bob.ID), bobs)
-	put(credentialKey(alice.ID, alice.ID), nil)
-	put(credentialKey(alice.ID, bob.ID), raw)
+	put(lookKey(bob.ID, bob.ID), bobs)
+	put(lookKey(alice.ID, alice.ID), nil)
+	put(lookKey(alice.ID, bob.ID), raw)
 	if _, e := s.Backup(&bytes.Buffer{}, now); e == nil {
 		t.Fatal("a store with a look under another account's ID backed up")
 	}
-	put(credentialKey(alice.ID, bob.ID), nil)
-	put(credentialKey(alice.ID, alice.ID), raw)
+	put(lookKey(alice.ID, bob.ID), nil)
+	put(lookKey(alice.ID, alice.ID), raw)
 	// A backup carries both looks; a restore brings them back.
 	data := backupOf(t, s, now)
 	restored, _, _, e := restoreStore(emptyDataDir(t), key, data, now)
@@ -230,7 +230,7 @@ func TestLookRecordIsSealedOwnedAndGoesWithTheAccount(t *testing.T) {
 		t.Fatal("fixture account deletion refused")
 	}
 	_ = s.view(func(tx *bolt.Tx) error {
-		raw = tx.Bucket(preferenceBucket).Get(credentialKey(bob.ID, bob.ID))
+		raw = tx.Bucket(preferenceBucket).Get(lookKey(bob.ID, bob.ID))
 		return nil
 	})
 	if raw != nil {
@@ -242,3 +242,7 @@ func TestLookRecordIsSealedOwnedAndGoesWithTheAccount(t *testing.T) {
 }
 
 func stringsRepeat(s string, n int) string { return string(bytes.Repeat([]byte(s), n)) }
+
+// lookKey is where a look is kept: under its owner, and an ID that must be
+// the owner's own.
+func lookKey(owner, id string) []byte { return []byte(owner + "/" + id) }

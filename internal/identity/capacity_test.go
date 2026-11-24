@@ -25,22 +25,16 @@ func capacityOwner(t *testing.T, l *Lab, store *Store, name, record string) (*cu
 	if err != nil {
 		t.Fatal("capacity owner missing")
 	}
-	credential, err := store.putCredential(account.ID, Credential{Name: "fixture", Kind: "password", Username: "synthetic-user", Secret: "Synthetic remote password"})
-	if err != nil {
-		t.Fatal("capacity credential fixture failed")
-	}
+	// They are put on the same account, as an administrator would.
 	alice, _ := store.lookup("alice")
-	row, err := store.readConnection(alice.ID, record)
-	if err != nil {
-		t.Fatal("capacity connection fixture missing")
+	if store.setAccountPerson(alice.ID, strings.Repeat("a", 32), record, account.ID, true, time.Now()) != nil {
+		t.Fatal("capacity account fixture failed")
 	}
-	row.ID, row.Revision, row.Credential = "", 0, credential
-	connection, err := store.putConnection(account.ID, row)
-	if err != nil {
-		t.Fatal("capacity connection fixture failed")
-	}
-	openTo(t, l, account.ID)
 	l.mu.Lock()
+	if l.reloadServersLocked() != nil {
+		l.mu.Unlock()
+		t.Fatal("capacity reload failed")
+	}
 	if !l.refreshLocked(name) {
 		l.mu.Unlock()
 		t.Fatal("capacity account refresh failed")
@@ -55,7 +49,7 @@ func capacityOwner(t *testing.T, l *Lab, store *Store, name, record string) (*cu
 	l.sessions[id].reauthUntil = l.now().Add(2 * time.Minute)
 	csrf := l.csrf(id)
 	l.mu.Unlock()
-	return &custodyClient{t: t, l: l, cookie: sessionCookie(raw, 3600), csrf: csrf}, connection
+	return &custodyClient{t: t, l: l, cookie: sessionCookie(raw, 3600), csrf: csrf}, record
 }
 
 func TestRemoteCapacityConfiguredOwnersGlobalAndReturn(t *testing.T) {
@@ -71,7 +65,7 @@ func TestRemoteCapacityConfiguredOwnersGlobalAndReturn(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		grantFixture(t, alice, record)
 	}
-	busy := alice.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 503)
+	busy := alice.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": record}), 503)
 	if busy.Header().Get("X-Keybash-Capacity") != "full" || busy.Header().Get("Retry-After") != "5" {
 		t.Fatal("capacity refusal lost truthful busy response")
 	}
@@ -81,7 +75,7 @@ func TestRemoteCapacityConfiguredOwnersGlobalAndReturn(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		grantFixture(t, carol, carolRecord)
 	}
-	carol.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": carolRecord}), 503)
+	carol.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": carolRecord}), 503)
 	l.mu.Lock()
 	if len(l.remote.leases) != 10 {
 		l.mu.Unlock()
@@ -107,7 +101,7 @@ func TestRemoteCapacityConcurrentAdmissionAndExpiry(t *testing.T) {
 		wg.Go(func() { l.mu.Lock(); defer l.mu.Unlock(); _, _ = l.grantRemoteLocked(id, record) })
 	}
 	wg.Wait()
-	rate := c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 429)
+	rate := c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": record}), 429)
 	if rate.Header().Get("Retry-After") != "60" || rate.Header().Get("X-Keybash-Capacity") != "" {
 		t.Fatal("attempt budget confused with capacity")
 	}
@@ -205,7 +199,7 @@ func TestRemoteCapacityRejectsInvalidConstructorAndBrowserOverrides(t *testing.T
 		}
 	}
 	l, _, c, record, _ := remoteFixtureWithLimits(t, "https://127.0.0.1:8443", sessionlimits.Limits{Total: 1, PerOwner: 1})
-	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record, "total": "100"}), 400)
+	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": record, "total": "100"}), 400)
 	c.expect("POST", "/api/remote/capacity", `{"total":100,"per_owner":100}`, 404)
 	var result sessionlimits.Limits
 	if json.Unmarshal(c.expect("GET", "/api/remote/capacity", "", 200).Body.Bytes(), &result) != nil || result.Total != 1 || l.remote.limits.PerOwner != 1 {

@@ -23,7 +23,7 @@ func TestWorkspaceArrivesInTheSessionStage(t *testing.T) {
 		}
 		return found[0][1]
 	}
-	for _, path := range []string{"/", "/keys", "/account", "/installation", "/users", "/servers"} {
+	for _, path := range []string{"/", "/account", "/installation", "/users", "/servers", "/users/" + strings.Repeat("b", 32), "/servers/" + strings.Repeat("c", 32)} {
 		if stage := stageOf(c, path); stage != "ready" {
 			t.Fatalf("%s arrived as %q for a ready session", path, stage)
 		}
@@ -34,7 +34,7 @@ func TestWorkspaceArrivesInTheSessionStage(t *testing.T) {
 	enrollFixture(t, store, "bob", time.Now())
 	bob := &custodyClient{t: t, l: c.l}
 	bob.expect("POST", "/api/session", inputJSON(map[string]string{"username": "bob", "password": alicePassword}), 204)
-	if stage := stageOf(bob, "/keys"); stage != "challenge" {
+	if stage := stageOf(bob, "/account"); stage != "challenge" {
 		t.Fatalf("a session awaiting its code arrived as %q", stage)
 	}
 	bob.session("challenge")
@@ -47,7 +47,7 @@ func TestWorkspaceArrivesInTheSessionStage(t *testing.T) {
 		t.Fatalf("a session without a phone arrived as %q", stage)
 	}
 	carol.session("enroll")
-	(&custodyClient{t: t, l: c.l}).expect("GET", "/keys", "", 303)
+	(&custodyClient{t: t, l: c.l}).expect("GET", "/servers/"+strings.Repeat("c", 32), "", 303)
 	// Only the three stages are ever written into the page.
 	for _, stage := range []string{"", "admin", "Ready", `ready" hidden="`, "ready "} {
 		w := httptest.NewRecorder()

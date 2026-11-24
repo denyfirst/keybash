@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/denyfirst/keybash/internal/rdpcert"
 	"github.com/denyfirst/keybash/internal/sessionlimits"
@@ -37,35 +38,16 @@ func policyFor(t *testing.T, endpoint string) *targetguard.Policy {
 func TestServersFromTheFileMoveInOnce(t *testing.T) {
 	store, _, _ := bootstrapped(t)
 	alice := mustLookup(t, store, "alice")
-	for _, name := range []string{"bob", "carol", "dave"} {
-		if _, e := store.CreateAccount(name, bobPassword); e != nil {
-			t.Fatal("fixture account failed")
-		}
+	if _, e := store.CreateAccount("bob", bobPassword); e != nil {
+		t.Fatal("fixture account failed")
 	}
-	bob, dave := mustLookup(t, store, "bob"), mustLookup(t, store, "dave")
+	bob := mustLookup(t, store, "bob")
 	literal, desktop := catalogSSHFixture(t), remoteTargetFixture(t)
 	named, e := targetguard.NewNamedTarget(policyFor(t, "10.20.0.6:22"), "ssh.invalid", 22, []netip.Addr{netip.MustParseAddr("10.20.0.6")})
 	if e != nil {
 		t.Fatal("fixture target failed")
 	}
 	byName := RemoteTarget{strings.Repeat("d", 32), "Named box", "ssh", named, hostKeyFixture(t).Marshal()}
-	// Before the upgrade bob connects to two of them, and dave, an auditor
-	// now, kept a connection from before the role changed.
-	for _, owner := range []durableAccount{bob, dave} {
-		credential, e := store.putCredential(owner.ID, Credential{Name: "Synthetic", Kind: "password", Username: "synthetic-user", Secret: "Synthetic remote password"})
-		if e != nil {
-			t.Fatal("fixture credential failed")
-		}
-		for _, target := range []RemoteTarget{literal, desktop} {
-			if owner.ID == dave.ID && target.ID == desktop.ID {
-				continue
-			}
-			if _, e := store.putConnection(owner.ID, connection{Name: "Synthetic", Target: target.ID, Credential: credential, Approval: approvalFingerprint(target), Fingerprint: identityFingerprint(target)}); e != nil {
-				t.Fatal("fixture connection failed")
-			}
-		}
-	}
-	setRole(t, store, "dave", roleAuditor)
 	networks := TargetNetworks([]netip.Prefix{netip.MustParsePrefix("10.20.0.0/24"), netip.MustParsePrefix("10.34.0.0/24")}, serverProtected)
 	start := func(targets ...RemoteTarget) *Lab {
 		t.Helper()
@@ -81,13 +63,16 @@ func TestServersFromTheFileMoveInOnce(t *testing.T) {
 	if e != nil || len(list) != 3 {
 		t.Fatal("the file's servers did not move in")
 	}
-	access := map[string][]string{literal.ID: {bob.ID}, desktop.ID: {bob.ID}, byName.ID: nil}
+	// They move in open to nobody: an administrator gives them accounts.
 	for _, w := range list {
-		if !w.FromFile || w.AddedBy != "" || w.Removed || !slices.Equal(w.Access, access[w.ID]) {
+		if !w.FromFile || w.AddedBy != "" || w.Removed || len(w.Access) != 0 {
 			t.Fatalf("moved server %+v", w)
 		}
 	}
-	// Each connection keeps the approval it had.
+	if accounts, e := store.listServerAccounts(); e != nil || len(accounts) != 0 {
+		t.Fatal("moving in made accounts")
+	}
+	// Each keeps the identity it had.
 	l.mu.Lock()
 	for _, target := range []RemoteTarget{literal, desktop, byName} {
 		moved, ok := l.remote.targets[target.ID]
@@ -96,11 +81,15 @@ func TestServersFromTheFileMoveInOnce(t *testing.T) {
 			t.Fatalf("%s moved with another identity", target.Name)
 		}
 	}
-	_, bobReaches := l.mayUseLocked(bob.ID, literal.ID)
-	_, daveReaches := l.mayUseLocked(dave.ID, literal.ID)
 	l.mu.Unlock()
-	if !bobReaches || daveReaches {
-		t.Fatal("access after moving in is not exactly the connections before it")
+	// An account on one of them is reached by the people it lists.
+	account := accountFixture(t, l, literal.ID, "deploy", "", bob.ID)
+	l.mu.Lock()
+	_, bobReaches := l.mayUseLocked(bob.ID, account)
+	_, aliceReaches := l.mayUseLocked(alice.ID, account)
+	l.mu.Unlock()
+	if !bobReaches || aliceReaches {
+		t.Fatal("an account on a server from the file did not decide who reaches it")
 	}
 	// A server with a DNS name is reachable only while every pinned address
 	// lies inside the networks of the start.
@@ -126,7 +115,7 @@ func TestServersFromTheFileMoveInOnce(t *testing.T) {
 	}
 	// Removed on the page, a server from the file stays a marker: it cannot
 	// be changed, and the file does not bring it back.
-	if store.deleteServer(alice.ID, byName.ID) != nil || store.deleteServer(alice.ID, byName.ID) != errMissing || store.renameServer(alice.ID, byName.ID, "Back") != errMissing || store.setServerAccess(alice.ID, byName.ID, bob.ID, true) != errMissing {
+	if store.deleteServer(alice.ID, byName.ID) != nil || store.deleteServer(alice.ID, byName.ID) != errMissing || store.renameServer(alice.ID, byName.ID, "Back") != errMissing || addAccountTo(store, alice.ID, byName.ID) != errMissing {
 		t.Fatal("a removed server from the file can still be changed")
 	}
 	_ = l.Close()
@@ -144,13 +133,19 @@ func TestServersFromTheFileMoveInOnce(t *testing.T) {
 		t.Fatal("a removed server came back from the file")
 	}
 	// One added to the file later moves in at the next start, open to nobody.
-	if row, listed := serverRow(view, extra.ID); !listed || len(row.Access) != 0 || !row.Available {
+	if row, listed := serverRow(view, extra.ID); !listed || len(row.Accounts) != 0 || !row.Available {
 		t.Fatalf("a server added to the file later: %+v", row)
 	}
 	list, _ = store.listServers()
 	if !slices.ContainsFunc(list, func(w webServer) bool { return w.ID == byName.ID && w.Removed && len(w.Access) == 0 }) {
 		t.Fatal("the removed server left no marker")
 	}
+}
+
+// addAccountTo tries to give a server an account, and says why not.
+func addAccountTo(store *Store, actor, server string) error {
+	_, e := store.addServerAccount(actor, server, "password", "deploy", "Synthetic password", nil, time.Now())
+	return e
 }
 
 // A record has one shape per kind of server; anything else does not load.

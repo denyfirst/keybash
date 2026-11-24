@@ -18,33 +18,22 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		"/vendor/ironrdp/ironrdp_web.js": "vendor/ironrdp/ironrdp_web.js", "/vendor/ironrdp/ironrdp_web_bg.wasm": "vendor/ironrdp/ironrdp_web_bg.wasm"}
 	file := assets[r.URL.Path]
 	protocol := ""
-	record := ""
-	shared := false
+	account := ""
+	// A session opens on its own page, by the account's ID (ADR 0010):
+	// /remote/{ssh|rdp}/{account}.
 	if strings.HasPrefix(r.URL.Path, "/remote/") {
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/remote/"), "/")
-		// A server's shared credential (ADR 0009) opens on its own path, by
-		// the server's ID: /remote/shared/{ssh|rdp}/{server}.
-		if len(parts) == 3 && parts[0] == "shared" {
-			shared, parts = true, parts[1:]
-		}
 		if len(parts) != 2 || !validID(parts[1]) || (parts[0] != "ssh" && parts[0] != "rdp") {
 			return false
 		}
-		protocol, record = parts[0], parts[1]
-		var c connection
-		var e error
-		if !shared {
-			c, e = l.store.readConnection(s.owner, record)
-		}
+		protocol, account = parts[0], parts[1]
 		l.mu.Lock()
-		allowed := e == nil && !l.closed && s.ctx.Err() == nil && l.remote != nil
-		if allowed && shared {
-			// The same checks as opening it: on the list, usable, and shared.
-			target, _, ok := l.sharedLocked(s, record)
+		// The same checks as opening it: on the account, the server usable,
+		// and of the protocol in the path.
+		allowed := !l.closed && s.ctx.Err() == nil && l.remote != nil
+		if allowed {
+			target, _, ok := l.accountLocked(s, account)
 			allowed = ok && target.Protocol == protocol
-		} else if allowed {
-			target, ok := l.targetLocked(s, c.Target)
-			allowed = ok && target.Protocol == protocol && connectionTrusted(c, target, l.now())
 		}
 		l.mu.Unlock()
 		if !allowed {
@@ -88,11 +77,7 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		mime = "text/html; charset=utf-8"
 		// Mark the body tag whatever else it carries. A page that cannot be
 		// marked would fall back to the lab login, so it is refused instead.
-		mark := `<body data-owned-remote="` + html.EscapeString(protocol) + `" data-connection="` + html.EscapeString(record) + `"`
-		// The page then opens it with open-shared, by the server's ID.
-		if shared {
-			mark += ` data-shared="1"`
-		}
+		mark := `<body data-owned-remote="` + html.EscapeString(protocol) + `" data-account="` + html.EscapeString(account) + `"`
 		// A desktop opens with the account's chosen picture, one fixed word.
 		if picture := l.store.preferencesOf(s.owner).Picture; protocol == "rdp" && (picture == "smooth" || picture == "sharp") {
 			mark += ` data-picture="` + picture + `"`

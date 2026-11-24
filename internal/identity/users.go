@@ -171,7 +171,9 @@ func (s *Store) claimInvite(name, code string, hash PasswordHash, now time.Time)
 // changeAccount applies one administrator's change to another account in one
 // transaction. The actor must be an active administrator, may not change
 // themselves here (their own password and factor are on the Account page),
-// and the result must leave at least one active administrator.
+// and the result must leave at least one active administrator. An auditor
+// reaches no server, so one is taken off every server account in the same
+// transaction.
 func (s *Store) changeAccount(actor, target string, change func(*durableAccount) error) error {
 	return s.updateWhy(func(tx *bolt.Tx) error {
 		if actor == target {
@@ -192,12 +194,15 @@ func (s *Store) changeAccount(actor, target string, change func(*durableAccount)
 		if s.saveAccount(tx, a) != nil {
 			return errRefused
 		}
+		if a.Role == roleAuditor && s.dropPerson(tx, a.ID) != nil {
+			return errRefused
+		}
 		return s.anAdminRemains(tx)
 	})
 }
 
-// deleteAccount removes another account with everything it owns: its keys,
-// passwords and connections go with it, in the same transaction.
+// deleteAccount removes another account, takes it off every server account,
+// and removes how its pages look, in the same transaction.
 func (s *Store) deleteAccount(actor, target string) error {
 	return s.updateWhy(func(tx *bolt.Tx) error {
 		if actor == target {
@@ -214,7 +219,7 @@ func (s *Store) deleteAccount(actor, target string) error {
 		if e = s.deleteOwned(tx, a.ID); e != nil {
 			return e
 		}
-		if e = s.dropAccess(tx, a.ID); e != nil {
+		if e = s.dropPerson(tx, a.ID); e != nil {
 			return e
 		}
 		if tx.Bucket(nameBucket).Delete(s.nameIndex(a.Username)) != nil || tx.Bucket(accountBucket).Delete([]byte(a.ID)) != nil {
@@ -224,11 +229,10 @@ func (s *Store) deleteAccount(actor, target string) error {
 	})
 }
 
-// deleteOwned removes every key, password and connection an account owns,
-// and how its pages look.
+// deleteOwned removes how an account's pages look, the one thing it owns.
 func (s *Store) deleteOwned(tx *bolt.Tx, owner string) error {
 	prefix := []byte(owner + "/")
-	for _, name := range [][]byte{credentialBucket, connectionBucket, preferenceBucket} {
+	for _, name := range [][]byte{preferenceBucket} {
 		b := tx.Bucket(name)
 		if b == nil {
 			continue
@@ -366,10 +370,11 @@ func (s *Store) resetPassword(name, code, factor string, hash PasswordHash, now 
 }
 
 // startOverAccount sends an account back to an invite when its holder lost
-// both password and phone. Its keys, passwords and connections are deleted in
-// the same transaction, so the administrator who receives the new invite code
-// never reaches what the account held. Its ID, username and role stay; a
-// blocked account stays blocked. hash is of a random secret nobody keeps.
+// both password and phone, and deletes how its pages look in the same
+// transaction. Its ID, username and role stay, and so do the server accounts
+// it is on: they belong to the servers, and an administrator manages them
+// anyway. A blocked account stays blocked. hash is of a random secret nobody
+// keeps.
 func (s *Store) startOverAccount(actor, target string, hash PasswordHash, now time.Time) (string, error) {
 	var code string
 	e := s.updateWhy(func(tx *bolt.Tx) error {

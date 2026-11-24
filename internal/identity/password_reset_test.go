@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -126,35 +127,28 @@ func TestPasswordResetCodesAreForEnrolledPeople(t *testing.T) {
 	f.alice.expect("POST", "/api/users/"+carol.ID+"/password", "{}", 428)
 }
 
-// Starting over, for someone who lost both password and phone, deletes what
-// the account held in the same step, so the administrator who receives the
-// new invite code never reaches it. The ID, name and role stay.
+// Starting over, for someone who lost both password and phone, makes the
+// account a fresh invite and deletes how its pages look. The ID, name and role
+// stay, and so do the server accounts it is on: they belong to the servers.
 func TestStartOverDeletesWhatTheAccountHeld(t *testing.T) {
 	f := adminFixture(t)
-	frankSession, frank := f.person("frank", roleAuditor)
-	record := Credential{Name: "Frank key", Kind: "password", Username: "frank", Secret: "Synthetic start-over secret 91"}
-	if validateCredential(&record) != nil {
-		t.Fatal("fixture credential refused")
+	frankSession, frank := f.person("frank", roleUser)
+	if f.store.setPreferences(frank.ID, preferences{Theme: "dark"}) != nil {
+		t.Fatal("fixture look failed")
 	}
-	credential, e := f.store.putCredential(frank.ID, record)
-	if e != nil {
-		t.Fatal("fixture credential failed")
-	}
-	if _, e = f.store.putConnection(frank.ID, connection{Name: "Frank server", Target: f.target.ID, Credential: credential, Approval: approvalFingerprint(f.target), Fingerprint: identityFingerprint(f.target)}); e != nil {
-		t.Fatal("fixture connection failed")
-	}
+	account := accountFixture(t, f.l, f.target.ID, "frank", "Synthetic start-over secret 91", frank.ID)
 	self := mustLookup(t, f.store, "alice")
 	f.alice.expect("POST", "/api/users/"+self.ID+"/restart", "{}", 403)
 	f.alice.expect("POST", "/api/users/"+frank.ID+"/restart", `{"extra":"1"}`, 400)
 	code := resetCode(t, f.alice.expect("POST", "/api/users/"+frank.ID+"/restart", "{}", 200))
 	frankSession.expect("GET", "/api/session", "", 401)
 	a := mustLookup(t, f.store, "frank")
-	if a.ID != frank.ID || a.Role != roleAuditor || !a.Invited || a.Seed != "" || len(a.Recovery) != 0 || a.password() == frank.password() {
+	if a.ID != frank.ID || a.Role != roleUser || !a.Invited || a.Seed != "" || len(a.Recovery) != 0 || a.password() == frank.password() {
 		t.Fatal("starting over did not make the account a fresh invite")
 	}
 	prefix := []byte(frank.ID + "/")
 	if f.store.view(func(tx *bolt.Tx) error {
-		for _, name := range [][]byte{credentialBucket, connectionBucket} {
+		for _, name := range [][]byte{preferenceBucket} {
 			if b := tx.Bucket(name); b != nil {
 				if k, _ := b.Cursor().Seek(prefix); k != nil && bytes.HasPrefix(k, prefix) {
 					return errRefused
@@ -163,9 +157,12 @@ func TestStartOverDeletesWhatTheAccountHeld(t *testing.T) {
 		}
 		return nil
 	}) != nil {
-		t.Fatal("a key, password or connection outlived starting over")
+		t.Fatal("a look outlived starting over")
 	}
-	if _, e = f.store.Backup(io.Discard, f.now); e != nil {
+	if got, e := f.store.readServerAccount(f.target.ID, account); e != nil || !slices.Equal(got.People, []string{frank.ID}) {
+		t.Fatal("starting over took the person off a server account")
+	}
+	if _, e := f.store.Backup(io.Discard, f.now); e != nil {
 		t.Fatal("the store no longer verifies after starting over")
 	}
 	(&custodyClient{t: t, l: f.l}).expect("POST", "/api/session", inputJSON(map[string]string{"username": "frank", "password": bobPassword}), 401)

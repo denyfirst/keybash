@@ -39,7 +39,7 @@ try {
   // 1. Windows refuses the stored password: the gateway's close says so.
   await page.goto(desktop);
   stage = 'the gateway\'s ending';
-  await notice('The server did not accept the user name or password saved for this connection.');
+  await notice('The server did not accept the account’s name or password. Your administrator can check it on the server’s page.');
   assert.deepEqual(sockets, [config.Origin.replace('https:', 'wss:') + '/api/remote/desktop']);
   assert.equal(await page.evaluate(() => typeof WebAssembly === 'object' && performance.getEntriesByType('resource').some(e => e.name.endsWith('/vendor/ironrdp/ironrdp_web_bg.wasm'))), true);
 

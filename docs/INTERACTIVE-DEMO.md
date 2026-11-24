@@ -30,8 +30,8 @@ dependencies for `web/` and Playwright Chromium as `ENGINEERING.md` describes.
 ./scripts/demo.ps1 -Serve
 ```
 
-The same synthetic demo account, keys and two sample connections are prepared
-in Go and served at `https://127.0.0.1:8443/login`. The terminal prints:
+The same synthetic demo person and a sample server with one account on it are
+prepared in Go and served at `https://127.0.0.1:8443/login`. The terminal prints:
 - the username and the password;
 - the MFA seed;
 - the one-time recovery codes.
@@ -52,8 +52,9 @@ the normal UI automatically. There is no MFA, CSRF or ownership bypass.
 
 An MFA code cannot be used twice. Wait for the code used at start to expire,
 or use one of the unused recovery codes on the guide page.
-- Adding keys and connections, and connecting, need no code.
-- Showing and deleting do, if more than 10 minutes have passed since sign-in:
+- Connecting needs no code.
+- Changing servers, their accounts and people does, if more than 10 minutes
+  have passed since sign-in:
   a small window asks for the phone's code (or a recovery code) and then
   carries on.
 - If you change the password or the MFA, the guide's details may no longer
@@ -61,10 +62,10 @@ or use one of the unused recovery codes on the guide page.
 
 ## What to try
 
-- **Account:** sign-in, MFA, sign-out, re-verification, the encrypted record
-  list, and adding, showing and deleting synthetic records.
-- **Connections:** **Connect** on the two samples, creating a new connection,
-  the selectors, naming, and moving between windows.
+- **Account:** sign-in, MFA, sign-out and re-verification.
+- **Your servers:** **Connect** on the sample, and moving between windows.
+- **Servers:** the sample server's page, its account, and adding another
+  account (a key made here, or a password), with who signs in with it.
 - **Terminal:** `help`, `whoami`, `hostname`, `pwd`, `ls`, `uname`, `date`,
   `echo hello`, `clear` and `exit`. Also try:
   - Unicode text;
@@ -74,8 +75,8 @@ or use one of the unused recovery codes on the guide page.
   - how the terminal looks when resized.
 - **Desktop:** a test picture marked SIMULATION; clicks and typing change it.
   Backspace, Enter, local full screen and the **Disconnect** button.
-- **Revocation:** open both connections, then choose **Sign out** in the menu.
-  Both views must close and the picture must be cleared.
+- **Revocation:** open the sample, then choose **Sign out** in the menu. Its
+  view must close.
 
 The terminal is a list of synthetic commands, not a Linux shell. There is no
 vim, tmux, real filesystem, process or job control, shell quoting or real SSH

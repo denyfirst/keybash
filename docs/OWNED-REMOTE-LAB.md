@@ -1,5 +1,12 @@
 # Account-owned remote session laboratory
 
+> **Since 24 November 2026 (ADR 0010):** people no longer keep their own
+> keys, passwords or connections. A server has accounts, each a key Keybash
+> makes or a password typed once, and lists the people who sign in as it. The
+> personal records, the reveal and the connection approvals described below are
+> history; the first start of that version erases what they stored. The
+> sealing, MFA and lease rules still hold. See `adr/0010-server-accounts.md`.
+
 20 October update: the owner/global lease and independent pre-proof socket
 budgets are now operator-configurable, defaulting to two/eight. Full capacity
 returns a fixed busy response without evicting live sessions. Details and

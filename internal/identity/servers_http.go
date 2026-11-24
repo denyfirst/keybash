@@ -105,35 +105,52 @@ func (l *Lab) webTargetLocked(w webServer) (RemoteTarget, bool) {
 	return RemoteTarget{ID: w.ID, Name: w.Name, Protocol: w.Protocol, Target: target, Identity: bytes.Clone(w.identity())}, true
 }
 
-// reloadServersLocked rebuilds the reachable servers from the store, then
-// ends every lease whose owner may no longer use its server or whose server's
-// identity changed since it was granted. A store whose servers cannot be read
-// leaves none.
+// reloadServersLocked rebuilds the reachable servers and who may use each
+// account from the store, then ends every lease whose person may no longer
+// use its account or whose server's identity changed since it was granted. A
+// store whose servers or accounts cannot be read leaves none.
 func (l *Lab) reloadServersLocked() error {
 	list, e := l.store.listServers()
-	if e != nil {
-		list = nil
+	accounts, ae := l.store.listServerAccounts()
+	if e != nil || ae != nil {
+		list, accounts = nil, nil
+		if e == nil {
+			e = ae
+		}
 	}
-	targets, access, unchecked := make(map[string]RemoteTarget), make(map[string]map[string]bool), make(map[string]bool)
+	targets, unchecked, infos := make(map[string]RemoteTarget), make(map[string]bool), make(map[string]accountInfo)
+	listed := make(map[string]webServer, len(list))
 	for _, w := range list {
+		if w.Removed {
+			continue
+		}
+		listed[w.ID] = w
 		if t, ok := l.webTargetLocked(w); ok {
-			targets[w.ID], access[w.ID] = t, make(map[string]bool, len(w.Access))
-			for _, person := range w.Access {
-				access[w.ID][person] = true
-			}
+			targets[w.ID] = t
 			if w.Unchecked {
 				unchecked[w.ID] = true
 			}
 		}
 	}
-	l.remote.targets, l.remote.access, l.remote.unchecked = targets, access, unchecked
+	for _, a := range accounts {
+		w, ok := listed[a.Server]
+		if !ok {
+			continue
+		}
+		people := make(map[string]bool, len(a.People))
+		for _, person := range a.People {
+			people[person] = true
+		}
+		infos[a.ID] = accountInfo{server: w.ID, name: w.Name, protocol: w.Protocol, system: w.System, username: a.Current.Username, kind: a.Current.Kind, people: people}
+	}
+	l.remote.targets, l.remote.unchecked, l.remote.accounts = targets, unchecked, infos
 	for id := range l.remote.seen {
 		if _, listed := targets[id]; !listed {
 			delete(l.remote.seen, id)
 		}
 	}
 	for key, lease := range l.remote.leases {
-		if t, ok := l.mayUseLocked(lease.owner, lease.target); !ok || approvalFingerprint(t) != lease.approval {
+		if t, ok := l.mayUseLocked(lease.owner, lease.account); !ok || t.ID != lease.target || approvalFingerprint(t) != lease.approval {
 			if lease.cancel != nil {
 				lease.cancel(terminalweb.ReasonAccessChanged)
 			}
@@ -141,25 +158,6 @@ func (l *Lab) reloadServersLocked() error {
 		}
 	}
 	return e
-}
-
-// mayUseLocked is the server owner may connect to: a reachable server whose
-// access list names owner. Administrators manage every server but connect
-// only where they are listed.
-func (l *Lab) mayUseLocked(owner, id string) (RemoteTarget, bool) {
-	t, ok := l.remote.targets[id]
-	if !ok || !l.remote.access[id][owner] {
-		return RemoteTarget{}, false
-	}
-	return t, true
-}
-
-// targetLocked is mayUseLocked for a session that reaches servers at all.
-func (l *Lab) targetLocked(s *session, id string) (RemoteTarget, bool) {
-	if !l.serversLocked(s) {
-		return RemoteTarget{}, false
-	}
-	return l.mayUseLocked(s.owner, id)
 }
 
 // serverView is one row of the Servers page: never a credential.
@@ -175,12 +173,12 @@ type serverView struct {
 	Certificate string   `json:"certificate,omitempty"` // RDP: see certificateStateLocked
 	Expires     int64    `json:"expires,omitempty"`     // RDP: when the pinned certificate ends
 	Unchecked   bool     `json:"unchecked,omitempty"`   // RDP: pinned without the console check
-	Access      []string `json:"access"`                // who may use it
+	System      string   `json:"system,omitempty"`      // the mark its cards show
 	AddedBy     string   `json:"added_by,omitempty"`    // empty when it came from the server file
 	Added       int64    `json:"added"`
-	// Shared is the server's shared credential as an administrator or
-	// auditor may see it (ADR 0009): never its secret.
-	Shared *sharedView `json:"shared,omitempty"`
+	// Accounts are the server's accounts as an administrator or auditor may
+	// see them (ADR 0010), with who is on each: never a secret.
+	Accounts []accountView `json:"accounts"`
 }
 type serversView struct {
 	Networks []string          `json:"networks"`
@@ -188,7 +186,7 @@ type serversView struct {
 	SSH      bool              `json:"ssh"`    // this installation serves SSH
 	RDP      bool              `json:"rdp"`    // this installation serves RDP
 	Servers  []serverView      `json:"servers"`
-	Names    map[string]string `json:"names"` // username of everyone on a list, and of whoever added a server
+	Names    map[string]string `json:"names"` // username of everyone on an account, and of whoever added a server or set an account
 }
 
 // serversViewLocked is what an administrator manages and an auditor reads.
@@ -201,7 +199,7 @@ func (l *Lab) serversViewLocked(admin bool) (serversView, error) {
 	if e != nil {
 		return serversView{}, e
 	}
-	shared, e := l.store.listShared()
+	accountList, e := l.store.listServerAccounts()
 	if e != nil {
 		return serversView{}, e
 	}
@@ -223,18 +221,27 @@ func (l *Lab) serversViewLocked(admin bool) (serversView, error) {
 		_, reachable := l.remote.targets[w.ID]
 		row := serverView{ID: w.ID, Name: w.Name, Protocol: w.Protocol, Hostname: w.Hostname, Port: w.Port, Addresses: slices.Clone(w.Pins),
 			Fingerprint: identityFingerprint(RemoteTarget{Protocol: w.Protocol, Identity: w.identity()}), Available: reachable && usableTarget(l.remote.targets[w.ID], l.now()),
-			Unchecked: w.Unchecked, Access: append([]string{}, w.Access...), AddedBy: w.AddedBy, Added: w.Added}
+			Unchecked: w.Unchecked, System: w.System, Accounts: make([]accountView, 0), AddedBy: w.AddedBy, Added: w.Added}
 		row.Certificate, row.Expires = l.certificateStateLocked(w)
 		if w.Hostname == "" {
 			row.Hostname, row.Addresses = w.Address, []string{w.Address}
 		}
-		for _, id := range append(slices.Clone(w.Access), w.AddedBy) {
-			named(id)
+		named(w.AddedBy)
+		for _, a := range accountList {
+			if a.Server != w.ID {
+				continue
+			}
+			row.Accounts = append(row.Accounts, a.view())
+			for _, id := range append(slices.Clone(a.People), a.SetBy) {
+				named(id)
+			}
 		}
-		if c, ok := shared[w.ID]; ok {
-			row.Shared = c.view()
-			named(c.SetBy)
-		}
+		slices.SortFunc(row.Accounts, func(a, b accountView) int {
+			if order := strings.Compare(strings.ToLower(a.Username), strings.ToLower(b.Username)); order != 0 {
+				return order
+			}
+			return strings.Compare(a.ID, b.ID)
+		})
 		view.Servers = append(view.Servers, row)
 	}
 	slices.SortFunc(view.Servers, func(a, b serverView) int {
@@ -373,8 +380,11 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 		return
 	}
 	// "/api/servers" adds, "/api/servers/scan" reads a new server's identity;
-	// "/api/servers/{id}" and "/api/servers/{id}/{action}" change one.
-	var server, action string
+	// "/api/servers/{id}" and "/api/servers/{id}/{action}" change one;
+	// "/api/servers/{id}/accounts" adds an account to it, and
+	// "/api/servers/{id}/accounts/{account}" with an optional "/{action}"
+	// changes one.
+	var server, account, action string
 	if rest := strings.TrimPrefix(r.URL.Path, "/api/servers"); rest == "" || rest == "/scan" {
 		action = strings.TrimPrefix(rest, "/")
 		if r.Method != "POST" {
@@ -383,13 +393,18 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 		}
 	} else {
 		parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
-		if !strings.HasPrefix(rest, "/") || len(parts) > 2 || !validID(parts[0]) {
+		if !strings.HasPrefix(rest, "/") || len(parts) > 4 || !validID(parts[0]) || len(parts) > 2 && (parts[1] != "accounts" || !validID(parts[2])) {
 			status = 404
 			return
 		}
 		server = parts[0]
-		if len(parts) == 2 {
+		switch len(parts) {
+		case 2:
 			action = parts[1]
+		case 3:
+			account, action = parts[2], "account"
+		case 4:
+			account, action = parts[2], "account-"+parts[3]
 		}
 	}
 	if l.readyLocked(id, true) != s {
@@ -515,6 +530,14 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			return
 		}
 		e = l.store.renameServer(actor, server, fields["name"])
+	case action == "system" && r.Method == "POST":
+		// A label only: which mark the server's cards show.
+		fields, ok := readFields(w, r, 256, "system")
+		if !ok || fields["system"] != "" && !systemNames[fields["system"]] {
+			status = 400
+			return
+		}
+		e = l.store.markServer(actor, server, fields["system"])
 	case action == "scan" && r.Method == "POST":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
@@ -576,58 +599,62 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			return
 		}
 		e = l.store.repinServer(actor, server, key.Marshal())
-	case (action == "grant" || action == "revoke") && r.Method == "POST":
-		fields, ok := readFields(w, r, 1024, "account")
-		if !ok || !validID(fields["account"]) {
-			status = 400
-			return
-		}
-		e = l.store.setServerAccess(actor, server, fields["account"], action == "grant")
-	// The shared credential (ADR 0009): set once, a password replaced at
-	// once, a key replaced in two steps, removed. Nothing here answers with
-	// its secret; the page reads the summary again.
-	case action == "shared" && r.Method == "POST":
-		fields, ok := readFields(w, r, 8192, "kind", "username", "secret")
+	// The accounts (ADR 0010). Nothing here answers with a secret; the page
+	// reads the list again.
+	case action == "accounts" && r.Method == "POST":
+		fields, ok := readFields(w, r, 16*1024, "kind", "username", "secret", "people")
 		defer clear(fields)
-		if !ok || !sharedRequest(fields["kind"], fields["username"], fields["secret"]) {
+		people, listed := peopleInput(fields["people"])
+		if !ok || !listed || !accountRequest(fields["kind"], fields["username"], fields["secret"]) {
 			status = 400
 			return
 		}
-		e = l.store.setShared(actor, server, fields["kind"], fields["username"], fields["secret"], l.now())
-	case action == "shared-password" && r.Method == "POST":
-		fields, ok := readFields(w, r, 8192, "username", "secret")
+		var made string
+		if made, e = l.store.addServerAccount(actor, server, fields["kind"], fields["username"], fields["secret"], people, l.now()); e == nil {
+			result = struct {
+				ID string `json:"id"`
+			}{made}
+		}
+	case (action == "account-grant" || action == "account-revoke") && r.Method == "POST":
+		fields, ok := readFields(w, r, 1024, "person")
+		if !ok || !validID(fields["person"]) {
+			status = 400
+			return
+		}
+		// Taking someone off ends their sessions through it, at the reload below.
+		e = l.store.setAccountPerson(actor, server, account, fields["person"], action == "account-grant", l.now())
+	case action == "account-password" && r.Method == "POST":
+		fields, ok := readFields(w, r, 8192, "secret")
 		defer clear(fields)
-		if !ok || !sharedRequest("password", fields["username"], fields["secret"]) {
+		if !ok || !passwordSecret(fields["secret"]) {
 			status = 400
 			return
 		}
-		e = l.store.replaceSharedPassword(actor, server, fields["username"], fields["secret"], l.now())
-	case action == "shared-next" && (r.Method == "POST" || r.Method == "DELETE"):
+		e = l.store.replaceAccountPassword(actor, server, account, fields["secret"], l.now())
+	case action == "account-next" && (r.Method == "POST" || r.Method == "DELETE"):
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
 			return
 		}
 		if r.Method == "POST" {
-			e = l.store.nextSharedKey(actor, server, l.now())
+			e = l.store.nextAccountKey(actor, server, account, l.now())
 		} else {
-			e = l.store.dropNextSharedKey(actor, server, l.now())
+			e = l.store.dropNextAccountKey(actor, server, account, l.now())
 		}
-	case action == "shared-switch" && r.Method == "POST":
+	case action == "account-switch" && r.Method == "POST":
 		fields, ok := readFields(w, r, 1024, "fingerprint")
 		if !ok || !validFingerprint(fields["fingerprint"]) {
 			status = 400
 			return
 		}
-		e = l.store.switchSharedKey(actor, server, fields["fingerprint"], l.now())
-	case action == "shared" && r.Method == "DELETE":
+		e = l.store.switchAccountKey(actor, server, account, fields["fingerprint"], l.now())
+	case action == "account" && r.Method == "DELETE":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
 			return
 		}
-		if e = l.store.removeShared(actor, server); e == nil {
-			// Nobody connects with it any more, from this moment.
-			l.revokeSharedLocked(server)
-		}
+		// Nobody connects through it any more, from the reload below.
+		e = l.store.removeServerAccount(actor, server, account)
 	case action == "" && r.Method == "DELETE":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
@@ -646,8 +673,8 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 	case e != nil:
 		status = 403
 	default:
-		// The change holds now: whoever lost the server, or a lease granted
-		// for its old identity, is cut off at once.
+		// The change holds now: whoever lost an account, or a lease granted
+		// for a server's old identity, is cut off at once.
 		_ = l.reloadServersLocked()
 	}
 	if e != nil {

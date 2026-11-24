@@ -21,8 +21,8 @@ import (
 // like connections: a database stays as it was until the first server is
 // added or moved in from the operator's server file. Nothing in a record is
 // secret, but it decides where the gateway dials and whose sessions may use
-// it, so it is sealed like an account and cannot be changed on disk without
-// the instance key.
+// it, so it is sealed like a person's record and cannot be changed on disk
+// without the instance key.
 var serverBucket = []byte("servers-v1")
 
 const maxServers = 256
@@ -32,11 +32,10 @@ var errDuplicate = errors.New("server already listed")
 // webServer is one server: at one literal address, where its pinned key or
 // exact certificate is the whole identity, or at a DNS name that resolves only
 // to its pinned addresses and that its certificate also names. It is reachable
-// only inside the target networks root set for the gateway, and only by the
-// accounts on its access list: none when an administrator adds it. A server
-// moved in from the file keeps its ID, so connections to it keep their
-// approval; one removed on the page stays as a marker so the file never brings
-// it back.
+// only inside the target networks root set for the gateway, and only through
+// its accounts (ADR 0010): none when an administrator adds it. A server moved
+// in from the file keeps its ID; one removed on the page stays as a marker so
+// the file never brings it back.
 type webServer struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -48,13 +47,23 @@ type webServer struct {
 	HostKey     []byte   `json:"host_key,omitempty"`    // SSH: wire format, Ed25519 only
 	Certificate []byte   `json:"certificate,omitempty"` // RDP: the pinned leaf, DER
 	Unchecked   bool     `json:"unchecked,omitempty"`   // RDP at an address: pinned without the console check
-	Access      []string `json:"access,omitempty"`      // account IDs, sorted
-	AddedBy     string   `json:"added_by,omitempty"`    // empty when moved from the file
-	Added       int64    `json:"added"`
-	FromFile    bool     `json:"from_file,omitempty"`
-	Removed     bool     `json:"removed,omitempty"`
-	Revision    uint64   `json:"-"`
+	// System is the mark its cards show (systemNames), a label only: it
+	// changes no target, identity or access.
+	System string `json:"system,omitempty"`
+	// Access is an earlier version's access list, read only to be erased
+	// (eraseRetired): a record is never written with one.
+	Access   []string `json:"access,omitempty"`
+	AddedBy  string   `json:"added_by,omitempty"` // empty when moved from the file
+	Added    int64    `json:"added"`
+	FromFile bool     `json:"from_file,omitempty"`
+	Removed  bool     `json:"removed,omitempty"`
+	Revision uint64   `json:"-"`
 }
+
+// systemNames are the marks web/systems.mjs draws (TestSystemNamesMatchTheMarks).
+var systemNames = map[string]bool{"ubuntu": true, "debian": true, "fedora": true, "redhat": true, "rockylinux": true, "almalinux": true,
+	"centos": true, "archlinux": true, "alpinelinux": true, "opensuse": true, "linuxmint": true, "kalilinux": true, "gentoo": true,
+	"nixos": true, "raspberrypi": true, "freebsd": true, "apple": true, "linux": true, "windows": true, "server": true}
 
 // serverName is a name people see, as the operator catalog accepts one.
 func serverName(name string) bool { return label(name, 160, false) && strings.TrimSpace(name) == name }
@@ -88,7 +97,7 @@ func (w webServer) endpoints() []netip.AddrPort {
 }
 
 func (w webServer) valid() bool {
-	if !validID(w.ID) || !serverName(w.Name) || w.Port == 0 || w.Added <= 0 || len(w.Access) > 256 ||
+	if !validID(w.ID) || !serverName(w.Name) || w.Port == 0 || w.Added <= 0 || len(w.Access) > 256 || w.System != "" && !systemNames[w.System] ||
 		w.FromFile != (w.AddedBy == "") || w.AddedBy != "" && !validID(w.AddedBy) || w.Removed && (!w.FromFile || len(w.Access) != 0) {
 		return false
 	}
@@ -168,7 +177,7 @@ func (s *Store) server(tx *bolt.Tx, id string) (webServer, error) {
 
 // saveServer seals w at its next revision.
 func (s *Store) saveServer(tx *bolt.Tx, w webServer) error {
-	if !w.valid() || w.Revision >= 1<<31 {
+	if !w.valid() || len(w.Access) != 0 || w.Revision >= 1<<31 {
 		return errRefused
 	}
 	b, e := tx.CreateBucketIfNotExists(serverBucket)
@@ -229,14 +238,14 @@ func overlaps(list []webServer, w webServer) bool {
 	})
 }
 
-// addServer stores a new SSH server at a literal address with nobody on its
-// access list. A listed server at the same address and port is refused.
+// addServer stores a new SSH server at a literal address, with no accounts. A
+// listed server at the same address and port is refused.
 func (s *Store) addServer(actor, name, address string, port uint16, hostKey []byte, now time.Time) (string, error) {
 	return s.addWebServer(actor, webServer{Name: name, Protocol: "ssh", Address: address, Port: port, HostKey: bytes.Clone(hostKey)}, now)
 }
 
 // addRDPServer stores a new RDP server at a literal address, identified by its
-// exact certificate, with nobody on its access list. Unchecked records that the
+// exact certificate, with no accounts. Unchecked records that the
 // administrator chose not to compare it on the server's own screen.
 func (s *Store) addRDPServer(actor, name, address string, port uint16, certificate []byte, unchecked bool, now time.Time) (string, error) {
 	return s.addWebServer(actor, webServer{Name: name, Protocol: "rdp", Address: address, Port: port, Certificate: bytes.Clone(certificate), Unchecked: unchecked}, now)
@@ -284,6 +293,14 @@ func (s *Store) editServer(actor, id string, change func(*bolt.Tx, *webServer) e
 	})
 }
 
+// markServer sets the mark a server's cards show; "" takes it away.
+func (s *Store) markServer(actor, id, system string) error {
+	if system != "" && !systemNames[system] {
+		return errRefused
+	}
+	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error { w.System = system; return nil })
+}
+
 func (s *Store) renameServer(actor, id, name string) error {
 	if !serverName(name) {
 		return errRefused
@@ -291,8 +308,8 @@ func (s *Store) renameServer(actor, id, name string) error {
 	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error { w.Name = name; return nil })
 }
 
-// repinServer replaces an SSH server's pinned host key. Connections to it then
-// show it as changed until each owner accepts the new one.
+// repinServer replaces an SSH server's pinned host key. Sessions through its
+// accounts end, and new ones are checked against the new key.
 func (s *Store) repinServer(actor, id string, hostKey []byte) error {
 	if _, ok := ed25519HostKey(hostKey); !ok {
 		return errRefused
@@ -306,9 +323,10 @@ func (s *Store) repinServer(actor, id string, hostKey []byte) error {
 	})
 }
 
-// repinCertificate replaces an RDP server's pinned certificate. Connections to
-// it then show it as changed until each owner accepts the new one. Checked on
-// the console, the server is checked from then on; pinned without that check,
+// repinCertificate replaces an RDP server's pinned certificate. Sessions
+// through its accounts end, and new ones are checked against the new one.
+// Checked on the console, the server is checked from then on; pinned without
+// that check,
 // a new certificate leaves it unchecked, and the same one leaves it as it was.
 func (s *Store) repinCertificate(actor, id string, certificate []byte, unchecked bool) error {
 	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error {
@@ -317,27 +335,6 @@ func (s *Store) repinCertificate(actor, id string, certificate []byte, unchecked
 		}
 		w.Unchecked = unchecked && (w.Unchecked || !bytes.Equal(w.Certificate, certificate))
 		w.Certificate = bytes.Clone(certificate)
-		return nil
-	})
-}
-
-// setServerAccess puts a person on a server's access list, or takes them off.
-// An auditor reaches no server, so is never put on one.
-func (s *Store) setServerAccess(actor, id, person string, allowed bool) error {
-	return s.editServer(actor, id, func(tx *bolt.Tx, w *webServer) error {
-		a, e := s.readAccount(tx, person)
-		if e != nil {
-			return errMissing
-		}
-		at, listed := slices.BinarySearch(w.Access, person)
-		switch {
-		case allowed && a.Role == roleAuditor:
-			return errRefused
-		case allowed && !listed:
-			w.Access = slices.Insert(w.Access, at, person)
-		case !allowed && listed:
-			w.Access = slices.Delete(w.Access, at, at+1)
-		}
 		return nil
 	})
 }
@@ -353,8 +350,8 @@ func (s *Store) deleteServer(actor, id string) error {
 		if w.Removed {
 			return errMissing
 		}
-		// Its shared credential goes with it.
-		if dropShared(tx, id) != nil {
+		// Its accounts go with it.
+		if dropServerAccounts(tx, id) != nil {
 			return errRefused
 		}
 		if !w.FromFile {
@@ -365,30 +362,11 @@ func (s *Store) deleteServer(actor, id string) error {
 	})
 }
 
-// dropAccess takes a deleted account off every access list, in the
-// transaction that deletes it.
-func (s *Store) dropAccess(tx *bolt.Tx, person string) error {
-	list, e := s.servers(tx)
-	if e != nil {
-		return errRefused
-	}
-	for _, w := range list {
-		if at, listed := slices.BinarySearch(w.Access, person); listed {
-			w.Access = slices.Delete(w.Access, at, at+1)
-			if s.saveServer(tx, w) != nil {
-				return errRefused
-			}
-		}
-	}
-	return nil
-}
-
 // importServers moves the servers in the operator's file into the list, once
-// each: the same ID, so every connection keeps its approval, and on its access
-// list exactly the accounts that already have a connection to it, so nobody
-// gains or loses a server. A server listed before, the removed markers
-// included, is never imported again, and nothing is written when there is
-// nothing new: a start then commits nothing.
+// each, with the same ID and no accounts: an administrator gives it accounts
+// on the Servers page. A server listed before, the removed markers included,
+// is never imported again, and nothing is written when there is nothing new:
+// a start then commits nothing.
 func (s *Store) importServers(targets []RemoteTarget, now time.Time) error {
 	if len(targets) == 0 {
 		return nil
@@ -409,10 +387,6 @@ func (s *Store) importServers(targets []RemoteTarget, now time.Time) error {
 		if e != nil {
 			return errRefused
 		}
-		users, e := s.connectedAccounts(tx)
-		if e != nil {
-			return errRefused
-		}
 		for _, t := range targets {
 			if slices.ContainsFunc(list, func(w webServer) bool { return w.ID == t.ID }) {
 				continue
@@ -421,7 +395,6 @@ func (s *Store) importServers(targets []RemoteTarget, now time.Time) error {
 			if !ok || len(list) >= maxServers {
 				return errRefused
 			}
-			w.Access = users[t.ID]
 			if s.saveServer(tx, w) != nil {
 				return errRefused
 			}
@@ -429,38 +402,6 @@ func (s *Store) importServers(targets []RemoteTarget, now time.Time) error {
 		}
 		return nil
 	})
-}
-
-// connectedAccounts maps each server ID to the accounts with a connection to
-// it, sorted; auditors reach no server and are left out.
-func (s *Store) connectedAccounts(tx *bolt.Tx) (map[string][]string, error) {
-	users := map[string][]string{}
-	b := tx.Bucket(connectionBucket)
-	if b == nil {
-		return users, nil
-	}
-	e := b.ForEach(func(k, _ []byte) error {
-		owner, id, ok := strings.Cut(string(k), "/")
-		if !ok {
-			return errRefused
-		}
-		c, e := s.connection(tx, owner, id)
-		if e != nil {
-			return e
-		}
-		a, e := s.readAccount(tx, owner)
-		if e != nil {
-			return e
-		}
-		if a.Role != roleAuditor && !slices.Contains(users[c.Target], owner) {
-			users[c.Target] = append(users[c.Target], owner)
-		}
-		return nil
-	})
-	for _, list := range users {
-		slices.Sort(list)
-	}
-	return users, e
 }
 
 // serverFromFile is the record for a server from the operator's file.

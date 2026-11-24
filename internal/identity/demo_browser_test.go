@@ -11,7 +11,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
-	"encoding/pem"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -42,10 +41,6 @@ func runInteractiveDemo(t *testing.T, interactive bool) {
 	if err != nil {
 		t.Fatal("demo entropy failed")
 	}
-	block, err := ssh.MarshalPrivateKey(key, "ephemeral interactive demo")
-	if err != nil {
-		t.Fatal("demo key encoding failed")
-	}
 	signer, err := ssh.NewSignerFromKey(key)
 	if err != nil {
 		t.Fatal("demo signer failed")
@@ -68,7 +63,7 @@ func runInteractiveDemo(t *testing.T, interactive bool) {
 	config, err := json.Marshal(struct {
 		Origin, Code, Password, SSHSecret, SSH, SSHFingerprint string
 		Interactive                                            bool
-	}{server.URL, code, "Synthetic Keybash demo password 73!", string(pem.EncodeToMemory(block)), terminal.ID, ssh.FingerprintSHA256(signer.PublicKey()), interactive})
+	}{server.URL, code, "Synthetic Keybash demo password 73!", "Synthetic demo account password 52!", terminal.ID, ssh.FingerprintSHA256(signer.PublicKey()), interactive})
 	if err != nil {
 		t.Fatal("demo configuration failed")
 	}

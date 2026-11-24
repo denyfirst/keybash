@@ -166,8 +166,8 @@ func run(args []string, input io.Reader, output io.Writer) error {
 			return refused
 		}
 		// Every factor was reset: hand each user their code, as with account-add.
-		_, e = fmt.Fprintf(output, "Restored instance %s from a backup made %s by %s: %d accounts, %d credentials, %d connections, %d servers.\nMFA was reset for every account. Give each user their one-time setup code:\n",
-			summary.Instance, summary.Created.Format(time.RFC3339), summary.Program, summary.Accounts, summary.Credentials, summary.Connections, summary.Servers)
+		_, e = fmt.Fprintf(output, "Restored instance %s from a backup made %s by %s: %d accounts, %d servers, %d server accounts.\nMFA was reset for every account. Give each user their one-time setup code:\n",
+			summary.Instance, summary.Created.Format(time.RFC3339), summary.Program, summary.Accounts, summary.Servers, summary.ServerAccounts)
 		for _, c := range codes {
 			if e == nil {
 				_, e = fmt.Fprintf(output, "%s\t%s\n", c.Username, c.Code)
@@ -204,8 +204,8 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		if e != nil {
 			return refused
 		}
-		_, e = fmt.Fprintf(output, "Backup of instance %s written %s: %d accounts, %d credentials, %d connections, %d servers. It opens only with the instance key; keep the key's recovery code apart from it.\n",
-			summary.Instance, summary.Created.Format(time.RFC3339), summary.Accounts, summary.Credentials, summary.Connections, summary.Servers)
+		_, e = fmt.Fprintf(output, "Backup of instance %s written %s: %d accounts, %d servers, %d server accounts. It opens only with the instance key; keep the key's recovery code apart from it.\n",
+			summary.Instance, summary.Created.Format(time.RFC3339), summary.Accounts, summary.Servers, summary.ServerAccounts)
 		return e
 	case "bootstrap-renew":
 		code, e := store.RenewBootstrap()

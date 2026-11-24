@@ -41,7 +41,7 @@ func adminFixtureAt(t *testing.T, origin string) *adminLab {
 	}
 	t.Cleanup(func() { _ = l.Close() })
 	f.l = l
-	openTo(t, l, mustLookup(t, store, "alice").ID)
+	accountFixture(t, l, f.target.ID, "synthetic-user", "Synthetic remote password", mustLookup(t, store, "alice").ID)
 	l.mu.Lock()
 	l.now = func() time.Time { return f.now }
 	l.mu.Unlock()
@@ -300,22 +300,25 @@ func TestAdministratorChangesTakeEffectAtOnce(t *testing.T) {
 	}
 	holder.expect("POST", "/api/mfa/confirm", inputJSON(map[string]string{"code": otpCode(t, seed.Secret, f.now.Unix()/30)}), 200)
 	holder.session("ready")
-	// Deleting takes the account's keys, passwords and connections with it.
-	if _, e := f.store.putCredential(b.ID, Credential{Name: "Bob's", Kind: "password", Username: "u", Secret: "s"}); e != nil {
-		t.Fatal("fixture credential failed")
+	// Deleting takes the person off every server account, and their look.
+	setRole(t, f.store, "bob", roleUser)
+	account := accountFixture(t, f.l, f.target.ID, "bob", "Synthetic password", b.ID)
+	if f.store.setPreferences(b.ID, preferences{Theme: "dark"}) != nil {
+		t.Fatal("fixture look failed")
 	}
 	f.alice.expect("DELETE", path, "{}", 204)
+	if a, e := f.store.readServerAccount(f.target.ID, account); e != nil || len(a.People) != 0 {
+		t.Fatal("a deleted person stayed on a server account")
+	}
 	if f.store.view(func(tx *bolt.Tx) error {
-		for _, name := range [][]byte{credentialBucket, connectionBucket} {
-			if bucket := tx.Bucket(name); bucket != nil {
-				if k, _ := bucket.Cursor().Seek([]byte(b.ID + "/")); k != nil && strings.HasPrefix(string(k), b.ID+"/") {
-					return errRefused
-				}
+		if bucket := tx.Bucket(preferenceBucket); bucket != nil {
+			if k, _ := bucket.Cursor().Seek([]byte(b.ID + "/")); k != nil && strings.HasPrefix(string(k), b.ID+"/") {
+				return errRefused
 			}
 		}
 		return nil
 	}) != nil {
-		t.Fatal("a deleted account's credentials or connections remain")
+		t.Fatal("a deleted person's look remains")
 	}
 	if _, e := f.store.Backup(io.Discard, f.now); e != nil {
 		t.Fatal("the store does not verify after a delete")
@@ -378,45 +381,30 @@ func TestAuditorReachesNoServer(t *testing.T) {
 		return response.StatusCode
 	}
 	bob, b := f.person("bob", roleUser)
-	openTo(t, f.l, b.ID)
+	record := accountFixture(t, f.l, f.target.ID, "bob", "Synthetic remote password", b.ID)
 	for _, path := range []string{"/api/remote/socket", "/api/remote/desktop"} {
 		if socket(bob, path) != 101 {
 			t.Fatalf("a user's %s was refused", path)
 		}
 	}
-	credential, e := f.store.putCredential(b.ID, Credential{Name: "Synthetic remote", Kind: "password", Username: "synthetic-user", Secret: "Synthetic remote password"})
-	if e != nil {
-		t.Fatal("fixture credential failed")
-	}
-	w := bob.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Bob's desktop", "target": f.target.ID, "credential": credential, "approval": approvalFingerprint(f.target)}), 200)
-	var record struct{ ID string }
-	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
-		t.Fatal("connection creation failed")
-	}
-	bob.expect("GET", "/remote/rdp/"+record.ID, "", 200)
+	bob.expect("GET", "/remote/rdp/"+record, "", 200)
 	bob.expect("GET", "/api/installation", "", 403)
-	grantFixture(t, bob, record.ID)
-	// The same person as an auditor: every server route refuses.
+	grantFixture(t, bob, record)
+	// The same person as an auditor: every server route refuses, even with
+	// their name still on the account (set here behind the store's back).
 	setRole(t, f.store, "bob", roleAuditor)
 	bob.expect("GET", "/api/session", "", 401)
 	bob, codes := f.signIn("bob")
 	for _, route := range [][3]string{
-		{"GET", "/api/credentials", ""},
-		{"POST", "/api/credentials", `{"name":"x","kind":"password","username":"u","secret":"s","passphrase":""}`},
-		{"POST", "/api/credentials/generate", `{"name":"x","username":"u"}`},
-		{"POST", "/api/credentials/" + credential + "/reveal", "{}"},
-		{"DELETE", "/api/credentials/" + credential, "{}"},
-		{"GET", "/api/targets", ""},
-		{"GET", "/api/targets/" + f.target.ID, ""},
-		{"GET", "/api/connections", ""},
-		{"POST", "/api/remote/open", inputJSON(map[string]string{"connection": record.ID})},
+		{"GET", "/api/access", ""},
+		{"POST", "/api/remote/open", inputJSON(map[string]string{"account": record})},
 		{"GET", "/api/remote/capacity", ""},
 		{"GET", "/api/installation", ""},
 		{"GET", "/api/users", ""},
 	} {
 		bob.expect(route[0], route[1], route[2], 403)
 	}
-	bob.expect("GET", "/remote/rdp/"+record.ID, "", 404)
+	bob.expect("GET", "/remote/rdp/"+record, "", 404)
 	for _, path := range []string{"/api/remote/socket", "/api/remote/desktop"} {
 		if socket(bob, path) != 403 {
 			t.Fatalf("an auditor opened %s", path)
@@ -424,7 +412,7 @@ func TestAuditorReachesNoServer(t *testing.T) {
 	}
 	f.l.mu.Lock()
 	id, _ := tokenID(bob.cookie.Value)
-	_, e = f.l.grantRemoteLocked(id, record.ID)
+	_, e := f.l.grantRemoteLocked(id, record)
 	f.l.mu.Unlock()
 	if e == nil {
 		t.Fatal("an auditor's session was granted a server")

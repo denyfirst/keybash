@@ -55,7 +55,7 @@ func TestStepUpTakesTheCodeAloneAndEndsTheSessionAfterFailures(t *testing.T) {
 	}
 	// Sign-in is fresh proof for freshProof; after that a fresh-only action
 	// answers 428 before it looks at the record, and the page asks for a code.
-	missing := "/api/credentials/" + strings.Repeat("a", 32) + "/reveal"
+	missing := "/api/users/" + strings.Repeat("a", 32) + "/block"
 	advance(l, &now, 10*time.Minute-time.Second) // ten minutes, as the page tells people
 	c.expect("POST", missing, "{}", 404)
 	advance(l, &now, time.Second)

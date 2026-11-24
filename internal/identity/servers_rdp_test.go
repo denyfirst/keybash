@@ -203,31 +203,26 @@ func addDesktop(t *testing.T, f *adminLab, reads *fixtureCertificates, name, end
 	return made.ID, cert
 }
 
-// A desktop connection that belongs to a person on the server's list.
-func desktopConnection(t *testing.T, f *adminLab, c *custodyClient, owner durableAccount, server string) string {
+// desktopConnection gives a desktop an account with a password, with owner on
+// it, as an administrator would, and returns the account's ID.
+func desktopConnection(t *testing.T, f *adminLab, _ *custodyClient, owner durableAccount, server string) string {
 	t.Helper()
-	f.alice.expect("POST", "/api/servers/"+server+"/grant", inputJSON(map[string]string{"account": owner.ID}), 204)
-	credential, e := f.store.putCredential(owner.ID, Credential{Name: "Synthetic desktop", Kind: "password", Username: "synthetic-user", Secret: "Synthetic remote password"})
-	if e != nil {
-		t.Fatal("fixture credential failed")
+	return accountFixture(t, f.l, server, "synthetic-user", "Synthetic remote password", owner.ID)
+}
+
+// accessOf is the one card on c's own page.
+func accessOf(t *testing.T, c *custodyClient) accessRow {
+	t.Helper()
+	var rows []accessRow
+	if json.Unmarshal(c.expect("GET", "/api/access", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 {
+		t.Fatal("access unreadable")
 	}
-	f.l.mu.Lock()
-	target := f.l.remote.targets[server]
-	f.l.mu.Unlock()
-	var record struct{ ID string }
-	if json.Unmarshal(c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Desk", "target": server, "credential": credential, "approval": approvalFingerprint(target)}), 200).Body.Bytes(), &record) != nil || !validID(record.ID) {
-		t.Fatal("fixture connection failed")
-	}
-	return record.ID
+	return rows[0]
 }
 
 func connectionTrust(t *testing.T, c *custodyClient) string {
 	t.Helper()
-	var rows []struct{ Trust string }
-	if json.Unmarshal(c.expect("GET", "/api/connections", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 {
-		t.Fatal("connections unreadable")
-	}
-	return rows[0].Trust
+	return accessOf(t, c).Trust
 }
 
 // A fingerprint is never handed out for RDP: an administrator can add a server
@@ -278,11 +273,14 @@ func TestRDPServersAreAddedOnlyWithTheConsoleFingerprint(t *testing.T) {
 			row = candidate
 		}
 	}
-	if row.Protocol != "rdp" || row.Hostname != "10.20.0.8" || row.Port != 3389 || row.Fingerprint != print || row.Certificate != "current" || row.Expires != cert.NotAfter.Unix() || !row.Available || len(row.Access) != 0 {
+	if row.Protocol != "rdp" || row.Hostname != "10.20.0.8" || row.Port != 3389 || row.Fingerprint != print || row.Certificate != "current" || row.Expires != cert.NotAfter.Unix() || !row.Available || len(row.Accounts) != 0 {
 		t.Fatalf("added server row %+v", row)
 	}
-	// Nobody is on its list, not even the administrator who added it.
-	f.alice.expect("GET", "/api/targets/"+row.ID, "", 404)
+	// It has no account, so nobody reaches it, not even the administrator who
+	// added it.
+	if strings.Contains(f.alice.expect("GET", "/api/access", "", 200).Body.String(), row.ID) {
+		t.Fatal("a new desktop was reachable")
+	}
 	// The stored record is exactly the certificate the server showed.
 	list, e := f.store.listServers()
 	if e != nil {
@@ -354,16 +352,17 @@ func TestRDPServersAreRefusedWhatCannotBeUsed(t *testing.T) {
 	}
 }
 
-// The six-month renewal: nobody's connection is silently moved to the new
-// certificate, and an administrator accepts it only with the fingerprint from
-// the console. Each person then accepts it on their own connection.
-func TestRDPRenewalNeedsTheConsoleFingerprintAndEachPerson(t *testing.T) {
+// The six-month renewal: nothing is sent to a server showing another
+// certificate, and an administrator accepts the new one only with the
+// fingerprint from the console. That decision is everyone's: people never
+// held the server's identity themselves.
+func TestRDPRenewalNeedsTheConsoleFingerprint(t *testing.T) {
 	f, reads, worker := desktopFixture(t)
 	id, old := addDesktop(t, f, reads, "Desk", "10.20.0.8:3389")
 	bob, b := f.person("bob", roleUser)
 	record := desktopConnection(t, f, bob, b, id)
 	if connectionTrust(t, bob) != "verified" {
-		t.Fatal("a new connection is not ready")
+		t.Fatal("a new account is not ready")
 	}
 	// The server still shows what is pinned: nothing to do.
 	var same struct {
@@ -388,7 +387,7 @@ func TestRDPRenewalNeedsTheConsoleFingerprintAndEachPerson(t *testing.T) {
 		t.Fatalf("a renewed server row %+v", row)
 	}
 	if connectionTrust(t, bob) != "stopped" {
-		t.Fatal("a person's connection does not say the server changed")
+		t.Fatal("a person's card does not say the server changed")
 	}
 	// Anything but the console's fingerprint leaves the pin as it was.
 	key := func(fingerprint string, status int) {
@@ -413,23 +412,11 @@ func TestRDPRenewalNeedsTheConsoleFingerprintAndEachPerson(t *testing.T) {
 	if row.Fingerprint != certificatePrint(next) || row.Certificate != "current" || row.Expires != next.NotAfter.Unix() {
 		t.Fatalf("a re-pinned server row %+v", row)
 	}
-	// The person decides for their own connection; it does not move by itself.
-	if connectionTrust(t, bob) != "changed" {
-		t.Fatal("a re-pinned server did not ask its users")
-	}
-	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
-	var target struct{ Approval string }
-	if json.Unmarshal(bob.expect("GET", "/api/targets/"+id, "", 200).Body.Bytes(), &target) != nil {
-		t.Fatal("target unreadable")
-	}
-	var rows []struct{ Revision string }
-	if json.Unmarshal(bob.expect("GET", "/api/connections", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 {
-		t.Fatal("connections unreadable")
-	}
-	bob.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"approval": target.Approval, "revision": rows[0].Revision}), 204)
+	// The new pin is ready for everyone on its accounts at once.
 	if connectionTrust(t, bob) != "verified" {
-		t.Fatal("the person could not accept the new identity")
+		t.Fatal("a re-pinned server is not ready")
 	}
+	_ = grantFixture(t, bob, record)
 	if worker.calls.Load() != 0 {
 		t.Fatal("something opened a desktop while checking identities")
 	}
@@ -923,15 +910,8 @@ func TestRDPServersCanBeAddedUncheckedAndCheckedLater(t *testing.T) {
 	// A person sees it too, and connects as to any server.
 	bob, b := f.person("bob", roleUser)
 	record := desktopConnection(t, f, bob, b, id)
-	var target struct {
-		Unchecked bool
-		Approval  string
-	}
-	if json.Unmarshal(bob.expect("GET", "/api/targets/"+id, "", 200).Body.Bytes(), &target) != nil || !target.Unchecked {
-		t.Fatal("a person is not told the server is unchecked")
-	}
-	if connectionTrust(t, bob) != "verified" {
-		t.Fatal("a person's connection to an unchecked server is not usable")
+	if card := accessOf(t, bob); !card.Unchecked || card.Trust != "verified" {
+		t.Fatal("a person is not told the server is unchecked, or cannot use it")
 	}
 	key := func(fingerprint string, status int) {
 		t.Helper()
@@ -961,8 +941,7 @@ func TestRDPServersCanBeAddedUncheckedAndCheckedLater(t *testing.T) {
 	if unchecked() || connectionTrust(t, bob) != "verified" {
 		t.Fatal("checking the same certificate did not mark it checked, or asked people again")
 	}
-	var checked struct{ Unchecked bool }
-	if json.Unmarshal(bob.expect("GET", "/api/targets/"+id, "", 200).Body.Bytes(), &checked) != nil || checked.Unchecked {
+	if accessOf(t, bob).Unchecked {
 		t.Fatal("a checked server is still unchecked for a person")
 	}
 	// The same certificate accepted unchecked does not undo a check.
@@ -970,18 +949,18 @@ func TestRDPServersCanBeAddedUncheckedAndCheckedLater(t *testing.T) {
 	if unchecked() {
 		t.Fatal("accepting the same certificate unchecked undid the check")
 	}
-	// A renewal accepted without the check is pinned unchecked, and each
-	// person still decides for their own connection.
+	// A renewal accepted without the check is pinned unchecked, and every
+	// person is told so.
 	next := windowsLeaf(t, nil)
 	reads.set("10.20.0.8:3389", next)
 	key(uncheckedPrint, 204)
 	if row, _ = serverRow(listServersView(t, f.alice), id); !row.Unchecked || row.Fingerprint != certificatePrint(next) {
 		t.Fatalf("a renewal accepted unchecked %+v", row)
 	}
-	if connectionTrust(t, bob) != "changed" {
-		t.Fatal("a renewal accepted unchecked moved a person's connection by itself")
+	if card := accessOf(t, bob); !card.Unchecked || card.Trust != "verified" {
+		t.Fatal("a renewal accepted unchecked did not tell people")
 	}
-	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
+	_ = grantFixture(t, bob, record)
 	// Even unchecked, an unfit certificate is never pinned, and nobody else can
 	// choose it.
 	reads.set("10.20.0.8:3389", unfit)

@@ -17,6 +17,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,28 +139,18 @@ func remoteFixtureWithLimits(t *testing.T, origin string, limits sessionlimits.L
 		t.Fatal("remote constructor refused")
 	}
 	t.Cleanup(func() { _ = l.Close() })
-	openTo(t, l, mustLookup(t, store, "alice").ID)
+	account := accountFixture(t, l, target.ID, "synthetic-user", worker.expected, mustLookup(t, store, "alice").ID)
 	c := &custodyClient{t: t, l: l}
 	c.login()
 	c.session("challenge")
 	c.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
 	c.session("ready")
 	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
-	a, _ := store.lookup("alice")
-	credential, e := store.putCredential(a.ID, Credential{Name: "Synthetic remote", Kind: "password", Username: "synthetic-user", Secret: worker.expected})
-	if e != nil {
-		t.Fatal("fixture credential failed")
-	}
-	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic connection", "target": target.ID, "credential": credential, "approval": approvalFingerprint(target)}), 200)
-	var record struct{ ID string }
-	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
-		t.Fatal("connection creation failed")
-	}
-	return l, store, c, record.ID, worker
+	return l, store, c, account, worker
 }
-func grantFixture(t *testing.T, c *custodyClient, record string) string {
+func grantFixture(t *testing.T, c *custodyClient, account string) string {
 	t.Helper()
-	w := c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 200)
+	w := c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": account}), 200)
 	var data struct{ Lease string }
 	if json.Unmarshal(w.Body.Bytes(), &data) != nil || len(data.Lease) != 43 {
 		t.Fatal("lease missing")
@@ -201,14 +192,8 @@ func TestOwnedRemoteLeaseOwnershipReplayExpiryAndRevocation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("logout did not revoke remote context")
 	}
-	if !lease.active {
-		t.Fatal("lease never activated")
-	}
-	if rows, e := store.listConnections(a.ID); e != nil || len(rows) != 1 {
-		t.Fatal("connection persistence failed")
-	}
-	if _, e = store.readConnection(strings.Repeat("b", 32), record); e == nil {
-		t.Fatal("cross-account connection read accepted")
+	if !lease.active || lease.owner != a.ID || lease.account != record || lease.target != strings.Repeat("a", 32) {
+		t.Fatal("lease never activated, or not bound to its person and account")
 	}
 	if worker.calls.Load() != 0 {
 		t.Fatal("authorization-only calls started worker")
@@ -222,7 +207,7 @@ func TestOwnedRemoteExpiryLimitsAndDelete(t *testing.T) {
 	l.mu.Unlock()
 	raw := grantFixture(t, c, record)
 	_ = grantFixture(t, c, record)
-	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 503)
+	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": record}), 503)
 	advance(l, &now, 31*time.Second)
 	id, _ := tokenID(c.cookie.Value)
 	l.mu.Lock()
@@ -238,17 +223,17 @@ func TestOwnedRemoteExpiryLimitsAndDelete(t *testing.T) {
 	if e != nil {
 		t.Fatal("valid renewed lease refused")
 	}
-	c.expect("DELETE", "/api/connections/"+record, "{}", 204)
+	c.expect("DELETE", accountPath(strings.Repeat("a", 32), record), "{}", 204)
 	select {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
-		t.Fatal("connection deletion did not revoke")
+		t.Fatal("removing the account did not revoke")
 	}
-	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
+	c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": record}), 401)
 }
 
 // terminalFixture is remoteFixture for an SSH server: alice, ready and freshly
-// proved, owns one connection to it, with a password for "deploy".
+// proved, is on its one account, "deploy" with a password.
 func terminalFixture(t *testing.T, origin string, worker SSHWorker) (*Lab, *custodyClient, string) {
 	t.Helper()
 	store, _, _ := bootstrapped(t)
@@ -270,24 +255,14 @@ func terminalFixture(t *testing.T, origin string, worker SSHWorker) (*Lab, *cust
 		t.Fatal("remote constructor refused")
 	}
 	t.Cleanup(func() { _ = l.Close() })
-	openTo(t, l, mustLookup(t, store, "alice").ID)
+	account := accountFixture(t, l, target.ID, "deploy", "Synthetic remote password", mustLookup(t, store, "alice").ID)
 	c := &custodyClient{t: t, l: l}
 	c.login()
 	c.session("challenge")
 	c.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
 	c.session("ready")
 	c.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
-	a, _ := store.lookup("alice")
-	credential, e := store.putCredential(a.ID, Credential{Name: "Synthetic login", Kind: "password", Username: "deploy", Secret: "Synthetic remote password"})
-	if e != nil {
-		t.Fatal("fixture credential failed")
-	}
-	w := c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "Synthetic terminal", "target": target.ID, "credential": credential, "approval": approvalFingerprint(target)}), 200)
-	var record struct{ ID string }
-	if json.Unmarshal(w.Body.Bytes(), &record) != nil || !validID(record.ID) {
-		t.Fatal("connection creation failed")
-	}
-	return l, c, record.ID
+	return l, c, account
 }
 
 func TestOwnedRemoteSocketEchoLogoutAndLateSetup(t *testing.T) {
@@ -415,7 +390,7 @@ func TestOwnedDesktopEndsOnSignOutOpenOrStarting(t *testing.T) {
 // The session page is told which owned connection it serves through its body
 // tag, whatever classes the design gives that tag. Without the mark the page
 // falls back to the lab login, so an unmarked page is never served.
-func TestOwnedRemotePageCarriesItsConnection(t *testing.T) {
+func TestOwnedRemotePageCarriesItsAccount(t *testing.T) {
 	_, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	w := c.expect("GET", "/remote/rdp/"+record, "", 200)
 	page := w.Body.String()
@@ -425,8 +400,8 @@ func TestOwnedRemotePageCarriesItsConnection(t *testing.T) {
 		t.Fatal("owned page has no body tag")
 	}
 	tag := page[start : start+end]
-	if !strings.Contains(tag, `data-owned-remote="rdp"`) || !strings.Contains(tag, `data-connection="`+record+`"`) || !strings.Contains(tag, `class="session-page"`) || strings.Count(page, "data-owned-remote") != 1 {
-		t.Fatalf("owned page body tag is not marked for its connection: %s", tag)
+	if !strings.Contains(tag, `data-owned-remote="rdp"`) || !strings.Contains(tag, `data-account="`+record+`"`) || !strings.Contains(tag, `class="session-page"`) || strings.Count(page, "data-owned-remote") != 1 {
+		t.Fatalf("owned page body tag is not marked for its account: %s", tag)
 	}
 	c.expect("GET", "/remote/ssh/"+record, "", 404)
 }
@@ -488,22 +463,19 @@ func TestOwnedRemoteConstructorAndMalformedRequests(t *testing.T) {
 	}
 	l, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	_ = l
-	c.expect("POST", "/api/connections", `{"name":"bad","target":"`+target.ID+`","credential":"`+strings.Repeat("a", 32)+`","owner":"other"}`, 400)
-	c.expect("POST", "/api/remote/open", `{"connection":"`+record+`","target":"attacker"}`, 400)
-	c.expect("POST", "/api/remote/open", `{"connection":"`+record+`","connection":"`+record+`"}`, 400)
+	c.expect("POST", "/api/remote/open", `{"account":"`+record+`","owner":"other"}`, 400)
+	c.expect("POST", "/api/remote/open", `{"account":"`+record+`","target":"attacker"}`, 400)
+	c.expect("POST", "/api/remote/open", `{"account":"`+record+`","account":"`+record+`"}`, 400)
+	c.expect("POST", "/api/remote/open", `{"account":1}`, 400)
 	c.expect("GET", "/remote/rdp/"+strings.Repeat("b", 32), "", 404)
 }
 
-func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
+func TestOwnedRemoteNeedsAReadySessionAndOnlyItsPeople(t *testing.T) {
 	l, store, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	id, _ := tokenID(c.cookie.Value)
-	a, _ := store.lookup("alice")
-	row, e := store.readConnection(a.ID, record)
-	if e != nil {
-		t.Fatal("connection missing")
-	}
-	// Opening an approved connection needs a ready session, not fresh proof;
-	// changing stored decisions still needs fresh proof.
+	server := strings.Repeat("a", 32)
+	// Opening an account needs a ready session, not fresh proof; changing an
+	// account still needs fresh proof.
 	l.mu.Lock()
 	saved := l.sessions[id].reauthUntil
 	l.sessions[id].reauthUntil = time.Time{}
@@ -513,19 +485,14 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	staleLease, _, _, _, e := l.redeemRemoteLocked(id, staleRaw)
 	if e != nil {
 		l.mu.Unlock()
-		t.Fatal("a ready session without fresh proof could not open its own connection")
+		t.Fatal("a ready session without fresh proof could not open its account")
 	}
 	staleLease.cancel(nil)
 	staleKey, _ := tokenID(staleRaw)
 	delete(l.remote.leases, staleKey)
 	l.mu.Unlock()
-	// Trusting and creating need the ready session only, so these reach their
-	// own checks (a stale revision, a wrong fingerprint) without changing
-	// anything; deleting asks for fresh proof.
-	c.expect("POST", "/api/connections/"+record+"/trust", inputJSON(map[string]string{"approval": row.Approval, "revision": "999"}), 409)
-	c.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "again", "target": row.Target, "credential": row.Credential, "approval": strings.Repeat("0", 64)}), 409)
-	c.expect("DELETE", "/api/connections/"+record, "{}", 428)
-	c.expect("DELETE", "/api/credentials/"+row.Credential, "{}", 428)
+	c.expect("DELETE", accountPath(server, record), "{}", 428)
+	c.expect("POST", accountPath(server, record, "revoke"), personField(mustLookup(t, store, "alice").ID), 428)
 	l.mu.Lock()
 	l.sessions[id].reauthUntil = saved
 	l.mu.Unlock()
@@ -539,7 +506,7 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	}
 	l.sessions[id].revision++
 	l.mu.Unlock()
-	// This trusted fixture writes another account; HTTP cannot select an owner.
+	// Someone not on the account opens nothing, and cannot change it.
 	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
 		t.Fatal("second fixture account failed")
 	}
@@ -550,85 +517,85 @@ func TestOwnedRemoteFreshStateCredentialDeletionAndOtherAccount(t *testing.T) {
 	bob.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
 	bob.session("ready")
 	bob.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": codes[1]}), 204)
-	bob.expect("POST", "/api/connections", inputJSON(map[string]string{"name": "other", "target": row.Target, "credential": row.Credential, "approval": row.Approval}), 403)
-	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"connection": record}), 401)
-	bob.expect("DELETE", "/api/connections/"+record, "{}", 404)
-	// An issued but unconsumed grant cannot retain a deleted credential.
+	bob.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": record}), 401)
+	bob.expect("POST", accountPath(server, record, "grant"), personField(mustLookup(t, store, "bob").ID), 403)
+	bob.expect("GET", "/remote/rdp/"+record, "", 404)
+	// An issued but unconsumed grant cannot outlive its account.
 	activeRaw := grantFixture(t, c, record)
 	l.mu.Lock()
 	_, _, _, activeContext, activeError := l.redeemRemoteLocked(id, activeRaw)
 	l.mu.Unlock()
 	if activeError != nil {
-		t.Fatal("active deletion fixture refused")
+		t.Fatal("active removal fixture refused")
 	}
-	c.expect("DELETE", "/api/credentials/"+row.Credential, "{}", 204)
+	c.expect("DELETE", accountPath(server, record), "{}", 204)
 	select {
 	case <-activeContext.Done():
 	case <-time.After(time.Second):
-		t.Fatal("credential deletion did not revoke active remote")
+		t.Fatal("removing the account did not revoke the active remote")
 	}
 	l.mu.Lock()
 	if _, _, _, _, e = l.redeemRemoteLocked(id, raw); e == nil {
 		l.mu.Unlock()
-		t.Fatal("deleted credential retained launch authority")
+		t.Fatal("a removed account retained launch authority")
 	}
 	l.mu.Unlock()
 }
 
-func TestOwnedConnectionEnvelopePersistenceAndOwnerBinding(t *testing.T) {
+// An account's record is sealed: neither its name on the server nor its
+// password is in the file, it survives reopening, and its ciphertext opens
+// only under its own server.
+func TestServerAccountEnvelopeIsSealedAndBoundToItsServer(t *testing.T) {
 	store, key, dir := bootstrapped(t)
 	a, _ := store.lookup("alice")
-	credential, e := store.putCredential(a.ID, Credential{Name: "fixture", Kind: "password", Secret: "synthetic"})
+	now := time.Now()
+	server, e := store.addServer(a.ID, "Web", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), now)
 	if e != nil {
-		t.Fatal("fixture credential refused")
+		t.Fatal("fixture server refused")
 	}
-	name := "Synthetic private connection canary 73"
-	record, e := store.putConnection(a.ID, connection{Name: name, Target: strings.Repeat("a", 32), Credential: credential, Approval: strings.Repeat("b", 64), Fingerprint: identityFingerprint(remoteTargetFixture(t))})
+	name, secret := "synthetic-private-account-canary-73", "Synthetic-private-password-canary-91"
+	account, e := store.addServerAccount(a.ID, server, "password", name, secret, []string{a.ID}, now)
 	if e != nil {
-		t.Fatal("valid connection refused")
+		t.Fatal("fixture account refused")
 	}
 	_ = store.Close()
+	data, e := os.ReadFile(filepath.Join(dir, "custody.db"))
+	if e != nil || strings.Contains(string(data), name) || strings.Contains(string(data), secret) {
+		t.Fatal("an account persisted in plaintext")
+	}
 	store, e = openStore(dir, key)
 	if e != nil {
-		t.Fatal("connection store reopen refused")
+		t.Fatal("reopen refused")
 	}
 	defer store.Close()
-	got, e := store.readConnection(a.ID, record)
-	if e != nil || got.Name != name || got.Credential != credential {
-		t.Fatal("encrypted connection did not persist")
+	if got, e := store.readServerAccount(server, account); e != nil || got.Current.Username != name || got.Current.Secret != secret || !slices.Equal(got.People, []string{a.ID}) {
+		t.Fatal("the account did not survive reopening")
 	}
-	data, e := os.ReadFile(filepath.Join(dir, "custody.db"))
-	if e != nil || strings.Contains(string(data), name) {
-		t.Fatal("connection metadata persisted plaintext")
-	}
-	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
-		t.Fatal("fixture second account refused")
-	}
-	b, _ := store.lookup("bob")
-	if store.update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(connectionBucket)
-		return bucket.Put(credentialKey(b.ID, record), append([]byte(nil), bucket.Get(credentialKey(a.ID, record))...))
+	if store.view(func(tx *bolt.Tx) error {
+		raw := tx.Bucket(serverAccountBucket).Get(accountKey(server, account))
+		if _, _, e := store.unseal("server-account", server, account, raw); e != nil {
+			return e
+		}
+		if _, _, e := store.unseal("server-account", strings.Repeat("c", 32), account, raw); e == nil {
+			return errRefused
+		}
+		if _, _, e := store.unseal("shared", server, server, raw); e == nil {
+			return errRefused
+		}
+		return nil
 	}) != nil {
-		t.Fatal("rebind fixture failed")
-	}
-	if _, e = store.readConnection(b.ID, record); e == nil {
-		t.Fatal("connection ciphertext owner rebind accepted")
+		t.Fatal("an account's ciphertext opened under another server or kind")
 	}
 }
 
-func TestOwnedRemoteChangedApprovalRefusesStoredConnection(t *testing.T) {
-	l, store, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+func TestOwnedRemoteChangedApprovalRefusesTheAccount(t *testing.T) {
+	l, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	raw := grantFixture(t, c, record)
 	id, _ := tokenID(c.cookie.Value)
-	a, _ := store.lookup("alice")
-	row, _ := store.readConnection(a.ID, record)
 	changed := remoteTargetFixture(t)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.remote.targets[row.Target] = changed // synthetic restart-equivalent approval replacement, never an HTTP knob.
-	if _, e := l.grantRemoteLocked(id, record); e == nil {
-		t.Fatal("changed approval silently retargeted stored connection")
-	}
+	l.remote.targets[changed.ID] = changed // synthetic restart-equivalent approval replacement, never an HTTP knob.
 	if _, _, _, _, e := l.redeemRemoteLocked(id, raw); e == nil {
 		t.Fatal("old grant survived changed target identity")
 	}
@@ -793,17 +760,17 @@ func TestExpiredRDPCertificateDisablesOnlyItsServer(t *testing.T) {
 	}
 	defer l.Close()
 	for _, target := range []RemoteTarget{expired, future} {
-		if describeTarget(target, now).Available || target.UsableAt(now) || acceptTargetProof(target, identityFingerprint(target), approvalFingerprint(target), now) {
+		if target.UsableAt(now) {
 			t.Fatal("an RDP server outside its certificate period is usable")
 		}
 	}
-	if !describeTarget(sshTarget, now).Available || !sshTarget.UsableAt(now) || !acceptTargetProof(sshTarget, identityFingerprint(sshTarget), approvalFingerprint(sshTarget), now) {
+	if !sshTarget.UsableAt(now) {
 		t.Fatal("another server became unavailable")
 	}
 	if !future.UsableAt(now.Add(90 * time.Minute)) {
 		t.Fatal("a future certificate did not become usable in its period")
 	}
-	_, _ = l.openTerminal(context.Background(), sshTarget, Credential{Name: "fixture", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"})
+	_, _ = l.openTerminal(context.Background(), sshTarget, Credential{Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"})
 	if _, ok := worker.got.(*sshkey.Password); !ok {
 		t.Fatal("the SSH server stopped working beside an expired RDP certificate")
 	}
@@ -872,7 +839,7 @@ func TestOwnedRemoteSessionsEndWithTheirReason(t *testing.T) {
 	})
 	t.Run("access-changed", func(t *testing.T) {
 		_, c, record, _, ctx := open(t)
-		c.expect("DELETE", "/api/connections/"+record, "{}", 204)
+		c.expect("DELETE", accountPath(strings.Repeat("a", 32), record), "{}", 204)
 		ended(t, ctx, terminalweb.ReasonAccessChanged)
 	})
 	t.Run("stopping", func(t *testing.T) {
