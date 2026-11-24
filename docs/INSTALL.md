@@ -255,6 +255,20 @@ server:
      nothing else. Keybash never takes a key of your own: copies of it live
      elsewhere, and anyone holding one could sign in without Keybash. Use your
      own key, or the console, only to put this line there.
+
+     The page gives the command for a shell (**Linux, macOS, BSD**) or for
+     PowerShell (**Windows**); it starts with PowerShell when the server is
+     marked Windows, and the other is one click away. Either adds the line
+     after a line break of its own, so a file whose last line has none keeps
+     its keys apart. On Windows OpenSSH, an administrator's keys go in
+     `C:\ProgramData\ssh\administrators_authorized_keys`: open PowerShell
+     with **Run as administrator** (the command stops and says so otherwise),
+     and it leaves that file to Administrators and SYSTEM alone, owned by
+     Administrators, as Windows OpenSSH requires. Every administrator shares
+     that file, so the key opens each administrator account on that server;
+     an administrator can do anything there already, and Keybash signs in only
+     as the account the key belongs to. Anyone else's key goes in their own
+     `.ssh\authorized_keys`.
    - **Password:** the account's own password, typed once. Anyone who already
      knows it can still sign in without Keybash, so change it when one of them
      leaves, on the server and then here.

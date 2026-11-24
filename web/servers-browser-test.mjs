@@ -98,13 +98,32 @@ try {
   page.on('response', listen);
   await page.locator('#account-user').fill('deploy'); await page.locator('#account-submit').click();
   await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
-  const keyLine = /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/;
+  const keyLine = /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && printf '\\n%s\\n' 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/;
+  // The same line for Windows OpenSSH, spelled out: an administrator's goes in
+  // the one file Windows keeps for Administrators and SYSTEM alone, anyone
+  // else's in their profile, each after a break of its own.
+  const windowsKey = command => [
+    `$line = '${command.match(/'(restrict,pty [^']+)'/)[1]}'`,
+    '$groups = whoami /groups',
+    "if ($groups -match 'S-1-5-32-544\\b') {",
+    "  if (-not ($groups -match 'S-1-16-12288\\b')) { throw 'Open PowerShell with Run as administrator, then run this again.' }",
+    '  $file = "$env:ProgramData\\ssh\\administrators_authorized_keys"',
+    "  Add-Content -Path $file -Value '', $line -Encoding ascii -ErrorAction Stop",
+    "  icacls.exe $file /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F'",
+    "  icacls.exe $file /setowner '*S-1-5-32-544'",
+    '} else {',
+    '  New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.ssh" | Out-Null',
+    "  Add-Content -Path \"$env:USERPROFILE\\.ssh\\authorized_keys\" -Value '', $line -Encoding ascii -ErrorAction Stop",
+    '}',
+  ].join('\n');
   // Putting the key on the server is one task, in steps, with one way out.
   assert.equal(await page.locator('#key-title').textContent(), 'Now put the key on Build box');
   assert.equal(await page.locator('#key-lead').textContent(), 'Until its line is there, nobody can sign in as deploy.');
   assert.equal(await page.locator('#key-step-open').textContent(), 'On Build box, open a terminal signed in as deploy.');
   assert.equal(await page.locator('#key-step-end').textContent(), 'Connect once from Your servers. This account then shows Set up.');
   assert.deepEqual(await page.locator('#key-dialog .dialog-actions button:visible').allTextContents(), ['Done']);
+  assert.deepEqual(await page.locator('#key-system .segment').allTextContents(), ['Linux, macOS, BSD', 'Windows']);
+  assert.equal(await page.locator('#key-system [aria-pressed=true]').textContent(), 'Linux, macOS, BSD', 'a server not marked Windows started with PowerShell');
   assert.equal(await page.locator('#key-command-head').textContent(), 'Shell on Build box, as deploy');
   const firstKey = await page.locator('#key-command').textContent(); assert.match(firstKey, keyLine);
   // The command's own Copy copies it whole.
@@ -129,6 +148,26 @@ try {
   await card('deploy').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#key-title').textContent(), 'Put the key on Build box');
   assert.equal(await page.locator('#key-command').textContent(), firstKey);
+  // The same key for a Windows server: PowerShell, one click away, copied whole.
+  await page.locator('#key-system [data-system=windows]').click();
+  assert.equal(await page.locator('#key-system [aria-pressed=true]').textContent(), 'Windows');
+  assert.equal(await page.locator('#key-step-open').textContent(), 'On Build box, open PowerShell signed in as deploy. If deploy is an administrator there, open it with Run as administrator.');
+  assert.equal(await page.locator('#key-command-head').textContent(), 'PowerShell on Build box, as deploy');
+  const windowsCommand = await page.locator('#key-command').textContent(); assert.equal(windowsCommand, windowsKey(firstKey));
+  // Its lines keep their shape and scroll inside their box, even on a phone.
+  assert.equal(await page.locator('#key-command').evaluate(command => getComputedStyle(command).whiteSpace), 'pre', 'the PowerShell lines wrapped');
+  await page.setViewportSize({ width: 390, height: 900 });
+  assert(await page.locator('#key-dialog').evaluate(sheet => sheet.scrollWidth <= sheet.clientWidth), 'the key sheet scrolled sideways at 390px');
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.locator('#key-dialog .command-box').first().locator('.copy-chip').click(); await page.waitForFunction(() => copiedText.length === 1); await settled();
+  assert.equal(await page.evaluate(() => copiedText[0]), windowsCommand, 'Copy took other text than the PowerShell command');
+  await page.evaluate(() => { copiedText.length = 0; });
+  await page.locator('#key-system [data-system=posix]').click();
+  assert.equal(await page.locator('#key-command').textContent(), firstKey);
+  await page.locator('#key-system [data-system=windows]').click();
+  await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  await card('deploy').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#key-command').textContent(), firstKey, 'a choice outlived its sheet');
   await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
 
   stage = 'this server';
@@ -219,6 +258,7 @@ try {
   await card('deploy').getByRole('button', { name: 'Replace key', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#key-title').textContent(), 'Replace the key for deploy?');
   assert(await page.locator('#key-steps').isHidden(), 'replacing showed a line before a new key existed');
+  assert(await page.locator('#key-system').isHidden(), 'replacing offered a system before there was a line');
   assert.deepEqual(await page.locator('#key-dialog .dialog-actions button:visible').allTextContents(), ['Cancel', 'Make the new key']);
   await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
   assert.equal(await card('deploy').locator('.account-state').textContent(), 'Set up', 'Cancel made a key');
@@ -250,6 +290,18 @@ try {
   await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
   await terminal.locator('.xterm-helper-textarea').focus(); await terminal.keyboard.type('after-switch');
   await terminal.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('after-switch'));
+
+  stage = 'a Windows server';
+  // Marked Windows, the server's key steps start in PowerShell; the shell
+  // stays one click away.
+  await page.locator('#server-system').click(); await page.locator('#system-dialog').waitFor({ state: 'visible' });
+  await page.locator('#system-grid').getByRole('button', { name: 'Windows', exact: true }).click(); await page.locator('#system-dialog').waitFor({ state: 'hidden' }); await settled();
+  await card('deploy').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#key-system [aria-pressed=true]').textContent(), 'Windows', 'a server marked Windows started with the shell');
+  assert.equal(await page.locator('#key-command').textContent(), windowsKey(usedKey));
+  await page.locator('#key-system [data-system=posix]').click();
+  assert.equal(await page.locator('#key-command').textContent(), usedKey);
+  await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
 
   stage = 'remove the account';
   // Removing it asks first; then nobody signs in as it, and the open session ends.

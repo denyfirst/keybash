@@ -343,8 +343,34 @@ const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length
 const serversOK = data => Array.isArray(data?.networks) && data.networks.length <= 64 && data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) && typeof data.adding === 'boolean' && typeof data.ssh === 'boolean' && typeof data.rdp === 'boolean' &&
   Array.isArray(data.servers) && data.servers.length <= 256 && data.servers.every(serverOK) && typeof data.names === 'object' && data.names !== null &&
   Object.entries(data.names).every(([id, name]) => idOK(id) && typeof name === 'string' && /^[a-z0-9._-]{1,64}$/.test(name));
-// What an administrator runs once on the server, as the account people sign in as.
-const keyCommand = line => `mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '${line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
+// What an administrator runs once on the server, as the account people sign in
+// as. The line goes after a break of its own: a file whose last line has none,
+// as an editor may leave it, would otherwise run the two lines together. The
+// line itself is checked (lineOK) before it reaches either command.
+const keyCommand = line => `mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s\\n' '${line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
+// The same in Windows PowerShell 5.1 and later. Windows OpenSSH reads an
+// administrator's keys from one file that every administrator shares, and uses
+// it only while Administrators and SYSTEM alone hold it and own it; anyone
+// else's from their own profile. Writing the shared file takes an elevated
+// PowerShell. Groups go by their SIDs, which hold in every language:
+// S-1-5-32-544 Administrators, S-1-5-18 SYSTEM, S-1-16-12288 an elevated
+// token. The empty value first is the break before the line. "} else {" stays
+// on one line: pasted at a prompt, a closed if would run before an else on the
+// next line.
+const windowsKeyCommand = line => [
+  `$line = '${line}'`,
+  '$groups = whoami /groups',
+  "if ($groups -match 'S-1-5-32-544\\b') {",
+  "  if (-not ($groups -match 'S-1-16-12288\\b')) { throw 'Open PowerShell with Run as administrator, then run this again.' }",
+  '  $file = "$env:ProgramData\\ssh\\administrators_authorized_keys"',
+  "  Add-Content -Path $file -Value '', $line -Encoding ascii -ErrorAction Stop",
+  "  icacls.exe $file /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F'",
+  "  icacls.exe $file /setowner '*S-1-5-32-544'",
+  '} else {',
+  '  New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.ssh" | Out-Null',
+  "  Add-Content -Path \"$env:USERPROFILE\\.ssh\\authorized_keys\" -Value '', $line -Encoding ascii -ErrorAction Stop",
+  '}',
+].join('\n');
 // The command an administrator runs on a Windows server: the fingerprint of the
 // certificate Remote Desktop uses now. Fixed text, the same for every server.
 const windowsCommand = `$t = (Get-CimInstance -Namespace root/cimv2/TerminalServices -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-Tcp'").SSLCertificateSHA1Hash; $c = Get-ChildItem Cert:\\LocalMachine -Recurse | Where-Object Thumbprint -eq $t | Select-Object -First 1; 'SHA256:' + -join ([Security.Cryptography.SHA256]::Create().ComputeHash($c.RawData) | ForEach-Object { $_.ToString('x2') })`;
@@ -608,10 +634,15 @@ bind('account-form', async () => {
 });
 
 // ── A key's line, and replacing the key ──────────────────────────────────
-let keyAccount = null;
+let keyAccount = null, keyShown = null;
 function showKey(server, account, fresh = false) {
   if (role !== 'admin' || account.kind !== 'ssh-key') return;
-  keyAccount = { server: server.id, account: account.id }; dialogNotice('');
+  // The steps follow what the server runs, as its card says; a choice made in
+  // the sheet holds while it stays open on the same account (closing it
+  // forgets the account).
+  const again = keyAccount?.account === account.id;
+  keyAccount = { server: server.id, account: account.id, windows: again ? keyAccount.windows : server.system === 'windows' };
+  keyShown = { server, account }; dialogNotice('');
   const view = account.next ? 'next' : account.used ? 'replace' : 'put', who = account.username;
   $('key-dialog').dataset.view = view;
   $('key-title').textContent = { put: `${fresh ? 'Now put' : 'Put'} the key on ${server.name}`, replace: `Replace the key for ${who}?`, next: `Switch ${who} to the new key` }[view];
@@ -620,17 +651,29 @@ function showKey(server, account, fresh = false) {
     replace: 'Keybash makes a new key. The current one keeps working until you switch, so nobody is cut off. Do this for a fresh key, or if its line came off the server.',
     next: 'The current key keeps working until you switch.',
   }[view];
-  $('key-steps').hidden = view === 'replace';
-  $('key-step-open').textContent = `On ${server.name}, open a terminal signed in as ${who}.`;
+  $('key-steps').hidden = $('key-system').hidden = view === 'replace';
   $('key-step-run').textContent = view === 'next' ? 'Add the new key’s line, once:' : 'Run this once:';
-  $('key-command-head').textContent = `Shell on ${server.name}, as ${who}`;
-  $('key-command').textContent = view === 'replace' ? '' : keyCommand(view === 'next' ? account.next : account.line);
+  paintKeySystem();
   $('key-step-end').textContent = view === 'next' ? 'Then use the new key. Keybash destroys the old one, and its line can come off the server.' : 'Connect once from Your servers. This account then shows Set up.';
   $('key-keep').hidden = $('key-switch').hidden = view !== 'next'; $('key-make').hidden = view !== 'replace';
   $('key-close').textContent = { put: 'Done', replace: 'Cancel', next: 'Later' }[view]; $('key-close').className = view === 'put' ? '' : 'secondary';
   if (!$('key-dialog').open) $('key-dialog').showModal();
   $('key-close').focus();
 }
+// Where the line goes and how: a terminal's shell, or Windows PowerShell.
+function paintKeySystem() {
+  const { server, account } = keyShown, who = account.username, windows = keyAccount.windows, view = $('key-dialog').dataset.view;
+  const system = windows ? 'windows' : 'posix'; $('key-dialog').dataset.system = system;
+  for (const choice of $('key-system').querySelectorAll('.segment')) choice.setAttribute('aria-pressed', String(choice.dataset.system === system));
+  $('key-step-open').textContent = windows ? `On ${server.name}, open PowerShell signed in as ${who}. If ${who} is an administrator there, open it with Run as administrator.` : `On ${server.name}, open a terminal signed in as ${who}.`;
+  $('key-command-head').textContent = `${windows ? 'PowerShell' : 'Shell'} on ${server.name}, as ${who}`;
+  $('key-command').textContent = view === 'replace' ? '' : (windows ? windowsKeyCommand : keyCommand)(view === 'next' ? account.next : account.line);
+}
+$('key-system')?.addEventListener('click', event => {
+  const choice = event.target.closest('.segment');
+  if (!choice || !keyAccount || !keyShown) return;
+  keyAccount.windows = choice.dataset.system === 'windows'; paintKeySystem();
+});
 // Making a key shows its line next; switching or dropping one ends the task.
 async function keyChange(path, method, body, said, stay = false) {
   const at = keyAccount;

@@ -36,7 +36,7 @@ try{
  stage="a key made here";await account.locator('#add-account').click();await account.locator('#account-dialog').waitFor({state:'visible'});
  assert.equal(await account.locator('#account-people input[type=checkbox]').count(),1);assert.equal(await account.locator('#account-people input').isChecked(),true,'someone alone here was not ticked');assert.equal(await account.locator('#account-kind .segment[aria-pressed=true]').getAttribute('data-kind'),'ssh-key');assert(!(await account.locator('#account-secret').isVisible()));
  await account.locator('#account-user').fill('deploy');await account.locator('#account-submit').click();await account.locator('#key-dialog').waitFor({state:'visible'});await settle();
- assert.match(await account.locator('#key-command').textContent(),/^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+=* keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/);
+ assert.match(await account.locator('#key-command').textContent(),/^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && printf '\\n%s\\n' 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+=* keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/);
  assert(!(await account.content()).includes('b3BlbnNzaC1rZXktdjE'),'the page holds a private key');// every OpenSSH private key body starts so
  await account.locator('#key-close').click();const keyCard=account.locator('.server-account',{has:account.locator('.server-account-name',{hasText:/^deploy$/})});assert.equal(await keyCard.locator('.server-account-how').textContent(),'Key kept by Keybash');assert.equal(await keyCard.locator('.account-state').textContent(),'Not set up yet');
  // Removing an account asks first; Cancel keeps it.
