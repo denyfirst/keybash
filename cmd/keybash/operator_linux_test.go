@@ -197,7 +197,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 		}
 		return raw
 	}
-	call("GET", "/api/targets", nil, 401)
+	call("GET", "/api/access", nil, 401)
 	call("GET", "/api/remote/capacity", nil, 401)
 	call("POST", "/api/bootstrap", map[string]string{"code": code, "username": "alice", "password": "Synthetic operator integration password 86!"}, 204)
 	var session struct{ CSRF string }
@@ -205,7 +205,7 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 		t.Fatal("configured CLI session proof missing")
 	}
 	csrf = session.CSRF
-	call("GET", "/api/targets", nil, 403)
+	call("GET", "/api/access", nil, 403)
 	call("GET", "/api/remote/capacity", nil, 403)
 	var seed struct{ Secret string }
 	if json.Unmarshal(call("POST", "/api/mfa/enrollment", map[string]string{}, 200), &seed) != nil {
@@ -223,27 +223,35 @@ func TestOperatorCatalogCLIUnprivilegedTLS(t *testing.T) {
 	if json.Unmarshal(call("GET", "/api/remote/capacity", nil, 200), &capacity) != nil || capacity.Total != 16 || capacity.PerOwner != 4 {
 		t.Fatal("configured CLI capacity ignored")
 	}
-	// The file's server moved into the server list with nobody on it: the
-	// administrator puts themself on it first, as on the Servers page.
-	var targets []struct{ ID, Name, Protocol string }
-	if json.Unmarshal(call("GET", "/api/targets", nil, 200), &targets) != nil || len(targets) != 0 {
-		t.Fatal("a server from the file was open before anyone was given it")
+	// The file's server moved into the server list with no account on it:
+	// nobody reaches it until the administrator adds an account with people on
+	// it, as on the server's page (ADR 0010).
+	server := strings.Repeat("a", 32)
+	var rows []struct{ Account, Server, Protocol, Username string }
+	if json.Unmarshal(call("GET", "/api/access", nil, 200), &rows) != nil || len(rows) != 0 {
+		t.Fatal("a server from the file was open before it had an account")
 	}
 	var users struct{ Self string }
 	if json.Unmarshal(call("GET", "/api/session", nil, 200), &session) != nil || json.Unmarshal(call("GET", "/api/users", nil, 200), &users) != nil {
 		t.Fatal("configured CLI account unreadable")
 	}
 	csrf = session.CSRF
-	call("POST", "/api/servers/"+strings.Repeat("a", 32)+"/grant", map[string]string{"account": users.Self}, 204)
-	if json.Unmarshal(call("GET", "/api/targets", nil, 200), &targets) != nil || len(targets) != 1 || targets[0].ID != strings.Repeat("a", 32) || targets[0].Protocol != "ssh" {
+	call("POST", "/api/servers/"+server+"/accounts", map[string]string{"kind": "ssh-key", "username": "deploy", "secret": "", "people": users.Self}, 200)
+	if json.Unmarshal(call("GET", "/api/access", nil, 200), &rows) != nil || len(rows) != 1 || rows[0].Server != server || rows[0].Protocol != "ssh" || rows[0].Username != "deploy" {
 		t.Fatal("configured CLI catalog missing after MFA")
 	}
-	var detail struct {
-		Hostname  string
-		Port      int
-		Addresses []string
+	var list struct {
+		Servers []struct {
+			ID        string
+			Hostname  string
+			Port      int
+			Addresses []string
+		}
 	}
-	if json.Unmarshal(call("GET", "/api/targets/"+targets[0].ID, nil, 200), &detail) != nil || detail.Hostname != "ssh.invalid" || detail.Port != 22 || len(detail.Addresses) != 1 || detail.Addresses[0] != "10.44.0.8" {
+	if json.Unmarshal(call("GET", "/api/servers", nil, 200), &list) != nil || len(list.Servers) != 1 {
+		t.Fatal("configured CLI server list unreadable")
+	}
+	if detail := list.Servers[0]; detail.ID != server || detail.Hostname != "ssh.invalid" || detail.Port != 22 || len(detail.Addresses) != 1 || detail.Addresses[0] != "10.44.0.8" {
 		t.Fatal("configured CLI network binding changed")
 	}
 	if child.Process.Signal(syscall.SIGTERM) != nil {
