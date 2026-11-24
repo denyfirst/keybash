@@ -38,7 +38,7 @@ try{
  await account.locator('#account-user').fill('deploy');await account.locator('#account-submit').click();await account.locator('#key-dialog').waitFor({state:'visible'});await settle();
  assert.match(await account.locator('#key-command').textContent(),/^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+=* keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/);
  assert(!(await account.content()).includes('b3BlbnNzaC1rZXktdjE'),'the page holds a private key');// every OpenSSH private key body starts so
- await account.locator('#key-close').click();const keyCard=account.locator('.server-account',{has:account.locator('.server-account-name',{hasText:/^deploy$/})});assert.equal(await keyCard.locator('.server-account-how').textContent(),'Key made by Keybash · not on the server yet');
+ await account.locator('#key-close').click();const keyCard=account.locator('.server-account',{has:account.locator('.server-account-name',{hasText:/^deploy$/})});assert.equal(await keyCard.locator('.server-account-how').textContent(),'Key kept by Keybash');assert.equal(await keyCard.locator('.account-state').textContent(),'Not set up yet');
  // Removing an account asks first; Cancel keeps it.
  await keyCard.getByRole('button',{name:'Remove',exact:true}).click();await account.locator('#delete-dialog').waitFor();assert.equal(await account.locator('#delete-title').textContent(),'Remove this account?');assert.equal(await account.locator('#delete-name').textContent(),`deploy on ${serverName}`);
  await account.locator('#cancel-delete').click();await account.locator('#delete-dialog').waitFor({state:'hidden'});await settle();assert.equal(await keyCard.count(),1,'cancel removed the account');

@@ -41,7 +41,7 @@ function showSeed(secret, rows) {
 }
 function clearAll() {
   clearInputs(); hideSeed(); csrf = ''; pendingPerson = null; pendingServer = null; scanned = null; pendingDelete = null;
-  for (const id of ['account', 'account-name', 'focus-account', 'access', 'people', 'person-code', 'servers', 'server-networks', 'server-card', 'accounts', 'person-card', 'person-access', 'key-command', 'key-next-command']) if ($(id)) $(id).textContent = '';
+  for (const id of ['account', 'account-name', 'focus-account', 'access', 'people', 'person-code', 'servers', 'server-networks', 'server-card', 'accounts', 'person-card', 'person-access', 'key-command', 'server-name-now', 'server-system-now']) if ($(id)) $(id).textContent = '';
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
@@ -313,7 +313,13 @@ async function loadAccess() {
     if (role === 'admin') start = pageLink('/servers', 'Open Servers', 'button-link');
     $('access').append(emptyState('No servers yet', role === 'admin' ? 'Put yourself on a server’s account, on the Servers page, to connect from here.' : 'Your administrator gives you servers to use. They appear here, ready to open.', 'terminal', start));
   }
+  $('access-foot').textContent = accessFoot[role] ?? '';
 }
+const accessFoot = {
+  admin: 'You are here for each account you are on. Who signs in with an account, you included, is chosen on its server’s page under Servers.',
+  user: 'Your administrator chooses which servers and accounts you may use.',
+  auditor: 'Auditors connect to no server. Servers shows every server and who signs in with each.',
+};
 
 // ── Servers, their accounts and the people on each ───────────────────────
 // The Servers page and each server's own page read the same list.
@@ -454,25 +460,33 @@ function serverHead(server) {
   const card = make('article', 'record server-row server-detail'); card.dataset.server = server.id;
   const titles = make('div', 'record-titles');
   const where = server.addresses.length === 1 && server.addresses[0] === server.hostname ? '' : ` (${server.addresses.join(', ')})`;
-  titles.append(make('h2', 'record-name', 'Identity'), make('p', 'record-meta', `${kindWords(server.protocol)} · ${hostPort(server.hostname, server.port)}${where}`));
+  titles.append(make('h2', 'record-name', 'Server identity'), make('p', 'record-meta', `${kindWords(server.protocol)} · ${hostPort(server.hostname, server.port)}${where}`));
   const print = make('p', 'record-print'), code = make('code', 'fingerprint', server.fingerprint); code.title = 'Identity (fingerprint)'; print.append(code); titles.append(print);
-  if (server.certificate === 'current') titles.append(make('p', 'server-access', `Certificate until ${dayOf(server.expires)}`));
-  titles.append(make('p', 'server-access', server.added_by ? `Added by ${nameOf(server.added_by)} on ${dayOf(server.added)}` : `From the server file, ${dayOf(server.added)}`));
+  titles.append(make('p', 'server-access identity-why', 'Keybash connects only while the server shows this identity.'));
+  const facts = [server.certificate === 'current' ? `Certificate until ${dayOf(server.expires)}` : '', server.added_by ? `Added by ${nameOf(server.added_by)} on ${dayOf(server.added)}` : `From the server file, ${dayOf(server.added)}`];
+  titles.append(make('p', 'server-access', facts.filter(Boolean).join(' · ')));
   const actions = make('div', 'record-actions');
-  const tile = serverTile(server, role === 'admin' ? 'button' : 'span');
-  if (role === 'admin') { tile.type = 'button'; tile.title = systems[server.system] ? `${systems[server.system].title} · change` : 'Choose what runs on it'; tile.setAttribute('aria-label', tile.title); tile.addEventListener('click', () => openSystemPicker(server)); }
-  card.append(tile, titles, stateOf(server), actions);
+  card.append(serverTile(server), titles, stateOf(server), actions);
   const note = serverNote(server);
   if (note) card.append(make('p', 'server-help server-note', note));
   if (role !== 'admin') return card;
   const check = () => { void run(() => openIdentity(server)); };
   if (needsChecking(server)) buttonIn(actions, 'Check identity', '', check);
   else if (server.available && server.unchecked) buttonIn(actions, 'Check now', '', check);
-  buttonIn(actions, 'Rename', 'ghost', () => openRename(server));
-  if (server.available && !needsChecking(server) && !server.unchecked) buttonIn(actions, 'Check identity', 'ghost', check);
-  buttonIn(actions, 'Remove', 'ghost destructive', () => askConfirm('server', { id: server.id, name: server.name }));
+  else if (server.available) buttonIn(actions, 'Check identity', 'secondary', check);
   return card;
 }
+// This server: its name, its picture and removing it, as on the Account page.
+function paintSettings(server) {
+  $('server-settings').hidden = !server || role !== 'admin';
+  if ($('server-settings').hidden) return;
+  $('server-name-now').textContent = `${server.name}. Everyone who signs in to it sees this name.`;
+  $('server-system-now').textContent = `${systems[server.system]?.title ?? 'Not chosen'}. Only the picture on its cards; Keybash connects the same way.`;
+  $('server-system').textContent = systems[server.system] ? 'Change' : 'Choose';
+}
+$('server-rename')?.addEventListener('click', () => { if (shownServer) openRename(shownServer); });
+$('server-system')?.addEventListener('click', () => { if (shownServer) openSystemPicker(shownServer); });
+$('server-remove')?.addEventListener('click', () => { if (shownServer) askConfirm('server', { id: shownServer.id, name: shownServer.name }); });
 // One account: its name on the server, how Keybash signs in as it, and the
 // people who may.
 function accountCard(server, account) {
@@ -481,9 +495,13 @@ function accountCard(server, account) {
   const tile = make('span', 'record-icon'); tile.append(glyph(account.kind === 'password' ? 'password' : account.used ? 'ssh-key' : 'made', 'server-glyph'));
   const titles = make('div', 'record-titles');
   titles.append(make('h3', 'record-name server-account-name', account.username));
-  const how = account.kind === 'password' ? 'Password kept by Keybash' : `Key made by Keybash · ${account.used ? 'on the server' : 'not on the server yet'}${account.next ? ' · a new key is waiting' : ''}`;
-  const kind = make('p', 'record-meta server-account-how', how); kind.dataset.waiting = String(account.kind === 'ssh-key' && !account.used); titles.append(kind);
-  head.append(tile, titles); card.append(head);
+  titles.append(make('p', 'record-meta server-account-how', account.kind === 'password' ? 'Password kept by Keybash' : 'Key kept by Keybash'));
+  head.append(tile, titles);
+  if (account.kind === 'ssh-key') {
+    const state = account.next ? 'next' : account.used ? 'set' : 'waiting';
+    const pill = make('span', 'pill account-state', { next: 'New key waiting', set: 'Set up', waiting: 'Not set up yet' }[state]); pill.dataset.state = state; head.append(pill);
+  }
+  card.append(head);
   const who = make('div', 'people-chips'); who.append(make('span', 'chips-label', 'Signs in with it'));
   if (!account.people.length) who.append(make('span', 'chips-none', 'Nobody yet'));
   for (const id of [...account.people].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))) {
@@ -494,8 +512,10 @@ function accountCard(server, account) {
   card.append(who, make('p', 'server-account-set', `Set by ${nameOf(account.set_by)} on ${dayOf(account.set)}`));
   const actions = make('div', 'server-account-actions');
   if (role === 'admin') buttonIn(actions, account.people.length ? 'Change who' : 'Choose who', 'secondary', () => openPeople(server, account));
-  if (account.kind === 'ssh-key') buttonIn(actions, account.used || role !== 'admin' ? 'Key line' : 'Put the key on the server', account.used || role !== 'admin' ? 'ghost' : '', () => showKey(server, account));
-  else if (role === 'admin') buttonIn(actions, 'Change password', 'ghost', () => openSecret(server, account));
+  if (role === 'admin' && account.kind === 'ssh-key') {
+    const [words, style] = account.next ? ['Switch to the new key', ''] : account.used ? ['Replace key', 'ghost'] : ['Put the key on the server', ''];
+    buttonIn(actions, words, style, () => showKey(server, account));
+  } else if (role === 'admin') buttonIn(actions, 'Change password', 'ghost', () => openSecret(server, account));
   if (role === 'admin') buttonIn(actions, 'Remove', 'ghost destructive', () => askConfirm('account', { id: account.id, name: `${account.username} on ${server.name}`, server: server.id }));
   if (actions.childElementCount) card.append(actions);
   return card;
@@ -503,7 +523,7 @@ function accountCard(server, account) {
 function paintServer(server) {
   shownServer = server ?? null;
   $('accounts').replaceChildren(); $('server-card').replaceChildren();
-  $('add-account').hidden = !server || role !== 'admin';
+  $('add-account').hidden = !server || role !== 'admin'; paintSettings(server);
   if (!server) {
     $('heading').textContent = 'Server not found'; $('lead').textContent = 'It was removed, or the address is wrong.';
     return;
@@ -539,7 +559,8 @@ function chooseAccountKind(kind) {
   accountKind = kind;
   document.querySelectorAll('#account-kind .segment').forEach(segment => segment.setAttribute('aria-pressed', String(segment.dataset.kind === kind)));
   $('account-secret-field').hidden = kind !== 'password'; $('account-secret').required = kind === 'password'; $('account-secret').value = '';
-  $('account-kind-hint').textContent = kind === 'ssh-key' ? 'Keybash makes a new key and keeps it; you put its line on the server once. Nobody ever sees the key, so nobody can take it along.' :
+  $('account-own-key').hidden = kind !== 'ssh-key'; $('account-own-key').open = false;
+  $('account-kind-hint').textContent = kind === 'ssh-key' ? 'Keybash makes a key for this account and keeps it; you put its line on the server once. Nobody ever sees the key, so nobody can take it along.' :
     `${accountServer?.protocol === 'rdp' ? 'A desktop signs in with a password. ' : ''}Typed once here and never shown again. Anyone who already knows it can still sign in without Keybash: when one of them leaves, change it on the server, then here.`;
   $('account-submit').textContent = kind === 'ssh-key' ? 'Make the key' : 'Save the password';
 }
@@ -589,36 +610,43 @@ bind('account-form', async () => {
 // ── A key's line, and replacing the key ──────────────────────────────────
 let keyAccount = null;
 function showKey(server, account, fresh = false) {
+  if (role !== 'admin' || account.kind !== 'ssh-key') return;
   keyAccount = { server: server.id, account: account.id }; dialogNotice('');
-  const admin = role === 'admin';
-  $('key-title').textContent = fresh ? 'Now put the key on the server' : `The key for ${account.username}`;
-  $('key-lead').textContent = account.used ? `In use: it has opened a session on ${server.name}. To put it on the account again, run this there, as ${account.username}:` :
-    `Not on the server yet. Run this once on ${server.name}, as ${account.username}. Until then nobody can sign in with it.`;
-  $('key-command-head').textContent = `Shell on ${server.name}, as ${account.username}`; $('key-command').textContent = keyCommand(account.line);
-  $('key-next').hidden = !account.next; $('key-new').hidden = !admin || Boolean(account.next);
-  for (const id of ['key-keep', 'key-switch']) $(id).hidden = !admin;
-  if (account.next) {
-    $('key-next-lead').textContent = 'A new key is waiting. Run this on the server too, then use it: the current key keeps working until you do.';
-    $('key-next-head').textContent = `Shell on ${server.name}, as ${account.username}`; $('key-next-command').textContent = keyCommand(account.next);
-  } else $('key-next-command').textContent = '';
+  const view = account.next ? 'next' : account.used ? 'replace' : 'put', who = account.username;
+  $('key-dialog').dataset.view = view;
+  $('key-title').textContent = { put: `${fresh ? 'Now put' : 'Put'} the key on ${server.name}`, replace: `Replace the key for ${who}?`, next: `Switch ${who} to the new key` }[view];
+  $('key-lead').textContent = {
+    put: `Until its line is there, nobody can sign in as ${who}.`,
+    replace: 'Keybash makes a new key. The current one keeps working until you switch, so nobody is cut off. Do this for a fresh key, or if its line came off the server.',
+    next: 'The current key keeps working until you switch.',
+  }[view];
+  $('key-steps').hidden = view === 'replace';
+  $('key-step-open').textContent = `On ${server.name}, open a terminal signed in as ${who}.`;
+  $('key-step-run').textContent = view === 'next' ? 'Add the new key’s line, once:' : 'Run this once:';
+  $('key-command-head').textContent = `Shell on ${server.name}, as ${who}`;
+  $('key-command').textContent = view === 'replace' ? '' : keyCommand(view === 'next' ? account.next : account.line);
+  $('key-step-end').textContent = view === 'next' ? 'Then use the new key. Keybash destroys the old one, and its line can come off the server.' : 'Connect once from Your servers. This account then shows Set up.';
+  $('key-keep').hidden = $('key-switch').hidden = view !== 'next'; $('key-make').hidden = view !== 'replace';
+  $('key-close').textContent = { put: 'Done', replace: 'Cancel', next: 'Later' }[view]; $('key-close').className = view === 'put' ? '' : 'secondary';
   if (!$('key-dialog').open) $('key-dialog').showModal();
   $('key-close').focus();
 }
-async function keyChange(path, method, body, said) {
+// Making a key shows its line next; switching or dropping one ends the task.
+async function keyChange(path, method, body, said, stay = false) {
   const at = keyAccount;
   if (!at) return;
   await request(`/api/servers/${at.server}/accounts/${at.account}/${path}`, method, body);
   const server = await refreshServer(at.server), account = server?.accounts.find(a => a.id === at.account);
-  if (account && $('key-dialog').open) showKey(server, account);
-  notice(said);
+  if (stay && account && $('key-dialog').open) showKey(server, account); else $('key-dialog').close();
+  if (said) notice(said);
 }
-click('key-new', () => keyChange('next', 'POST', {}, 'A new key is waiting. Put its line on the server, then use it.'));
+click('key-make', () => keyChange('next', 'POST', {}, '', true));
 // The switch names the key this sheet showed, so a key made again elsewhere
 // meanwhile is never switched to unseen.
 click('key-switch', async () => {
   const at = keyAccount, account = serverById(at?.server)?.accounts.find(a => a.id === at.account);
   if (!sshPrintOK(account?.next_fingerprint)) return;
-  await keyChange('switch', 'POST', { fingerprint: account.next_fingerprint }, 'The new key is in use. The old key is destroyed: its line can come off the server.');
+  await keyChange('switch', 'POST', { fingerprint: account.next_fingerprint }, `${account.username} uses the new key now. The old key is destroyed: its line can come off the server.`);
 });
 click('key-keep', () => keyChange('next', 'DELETE', {}, 'The new key was destroyed. The current one stays.'));
 $('key-close')?.addEventListener('click', () => $('key-dialog').close());
@@ -928,7 +956,7 @@ function paintPerson(person) {
     const item = make('article', 'record access-item'); item.dataset.account = account.id;
     const titles = make('div', 'record-titles'), name = make('h3', 'record-name');
     name.append(pageLink(`/servers/${server.id}`, server.name, 'record-link'));
-    titles.append(name, make('p', 'record-meta', `as ${account.username} · ${account.kind === 'password' ? 'password kept by Keybash' : 'key made by Keybash'}`));
+    titles.append(name, make('p', 'record-meta', `as ${account.username} · ${account.kind === 'password' ? 'password kept by Keybash' : 'key kept by Keybash'}`));
     const actions = make('div', 'record-actions');
     buttonIn(actions, 'Take off', 'ghost destructive', () => askConfirm('revoke', { id: account.id, name: `${person.username} as ${account.username} on ${server.name}`, server: server.id, person: person.id }));
     item.append(serverTile(server), titles, actions);
@@ -951,7 +979,7 @@ function paintGive() {
   const choices = (server?.accounts ?? []).map((account, i) => {
     const label = make('label', 'role-option'), input = make('input'); input.type = 'radio'; input.name = 'give-account'; input.value = account.id;
     const on = account.people.includes(person.id); input.disabled = on; input.checked = !on && !$('give-accounts').querySelector('input:checked:not(:disabled)') && i === server.accounts.findIndex(a => !a.people.includes(person.id));
-    const text = make('span', 'role-text'); text.append(make('strong', '', account.username), make('span', '', on ? `${person.username} is on it already` : account.kind === 'password' ? 'Password kept by Keybash' : 'Key made by Keybash'));
+    const text = make('span', 'role-text'); text.append(make('strong', '', account.username), make('span', '', on ? `${person.username} is on it already` : account.kind === 'password' ? 'Password kept by Keybash' : 'Key kept by Keybash'));
     label.append(input, text); return label;
   });
   $('give-accounts').replaceChildren(legend, ...choices);

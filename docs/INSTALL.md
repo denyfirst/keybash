@@ -252,17 +252,24 @@ server:
    - **New key (safer):** Keybash makes a key and keeps it, and nobody ever
      sees it. Run the line the page shows once on the server, as that account.
      The line begins `restrict,pty`, so the key can open a terminal and
-     nothing else.
+     nothing else. Keybash never takes a key of your own: copies of it live
+     elsewhere, and anyone holding one could sign in without Keybash. Use your
+     own key, or the console, only to put this line there.
    - **Password:** the account's own password, typed once. Anyone who already
      knows it can still sign in without Keybash, so change it when one of them
      leaves, on the server and then here.
 
 A server may have several accounts, up to 16, each with its own people: for
 example `deploy` for most people and `root` for one. Each account's card
-shows who signs in with it (**Change who**), its key's line (**Key line**,
-**Make a new key**, then **Use the new key** once the new line is on the
-server) or **Change password**, and **Remove**. Taking someone off an
-account, or removing it, ends their open sessions through it at once.
+shows who signs in with it (**Change who**) and, for a key, its state: **Not
+set up yet** until the key has opened a session, then **Set up**. Its key
+action follows the state: **Put the key on the server** shows the line again;
+**Replace key** makes a new key that waits beside the current one, and
+**Switch to the new key** shows the new line, then **Use the new key** once
+it is on the server (or **Discard the new key**). A password account has
+**Change password** instead. **Remove** is at the end of each card. Taking
+someone off an account, or removing it, ends their open sessions through it
+at once.
 
 A Windows desktop (**Desktop (RDP)**, on an installation built with
 `--with-rdp`) uses the certificate Windows makes for itself:
@@ -285,10 +292,11 @@ A Windows desktop (**Desktop (RDP)**, on an installation built with
    later, with the same command.
 3. Its first **account**, as above. A desktop takes a password only.
 
-A server's page also has **Rename**, a picture of what runs on it (click its
-tile), **Check identity** (accept a new host key or certificate, for example
-after a reinstall, in the same way; open sessions end, and new ones use it)
-and **Remove** (open sessions end, and its accounts go with it).
+On a server's page, its identity card has **Check identity** (accept a new
+host key or certificate, for example after a reinstall, in the same way; open
+sessions end, and new ones use it). Under **This server** are **Rename**, a
+picture of what runs on it (**Choose**), and **Remove server** (open sessions
+end, and its accounts go with it).
 
 The page adds servers only inside the gateway's target networks
 (`--target-networks`, set at install or with `upgrade.sh`); a server added
