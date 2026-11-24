@@ -540,7 +540,7 @@ button.server-icon:hover:not(:disabled) { box-shadow: 0 0 0 3px color-mix(in srg
 dialog.systems { width: min(40rem, 94vw); }
 
 /* ── Adding a key or password: one sheet, three kinds ────────────────────── */
-:is(#server-dialog, #account-dialog) .segmented {
+:is(#server-dialog, #account-dialog, #key-dialog) .segmented {
   display: flex;
   gap: 0.25rem;
   margin: 1.1rem 0 0.2rem;
@@ -549,8 +549,8 @@ dialog.systems { width: min(40rem, 94vw); }
   border: 1px solid var(--rule);
   border-radius: calc(var(--radius) + 2px);
 }
-:is(#server-dialog, #account-dialog) .segmented[hidden] { display: none; }
-:is(#server-dialog, #account-dialog) .segment {
+:is(#server-dialog, #account-dialog, #key-dialog) .segmented[hidden] { display: none; }
+:is(#server-dialog, #account-dialog, #key-dialog) .segment {
   flex: 1;
   margin: 0;
   padding: 0.5rem 0.6rem;
@@ -561,8 +561,8 @@ dialog.systems { width: min(40rem, 94vw); }
   border-color: transparent;
   box-shadow: none;
 }
-:is(#server-dialog, #account-dialog) .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
-:is(#server-dialog, #account-dialog) .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
+:is(#server-dialog, #account-dialog, #key-dialog) .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
+:is(#server-dialog, #account-dialog, #key-dialog) .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
 /* How people sign in: who that is stays in view, with the way to change it. */
 /* Names to pick instead of typing, each as it is typed. */
 /* What a sheet says back stays in the sheet. */
@@ -877,11 +877,14 @@ a.button-link.secondary:hover { background: var(--paper-sunk); border-color: var
 .server-account-actions button { margin: 0; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
 .server-account-actions button.destructive { margin-left: auto; }
 /* The key sheet: one task, in numbered steps, the command inside its step.
-   Dropping a new key sits apart, at the left, from the way forward. */
-.key-steps { display: grid; gap: 0.75rem; margin: 1rem 0 0.2rem; padding-left: 1.4rem; font-size: 0.92rem; color: var(--ink-soft); }
+   Dropping a new key sits apart, at the left, from the way forward. The
+   shell's one line wraps; PowerShell's lines keep their shape and scroll
+   inside their box. */
+.key-steps { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; margin: 1rem 0 0.2rem; padding-left: 1.4rem; font-size: 0.92rem; color: var(--ink-soft); }
 .key-steps li::marker { font-weight: 700; color: var(--tool); }
 #key-dialog .command-box { margin: 0.5rem 0 0; }
 #key-command { white-space: pre-wrap; overflow-wrap: anywhere; }
+#key-dialog[data-system=windows] #key-command { overflow-x: auto; overflow-wrap: normal; white-space: pre; }
 #key-dialog .key-discard { margin-right: auto; }
 /* Why Keybash makes the key: a quiet fold under the choice. */
 .own-key { margin-top: 0.5rem; border-top: 0; }
