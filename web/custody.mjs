@@ -368,7 +368,7 @@ function paintAttention(servers) {
   $('rail-attention').textContent = String(count); $('rail-attention').setAttribute('aria-label', `${count} ${count === 1 ? 'server needs' : 'servers need'} checking`);
   $('attention-text').textContent = count > 1 ? `${count} servers need checking. Nobody can connect to them until you do.` :
     `${needing[0].name} ${needing[0].certificate === 'changed' ? 'shows a different certificate' : 'has a certificate that ended'}. Nobody can connect to it until you check it.`;
-  $('attention-open').hidden = location.pathname.startsWith('/servers');
+  $('attention-open').hidden = route.name === 'servers' || route.name === 'server';
 }
 // On the other pages the same check runs behind the page; failing it changes nothing there.
 async function checkAttention() {
@@ -1091,6 +1091,9 @@ function showPage(ready) {
   if (!allowed.includes(name)) { name = allowed[0]; id = ''; }
   route.name = name; route.id = id;
   const page = pages[name], rail = page.under ?? name;
+  // The alarm may stay up from the page before: its way to Servers shows on
+  // every other page as soon as that page does.
+  $('attention-open').hidden = rail === 'servers';
   for (const [key, each] of Object.entries(pages)) $(each.panel).hidden = !ready || key !== name;
   document.querySelectorAll('.rail-item').forEach(item => {
     if (item.dataset.page === rail) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
