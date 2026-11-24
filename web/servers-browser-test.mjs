@@ -73,19 +73,73 @@ try {
   assert.equal((await (await page.request.get(config.Origin + '/api/targets')).json()).some(t => t.name === 'Build box'), false, 'the administrator reaches a server nobody was given');
   await page.locator('#access-people label').filter({ hasText: 'alice' }).locator('input').check(); await page.locator('#access-form button[type=submit]').click();
   await page.locator('#access-dialog').waitFor({ state: 'hidden' }); await settled();
-  assert.match(await row('Build box').locator('.server-access').textContent(), /^Can use it: alice$/);
+  assert.match(await row('Build box').locator('.server-who').textContent(), /^Can use it: alice$/);
+  // Who may connect and how they sign in are two lines, two questions.
+  assert.equal(await row('Build box').locator('.server-sign-in').textContent(), 'Each person signs in with their own key or password.');
+
+  stage = 'narrow list';
+  // At any width the fingerprint keeps room to be read, each action keeps its
+  // words on one line, and the page does not scroll sideways.
+  for (const width of [820, 980, 1100, 1280]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const print = await row('Build box').locator('.fingerprint').boundingBox();
+    assert(print.width >= 180, `the fingerprint was squeezed at ${width}px`);
+    // With the room of a wide window, the actions wrap and the fingerprint keeps one line.
+    if (width === 1280) assert(print.height < 34, 'the fingerprint wrapped beside the actions at 1280px');
+    assert.deepEqual(await row('Build box').locator('.record-actions button').evaluateAll(buttons => buttons.filter(b => b.getBoundingClientRect().height > 44).map(b => b.textContent)), [], `an action wrapped its words at ${width}px`);
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `the page scrolled sideways at ${width}px`);
+  }
+  await page.setViewportSize({ width: 1280, height: 1000 });
+
+  stage = 'sign-in sheet';
+  // Keybash cannot list a server's accounts, so it offers the names alice's own
+  // connections to this server sign in as, and none from other servers.
+  const buildID = await row('Build box').getAttribute('data-server');
+  const answer = (path, body) => page.route(config.Origin + path, route => route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', body: JSON.stringify(body) }));
+  await answer('/api/credentials', [{ id: 'a'.repeat(32), name: 'Deploy password', kind: 'password', username: 'deploy', fingerprint: '' }, { id: 'b'.repeat(32), name: 'Elsewhere', kind: 'password', username: 'other', fingerprint: '' }]);
+  await answer('/api/connections', [{ id: 'c'.repeat(32), name: 'Mine', target: buildID, credential: 'a'.repeat(32), revision: '1', trust: 'unverified', fingerprint: '' }, { id: 'd'.repeat(32), name: 'Other', target: 'e'.repeat(32), credential: 'b'.repeat(32), revision: '1', trust: 'unverified', fingerprint: '' }]);
+  await page.reload(); await row('Build box').waitFor(); await settled();
+  await row('Build box').getByRole('button', { name: 'How they sign in', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#shared-title').textContent(), 'How people sign in to Build box');
+  assert.match(await page.locator('#shared-lead').textContent(), /^Now each person on the list signs in with their own key or password\. Instead, Keybash can sign them all in/);
+  assert.equal(await page.locator('#shared-who').textContent(), 'Who can use it: alice');
+  assert.equal(await page.locator('#shared-change-who').textContent(), 'Change who');
+  assert.match(await page.locator('#shared-user-hint').textContent(), /^The name you would type to sign in on Build box\. It is an account on that server, not a person in Keybash\.$/);
+  assert.deepEqual(await page.locator('#shared-names .name-chip').allTextContents(), ['deploy'], 'the names offered were not those of this server');
+  // Each kind says what it is, the chosen one looks chosen, and the button
+  // says what it does.
+  const look = kind => page.locator(`#shared-kind [data-kind=${kind}]`).evaluate(element => getComputedStyle(element).backgroundColor);
+  assert.equal(await page.locator('#shared-submit').textContent(), 'Make the key');
+  assert.match(await page.locator('#shared-kind-hint').textContent(), /Nobody ever sees the key/);
+  assert.notEqual(await look('ssh-key'), await look('password'), 'the chosen kind looked like the other');
+  await page.locator('#shared-kind [data-kind=password]').click();
+  assert.equal(await page.locator('#shared-submit').textContent(), 'Save the password');
+  assert.match(await page.locator('#shared-kind-hint').textContent(), /^The account’s own password, typed once and never shown again\. Anyone who already knows it can still sign in without Keybash/);
+  assert.notEqual(await look('ssh-key'), await look('password'), 'the chosen kind looked like the other');
+  await page.locator('#shared-kind [data-kind=ssh-key]').click();
+  await page.locator('#shared-names .name-chip').click();
+  assert.equal(await page.locator('#shared-user').inputValue(), 'deploy', 'a name picked was not filled in');
+  // Who may connect is one step away, for the same server.
+  await page.locator('#shared-change-who').click(); await page.locator('#access-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#access-title').textContent(), 'Who can use Build box?');
+  assert(await page.locator('#shared-dialog').isHidden(), 'the sign-in sheet stayed open under the list');
+  await page.locator('#access-cancel').click(); await page.locator('#access-dialog').waitFor({ state: 'hidden' });
+  await page.unroute(config.Origin + '/api/credentials'); await page.unroute(config.Origin + '/api/connections');
+  await page.reload(); await row('Build box').waitFor(); await settled();
 
   stage = 'shared key';
   page.on('response', listen);
-  await row('Build box').getByRole('button', { name: 'Share a key', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
-  assert.equal(await page.locator('#shared-title').textContent(), 'Share a key on Build box');
+  await row('Build box').getByRole('button', { name: 'How they sign in', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
+  assert(await page.locator('#shared-names').isHidden(), 'names were offered without a connection to the server');
   assert(await page.locator('#shared-secret-field').isHidden(), 'a key made here asked for a password');
   await page.locator('#shared-user').fill('deploy'); await page.locator('#shared-submit').click();
   await page.locator('#shared-manage').waitFor({ state: 'visible' }); await settled();
   const sharedLine = /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash-shared' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/;
   const firstKey = await page.locator('#shared-command').textContent(); assert.match(firstKey, sharedLine);
   assert.match(await sheetNotice('shared-dialog').textContent(), /^Key made\. Add its line on Build box/);
-  assert.match(await row('Build box').locator('.server-shared').textContent(), /^Shared key for user deploy · not on the server yet$/);
+  assert.equal(await row('Build box').locator('.server-sign-in').textContent(), 'Keybash signs them in as deploy, with a key it made · not on the server yet');
+  assert.match(await page.locator('#shared-summary').textContent(), /^Keybash signs them in as deploy, with a key it made\. Set by alice on /);
+  assert.match(await page.locator('#shared-lead').textContent(), /^Keybash signs everyone on the list in with this\./);
   // The command's own Copy copies it whole.
   await page.locator('#shared-key > .command-box .copy-chip').click(); await page.waitForFunction(() => copiedText.length === 1); await settled();
   assert.equal(await page.evaluate(() => copiedText[0]), firstKey, 'Copy took other text than the command');
@@ -95,7 +149,7 @@ try {
   const nextKey = await page.locator('#shared-next-command').textContent(); assert.match(nextKey, sharedLine); assert.notEqual(nextKey, firstKey);
   assert.equal(await page.locator('#shared-command').textContent(), firstKey, 'a new key replaced the current one before the switch');
   assert(await page.locator('#shared-new').isHidden(), 'a second new key was offered while one waits');
-  assert.match(await row('Build box').locator('.server-shared').textContent(), / · a new key is waiting$/);
+  assert.match(await row('Build box').locator('.server-sign-in').textContent(), / · a new key is waiting$/);
   await page.locator('#shared-switch').click(); await sheetNotice('shared-dialog').filter({ hasText: /uses the new key now/ }).waitFor(); await settled();
   assert.equal(await page.locator('#shared-command').textContent(), nextKey, 'the switch did not make the new key the one used');
   assert(await page.locator('#shared-next-box').isHidden() && await page.locator('#shared-new').isVisible(), 'the sheet still showed a waiting key');
@@ -112,7 +166,7 @@ try {
   const sharedCard = page.locator('.server-card[data-shared]'); await sharedCard.waitFor();
   assert.equal(await sharedCard.count(), 1);
   assert.equal(await sharedCard.locator('.server-name').textContent(), 'Build box');
-  assert.equal(await sharedCard.locator('.server-kind').textContent(), 'Terminal (SSH) · Shared by your administrator');
+  assert.equal(await sharedCard.locator('.server-kind').textContent(), 'Terminal (SSH) · Set up by your administrator');
   assert.equal(await sharedCard.locator('.trust-state').textContent(), 'Ready');
   assert.match(await sharedCard.locator('.server-screen').textContent(), /^deploy@Build box ~ \$ /);
   assert.equal(await sharedCard.getByRole('button').count(), 0, 'a shared card offered to change it');
@@ -152,16 +206,16 @@ try {
   await terminal.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('shared-key-echo'));
   // The key worked once, so the Servers page says it is in use.
   await page.locator('.rail-item[data-page=servers]').click(); await page.waitForURL(config.Origin + '/servers'); await row('Build box').waitFor(); await settled();
-  assert.match(await row('Build box').locator('.server-shared').textContent(), /^Shared key for user deploy · in use$/);
+  assert.equal(await row('Build box').locator('.server-sign-in').textContent(), 'Keybash signs them in as deploy, with a key it made · in use');
 
   stage = 'stop sharing';
   // Stopping asks first; then the server has none, and the open session ends.
-  await row('Build box').getByRole('button', { name: 'Shared key', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
+  await row('Build box').getByRole('button', { name: 'How they sign in', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
   await page.locator('#shared-stop').click(); await page.locator('#delete-dialog').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#delete-title').textContent(), 'Stop sharing on this server?');
-  await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: /^Build box has no shared key or password any more\.$/ }).waitFor(); await settled();
-  assert.equal(await row('Build box').locator('.server-shared').count(), 0, 'a stopped shared key still shows');
-  assert.equal(await row('Build box').getByRole('button', { name: 'Share a key', exact: true }).count(), 1);
+  assert.equal(await page.locator('#delete-title').textContent(), 'Stop signing people in to this server?');
+  assert.equal(await page.locator('#confirm-delete').textContent(), 'Stop signing them in');
+  await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: /^Keybash no longer signs anyone in to Build box\. People on its list need their own key or password\.$/ }).waitFor(); await settled();
+  assert.equal(await row('Build box').locator('.server-sign-in').textContent(), 'Each person signs in with their own key or password.', 'a stopped shared key still shows');
   await terminal.locator('#notice').filter({ hasText: /^This server, this connection or your access to it changed, so this session ended\.$/ }).waitFor();
   await terminal.close();
   assert.equal((await page.request.get(`${config.Origin}/remote/shared/ssh/${buildBox}`)).status(), 404, 'a stopped shared key still opened a page');
@@ -267,15 +321,19 @@ try {
   stage = 'desktop: shared password';
   const sharedPassword = config.SharedPassword;
   page.on('response', listen);
-  await row('Desk').getByRole('button', { name: 'Share a password', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
+  await row('Desk').getByRole('button', { name: 'How they sign in', exact: true }).click(); await page.locator('#shared-dialog').waitFor({ state: 'visible' }); await settled();
   assert(await page.locator('#shared-kind').isHidden(), 'a desktop offered a key');
   assert(await page.locator('#shared-secret-field').isVisible(), 'a desktop did not ask for its password');
+  assert.match(await page.locator('#shared-kind-hint').textContent(), /^A desktop signs in with a password\. The account’s own password/);
+  assert.equal(await page.locator('#shared-submit').textContent(), 'Save the password');
+  // Nobody is on Desk's list yet, and the sheet says so.
+  assert.equal(await page.locator('#shared-who').textContent(), 'Nobody can use it yet.');
+  assert.equal(await page.locator('#shared-change-who').textContent(), 'Choose who');
   await page.locator('#shared-user').fill('kbtest'); await page.locator('#shared-secret').fill(sharedPassword); await page.locator('#shared-submit').click();
   await page.locator('#shared-password-form').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#shared-secret').inputValue(), '', 'the typed password stayed on the page');
-  assert.match(await page.locator('#shared-summary').textContent(), /^For user kbtest on the server\. Set by alice on /);
-  assert.match(await row('Desk').locator('.server-shared').textContent(), /^Shared password for user kbtest$/);
-  assert.equal(await row('Desk').getByRole('button', { name: 'Shared password', exact: true }).count(), 1);
+  assert.match(await page.locator('#shared-summary').textContent(), /^Keybash signs them in as kbtest, with a password it keeps\. Set by alice on /);
+  assert.equal(await row('Desk').locator('.server-sign-in').textContent(), 'Keybash signs them in as kbtest, with a password it keeps.');
   await page.locator('#shared-password').fill(`${sharedPassword}-2`); await page.locator('#shared-password-form button[type=submit]').click();
   await sheetNotice('shared-dialog').filter({ hasText: /^Keybash uses the new password from now on\.$/ }).waitFor(); await settled();
   assert.equal(await page.locator('#shared-password').inputValue(), '', 'the new password stayed on the page');
@@ -290,7 +348,7 @@ try {
   await page.locator('.rail-item[data-page=connections]').click(); await page.waitForURL(config.Origin + '/'); await settled();
   const deskCard = page.locator('.server-card[data-shared]'); await deskCard.waitFor();
   assert.equal(await deskCard.count(), 1);
-  assert.equal(await deskCard.locator('.server-kind').textContent(), 'Desktop (RDP) · Shared by your administrator');
+  assert.equal(await deskCard.locator('.server-kind').textContent(), 'Desktop (RDP) · Set up by your administrator');
   assert.equal(await deskCard.locator('.server-screen').textContent(), 'kbtest@Desk · desktop');
   const deskID = await deskCard.getAttribute('data-shared');
   assert.equal(await deskCard.getByRole('link', { name: 'Connect', exact: true }).getAttribute('href'), `/remote/shared/rdp/${deskID}`);
@@ -310,7 +368,7 @@ try {
   for (const answer of await Promise.all(answers)) assert(!answer.includes(sharedPassword) && !answer.includes('b3BlbnNzaC1rZXktdjE') && !answer.includes('PRIVATE KEY'), 'an answer carried a shared secret');
 
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop, renewal, unchecked desktop, shared key and shared password, and their cards and sessions passed');
+  console.log('Servers page browser: list, refusals, compare-before-add, access, connection form, removal, desktop, renewal, unchecked desktop, the narrow list, the sign-in sheet, shared key and shared password, and their cards and sessions passed');
 } catch (error) {
   console.log('Servers browser stage:', stage, error.code === 'ERR_ASSERTION' ? error.message : error.name);
   if (process.env.KEYBASH_SERVERS_SCREENSHOT) await page.screenshot({ path: process.env.KEYBASH_SERVERS_SCREENSHOT });

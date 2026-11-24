@@ -581,7 +581,7 @@ button.server-icon:hover:not(:disabled) { box-shadow: 0 0 0 3px color-mix(in srg
 dialog.systems { width: min(40rem, 94vw); }
 
 /* ── Adding a key or password: one sheet, three kinds ────────────────────── */
-:is(#record-dialog, #server-dialog) .segmented {
+:is(#record-dialog, #server-dialog, #shared-dialog) .segmented {
   display: flex;
   gap: 0.25rem;
   margin: 1.1rem 0 0.2rem;
@@ -590,8 +590,8 @@ dialog.systems { width: min(40rem, 94vw); }
   border: 1px solid var(--rule);
   border-radius: calc(var(--radius) + 2px);
 }
-:is(#record-dialog, #server-dialog) .segmented[hidden] { display: none; }
-:is(#record-dialog, #server-dialog) .segment {
+:is(#record-dialog, #server-dialog, #shared-dialog) .segmented[hidden] { display: none; }
+:is(#record-dialog, #server-dialog, #shared-dialog) .segment {
   flex: 1;
   margin: 0;
   padding: 0.5rem 0.6rem;
@@ -602,8 +602,18 @@ dialog.systems { width: min(40rem, 94vw); }
   border-color: transparent;
   box-shadow: none;
 }
-:is(#record-dialog, #server-dialog) .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
-:is(#record-dialog, #server-dialog) .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
+:is(#record-dialog, #server-dialog, #shared-dialog) .segment:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--card) 60%, transparent); border-color: transparent; box-shadow: none; }
+:is(#record-dialog, #server-dialog, #shared-dialog) .segment[aria-pressed=true] { color: var(--ink); background: var(--card); border-color: var(--rule); box-shadow: var(--shadow); }
+/* How people sign in: who that is stays in view, with the way to change it. */
+.shared-who { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.8rem; margin: 0.8rem 0 0; padding: 0.55rem 0.8rem; background: var(--paper-sunk); border: 1px solid var(--rule); border-radius: var(--radius); }
+.shared-who p { flex: 1 1 12rem; margin: 0; font-size: 0.88rem; font-weight: 550; color: var(--ink); overflow-wrap: anywhere; }
+.shared-who button { margin: 0; padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+#shared-kind-hint { margin-top: 0.6rem; }
+/* Names to pick instead of typing, each as it is typed. */
+.shared-names { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0.5rem 0 0; }
+.shared-names[hidden] { display: none; }
+.shared-names span { font-size: 0.84rem; color: var(--ink-soft); }
+.shared-names .name-chip { margin: 0; padding: 0.2rem 0.65rem; font-family: var(--mono); font-size: 0.8rem; border-radius: 999px; }
 .generate-lead { margin-top: 1rem; }
 /* What a sheet says back stays in the sheet. */
 .dialog-notice { min-height: 0; margin: 0.8rem 0 0; font-size: 0.88rem; font-weight: 500; color: var(--ink); text-align: right; }
@@ -751,7 +761,16 @@ button.secondary[data-copied], .command-head button.copy-chip[data-copied] { col
 }
 /* Servers: one row per server, laid out like the Users page so the state and
    the actions line up from row to row. Who may use it reads like the meta. */
-#servers { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+/* The name and fingerprint keep room to read: the actions wrap first, never
+   the fingerprint one character to a line. When the list itself is narrow,
+   whatever the window, the actions move under the server, as on a phone. */
+#servers { grid-template-columns: auto minmax(min(15rem, 100%), 1fr) auto fit-content(22rem); container-type: inline-size; }
+@container (max-width: 50rem) {
+  .server-row { grid-template-columns: auto minmax(0, 1fr); }
+  .server-row .server-state, .server-row .server-note { grid-column: 1 / -1; }
+  .server-row .record-actions { grid-column: 1 / -1; justify-content: flex-start; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
+  .server-row .record-actions button.destructive { margin-left: auto; }
+}
 .server-row { grid-column: 1 / -1; grid-template-columns: subgrid; }
 .server-row .server-state { justify-self: start; }
 .server-row .record-actions { flex-wrap: wrap; min-width: 0; }
