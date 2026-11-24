@@ -67,7 +67,7 @@ func TestTheTypefaceIsTheOneChosenAndCarriesItsLicence(t *testing.T) {
 // Every page that is drawn loads the shared sheet and the typeface preload,
 // so no page falls back to whatever the system draws.
 func TestEveryPageLoadsTheSharedDesign(t *testing.T) {
-	for _, page := range []string{"index.html", "remote-desktop.html", "auth-login.html", "auth-workspace.html", "custody-login.html", "custody-workspace.html"} {
+	for _, page := range []string{"index.html", "remote-desktop.html", "remote-closed.html", "auth-login.html", "auth-workspace.html", "custody-login.html", "custody-workspace.html"} {
 		html := sheet(t, page)
 		if !strings.Contains(html, `href="/keybash.css"`) || !strings.Contains(html, `href="`+FontPath+`" as="font"`) {
 			t.Errorf("%s does not load the shared design", page)

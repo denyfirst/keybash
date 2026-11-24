@@ -704,23 +704,43 @@ func TestServerAccountSessionPageOpensOnlyForPeopleOnIt(t *testing.T) {
 	if policy := w.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "; script-src 'self'; ") {
 		t.Fatalf("a terminal page may compile WebAssembly: %s", policy)
 	}
-	// Another protocol, the server's ID, other shapes, the old shared path,
-	// and people not on the account: nothing.
-	for _, path := range []string{"/remote/rdp/" + account, "/remote/ssh/" + server, "/remote/ssh/" + strings.Repeat("e", 32), "/remote/ssh/" + strings.ToUpper(account),
-		"/remote/" + account, "/remote/ssh/" + account + "/", "/remote/shared/ssh/" + server, "/remote/shared/ssh/" + account} {
-		if w := bob.expect("GET", path, "", 404); strings.Contains(w.Body.String(), "data-owned-remote") {
+	// A session page that does not open answers with one closed page, the
+	// same for every reason, under the strict policy, leading back to Your
+	// servers. It never names the account or the server.
+	w = bob.expect("GET", "/remote/ssh/"+strings.Repeat("e", 32), "", 404)
+	closed := w.Body.String()
+	if !strings.Contains(closed, "This server is not open to you") || !strings.Contains(closed, `<a class="go-back" href="/">Back to your servers</a>`) || strings.Contains(closed, "<script") ||
+		w.Header().Get("Content-Type") != "text/html; charset=utf-8" || strings.Contains(w.Header().Get("Content-Security-Policy"), "unsafe") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+		t.Fatal("a refused session page is not the closed page")
+	}
+	isClosed := func(who *custodyClient, path string) {
+		t.Helper()
+		if w := who.expect("GET", path, "", 404); w.Body.String() != closed {
+			t.Fatalf("%s did not answer with the closed page", path)
+		}
+	}
+	// Another protocol, the server's ID, or people not on the account: the
+	// closed page. Other shapes and the old shared path are no session page.
+	isClosed(bob, "/remote/rdp/"+account)
+	isClosed(bob, "/remote/ssh/"+server)
+	isClosed(f.alice, page)
+	isClosed(dave, page)
+	for _, path := range []string{"/remote/ssh/" + strings.ToUpper(account), "/remote/" + account, "/remote/ssh/" + account + "/", "/remote/shared/ssh/" + server, "/remote/shared/ssh/" + account} {
+		if w := bob.expect("GET", path, "", 404); strings.Contains(w.Body.String(), "data-owned-remote") || w.Body.String() == closed {
 			t.Fatalf("%s served a session page", path)
 		}
 	}
-	f.alice.expect("GET", page, "", 404)
-	dave.expect("GET", page, "", 404)
-	// Taken off, or the account removed: gone again.
+	// Signed out, as from a bookmark: sign in first, like any page.
+	if w := (&custodyClient{t: t, l: f.l}).expect("GET", page, "", 303); w.Header().Get("Location") != "/login" || strings.Contains(w.Body.String(), account) {
+		t.Fatal("a signed-out session page did not lead to sign-in")
+	}
+	// Taken off, or the account removed: closed again.
 	f.alice.expect("POST", accountPath(server, account, "revoke"), personField(b.ID), 204)
-	bob.expect("GET", page, "", 404)
+	isClosed(bob, page)
 	f.alice.expect("POST", accountPath(server, account, "grant"), personField(b.ID), 204)
 	bob.expect("GET", page, "", 200)
 	f.alice.expect("DELETE", accountPath(server, account), "{}", 204)
-	bob.expect("GET", page, "", 404)
+	isClosed(bob, page)
 }
 
 // A desktop's account takes a password only, and its card follows its
