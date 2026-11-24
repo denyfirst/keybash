@@ -157,15 +157,19 @@ func TestSSHProcessImageAndPolicyRefuseBeforeDial(t *testing.T) {
 	}
 }
 
+// processOwnedFixture is a real SSH server reached through the isolated worker
+// process. It takes only the password the browser gave the server account
+// (ADR 0010): nobody holds a key of their own any more.
 type processOwnedFixture struct {
-	t          *testing.T
-	manager    ProcessWorker
-	host, user ssh.Signer
-	closed     chan struct{}
+	t        *testing.T
+	manager  ProcessWorker
+	host     ssh.Signer
+	password string
+	closed   chan struct{}
 }
 
 func (f *processOwnedFixture) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
-	fixture := newFixture(f.t, fixtureOptions{host: f.host, user: f.user})
+	fixture := newFixture(f.t, fixtureOptions{host: f.host, password: f.password})
 	// Only this _test.go seam substitutes a loopback peer. Runtime OpenSSH
 	// always calls NamedTarget.DialContext before descriptor handoff.
 	stream, err := f.manager.open(ctx, target.Hostname(), func(context.Context) (net.Conn, error) { return fixture.client, nil }, pin, user, auth)
@@ -176,7 +180,7 @@ func (f *processOwnedFixture) OpenSSH(ctx context.Context, target *targetguard.N
 }
 func TestSSHProcessOwnedBrowser(t *testing.T) {
 	manager := processFixtureManager(t)
-	user, secret := processFixtureKey(t)
+	const password = "Synthetic process SSH password 2026!"
 	host := syntheticSigner(t)
 	ip := netip.MustParseAddr("10.44.0.2")
 	policy, err := targetguard.New([]netip.AddrPort{netip.AddrPortFrom(ip, 22)}, nil)
@@ -187,10 +191,11 @@ func TestSSHProcessOwnedBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal("fixture target failed")
 	}
-	f := &processOwnedFixture{t: t, manager: manager, host: host, user: user, closed: make(chan struct{})}
-	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
+	f := &processOwnedFixture{t: t, manager: manager, host: host, password: password, closed: make(chan struct{})}
+	ctx, cancel := context.WithTimeout(context.Background(), 110*time.Second)
 	defer cancel()
-	remotefixture.Run(t, ctx, identity.RemoteTarget{ID: strings.Repeat("c", 32), Name: "Isolated SSH process", Protocol: "ssh", Target: target, Identity: host.PublicKey().Marshal()}, f, nil, string(secret), "node", nil)
+	// The browser script finds the server by the name it adds accounts to.
+	remotefixture.Run(t, ctx, identity.RemoteTarget{ID: strings.Repeat("c", 32), Name: "Owned remote", Protocol: "ssh", Target: target, Identity: host.PublicKey().Marshal()}, f, nil, password, "node", nil)
 	select {
 	case <-f.closed:
 	case <-time.After(2 * time.Second):
