@@ -205,6 +205,14 @@ try {
   await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: /^deploy on Build box was removed\.$/ }).waitFor(); await settled();
   assert.equal(await page.locator('.server-account').count(), 0); await page.locator('#accounts .empty-state').waitFor();
   await terminal.locator('#notice').filter({ hasText: /^This server, its account or your access to it changed, so this session ended\.$/ }).waitFor();
+  // Connect again finds it closed: one page that names nothing and leads back
+  // to Your servers.
+  await Promise.all([terminal.waitForEvent('load'), terminal.locator('#reconnect').click()]);
+  await terminal.locator('h1').filter({ hasText: /^This server is not open to you$/ }).waitFor();
+  assert.equal(await terminal.locator('script').count(), 0, 'the closed page runs a script');
+  assert.doesNotMatch(await terminal.content(), new RegExp(`${deployID}|Build box|deploy`), 'the closed page names the account');
+  await Promise.all([terminal.waitForURL(config.Origin + '/'), terminal.getByRole('link', { name: 'Back to your servers', exact: true }).click()]);
+  await terminal.locator('#access-panel').waitFor({ state: 'visible' });
   await Promise.all(answers); await terminal.close(); // its answers are read while it is open
   assert.equal((await page.request.get(`${config.Origin}/remote/ssh/${deployID}`)).status(), 404, 'a removed account still opened a page');
   // Every OpenSSH private key's body begins with this (base64 of openssh-key-v1).

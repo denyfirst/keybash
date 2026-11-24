@@ -9,6 +9,28 @@ import (
 	"github.com/denyfirst/keybash/web"
 )
 
+// sessionPage reports whether path names a session page by its shape alone:
+// /remote/{ssh|rdp}/{account} (ADR 0010). Whether it opens is decided later.
+func sessionPage(path string) bool {
+	parts := strings.Split(strings.TrimPrefix(path, "/remote/"), "/")
+	return strings.HasPrefix(path, "/remote/") && len(parts) == 2 && validID(parts[1]) && (parts[0] == "ssh" || parts[0] == "rdp")
+}
+
+// closedPage answers a session page this person may not open with one page,
+// whatever the reason: not on the account, an account or server that is gone,
+// the other protocol, or none at all. It names nothing and leads back to the
+// servers they can open.
+func closedPage(w http.ResponseWriter) {
+	data, e := web.Assets.ReadFile("remote-closed.html")
+	if e != nil {
+		refuse(w, 404)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(404)
+	_, _ = w.Write(data)
+}
+
 func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bool {
 	assets := map[string]string{"/app.mjs": "app.mjs", "/desktop-workspace.mjs": "desktop-workspace.mjs", "/remote.mjs": "remote.mjs", "/paste.mjs": "paste.mjs", "/style.css": "style.css", "/desktop.css": "desktop.css", "/vendor/xterm.js": "vendor/xterm.js", "/vendor/xterm-addon-webgl.js": "vendor/xterm-addon-webgl.js", "/vendor/xterm.css": "vendor/xterm.css",
 		// The desktop page on IronRDP (BROWSER-RDP-PAGE.md, 3d), and IronRDP's
@@ -22,10 +44,10 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 	// A session opens on its own page, by the account's ID (ADR 0010):
 	// /remote/{ssh|rdp}/{account}.
 	if strings.HasPrefix(r.URL.Path, "/remote/") {
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/remote/"), "/")
-		if len(parts) != 2 || !validID(parts[1]) || (parts[0] != "ssh" && parts[0] != "rdp") {
+		if !sessionPage(r.URL.Path) {
 			return false
 		}
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/remote/"), "/")
 		protocol, account = parts[0], parts[1]
 		l.mu.Lock()
 		// The same checks as opening it: on the account, the server usable,
@@ -37,7 +59,7 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		}
 		l.mu.Unlock()
 		if !allowed {
-			refuse(w, 404)
+			closedPage(w)
 			return true
 		}
 		file = "index.html"

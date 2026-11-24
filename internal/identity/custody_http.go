@@ -258,7 +258,9 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	s := l.liveLocked(id, page)
 	if !valid || s == nil {
 		l.mu.Unlock()
-		if page {
+		// A session page opened signed out, as from a bookmark, signs in first
+		// like any page; nothing about the account is looked at.
+		if page || r.Method == "GET" && sessionPage(r.URL.Path) {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 		} else {
 			refuse(w, 401)
