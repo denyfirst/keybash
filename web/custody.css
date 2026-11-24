@@ -394,7 +394,7 @@ dialog.sheet .hint { margin-bottom: 0; }
 dialog.install { width: min(44rem, 92vw); }
 .install-steps { margin: 0.7rem 0 0.2rem; padding-left: 1.3rem; font-size: 0.9rem; color: var(--ink-soft); }
 .install-steps li { margin: 0.25rem 0; }
-#key-command, #key-next-command { font-size: 0.8rem; }
+#key-command { font-size: 0.8rem; }
 
 /* Step-up: one short question, asked only when an action needs it. */
 dialog.stepup { width: min(27rem, 92vw); padding: 1.8rem 1.8rem 1.4rem; }
@@ -863,7 +863,10 @@ a.button-link.secondary:hover { background: var(--paper-sunk); border-color: var
 .server-account:hover { border-color: color-mix(in srgb, var(--tool) 30%, var(--rule)); box-shadow: var(--shadow-lg); }
 .server-account-head { display: flex; align-items: center; gap: 0.85rem; min-width: 0; }
 .server-account-name { font-family: var(--mono); font-size: 1.02rem; }
-.server-account-how[data-waiting=true] { color: var(--tool); font-weight: 600; }
+/* A key's state sits at the card's top right, in words and a colour. */
+.server-account-head .account-state { flex: none; margin-left: auto; align-self: flex-start; }
+.account-state[data-state=set] { color: var(--strong); }
+.account-state:is([data-state=waiting], [data-state=next]) { color: var(--weak); }
 .people-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding-top: 0.7rem; border-top: 1px solid var(--rule); }
 .chips-label { flex-basis: 100%; font-size: 0.78rem; font-weight: 600; color: var(--ink-soft); }
 .chips-none { font-size: 0.86rem; color: var(--ink-faint); }
@@ -873,9 +876,29 @@ a.button-link.secondary:hover { background: var(--paper-sunk); border-color: var
 .server-account-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .server-account-actions button { margin: 0; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
 .server-account-actions button.destructive { margin-left: auto; }
-#key-dialog .command-box { margin: 0.6rem 0 0.4rem; }
-#key-next { margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--rule); }
-#key-command, #key-next-command { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The key sheet: one task, in numbered steps, the command inside its step.
+   Dropping a new key sits apart, at the left, from the way forward. */
+.key-steps { display: grid; gap: 0.75rem; margin: 1rem 0 0.2rem; padding-left: 1.4rem; font-size: 0.92rem; color: var(--ink-soft); }
+.key-steps li::marker { font-weight: 700; color: var(--tool); }
+#key-dialog .command-box { margin: 0.5rem 0 0; }
+#key-command { white-space: pre-wrap; overflow-wrap: anywhere; }
+#key-dialog .key-discard { margin-right: auto; }
+/* Why Keybash makes the key: a quiet fold under the choice. */
+.own-key { margin-top: 0.5rem; border-top: 0; }
+.own-key summary { width: fit-content; padding: 0; font-size: 0.88rem; font-weight: 500; color: var(--link); }
+.own-key summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+.own-key[open] summary { margin-bottom: 0.3rem; }
+.own-key .hint + .hint { margin-top: 0.4rem; }
+/* This server: its name, its picture and removing it, as cards like the
+   Account page's; removing it shows its red when pointed at. */
+#server-settings { margin-top: 2.2rem; }
+.setting h3 { margin: 0 0 0.25rem; font-size: 1.02rem; }
+.setting-danger .setting-icon { color: var(--insecure); background: color-mix(in srgb, var(--insecure) 10%, var(--card)); }
+button.secondary.destructive:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--insecure);
+  background: color-mix(in srgb, var(--insecure) 8%, var(--card));
+  border-color: color-mix(in srgb, var(--insecure) 45%, var(--rule));
+}
 
 /* Where one person signs in: one row per account. */
 .access-list { display: grid; gap: 0.6rem; }

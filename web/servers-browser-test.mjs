@@ -85,7 +85,12 @@ try {
   assert.equal(await page.locator('#account-submit').textContent(), 'Make the key'); assert(await page.locator('#account-secret-field').isHidden(), 'a key made here asked for a password');
   assert.match(await page.locator('#account-kind-hint').textContent(), /Nobody ever sees the key/);
   assert.notEqual(await look('ssh-key'), await look('password'), 'the chosen kind looked like the other');
+  // Why Keybash does not take your own key is a closed fold under the key.
+  assert(await page.locator('#account-own-key').isVisible() && !await page.locator('#account-own-key').evaluate(fold => fold.open), 'the reason for a key made here was missing or open');
+  await page.locator('#account-own-key summary').click();
+  assert.match(await page.locator('#account-own-key').textContent(), /Anyone holding one could sign in without Keybash/);
   await page.locator('#account-kind [data-kind=password]').click();
+  assert(await page.locator('#account-own-key').isHidden(), 'a password showed why not your own key');
   assert.equal(await page.locator('#account-submit').textContent(), 'Save the password'); assert(await page.locator('#account-secret-field').isVisible());
   assert.match(await page.locator('#account-kind-hint').textContent(), /^Typed once here and never shown again\. Anyone who already knows it can still sign in without Keybash/);
   assert.notEqual(await look('ssh-key'), await look('password'), 'the chosen kind looked like the other');
@@ -94,8 +99,12 @@ try {
   await page.locator('#account-user').fill('deploy'); await page.locator('#account-submit').click();
   await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
   const keyLine = /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && echo 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/;
-  assert.equal(await page.locator('#key-title').textContent(), 'Now put the key on the server');
-  assert.match(await page.locator('#key-lead').textContent(), /^Not on the server yet\. Run this once on Build box, as deploy\./);
+  // Putting the key on the server is one task, in steps, with one way out.
+  assert.equal(await page.locator('#key-title').textContent(), 'Now put the key on Build box');
+  assert.equal(await page.locator('#key-lead').textContent(), 'Until its line is there, nobody can sign in as deploy.');
+  assert.equal(await page.locator('#key-step-open').textContent(), 'On Build box, open a terminal signed in as deploy.');
+  assert.equal(await page.locator('#key-step-end').textContent(), 'Connect once from Your servers. This account then shows Set up.');
+  assert.deepEqual(await page.locator('#key-dialog .dialog-actions button:visible').allTextContents(), ['Done']);
   assert.equal(await page.locator('#key-command-head').textContent(), 'Shell on Build box, as deploy');
   const firstKey = await page.locator('#key-command').textContent(); assert.match(firstKey, keyLine);
   // The command's own Copy copies it whole.
@@ -103,7 +112,9 @@ try {
   assert.equal(await page.evaluate(() => copiedText[0]), firstKey, 'Copy took other text than the command');
   await page.evaluate(() => { copiedText.length = 0; });
   await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
-  assert.equal(await card('deploy').locator('.server-account-how').textContent(), 'Key made by Keybash · not on the server yet');
+  assert.equal(await card('deploy').locator('.server-account-how').textContent(), 'Key kept by Keybash');
+  assert.equal(await card('deploy').locator('.account-state').textContent(), 'Not set up yet');
+  assert.deepEqual(await card('deploy').locator('.server-account-actions button').allTextContents(), ['Change who', 'Put the key on the server', 'Remove']);
   assert.deepEqual(await card('deploy').locator('.chip-name').allTextContents(), ['alice (you)']);
   // Another account on the server needs another name, whatever its case.
   await page.locator('#add-account').click(); await page.locator('#account-dialog').waitFor({ state: 'visible' });
@@ -112,29 +123,34 @@ try {
   await page.locator('#account-cancel').click(); await page.locator('#account-dialog').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('.server-account').count(), 1);
 
-  stage = 'new key';
-  // A new key waits beside the current one until the switch.
-  await card('deploy').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' });
-  await page.locator('#key-new').click(); await page.locator('#key-next').waitFor({ state: 'visible' }); await settled();
-  const nextKey = await page.locator('#key-next-command').textContent(); assert.match(nextKey, keyLine); assert.notEqual(nextKey, firstKey);
-  assert.equal(await page.locator('#key-command').textContent(), firstKey, 'a new key replaced the current one before the switch');
-  assert(await page.locator('#key-new').isHidden(), 'a second new key was offered while one waits');
-  assert.match(await card('deploy').locator('.server-account-how').textContent(), / · a new key is waiting$/);
-  await page.locator('#key-switch').click(); await sheetNotice('key-dialog').filter({ hasText: /^The new key is in use\. The old key is destroyed/ }).waitFor(); await settled();
-  assert.equal(await page.locator('#key-command').textContent(), nextKey, 'the switch did not make the new key the one used');
-  assert(await page.locator('#key-next').isHidden() && await page.locator('#key-new').isVisible(), 'the sheet still showed a waiting key');
-  // A waiting key can be dropped; the current one stays.
-  await page.locator('#key-new').click(); await page.locator('#key-next').waitFor({ state: 'visible' }); await settled();
-  await page.locator('#key-keep').click(); await sheetNotice('key-dialog').filter({ hasText: /^The new key was destroyed\. The current one stays\.$/ }).waitFor(); await settled();
-  assert.equal(await page.locator('#key-command').textContent(), nextKey);
+  stage = 'key not set up';
+  // Until the key has worked once, its card shows the same line again, and
+  // offers no new key.
+  await card('deploy').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#key-title').textContent(), 'Put the key on Build box');
+  assert.equal(await page.locator('#key-command').textContent(), firstKey);
   await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+
+  stage = 'this server';
+  // The identity card offers only its check; the name, the picture and
+  // removing the server sit under This server.
+  assert.deepEqual(await page.locator('#server-card button').allTextContents(), ['Check identity'], 'the identity card offered more than its check');
+  assert.equal(await page.locator('#server-card .record-name').textContent(), 'Server identity');
+  assert.equal(await page.locator('#server-name-now').textContent(), 'Build box. Everyone who signs in to it sees this name.');
+  assert.deepEqual(await page.locator('#server-settings button').allTextContents(), ['Rename', 'Choose', 'Remove server']);
+  await page.locator('#server-rename').click(); await page.locator('#rename-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#rename-name').inputValue(), 'Build box');
+  await page.locator('#rename-cancel').click(); await page.locator('#rename-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#server-system').click(); await page.locator('#system-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#system-title').textContent(), 'What runs on Build box?');
+  await page.locator('#system-cancel').click(); await page.locator('#system-dialog').waitFor({ state: 'hidden' });
 
   stage = 'narrow pages';
   // At any width the list keeps a server's fingerprint readable on its own
   // page, each action keeps its words on one line, and nothing scrolls sideways.
   for (const width of [390, 820, 1100, 1280]) {
     await page.setViewportSize({ width, height: 1000 });
-    assert.deepEqual(await page.locator('#server-card button, .server-account button').evaluateAll(buttons => buttons.filter(b => b.getBoundingClientRect().height > 44).map(b => b.textContent)), [], `an action wrapped its words at ${width}px`);
+    assert.deepEqual(await page.locator('#server-card button, .server-account button, #server-settings button').evaluateAll(buttons => buttons.filter(b => b.getBoundingClientRect().height > 44).map(b => b.textContent)), [], `an action wrapped its words at ${width}px`);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `the server's page scrolled sideways at ${width}px`);
     if (width > 390) assert((await page.locator('#server-card .fingerprint').boundingBox()).width >= 180, `the fingerprint was squeezed at ${width}px`);
   }
@@ -159,6 +175,7 @@ try {
   assert.match(await accessCard.locator('.server-screen').textContent(), /^deploy@Build box ~ \$ /);
   assert.equal(await accessCard.getByRole('button').count(), 0, 'a card offered to change its account');
   const deployID = await accessCard.getAttribute('data-account'); assert.match(deployID, /^[a-f0-9]{32}$/);
+  assert.equal(await page.locator('#access-foot').textContent(), 'You are here for each account you are on. Who signs in with an account, you included, is chosen on its server’s page under Servers.', 'an administrator was told an administrator chooses');
   const connect = accessCard.getByRole('link', { name: 'Connect', exact: true });
   assert.equal(await connect.getAttribute('href'), `/remote/ssh/${deployID}`);
 
@@ -194,8 +211,45 @@ try {
   await terminal.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('account-key-echo'));
   // The key worked once, so its account says it is on the server.
   await page.goto(`${config.Origin}/servers/${buildID}`); await page.locator('#server-panel').waitFor({ state: 'visible' }); await settled();
-  assert.equal(await card('deploy').locator('.server-account-how').textContent(), 'Key made by Keybash · on the server');
-  assert.equal(await card('deploy').getByRole('button', { name: 'Key line', exact: true }).count(), 1);
+  assert.equal(await card('deploy').locator('.account-state').textContent(), 'Set up');
+  assert.deepEqual(await card('deploy').locator('.server-account-actions button').allTextContents(), ['Change who', 'Replace key', 'Remove']);
+
+  stage = 'replace the key';
+  // Replacing asks first and shows no line until a new key exists.
+  await card('deploy').getByRole('button', { name: 'Replace key', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#key-title').textContent(), 'Replace the key for deploy?');
+  assert(await page.locator('#key-steps').isHidden(), 'replacing showed a line before a new key existed');
+  assert.deepEqual(await page.locator('#key-dialog .dialog-actions button:visible').allTextContents(), ['Cancel', 'Make the new key']);
+  await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await card('deploy').locator('.account-state').textContent(), 'Set up', 'Cancel made a key');
+  // The new key waits beside the current one, which goes on working.
+  await card('deploy').getByRole('button', { name: 'Replace key', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' });
+  await page.locator('#key-make').click(); await page.locator('#key-title').filter({ hasText: /^Switch deploy to the new key$/ }).waitFor(); await settled();
+  assert.equal(await sheetNotice('key-dialog').textContent(), '', 'the sheet repeated its own lead as a notice');
+  assert.equal(await page.locator('#key-step-run').textContent(), 'Add the new key’s line, once:');
+  const nextKey = await page.locator('#key-command').textContent(); assert.match(nextKey, keyLine); assert.notEqual(nextKey, firstKey);
+  assert.deepEqual(await page.locator('#key-dialog .dialog-actions button:visible').allTextContents(), ['Discard the new key', 'Later', 'Use the new key']);
+  await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await card('deploy').locator('.account-state').textContent(), 'New key waiting');
+  // A waiting key can be dropped; the current one stays.
+  await card('deploy').getByRole('button', { name: 'Switch to the new key', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#key-command').textContent(), nextKey, 'the sheet showed another key than the one waiting');
+  await page.locator('#key-keep').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#notice').filter({ hasText: /^The new key was destroyed\. The current one stays\.$/ }).waitFor(); await settled();
+  assert.equal(await card('deploy').locator('.account-state').textContent(), 'Set up');
+  // Switching makes the new key the one used: the card asks for its first
+  // session again, and the open terminal goes on.
+  await card('deploy').getByRole('button', { name: 'Replace key', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' });
+  await page.locator('#key-make').click(); await page.locator('#key-title').filter({ hasText: /^Switch deploy to the new key$/ }).waitFor(); await settled();
+  const usedKey = await page.locator('#key-command').textContent(); assert.notEqual(usedKey, nextKey);
+  await page.locator('#key-switch').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#notice').filter({ hasText: /^deploy uses the new key now\. The old key is destroyed: its line can come off the server\.$/ }).waitFor(); await settled();
+  assert.equal(await card('deploy').locator('.account-state').textContent(), 'Not set up yet');
+  await card('deploy').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#key-command').textContent(), usedKey, 'the switch did not make the new key the one used');
+  await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  await terminal.locator('.xterm-helper-textarea').focus(); await terminal.keyboard.type('after-switch');
+  await terminal.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('after-switch'));
 
   stage = 'remove the account';
   // Removing it asks first; then nobody signs in as it, and the open session ends.
@@ -219,7 +273,7 @@ try {
   assert.doesNotMatch(await page.content(), /b3BlbnNzaC1rZXktdjE/, 'the page held a private key');
 
   stage = 'remove the server';
-  await page.locator('#server-card').getByRole('button', { name: 'Remove', exact: true }).click(); await page.locator('#delete-dialog').waitFor({ state: 'visible' });
+  await page.locator('#server-remove').click(); await page.locator('#delete-dialog').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#delete-title').textContent(), 'Remove this server?');
   await page.locator('#confirm-delete').click(); await page.waitForURL(config.Origin + '/servers'); await page.locator('#notice').filter({ hasText: /^Build box was removed\.$/ }).waitFor(); await settled();
   assert.equal(await row('Build box').count(), 0, 'the server was not removed');
@@ -384,7 +438,7 @@ try {
   for (const answer of await Promise.all(answers)) assert(!answer.includes(sharedPassword) && !answer.includes('b3BlbnNzaC1rZXktdjE') && !answer.includes('PRIVATE KEY'), 'an answer carried a secret');
 
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
-  console.log('Servers page browser: list, refusals, compare-before-add, the first account, key lines and a new key, narrow pages, your servers and their card states, a terminal and a desktop through accounts, removal, renewal, unchecked desktop, and giving access from a person\'s page passed');
+  console.log('Servers page browser: list, refusals, compare-before-add, the first account, putting and replacing a key, This server, narrow pages, your servers and their card states, a terminal and a desktop through accounts, removal, renewal, unchecked desktop, and giving access from a person\'s page passed');
 } catch (error) {
   console.log('Servers browser stage:', stage, error.code === 'ERR_ASSERTION' ? error.message : error.name);
   if (process.env.KEYBASH_SERVERS_SCREENSHOT) await page.screenshot({ path: process.env.KEYBASH_SERVERS_SCREENSHOT });
