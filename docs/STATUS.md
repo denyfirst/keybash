@@ -41,34 +41,38 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
     password.
   - **Their password:** "Forgot password?" with an administrator's code and
     their own phone code.
-  - **Both:** start over, which deletes their keys and passwords.
+  - **Both:** start over with a new invite; the servers they sign in to stay.
 
   No administrator can become someone else.
 - `keybash account-recover --admin` on the server, for when no administrator
   can sign in.
 
-**Keys, passwords and servers**
-- Each stored key or password is sealed under its own data key; the instance
-  key is kept in a separate file.
-- SSH keys (Ed25519, ECDSA, RSA 2048 and up) with passphrases, and passwords.
-  Keybash can also make an Ed25519 key whose private half it never shows.
+**Servers and their accounts** (ADR 0010)
+- A person reaches a server only through an account on it that lists them, and
+  signs in as that account: a key Keybash makes (Ed25519, SSH), whose private
+  half nobody ever sees, or a password typed once by an administrator. Each is
+  sealed under its own data key; the instance key is kept in a separate file.
+- People never hold a server's key or password, so taking them off an account
+  is their whole revocation. Their own keys, passwords and connections are
+  gone: the first start of this version erases what earlier ones kept.
 - Administrators add SSH and Windows RDP servers on the Servers page, inside the
   target networks only. Keybash reads the host key or certificate, they check it
   on the server's own console, and it is read again and pinned when added. For a
   Windows desktop they may leave the check out; the server is then marked Not
   checked, for them and for the people who use it, until they check it. Nobody
-  can use a new server until an administrator chooses who may; taking someone
-  off, a new key or removing the server ends open sessions at once.
+  can use a new server until an administrator adds an account and puts people
+  on it; taking someone off, removing the account or the server, or a new
+  server identity ends open sessions at once.
 - When Windows renews its RDP certificate, nothing accepts it by itself. Keybash
   reads each desktop's certificate hourly and before each session: the person
   connecting is told no password was sent, an administrator sees a mark and a
   line on every page, and a fingerprint from the server's own screen settles it.
-- Every server has an access list, auditors read the page, and nothing is
-  open to everyone. Servers in an older `targets.json` move into the page once
-  at the first start, open to exactly the people who already connect to them.
+- Auditors read the Servers page, and nothing is open to everyone. Servers in
+  an older `targets.json` move into the page once at the first start, with no
+  account.
   A new install needs no server file: it names only the networks servers are
-  in. Changed identities block the connection until the owner accepts them
-  again (`SERVER-TRUST-LAB.md`, `INSTALL.md`).
+  in. A changed identity blocks every account on the server until an
+  administrator accepts it (`SERVER-TRUST-LAB.md`, `INSTALL.md`).
 - Dials go to the pinned addresses only, with DNS answers checked and
   metadata, loopback and protected networks refused.
 

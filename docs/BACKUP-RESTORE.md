@@ -68,15 +68,22 @@ database's exclusive lock, so the service is stopped while `backup` or
 ## What a backup is
 
 A logical copy of every custody namespace (state, accounts, name index,
-credentials, connections, servers, servers' shared credentials, and each
-account's chosen look), read in one transaction. Before anything is written,
-every record is read as the service would read it: the state's tag, each
-account, one name-index entry per account, each credential, connection and
-look with an existing owner (a look under its own account's name only), each
-shared credential under its own listed server, and the write quotas (256 accounts,
-256 credentials per owner and 4096 overall, 128 connections per owner and
-2048 overall, one look per account). A store holding any other namespace, a nested one, or a record that
-does not read is refused rather than backed up in part.
+servers, their accounts, and each account's chosen look), read in one
+transaction. Before anything is written, every record is read as the service
+would read it: the state's tag, each account, one name-index entry per
+account, each look under its own account's name, each server, and each
+server account under its own listed server, with a name of its own there and
+only people who exist and are not auditors, within the write quotas (256
+accounts, 256 servers, 16 accounts per server and 2048 overall, one look per
+account). A store holding any other namespace, a nested one, a record that does
+not read, or anything earlier versions kept for the personal path (ADR 0010)
+is refused rather than backed up in part.
+
+A backup taken by an earlier version still restores. Its personal keys,
+passwords and connections and its shared credentials are read past and
+dropped, and its servers' access lists are erased, in the restore's own
+transaction; the restored instance then has servers and people but no
+accounts on them until an administrator adds some.
 
 The copy is sealed with AES-256-GCM (random nonce) under a key derived from the
 instance key by HKDF for that one file (a random 32-byte salt). The header,
@@ -119,9 +126,10 @@ entry from their authenticator app and enroll anew.
 
 ## Limits
 
-- A backup is a point in time. Restoring it brings back credentials, passwords
-  and connections as they were then: a credential deleted or rotated since, or
-  an account password changed since, returns to its old value. Rotate what
+- A backup is a point in time. Restoring it brings back server accounts and
+  their keys and passwords as they were then: an account removed or a secret
+  replaced since, or a person's password changed since, returns to its old
+  value. Rotate what
   changed for a reason, and use `account-recover` for a user whose password
   changed after the backup.
 - Restore replaces an instance, it does not fork one. Running the restored

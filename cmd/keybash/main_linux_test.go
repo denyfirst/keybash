@@ -215,7 +215,7 @@ func TestOperatorLinuxBackupKeyRecoveryAndRestore(t *testing.T) {
 	}
 	backup := filepath.Join(dirs["offsite"], "custody.backup")
 	printed, e := call("backup", "", at(dirs["data"], key, "--out", backup)...)
-	if e != nil || !strings.Contains(printed, "2 accounts, 0 credentials, 0 connections") || strings.Contains(printed, recovery) {
+	if e != nil || !strings.Contains(printed, "2 accounts, 0 servers, 0 server accounts") || strings.Contains(printed, recovery) {
 		t.Fatal("valid backup refused or misreported")
 	}
 	if info, e := os.Stat(backup); e != nil || info.Mode().Perm() != 0600 {

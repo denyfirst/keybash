@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/denyfirst/keybash/web"
+	"golang.org/x/crypto/ssh"
 )
 
 // The names the server accepts are exactly the marks the page can draw.
@@ -36,67 +37,59 @@ func TestSystemNamesMatchTheMarks(t *testing.T) {
 	}
 }
 
-// A card's system is a label its owner picks: it changes no target,
-// credential or trust decision, and only the owner can set it.
-func TestConnectionSystemIsALabelOnly(t *testing.T) {
-	_, store, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
-	read := func() connectionView {
+// A server's mark is a label an administrator picks for its cards: it changes
+// no target, identity or access, and nobody else sets it.
+func TestServerSystemIsALabelOnly(t *testing.T) {
+	f, scans := serversFixture(t)
+	server, key := addServerFixture(t, f.alice, scans, "Web", "10.20.0.7:22")
+	bob, b := f.person("bob", roleUser)
+	dave, _ := f.person("dave", roleAuditor)
+	account := accountFixture(t, f.l, server, "deploy", "", b.ID)
+	card := func() accessRow {
 		t.Helper()
-		var rows []connectionView
-		if json.Unmarshal(c.expect("GET", "/api/connections", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 {
-			t.Fatal("connection list malformed")
+		var rows []accessRow
+		if json.Unmarshal(bob.expect("GET", "/api/access", "", 200).Body.Bytes(), &rows) != nil || len(rows) != 1 {
+			t.Fatal("access list malformed")
 		}
 		return rows[0]
 	}
-	before := read()
+	before := card()
+	stored, _ := f.store.listServers()
 	if before.System != "" || before.Trust != "verified" {
-		t.Fatal("fixture connection is not a verified connection without a system")
+		t.Fatal("fixture card is not a ready card without a mark")
 	}
-	path := "/api/connections/" + record + "/system"
-	c.expect("POST", path, inputJSON(map[string]string{"system": "ubuntu"}), 204)
-	after := read()
-	if after.System != "ubuntu" || after.Trust != "verified" || after.Target != before.Target || after.Credential != before.Credential || after.Fingerprint != before.Fingerprint || after.Name != before.Name {
-		t.Fatal("setting the system changed more than the label")
+	path := "/api/servers/" + server + "/system"
+	f.alice.expect("POST", path, inputJSON(map[string]string{"system": "ubuntu"}), 204)
+	after := card()
+	if after.System != "ubuntu" || after.Trust != "verified" || after.Account != account || after.Username != "deploy" {
+		t.Fatal("setting the mark changed more than the label")
 	}
-	if after.Revision == before.Revision {
+	row, _ := serverRow(listServersView(t, f.alice), server)
+	if row.System != "ubuntu" || row.Fingerprint != ssh.FingerprintSHA256(key) {
+		t.Fatalf("the server's row: %+v", row)
+	}
+	if list, _ := f.store.listServers(); list[0].Revision == stored[0].Revision && list[1].Revision == stored[1].Revision {
 		t.Fatal("the record was not resealed at a new revision")
 	}
 	for _, body := range []string{
 		inputJSON(map[string]string{"system": "windows95"}),
 		inputJSON(map[string]string{"system": "Ubuntu"}),
-		inputJSON(map[string]string{"system": ""}),
-		inputJSON(map[string]string{"system": "ubuntu", "target": strings.Repeat("a", 32)}),
+		inputJSON(map[string]string{"system": "ubuntu", "name": "x"}),
 		`{"system":1}`, `not json`,
 	} {
-		c.expect("POST", path, body, 400)
+		f.alice.expect("POST", path, body, 400)
 	}
-	c.expect("POST", "/api/connections/"+strings.Repeat("a", 32)+"/system", inputJSON(map[string]string{"system": "debian"}), 404)
-	c.expect("POST", "/api/connections/not-an-id/system", inputJSON(map[string]string{"system": "debian"}), 400)
-	if read().System != "ubuntu" {
-		t.Fatal("a refused request changed the system")
+	f.alice.expect("POST", "/api/servers/"+strings.Repeat("e", 32)+"/system", inputJSON(map[string]string{"system": "debian"}), 404)
+	for _, c := range []*custodyClient{bob, dave} {
+		c.expect("POST", path, inputJSON(map[string]string{"system": "debian"}), 403)
 	}
-	// A request without this session's CSRF token, or without a session, is
-	// refused before it is read.
-	token := c.csrf
-	c.csrf = strings.Repeat("A", 43)
-	c.expect("POST", path, inputJSON(map[string]string{"system": "debian"}), 403)
-	c.csrf = token
-	(&custodyClient{t: t, l: c.l}).expect("POST", path, inputJSON(map[string]string{"system": "debian"}), 401)
-	if read().System != "ubuntu" {
-		t.Fatal("a request without the session's token changed the system")
+	if card().System != "ubuntu" {
+		t.Fatal("a refused request changed the mark")
 	}
-	// Another account cannot label someone else's connection.
-	if _, e := store.CreateAccount("bob", alicePassword); e != nil {
-		t.Fatal("second account failed")
+	// Taking the mark away is allowed.
+	f.alice.expect("POST", path, inputJSON(map[string]string{"system": ""}), 204)
+	if card().System != "" {
+		t.Fatal("the mark was not taken away")
 	}
-	_, _, codes := enrollFixture(t, store, "bob", time.Now())
-	bob := &custodyClient{t: t, l: c.l}
-	bob.expect("POST", "/api/session", inputJSON(map[string]string{"username": "bob", "password": alicePassword}), 204)
-	bob.session("challenge")
-	bob.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": codes[0]}), 204)
-	bob.session("ready")
-	bob.expect("POST", path, inputJSON(map[string]string{"system": "debian"}), 404)
-	if read().System != "ubuntu" {
-		t.Fatal("another account changed the system")
-	}
+	_ = time.Second
 }

@@ -47,40 +47,18 @@ func TestCustodySSHRejectsCostBombAndMismatchedPublic(t *testing.T) {
 	if ssh.Unmarshal(block.Bytes[len(magic):], &original) != nil {
 		t.Fatal("fixture outer parse failed")
 	}
-	for _, rounds := range []uint32{0, 65, 0xffffffff} {
+	// A key locked with a passphrase is never one Keybash keeps, whatever its
+	// cost: no bcrypt runs at all.
+	for _, rounds := range []uint32{0, 16, 65, 0xffffffff} {
 		outer := original
 		outer.Options = string(ssh.Marshal(struct {
 			Salt   string
 			Rounds uint32
 		}{strings.Repeat("s", 16), rounds}))
 		raw := append([]byte(magic), ssh.Marshal(outer)...)
-		c := Credential{Name: "fixture", Kind: "ssh-key", Passphrase: "synthetic passphrase", Secret: string(pem.EncodeToMemory(&pem.Block{Type: block.Type, Bytes: raw}))}
+		c := Credential{Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(&pem.Block{Type: block.Type, Bytes: raw}))}
 		if validateCredential(&c) == nil {
-			t.Fatal("unbounded bcrypt rounds accepted")
-		}
-	}
-	// The bound itself, both ways: decryption above fails for a wrong salt
-	// anyway, so only the predicate shows where the work limit sits.
-	options := func(salt int, rounds uint32) string {
-		return string(ssh.Marshal(struct {
-			Salt   string
-			Rounds uint32
-		}{strings.Repeat("s", salt), rounds}))
-	}
-	if !encryptionAllowed("aes256-ctr", "bcrypt", original.Options) || !encryptionAllowed("aes256-ctr", "bcrypt", options(16, 64)) || !encryptionAllowed("aes256-ctr", "bcrypt", options(64, 1)) {
-		t.Fatal("a bounded key encryption was refused")
-	}
-	for name, raw := range map[string][3]string{
-		"rounds-65": {"aes256-ctr", "bcrypt", options(16, 65)},
-		"rounds-0":  {"aes256-ctr", "bcrypt", options(16, 0)},
-		"salt-15":   {"aes256-ctr", "bcrypt", options(15, 16)},
-		"salt-65":   {"aes256-ctr", "bcrypt", options(65, 16)},
-		"cipher":    {"aes128-ctr", "bcrypt", options(16, 16)},
-		"kdf":       {"aes256-ctr", "none", options(16, 16)},
-		"options":   {"aes256-ctr", "bcrypt", options(16, 16) + "x"},
-	} {
-		if encryptionAllowed(raw[0], raw[1], raw[2]) {
-			t.Fatalf("%s key encryption allowed", name)
+			t.Fatalf("a locked key with %d bcrypt rounds was accepted", rounds)
 		}
 	}
 	plain, e := ssh.MarshalPrivateKey(private, "synthetic")
@@ -112,7 +90,7 @@ func TestCustodySSHRejectsCostBombAndMismatchedPublic(t *testing.T) {
 		if mutation == "trailing" {
 			raw = append(raw, 1)
 		}
-		c := Credential{Name: "fixture", Kind: "ssh-key", Secret: string(pem.EncodeToMemory(&pem.Block{Type: plain.Type, Bytes: raw}))}
+		c := Credential{Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(&pem.Block{Type: plain.Type, Bytes: raw}))}
 		if validateCredential(&c) == nil {
 			t.Fatalf("%s key confusion accepted", mutation)
 		}
@@ -128,23 +106,23 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 	}) != nil {
 		t.Fatal("fixture second account failed")
 	}
-	bob, _, bobCodes := enrollFixture(t, s, "bob", now)
-	c := Credential{Name: "synthetic", Kind: "password", Secret: "synthetic-envelope-canary"}
-	if validateCredential(&c) != nil {
-		t.Fatal("valid password credential refused")
-	}
-	record, e := s.putCredential(alice.ID, c)
+	_, _, bobCodes := enrollFixture(t, s, "bob", now)
+	server, e := s.addServer(alice.ID, "Web", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), now)
 	if e != nil {
-		t.Fatal("valid credential refused")
+		t.Fatal("fixture server refused")
+	}
+	record, e := s.addServerAccount(alice.ID, server, "password", "deploy", "synthetic-envelope-canary", nil, now)
+	if e != nil {
+		t.Fatal("valid account refused")
 	}
 	// Two equal plaintexts require independent data keys and nonces, and the
 	// data and wrapping tags cannot be interchanged.
 	if s.update(func(tx *bolt.Tx) error {
-		one, e := s.seal(tx, "credential", alice.ID, record, 1, []byte("synthetic"))
+		one, e := s.seal(tx, "server-account", server, record, 1, []byte("synthetic"))
 		if e != nil {
 			return e
 		}
-		two, e := s.seal(tx, "credential", alice.ID, record, 1, []byte("synthetic"))
+		two, e := s.seal(tx, "server-account", server, record, 1, []byte("synthetic"))
 		if e != nil {
 			return e
 		}
@@ -156,7 +134,7 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 		}
 		a.Data = b.Data
 		bad, _ := json.Marshal(a)
-		if _, _, e = s.unseal("credential", alice.ID, record, bad); e == nil {
+		if _, _, e = s.unseal("server-account", server, record, bad); e == nil {
 			t.Fatal("mixed envelope accepted")
 		}
 		return nil
@@ -174,13 +152,13 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 	owner.expect("POST", "/api/mfa/verify", inputJSON(map[string]string{"code": bobCodes[0]}), 204)
 	owner.session("ready")
 	owner.expect("POST", "/api/reauth", inputJSON(map[string]string{"code": bobCodes[1]}), 204)
+	// Someone who is not an administrator reads and changes no account, and
+	// nothing reveals a secret.
+	owner.expect("GET", "/api/servers", "", 403)
+	owner.expect("DELETE", accountPath(server, record), "{}", 403)
 	owner.expect("POST", "/api/credentials/"+record+"/reveal", "{}", 404)
-	owner.expect("DELETE", "/api/credentials/"+record, "{}", 404)
-	if _, e = s.readCredential(alice.ID, record); e != nil {
-		t.Fatal("cross-account delete removed owner's record")
-	}
-	if items, e := s.listCredentials(bob.ID); e != nil || len(items) != 0 {
-		t.Fatal("cross-account listing exposed metadata")
+	if _, e = s.readServerAccount(server, record); e != nil {
+		t.Fatal("a refused delete removed the account")
 	}
 	owner = custodyClient{t: t, l: l}
 	owner.login()
@@ -208,24 +186,5 @@ func TestCustodyRandomEnvelopesQuotaAndHTTPIsolation(t *testing.T) {
 	if s.consumeFactor(a.ID, a.Revision, newCodes.Codes[0], now) != nil {
 		t.Fatal("new recovery codes refused")
 	}
-	// Avoid crypto-work noise while verifying owner quota: these are synthetic
-	// opaque rows; count checks must run before attempting another encryption.
-	if s.update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(credentialBucket)
-		for i := 1; i < 256; i++ {
-			id, e := randomID()
-			if e != nil {
-				return e
-			}
-			if e = b.Put(credentialKey(alice.ID, id), []byte("synthetic quota row")); e != nil {
-				return e
-			}
-		}
-		return nil
-	}) != nil {
-		t.Fatal("quota fixture failed")
-	}
-	if _, e = s.putCredential(alice.ID, c); e == nil {
-		t.Fatal("owner credential quota bypassed")
-	}
+
 }

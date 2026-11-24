@@ -2,7 +2,6 @@ package identity
 
 import (
 	"bytes"
-	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"io"
@@ -20,6 +19,22 @@ const (
 	workspaceBody = `<body class="workspace" data-screen="account">`
 	workspaceRoot = `<html lang="en">`
 )
+
+// workspacePage reports whether path is one of the workspace's pages: Your
+// servers, Account, Installation, People and Servers, and one person's or one
+// server's own page by its ID.
+func workspacePage(path string) bool {
+	switch path {
+	case "/", "/account", "/installation", "/users", "/servers":
+		return true
+	}
+	for _, prefix := range []string{"/users/", "/servers/"} {
+		if id, ok := strings.CutPrefix(path, prefix); ok {
+			return validID(id)
+		}
+	}
+	return false
+}
 
 // serveWorkspace sends the workspace already in the layout of the session's
 // stage, so moving between pages never shows the second-factor layout for a
@@ -237,7 +252,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 	// The workspace is one document with a page per path; the script shows
 	// the part the path names. Loading a page counts as activity.
-	page := r.Method == "GET" && (r.URL.Path == "/" || r.URL.Path == "/keys" || r.URL.Path == "/account" || r.URL.Path == "/installation" || r.URL.Path == "/users" || r.URL.Path == "/servers")
+	page := r.Method == "GET" && workspacePage(r.URL.Path)
 	id, valid := tokenID(requestToken(r))
 	l.mu.Lock()
 	s := l.liveLocked(id, page)
@@ -438,9 +453,9 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		l.serversHTTP(w, r, id, s)
 		return
 	}
-	// An auditor holds no key or password and reaches no server; only an
-	// administrator sees how this copy is installed.
-	servers := strings.HasPrefix(r.URL.Path, "/api/credentials") || r.URL.Path == "/api/shared" || r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || strings.HasPrefix(r.URL.Path, "/api/remote/")
+	// An auditor reaches no server; only an administrator sees how this copy
+	// is installed.
+	servers := r.URL.Path == "/api/access" || strings.HasPrefix(r.URL.Path, "/api/remote/")
 	if servers && !l.serversLocked(s) || r.URL.Path == "/api/installation" && l.roleLocked(s) != roleAdmin {
 		l.mu.Unlock()
 		refuse(w, 403)
@@ -452,7 +467,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, data)
 		return
 	}
-	if r.URL.Path == "/api/targets" || strings.HasPrefix(r.URL.Path, "/api/targets/") || strings.HasPrefix(r.URL.Path, "/api/connections") || r.URL.Path == "/api/shared" || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/open-shared" || r.URL.Path == "/api/remote/capacity" {
+	if r.URL.Path == "/api/access" || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/capacity" {
 		l.remoteHTTP(w, r, id, s)
 		return
 	}
@@ -472,21 +487,15 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(204)
 		return
 	}
-	if r.URL.Path == "/api/credentials" && r.Method == "GET" {
-		items, e := l.store.listCredentials(s.owner)
+	// What is left changes account security and asks for a factor proved
+	// within freshProof; 428 tells the page to ask for a code. Anything else is
+	// not here at all.
+	if r.Method != "POST" || r.URL.Path != "/api/password" && r.URL.Path != "/api/mfa/reset" && r.URL.Path != "/api/mfa/recovery" {
 		l.mu.Unlock()
-		if e != nil {
-			refuse(w, 503)
-			return
-		}
-		jsonReply(w, items)
+		refuse(w, 404)
 		return
 	}
-	// Adding a record only needs the ready session. Everything else here
-	// reveals, removes or changes account security and asks for a factor
-	// proved within freshProof; 428 tells the page to ask for a code.
-	adding := (r.URL.Path == "/api/credentials" || r.URL.Path == "/api/credentials/generate") && r.Method == "POST"
-	if !adding && l.readyLocked(id, true) != s {
+	if l.readyLocked(id, true) != s {
 		l.mu.Unlock()
 		refuse(w, http.StatusPreconditionRequired)
 		return
@@ -549,136 +558,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, struct {
 			Codes recoveryCodes `json:"codes"`
 		}{codes})
-	case r.URL.Path == "/api/credentials/generate" && r.Method == "POST":
-		if !l.attemptLocked("import:"+s.username, importAttempts) {
-			l.mu.Unlock()
-			identityError(w, errLimited)
-			return
-		}
-		l.mu.Unlock()
-		fields, ok := readFields(w, r, 1024, "name", "username")
-		if !ok {
-			refuse(w, 400)
-			return
-		}
-		c, e := newGeneratedKey(fields["name"], fields["username"])
-		if e != nil {
-			refuse(w, 400)
-			return
-		}
-		l.mu.Lock()
-		if l.readyLocked(id, false) != s || r.Context().Err() != nil {
-			l.mu.Unlock()
-			refuse(w, 401)
-			return
-		}
-		record, e := l.store.putCredential(s.owner, c)
-		l.mu.Unlock()
-		if e != nil {
-			refuse(w, 503)
-			return
-		}
-		// Only the public line leaves; the private key stays sealed here.
-		jsonReply(w, struct {
-			ID     string `json:"id"`
-			Public string `json:"public"`
-		}{record, c.Public})
-	case r.URL.Path == "/api/credentials" && r.Method == "POST":
-		if !l.attemptLocked("import:"+s.username, importAttempts) {
-			l.mu.Unlock()
-			identityError(w, errLimited)
-			return
-		}
-		l.mu.Unlock()
-		fields, ok := readFields(w, r, 96*1024, "name", "kind", "username", "secret", "passphrase")
-		if !ok {
-			refuse(w, 400)
-			return
-		}
-		c := Credential{Name: fields["name"], Kind: fields["kind"], Username: fields["username"], Secret: fields["secret"], Passphrase: fields["passphrase"]}
-		clear(fields)
-		if !l.slot(r.Context()) {
-			identityError(w, errLimited)
-			return
-		}
-		e := validateCredential(&c)
-		<-l.derive
-		if e != nil {
-			refuse(w, 400)
-			return
-		}
-		l.mu.Lock()
-		if l.readyLocked(id, false) != s || r.Context().Err() != nil {
-			l.mu.Unlock()
-			refuse(w, 401)
-			return
-		}
-		record, e := l.store.putCredential(s.owner, c)
-		l.mu.Unlock()
-		if e != nil {
-			refuse(w, 503)
-			return
-		}
-		jsonReply(w, struct {
-			ID string `json:"id"`
-		}{record})
 	default:
-		prefix := "/api/credentials/"
-		path := strings.TrimPrefix(r.URL.Path, prefix)
-		record, action, _ := strings.Cut(path, "/")
-		if !strings.HasPrefix(r.URL.Path, prefix) || !validID(record) {
-			l.mu.Unlock()
-			refuse(w, 404)
-			return
-		}
-		if r.Method == "DELETE" && action == "" {
-			if _, ok := readFields(w, r, 1024); !ok {
-				l.mu.Unlock()
-				refuse(w, 400)
-				return
-			}
-			e := l.store.deleteCredential(s.owner, record)
-			if e == nil {
-				l.revokeRemotesLocked(s.owner, "", record)
-			}
-			l.mu.Unlock()
-			if e != nil {
-				refuse(w, 404)
-				return
-			}
-			w.WriteHeader(204)
-			return
-		}
-		if r.Method == "POST" && action == "reveal" {
-			if _, ok := readFields(w, r, 1024); !ok {
-				l.mu.Unlock()
-				refuse(w, 400)
-				return
-			}
-			c, e := l.store.readCredential(s.owner, record)
-			l.mu.Unlock()
-			if e != nil {
-				refuse(w, 404)
-				return
-			}
-			if c.Generated {
-				refuse(w, 403) // made here, never exported
-				return
-			}
-			deadlineDone := make(chan struct{})
-			stop := context.AfterFunc(s.ctx, func() { defer close(deadlineDone); _ = http.NewResponseController(w).SetWriteDeadline(time.Now()) })
-			defer func() {
-				if !stop() {
-					<-deadlineDone
-				}
-			}()
-			if s.ctx.Err() != nil || r.Context().Err() != nil {
-				refuse(w, 401)
-				return
-			}
-			jsonReply(w, c)
-			return
-		}
 		l.mu.Unlock()
 		refuse(w, 404)
 	}

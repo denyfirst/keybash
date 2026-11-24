@@ -42,18 +42,20 @@ The usual path: sign in with MFA → find or choose the server → Connect → w
 in the terminal or on the desktop. Where security needs a server identity
 check or extra authentication, the page says so in plain words.
 
-Each account has its own connections and credentials. Since 1 November 2026
-an instance has three roles, all managed from the web:
+Since 1 November 2026 an instance has three roles, all managed from the web:
 
-- **User:** reaches servers with their own keys and passwords.
-- **Administrator:** a user who also invites, blocks, resets and deletes
-  accounts and changes roles. An administrator never sees another person's
-  password or their keys and passwords.
+- **User:** reaches the servers an administrator puts them on.
+- **Administrator:** also adds servers and their accounts, invites, blocks,
+  resets and deletes people and changes roles. An administrator never sees
+  another person's password.
 - **Auditor:** reads what happened; reaches no server and holds no secret.
 
-Since November 2026 administrators add SSH and Windows RDP servers on the Servers
-page and choose who may use each one; nobody can until they do, administrators
-included, and auditors read the page (`adr/0005-web-managed-servers.md`).
+Administrators add SSH and Windows RDP servers on the Servers page
+(`adr/0005-web-managed-servers.md`). Since 24 November 2026 a server has
+accounts: each is a key Keybash makes or a password typed once, never shown to
+anyone, with the people who sign in as it. Nobody reaches a server until an
+account lists them, administrators included, and nobody brings their own key
+or password (`adr/0010-server-accounts.md`).
 After the install, servers are managed only there: the server file of
 earlier versions moves into the page once. Planned next: shared keys a user can
 connect with without seeing them. These need their own design and review.

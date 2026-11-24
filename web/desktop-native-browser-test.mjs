@@ -53,15 +53,12 @@ try {
   await account.locator('#recovery').waitFor({ state: 'visible' }); await settle();
   await account.locator('#saved-recovery').click(); await account.locator('#vault').waitFor({ state: 'visible' }); await settle();
 
-  stage = 'the server\'s password and connection';
+  stage = 'the server\'s account';
+  // An account on the desktop with its password, with alice on it (ADR 0010).
   const state = await (await account.request.get(config.Origin + '/api/session')).json();
   const headers = { Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf };
-  const saved = await account.request.post(config.Origin + '/api/credentials', { headers, data: { name: 'Synthetic Windows', kind: 'password', username: 'synthetic-user', secret: config.Secret, passphrase: '' } });
-  assert.equal(saved.status(), 200); const credential = await saved.json();
   const users = await (await account.request.get(config.Origin + '/api/users')).json();
-  assert.equal((await account.request.post(config.Origin + '/api/servers/' + config.Target + '/grant', { headers, data: { account: users.self } })).status(), 204);
-  const target = await (await account.request.get(config.Origin + '/api/targets/' + config.Target)).json();
-  const made = await account.request.post(config.Origin + '/api/connections', { headers, data: { name: 'Synthetic desktop', target: config.Target, credential: credential.id, approval: target.approval } });
+  const made = await account.request.post(config.Origin + '/api/servers/' + config.Target + '/accounts', { headers, data: { kind: 'password', username: 'synthetic-user', secret: config.Secret, people: users.self } });
   assert.equal(made.status(), 200); const connection = await made.json();
 
   stage = 'the desktop opens';

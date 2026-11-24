@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
-	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,17 +30,25 @@ import (
 type portableSSHWorker struct{ calls atomic.Int32 }
 
 func (w *portableSSHWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, key []byte, user string, c sshkey.Credential) (terminalweb.Stream, error) {
-	if user != "synthetic-user" || target.Hostname() != "rdp.invalid" {
+	password, ok := c.(*sshkey.Password)
+	if !ok || user != "synthetic-user" || target.Hostname() != "rdp.invalid" {
+		return nil, errRefused
+	}
+	if value, e := password.Bytes(); e != nil || string(value) != portablePassword {
 		return nil, errRefused
 	}
 	w.calls.Add(1)
 	return echoSSHWorker{}.OpenSSH(ctx, target, key, user, c)
 }
+
+// portablePassword is the account's password the browser types once.
+const portablePassword = "Synthetic owned account SSH password 41!"
+
 func TestBrowserOwnedRemotePortable(t *testing.T) { runOwnedPortable(t, false, false) }
 func TestBrowserServerTrustWorkflow(t *testing.T) { runOwnedPortable(t, true, false) }
 func TestBrowserCapacityWorkflow(t *testing.T)    { runOwnedPortable(t, false, true) }
 func runOwnedPortable(t *testing.T, review, capacity bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 110*time.Second)
 	defer cancel()
 	store, _, _, code := custodyFixture(t)
 	server := httptest.NewUnstartedServer(nil)
@@ -49,16 +56,12 @@ func runOwnedPortable(t *testing.T, review, capacity bool) {
 	if e != nil {
 		t.Fatal("fixture key failed")
 	}
-	block, e := ssh.MarshalPrivateKey(key, "synthetic")
-	if e != nil {
-		t.Fatal("fixture encoding failed")
-	}
 	signer, e := ssh.NewSignerFromKey(key)
 	if e != nil {
 		t.Fatal("fixture signer failed")
 	}
 	target := remoteTargetFixture(t)
-	target.Protocol = "ssh"
+	target.Protocol, target.Name = "ssh", "Owned remote"
 	target.Identity = signer.PublicKey().Marshal()
 	worker := &portableSSHWorker{}
 	limits := sessionlimits.Default()
@@ -85,9 +88,6 @@ func runOwnedPortable(t *testing.T, review, capacity bool) {
 		if e != nil {
 			t.Fatal("fixture replacement signer failed")
 		}
-		updated := target
-		updated.Identity = nextSigner.PublicKey().Marshal()
-		updated.Target = networkFixture(t, "rdp.invalid", 3390, "10.34.0.9")
 		updatedFingerprint = ssh.FingerprintSHA256(nextSigner.PublicKey())
 		server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/__fixture/trust-change" {
@@ -95,10 +95,15 @@ func runOwnedPortable(t *testing.T, review, capacity bool) {
 					w.WriteHeader(403)
 					return
 				}
-				// Synthetic catalog replacement exists only in this test. Runtime
-				// operator configuration is immutable until a restart logs out all.
+				// The server's key changes and an administrator accepts it, as
+				// the Servers page does after comparing it on the console.
+				admin, e := store.lookup("alice")
+				if e != nil || store.repinServer(admin.ID, target.ID, nextSigner.PublicKey().Marshal()) != nil {
+					w.WriteHeader(500)
+					return
+				}
 				l.mu.Lock()
-				l.remote.targets[target.ID] = updated
+				_ = l.reloadServersLocked()
 				l.mu.Unlock()
 				w.WriteHeader(204)
 				return
@@ -112,7 +117,7 @@ func runOwnedPortable(t *testing.T, review, capacity bool) {
 	config, _ := json.Marshal(struct {
 		Origin, Code, Password, Mode, Secret, Target, Fingerprint, UpdatedFingerprint, Control string
 		CapacityTest                                                                           bool
-	}{server.URL, code, "Synthetic owned account password 73!", "ssh", string(pem.EncodeToMemory(block)), target.ID, ssh.FingerprintSHA256(signer.PublicKey()), updatedFingerprint, control, capacity})
+	}{server.URL, code, "Synthetic owned account password 73!", "ssh", portablePassword, target.ID, ssh.FingerprintSHA256(signer.PublicKey()), updatedFingerprint, control, capacity})
 	command := exec.CommandContext(ctx, "node", filepath.Join("..", "..", "web", "owned-browser-test.mjs")) // #nosec G204 -- fixed synthetic browser driver and stdin-only fixture data.
 	command.Stdin = bytes.NewReader(config)
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr

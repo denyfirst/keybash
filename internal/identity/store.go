@@ -302,7 +302,21 @@ func createStore(dir string, key []byte) (*Store, string, error) {
 	}
 	return s, code, nil
 }
-func openStore(dir string, key []byte) (*Store, error) { return openDB(dir, key, "") }
+
+// openStore opens an existing database and erases what earlier versions
+// stored for personal keys, connections, access lists and shared credentials
+// (eraseRetired) before anything else reads it.
+func openStore(dir string, key []byte) (*Store, error) {
+	s, e := openDB(dir, key, "")
+	if e != nil {
+		return nil, e
+	}
+	if s.eraseRetiredOnOpen() != nil {
+		_ = s.Close()
+		return nil, errRefused
+	}
+	return s, nil
+}
 
 // openDB opens the pinned database. With no instance it reads the stored one
 // and checks the state's tag against the key; a given instance is for a

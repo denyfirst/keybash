@@ -288,8 +288,6 @@ const (
 	factorAttempts   = 5  // per account; the store keeps its own durable budget
 	reauthAttempts   = 5  // per account, separate from unauthenticated login
 	passwordAttempts = 5  // per account
-	importAttempts   = 5  // per account
-	trustAttempts    = 5  // per account
 	remoteAttempts   = 20 // connection opens per account
 	setupAttempts    = 5  // the single pre-initialization bootstrap
 	// Per submitted username on an exposed lab, across all sources. The name

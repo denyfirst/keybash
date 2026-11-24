@@ -19,12 +19,12 @@ const stepUpFailures = 5
 
 // NewPersistent keeps the existing HTTPS/Origin/session controls, backed by
 // encrypted transactional custody. Password-only sessions are setup/challenge
-// sessions; only confirmed MFA can reach credential operations.
+// sessions; only confirmed MFA reaches servers and their accounts.
 func NewPersistent(origin string, store *Store, options ...Option) (*Lab, error) {
 	if store == nil {
 		return nil, errRefused
 	}
-	if _, e := store.initialized(); e != nil || store.adoptSoleAdmin() != nil || store.unlockStoredKeys() != nil {
+	if _, e := store.initialized(); e != nil || store.adoptSoleAdmin() != nil || store.eraseRetiredOnOpen() != nil {
 		return nil, errRefused
 	}
 	dummy, e := token()

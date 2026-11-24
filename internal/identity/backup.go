@@ -37,8 +37,10 @@ import (
 const (
 	backupMagic  = "keybash-custody-backup-v1"
 	backupSchema = 1
-	// The quotas bound the records: at most 64 MiB of credentials, 256
-	// accounts, 2048 connections and 256 servers stay under this.
+	// The quotas bound the records: 256 accounts with their looks, 256
+	// servers and 2048 server accounts stay well under this. A backup of an
+	// earlier version also carried up to 64 MiB of personal records, which a
+	// restore reads past and drops.
 	maxBackupBody = 96 << 20
 	// MaxBackupFile bounds what restore reads.
 	MaxBackupFile   = maxBackupBody + 4096
@@ -46,15 +48,20 @@ const (
 )
 
 // backupBuckets is every namespace a backup carries, in file order. A store
-// holding anything else is refused rather than copied in part. The
-// connections, servers and preferences namespaces are optional, as on open.
+// holding anything else is refused rather than copied in part. The servers,
+// preferences and server accounts namespaces are optional, as on open.
+// Retired namespaces are what earlier versions kept for the personal path
+// (ADR 0010): a backup never holds their records, and a restore of an earlier
+// backup drops them. The credentials namespace stays, empty.
 type backupBucket struct {
 	id       uint8
 	name     []byte
 	optional bool
+	retired  bool
 }
 
-var backupBuckets = []backupBucket{{1, metaBucket, false}, {2, accountBucket, false}, {3, nameBucket, false}, {4, credentialBucket, false}, {5, connectionBucket, true}, {6, serverBucket, true}, {7, preferenceBucket, true}, {8, sharedBucket, true}}
+var backupBuckets = []backupBucket{{1, metaBucket, false, false}, {2, accountBucket, false, false}, {3, nameBucket, false, false}, {4, credentialBucket, false, true},
+	{5, connectionBucket, true, true}, {6, serverBucket, true, false}, {7, preferenceBucket, true, false}, {8, sharedBucket, true, true}, {9, serverAccountBucket, true, false}}
 
 type backupFile struct {
 	Header, Sealed []byte // Header is also the sealed body's associated data
@@ -76,10 +83,10 @@ type backupEntry struct {
 
 // BackupSummary describes a backup without anything secret.
 type BackupSummary struct {
-	Instance                                    string
-	Created                                     time.Time
-	Program                                     string
-	Accounts, Credentials, Connections, Servers int
+	Instance                          string
+	Created                           time.Time
+	Program                           string
+	Accounts, Servers, ServerAccounts int
 }
 
 // SetupCode is one account's fresh one-time enrollment code after a restore.
@@ -160,8 +167,8 @@ func snapshotBuckets(tx *bolt.Tx) ([]byte, error) {
 	var out []byte
 	for _, bucket := range backupBuckets {
 		b := tx.Bucket(bucket.name)
-		if b == nil {
-			continue // verifyAll has already required the mandatory ones
+		if b == nil || bucket.retired {
+			continue // verifyAll has already required the mandatory ones, and the retired ones empty
 		}
 		if b.ForEach(func(k, v []byte) error {
 			out = append(out, ssh.Marshal(&backupEntry{Bucket: bucket.id, Key: k, Value: v})...)
@@ -237,13 +244,12 @@ func (s *Store) verifyAll(tx *bolt.Tx) (BackupSummary, error) {
 		})
 		return n, e
 	}
+	// Nothing is left of the personal path (ADR 0010): eraseRetired ran when
+	// the store opened, or in the restore's own transaction.
+	if left, e := s.retiredLeft(tx); e != nil || left {
+		return BackupSummary{}, errRefused
+	}
 	var e error
-	if summary.Credentials, e = owned(credentialBucket, 256, 4096, func(owner, id string) error { _, e := s.credential(tx, owner, id); return e }); e != nil {
-		return BackupSummary{}, errRefused
-	}
-	if summary.Connections, e = owned(connectionBucket, 128, 2048, func(owner, id string) error { _, e := s.connection(tx, owner, id); return e }); e != nil {
-		return BackupSummary{}, errRefused
-	}
 	// At most one look per account, kept under the account's own name.
 	if _, e = owned(preferenceBucket, 1, 256, func(owner, id string) error {
 		if id != owner {
@@ -254,27 +260,33 @@ func (s *Store) verifyAll(tx *bolt.Tx) (BackupSummary, error) {
 	}); e != nil {
 		return BackupSummary{}, errRefused
 	}
-	// Each server record names itself, within the quota, and lists only
-	// accounts that exist: deleting an account takes it off every list.
+	// Each server record names itself, within the quota.
 	servers, e := s.servers(tx)
 	if e != nil {
 		return BackupSummary{}, errRefused
 	}
-	for _, w := range servers {
-		if slices.ContainsFunc(w.Access, func(id string) bool { return !accounts[id] }) {
-			return BackupSummary{}, errRefused
-		}
-	}
 	summary.Servers = len(servers)
-	// Each shared credential is its own listed server's, and reads.
-	if b := tx.Bucket(sharedBucket); b != nil {
-		if b.ForEach(func(k, _ []byte) error {
-			_, _, e := s.shared(tx, string(k))
-			return e
-		}) != nil {
+	// Each server account reads, on a listed server, within the quotas, with a
+	// name of its own there, and lists only people who exist and are not
+	// auditors: deleting a person or making them an auditor takes them off.
+	list, e := s.serverAccounts(tx, "")
+	if e != nil {
+		return BackupSummary{}, errRefused
+	}
+	here := map[string][]string{}
+	for _, a := range list {
+		for _, person := range a.People {
+			if !accounts[person] || s.mayHoldAccess(tx, person) != nil {
+				return BackupSummary{}, errRefused
+			}
+		}
+		name := strings.ToLower(a.Current.Username)
+		if slices.Contains(here[a.Server], name) || len(here[a.Server]) >= maxServerAccounts {
 			return BackupSummary{}, errRefused
 		}
+		here[a.Server] = append(here[a.Server], name)
 	}
+	summary.ServerAccounts = len(list)
 	return summary, nil
 }
 
@@ -385,7 +397,7 @@ func restoreStore(dir string, key, data []byte, now time.Time) (*Store, []SetupC
 	e = s.update(func(tx *bolt.Tx) error {
 		buckets := map[uint8]*bolt.Bucket{}
 		for _, bucket := range backupBuckets {
-			if bucket.optional && !slices.ContainsFunc(entries, func(entry backupEntry) bool { return entry.Bucket == bucket.id }) {
+			if bucket.optional && (bucket.retired || !slices.ContainsFunc(entries, func(entry backupEntry) bool { return entry.Bucket == bucket.id })) {
 				continue
 			}
 			b, e := tx.CreateBucket(bucket.name)
@@ -395,9 +407,17 @@ func restoreStore(dir string, key, data []byte, now time.Time) (*Store, []SetupC
 			buckets[bucket.id] = b
 		}
 		for _, entry := range entries {
+			// An earlier version's personal records are read past, not kept.
+			if backupBuckets[entry.Bucket-1].retired {
+				continue
+			}
 			if buckets[entry.Bucket].Put(entry.Key, entry.Value) != nil {
 				return errRefused
 			}
+		}
+		// Its access lists go too, before anything is checked.
+		if s.eraseRetired(tx) != nil {
+			return errRefused
 		}
 		var e error
 		if summary, e = s.verifyAll(tx); e != nil {

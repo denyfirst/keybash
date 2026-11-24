@@ -1,5 +1,12 @@
 # Durable identity and credential custody laboratory
 
+> **Since 24 November 2026 (ADR 0010):** people no longer keep their own
+> keys, passwords or connections. A server has accounts, each a key Keybash
+> makes or a password typed once, and lists the people who sign in as it. The
+> personal records, the reveal and the connection approvals described below are
+> history; the first start of that version erases what they stored. The
+> sealing, MFA and lease rules still hold. See `adr/0010-server-accounts.md`.
+
 15 October 2026. This extends the memory-only identity experiment. Linux
 operator provisioning, encrypted durable accounts, mandatory MFA, single-use
 recovery and owner-scoped credential CRUD now exist. The loopback HTTPS lab

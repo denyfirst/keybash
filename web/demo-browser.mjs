@@ -39,7 +39,7 @@ try {
   await account.locator('#setup-password').fill(config.Password);
   await account.locator('#bootstrap button').click();
   await account.waitForURL(config.Origin + '/'); await settle();
-  assert.equal((await account.request.get(config.Origin + '/api/connections')).status(), 403);
+  assert.equal((await account.request.get(config.Origin + '/api/access')).status(), 403);
   stage = 'MFA';
   await account.locator('#begin-enroll').click();
   await account.locator('#seed-panel').waitFor({state: 'visible'});
@@ -50,26 +50,16 @@ try {
   await account.locator('#recovery').waitFor({state: 'visible'}); await settle();
   const recovery = (await account.locator('#recovery-codes').inputValue()).split('\n');
   await account.locator('#saved-recovery').click(); await account.locator('#vault').waitFor({state: 'visible'}); await settle();
-  // Records and connections need a ready session only; no step-up here.
-  stage = 'sample connections';
+  // The demo's one server gets an account with the demo person on it, as
+  // the Servers page does (ADR 0010); signing in has just proved both factors.
+  stage = 'sample account';
   const state = await (await account.request.get(config.Origin + '/api/session')).json();
   const headers = {Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf};
-  // Nobody may use a server until an administrator puts them on it, the
-  // administrator included; the first account is one, as on the Servers page.
   const self = (await (await account.request.get(config.Origin + '/api/users')).json()).self;
-  for (const target of [config.SSH]) assert.equal((await account.request.post(config.Origin + '/api/servers/' + target + '/grant', {headers, data: {account: self}})).status(), 204);
-  const connections = {};
-  for (const [mode, name, secret, target] of [
-    ['ssh', 'Linux SSH · UI simulation', config.SSHSecret, config.SSH]
-  ]) {
-    const saved = await account.request.post(config.Origin + '/api/credentials', {headers, data: {name, kind: 'ssh-key', username: 'synthetic-user', secret, passphrase: ''}});
-    assert.equal(saved.status(), 200);
-    const credential = await saved.json();
-    const linked = await account.request.post(config.Origin + '/api/connections', {headers, data: {name, target, credential: credential.id, approval: (await (await account.request.get(config.Origin + '/api/targets/' + target)).json()).approval}});
-    assert.equal(linked.status(), 200);
-    connections[mode] = (await linked.json()).id;
-  }
-  await account.reload(); await account.locator('#connections-panel').waitFor({state: 'visible'}); await settle();
+  const made = await account.request.post(config.Origin + '/api/servers/' + config.SSH + '/accounts', {headers, data: {kind: 'password', username: 'synthetic-user', secret: config.SSHSecret, people: self}});
+  assert.equal(made.status(), 200);
+  const connections = {ssh: (await made.json()).id};
+  await account.reload(); await account.locator('#access-panel').waitFor({state: 'visible'}); await settle();
   const screenshot = process.env.KEYBASH_DEMO_SCREENSHOT;
   if (screenshot && !config.Interactive) await account.screenshot({path: screenshot + '-workspace.png', fullPage: true});
 
@@ -83,11 +73,11 @@ try {
       <h1>keybash<span style="color:#22d3ee">.</span> Demo</h1>
       <p><strong>This is a local UI simulation.</strong> There is no real Linux shell, and no desktop: the desktop page needs a real Windows server. Do not enter your own server keys or passwords.</p>
       <button id="workspace">Open the workspace</button>
-      <ol><li>The workspace has a sample terminal connection. Choose <b>Connect</b>.</li><li>In the terminal try <code>help</code>, <code>whoami</code>, <code>echo hello friend</code>, Ctrl+C and the paste preview.</li><li>Connecting and adding keys or connections need no code; showing and deleting secrets ask for the code on your phone (not within 10 minutes of signing in). Signing out closes every open connection.</li></ol>
+      <ol><li>Your servers has a sample terminal. Choose <b>Connect</b>.</li><li>In the terminal try <code>help</code>, <code>whoami</code>, <code>echo hello friend</code>, Ctrl+C and the paste preview.</li><li>Connecting needs no code; changing servers, their accounts and people asks for the code on your phone (not within 10 minutes of signing in). Signing out closes every open session.</li></ol>
       <p>Demo user: <code>demo</code><br>Demo password: <code id="password"></code></p>
       <p>Current MFA code: <output id="otp"></output><br><small id="remaining"></small><br><small>Each code works once. If the code was used at start-up, wait for the next 30-second code.</small></p>
       <details><summary>Demo MFA seed and one-time recovery codes</summary><p>To add it to an authenticator by hand: <code id="seed"></code></p><textarea id="recovery" readonly></textarea><p>Each recovery code works once. They exist only for this temporary demo.</p></details>
-      <details><summary>Demo server identities</summary><p>Nobody types an identity when creating a connection; Keybash takes it from the server list. These are for information only:</p><p>SSH: <code id="ssh-fingerprint"></code></p></details><p><small>The session ends when you close every demo window, or after an hour. Each start begins with new, temporary data.</small></p></html>`);
+      <details><summary>Demo server identities</summary><p>Nobody types an identity to connect; Keybash takes it from the server list. These are for information only:</p><p>SSH: <code id="ssh-fingerprint"></code></p></details><p><small>The session ends when you close every demo window, or after an hour. Each start begins with new, temporary data.</small></p></html>`);
     await guide.locator('#ssh-fingerprint').evaluate((el, value) => { el.textContent = value; }, config.SSHFingerprint);
     await guide.locator('#password').evaluate((el, value) => { el.textContent = value; }, config.Password);
     await guide.locator('#seed').evaluate((el, value) => { el.textContent = value; }, seed);
@@ -137,7 +127,7 @@ try {
     await account.bringToFront(); await account.locator('#logout').click(); await account.waitForURL(config.Origin + '/login');
     await terminal.waitForFunction(() => document.getElementById('terminal').childElementCount === 0);
     assert.deepEqual(errors, []);
-    console.log('Interactive demo browser: MFA, owned samples, terminal input and logout passed.');
+    console.log('Interactive demo browser: MFA, a server account, terminal input and logout passed.');
   }
 } catch (error) {
   // Never reflect Playwright request/fill diagnostics containing fixture data.

@@ -241,51 +241,52 @@ func TestCustodyCiphertextOwnerBindingTamperAndPlaintextAbsence(t *testing.T) {
 		t.Fatal("second account absent")
 	}
 	canary := "CUSTODY-SYNTHETIC-SECRET-CANARY-91d"
-	c := Credential{Name: "private-label-canary-84c", Kind: "password", Username: "remote-user", Secret: canary}
-	if validateCredential(&c) != nil {
-		t.Fatal("valid password credential refused")
-	}
-	id, e := s.putCredential(alice.ID, c)
+	name := "private-account-canary-84c"
+	server, e := s.addServer(alice.ID, "Web", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), now)
 	if e != nil {
-		t.Fatal("valid owned credential refused")
+		t.Fatal("fixture server refused")
 	}
-	got, e := s.readCredential(alice.ID, id)
-	if e != nil || got.Secret != canary {
-		t.Fatal("credential content changed")
+	other, e := s.addServer(alice.ID, "Db", "10.20.0.8", 22, hostKeyFixture(t).Marshal(), now)
+	if e != nil {
+		t.Fatal("fixture server refused")
 	}
-	if _, e = s.readCredential(bob.ID, id); e == nil {
-		t.Fatal("cross-owner credential opened")
+	id, e := s.addServerAccount(alice.ID, server, "password", name, canary, []string{bob.ID}, now)
+	if e != nil {
+		t.Fatal("valid account refused")
 	}
-	if s.deleteCredential(bob.ID, id) == nil {
-		t.Fatal("cross-owner credential deleted")
+	got, e := s.readServerAccount(server, id)
+	if e != nil || got.Current.Secret != canary || got.Current.Username != name {
+		t.Fatal("account content changed")
 	}
-	items, e := s.listCredentials(alice.ID)
-	if e != nil || len(items) != 1 || items[0].Name != c.Name {
-		t.Fatal("credential metadata listing failed")
+	if _, e = s.readServerAccount(other, id); e != errMissing {
+		t.Fatal("an account read under another server")
 	}
-	meta, _ := json.Marshal(items)
-	if bytes.Contains(meta, []byte(canary)) || bytes.Contains(meta, []byte("passphrase")) {
-		t.Fatal("metadata endpoint leaked secret fields")
+	if s.removeServerAccount(bob.ID, server, id) == nil {
+		t.Fatal("someone who is not an administrator removed an account")
+	}
+	meta, _ := json.Marshal(got.view())
+	if bytes.Contains(meta, []byte(canary)) || bytes.Contains(meta, []byte("secret")) {
+		t.Fatal("the account's view leaked its secret")
 	}
 	data, e := os.ReadFile(filepath.Join(dir, "custody.db"))
 	if e != nil {
 		t.Fatal("fixture DB read failed")
 	}
-	for _, secret := range []string{canary, c.Name, seed, codes[0], alicePassword, string(key)} {
+	for _, secret := range []string{canary, name, seed, codes[0], alicePassword, string(key)} {
 		if bytes.Contains(data, []byte(secret)) {
 			t.Fatal("plaintext secret entered database")
 		}
 	}
 	var original []byte
 	if e = s.update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(credentialBucket)
-		original = append([]byte(nil), b.Get(credentialKey(alice.ID, id))...)
-		return b.Put(credentialKey(bob.ID, id), original)
+		b := tx.Bucket(serverAccountBucket)
+		original = append([]byte(nil), b.Get(accountKey(server, id))...)
+		return b.Put(accountKey(other, id), original)
 	}); e != nil {
 		t.Fatal("tamper fixture failed")
 	}
-	if _, e = s.readCredential(bob.ID, id); e == nil {
-		t.Fatal("ciphertext rebind to another owner accepted")
+	if _, e = s.readServerAccount(other, id); e == nil {
+		t.Fatal("ciphertext rebind to another server accepted")
 	}
 	if e = s.update(func(tx *bolt.Tx) error {
 		var record sealedRecord
@@ -294,15 +295,17 @@ func TestCustodyCiphertextOwnerBindingTamperAndPlaintextAbsence(t *testing.T) {
 		}
 		record.Data[len(record.Data)-1] ^= 1
 		b, _ := json.Marshal(record)
-		return tx.Bucket(credentialBucket).Put(credentialKey(alice.ID, id), b)
+		return tx.Bucket(serverAccountBucket).Put(accountKey(server, id), b)
 	}); e != nil {
 		t.Fatal("tamper fixture failed")
 	}
-	if _, e = s.readCredential(alice.ID, id); e == nil {
+	if _, e = s.readServerAccount(server, id); e == nil {
 		t.Fatal("modified ciphertext accepted")
 	}
-	if strings.Contains(fmt.Sprintf("%+v", got), canary) || strings.Contains(fmt.Sprintf("%+v", alice), seed) {
-		t.Fatal("secret formatting was not redacted")
+	for _, shown := range []string{fmt.Sprintf("%+v", got), fmt.Sprintf("%v", got.Current), fmt.Sprintf("%+v", alice)} {
+		if strings.Contains(shown, canary) || strings.Contains(shown, seed) {
+			t.Fatal("secret formatting was not redacted")
+		}
 	}
 }
 func TestCustodySSHImportBoundsAndPasswordBlocklist(t *testing.T) {
@@ -310,30 +313,23 @@ func TestCustodySSHImportBoundsAndPasswordBlocklist(t *testing.T) {
 	if e != nil {
 		t.Fatal("fixture key generation failed")
 	}
-	for _, encrypted := range []bool{false, true} {
-		var block *pem.Block
-		pass := ""
-		if encrypted {
-			pass = "Synthetic private passphrase"
-			block, e = ssh.MarshalPrivateKeyWithPassphrase(private, "synthetic", []byte(pass))
-		} else {
-			block, e = ssh.MarshalPrivateKey(private, "synthetic")
-		}
-		if e != nil {
-			t.Fatal("fixture key encoding failed")
-		}
-		c := Credential{Name: "ssh-test", Kind: "ssh-key", Secret: string(pem.EncodeToMemory(block)), Passphrase: pass}
-		if validateCredential(&c) != nil || !strings.HasPrefix(c.Fingerprint, "SHA256:") {
-			t.Fatal("valid Ed25519 key import refused")
-		}
-		if encrypted {
-			c.Passphrase = "wrong"
-			if validateCredential(&c) == nil {
-				t.Fatal("wrong key passphrase accepted")
-			}
-		}
+	// An account's key is kept as made, without a passphrase; one locked with
+	// a passphrase is not a key Keybash keeps.
+	block, e := ssh.MarshalPrivateKey(private, "synthetic")
+	if e != nil {
+		t.Fatal("fixture key encoding failed")
 	}
-	for _, c := range []Credential{{Name: "bad", Kind: "ssh-key", Secret: "not a private key"}, {Name: "bad", Kind: "password", Secret: "ok", Passphrase: "unexpected"}, {Name: "bad\u202e", Kind: "password", Secret: "ok"}} {
+	c := Credential{Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(block))}
+	if validateCredential(&c) != nil || !strings.HasPrefix(c.Fingerprint, "SHA256:") {
+		t.Fatal("a valid Ed25519 key was refused")
+	}
+	locked, e := ssh.MarshalPrivateKeyWithPassphrase(private, "synthetic", []byte("Synthetic private passphrase"))
+	if e != nil {
+		t.Fatal("fixture key encoding failed")
+	}
+	for _, c := range []Credential{{Kind: "ssh-key", Username: "deploy", Secret: "not a private key"}, {Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(locked))},
+		{Kind: "password", Username: "deploy\u202e", Secret: "ok"}, {Kind: "password", Username: "", Secret: "ok"}, {Kind: "password", Username: "deploy", Secret: "o\x00k"},
+		{Kind: "password", Username: "deploy", Secret: ""}, {Kind: "other", Username: "deploy", Secret: "ok"}} {
 		if validateCredential(&c) == nil {
 			t.Fatal("invalid credential accepted")
 		}
@@ -349,10 +345,8 @@ func TestCustodySSHImportBoundsAndPasswordBlocklist(t *testing.T) {
 	}
 }
 
-// Ed25519, ECDSA and RSA keys import plain or passphrase-protected; a
-// protected one is kept unlocked, as the same key without its passphrase, so
-// no connection runs bcrypt. A weak RSA key or one whose stored public half is
-// another key's refuses.
+// Ed25519, ECDSA and RSA keys open as themselves. A weak RSA key, or one whose
+// stored public half is another key's, refuses.
 func TestCustodySSHImportKeyTypes(t *testing.T) {
 	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -367,33 +361,20 @@ func TestCustodySSHImportKeyTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, private := range map[string]any{"ed25519": ed, "ecdsa-p256": p256, "rsa-2048": rsa2048} {
-		for _, pass := range []string{"", "Synthetic private passphrase"} {
-			var block *pem.Block
-			if pass == "" {
-				block, err = ssh.MarshalPrivateKey(private, "synthetic")
-			} else {
-				block, err = ssh.MarshalPrivateKeyWithPassphrase(private, "synthetic", []byte(pass))
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			c := Credential{Name: name, Kind: "ssh-key", Secret: string(pem.EncodeToMemory(block)), Passphrase: pass}
-			signer, _ := ssh.NewSignerFromKey(private)
-			if validateCredential(&c) != nil || c.Fingerprint != ssh.FingerprintSHA256(signer.PublicKey()) {
-				t.Fatalf("%s key import refused or fingerprinted wrongly", name)
-			}
-			if c.Passphrase != "" || strings.Contains(c.Secret, "Proc-Type") {
-				t.Fatalf("%s key was kept with its passphrase", name)
-			}
-			if _, locked := ssh.ParseRawPrivateKey([]byte(c.Secret)); locked != nil {
-				t.Fatalf("%s key was kept locked: %v", name, locked)
-			}
-			key, err := checkCredential(&c)
-			if err != nil || !bytes.Equal(key.PublicKey().Marshal(), signer.PublicKey().Marshal()) {
-				t.Fatalf("%s key did not open as itself", name)
-			}
-			key.Close()
+		block, err := ssh.MarshalPrivateKey(private, "synthetic")
+		if err != nil {
+			t.Fatal(err)
 		}
+		c := Credential{Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(block))}
+		signer, _ := ssh.NewSignerFromKey(private)
+		if validateCredential(&c) != nil || c.Fingerprint != ssh.FingerprintSHA256(signer.PublicKey()) {
+			t.Fatalf("%s key refused or fingerprinted wrongly", name)
+		}
+		key, err := checkCredential(&c)
+		if err != nil || !bytes.Equal(key.PublicKey().Marshal(), signer.PublicKey().Marshal()) {
+			t.Fatalf("%s key did not open as itself", name)
+		}
+		key.Close()
 	}
 	weak, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
@@ -403,7 +384,7 @@ func TestCustodySSHImportKeyTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := (Credential{Name: "weak", Kind: "ssh-key", Secret: string(pem.EncodeToMemory(block))}); validateCredential(&c) == nil {
+	if c := (Credential{Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(block))}); validateCredential(&c) == nil {
 		t.Fatal("a 1024-bit RSA key was imported")
 	}
 	// The outer public half of one key paired with another key's private half.
@@ -421,7 +402,7 @@ func TestCustodySSHImportKeyTypes(t *testing.T) {
 	}
 	a.Public = b.Public
 	mixed := pem.EncodeToMemory(&pem.Block{Type: mine.Type, Bytes: append([]byte(magic), ssh.Marshal(a)...)})
-	if c := (Credential{Name: "mixed", Kind: "ssh-key", Secret: string(mixed)}); validateCredential(&c) == nil {
+	if c := (Credential{Kind: "ssh-key", Username: "deploy", Secret: string(mixed)}); validateCredential(&c) == nil {
 		t.Fatal("a key whose stored public half is another key's was imported")
 	}
 }
@@ -458,8 +439,8 @@ func TestOwnedSSHCredentialKinds(t *testing.T) {
 	_, userKey, _ := ed25519.GenerateKey(rand.Reader)
 	block, _ := ssh.MarshalPrivateKey(userKey, "synthetic")
 	for _, c := range []Credential{
-		{Name: "key", Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(block))},
-		{Name: "password", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"},
+		{Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(block))},
+		{Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"},
 	} {
 		if !compatible(target, c) {
 			t.Fatalf("%s credential is not compatible with SSH", c.Kind)
@@ -490,7 +471,7 @@ func TestOwnedSSHCredentialKinds(t *testing.T) {
 	}
 }
 
-func TestPersistentPasswordSessionsCannotOpenVault(t *testing.T) {
+func TestPersistentPasswordSessionsReachNoServer(t *testing.T) {
 	s, _, _ := bootstrapped(t)
 	l, e := NewPersistent("https://127.0.0.1:9443", s)
 	if e != nil {
@@ -498,8 +479,8 @@ func TestPersistentPasswordSessionsCannotOpenVault(t *testing.T) {
 	}
 	defer l.Close()
 	raw := signIn(t, l, "alice", alicePassword, "")
-	if respond(l, request(l, "GET", "/api/credentials", "", raw)).Code != 403 {
-		t.Fatal("password-only session opened vault")
+	if respond(l, request(l, "GET", "/api/access", "", raw)).Code != 403 {
+		t.Fatal("a password-only session listed servers")
 	}
 	l.mu.Lock()
 	id, _ := tokenID(raw)
@@ -512,78 +493,5 @@ func TestPersistentPasswordSessionsCannotOpenVault(t *testing.T) {
 	ctx := context.Background()
 	if _, e = l.login(ctx, "alice", alicePassword, ""); e == nil {
 		t.Fatal("closed persistent service accepted login")
-	}
-}
-
-// A key stored with its passphrase before keys were kept unlocked is unlocked
-// once when the gateway starts, at its next revision, and opens without its
-// passphrase. A start with nothing to unlock writes nothing, and a stored key
-// that no longer opens is left as it was and does not stop the start.
-func TestStoredLockedKeysAreUnlockedOnceAtStart(t *testing.T) {
-	s, _, _ := bootstrapped(t)
-	alice, e := s.lookup("alice")
-	if e != nil {
-		t.Fatal("fixture account absent")
-	}
-	_, private, _ := ed25519.GenerateKey(rand.Reader)
-	block, e := ssh.MarshalPrivateKeyWithPassphrase(private, "synthetic", []byte("Synthetic private passphrase"))
-	if e != nil {
-		t.Fatal(e)
-	}
-	locked := string(pem.EncodeToMemory(block))
-	signer, _ := ssh.NewSignerFromKey(private)
-	public := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
-	// As an earlier version stored them: the locked key and its passphrase.
-	old := Credential{Name: "locked", Kind: "ssh-key", Username: "deploy", Secret: locked, Passphrase: "Synthetic private passphrase", Fingerprint: ssh.FingerprintSHA256(signer.PublicKey()), Public: public}
-	id, e := s.putCredential(alice.ID, old)
-	if e != nil {
-		t.Fatal("fixture credential refused")
-	}
-	broken := old
-	broken.Name, broken.Passphrase = "wrong passphrase", "Not the passphrase"
-	brokenID, e := s.putCredential(alice.ID, broken)
-	if e != nil {
-		t.Fatal("fixture credential refused")
-	}
-	sealed := func(id string) []byte {
-		var v []byte
-		_ = s.view(func(tx *bolt.Tx) error {
-			v = bytes.Clone(tx.Bucket(credentialBucket).Get(credentialKey(alice.ID, id)))
-			return nil
-		})
-		return v
-	}
-	brokenBefore := sealed(brokenID)
-	if _, e := NewPersistent("https://127.0.0.1:8443", s); e != nil {
-		t.Fatal("the start refused")
-	}
-	c, e := s.readCredential(alice.ID, id)
-	if e != nil || c.Passphrase != "" || c.Public != public || c.Fingerprint != old.Fingerprint || c.Name != "locked" || c.Username != "deploy" {
-		t.Fatal("the locked key was not kept unlocked as itself")
-	}
-	raw, e := ssh.ParseRawPrivateKey([]byte(c.Secret))
-	if e != nil {
-		t.Fatalf("the stored key still needs its passphrase: %v", e)
-	}
-	opened, _ := ssh.NewSignerFromKey(raw)
-	if opened == nil || !bytes.Equal(opened.PublicKey().Marshal(), signer.PublicKey().Marshal()) {
-		t.Fatal("the unlocked key is another key")
-	}
-	if _, revision, e := s.unseal("credential", alice.ID, id, sealed(id)); e != nil || revision != 2 {
-		t.Fatal("the unlocked key was not sealed at its next revision")
-	}
-	if !bytes.Equal(sealed(brokenID), brokenBefore) {
-		t.Fatal("a key that does not open was changed")
-	}
-	// Nothing left to unlock: no transaction commits, so an upgrade that puts
-	// the old database back finds it unchanged.
-	committed := func() int {
-		var id int
-		_ = s.view(func(tx *bolt.Tx) error { id = tx.ID(); return nil })
-		return id
-	}
-	before, transaction := sealed(id), committed()
-	if s.unlockStoredKeys() != nil || committed() != transaction || !bytes.Equal(sealed(id), before) || !bytes.Equal(sealed(brokenID), brokenBefore) {
-		t.Fatal("a start with nothing to unlock wrote")
 	}
 }

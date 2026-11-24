@@ -17,9 +17,12 @@ it. [What exists and what remains before a release](docs/STATUS.md). In short:
   ([installing](docs/INSTALL.md), [LAN ingress](docs/LAN-INGRESS.md)).
 - Accounts with Argon2id passwords, mandatory TOTP and recovery codes, roles
   and invitations, all managed on the web pages.
-- Stored SSH keys and passwords, each sealed under its own data key. Servers
-  are added on the Servers page; their host key or certificate is checked on
-  the server's console and pinned ([server trust](docs/SERVER-TRUST-LAB.md)).
+- Servers are added on the Servers page; their host key or certificate is
+  checked on the server's console and pinned
+  ([server trust](docs/SERVER-TRUST-LAB.md)). Each server has accounts: a key
+  Keybash makes, or a password typed once, sealed under its own data key and
+  never shown. People sign in only as the accounts they are put on
+  ([ADR 0010](docs/adr/0010-server-accounts.md)).
 - SSH terminals through a sandboxed worker per session
   ([SSH worker](docs/SSH-PROCESS-LAB.md), [manager](docs/SSH-MANAGER-LAB.md)).
 - Windows desktops run IronRDP in the browser (WebAssembly, drawn on the GPU,

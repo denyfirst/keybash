@@ -1,7 +1,4 @@
 export const ownedRemote = Boolean(document.body.dataset.ownedRemote);
-// A server's shared credential (ADR 0009): the page's record is then the
-// server's ID, opened with open-shared and named from the shared list.
-const sharedRemote = document.body.dataset.shared === '1';
 async function json(path, method='GET', body, csrf='') {
   const response=await fetch(path,{method,headers:{'Content-Type':'application/json','X-Keybash-Request':'1','X-Keybash-CSRF':csrf},body:body===undefined?undefined:JSON.stringify(body),credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000)});
   if(response.status===503&&response.headers.get('X-Keybash-Capacity')==='full')throw Object.assign(new Error('capacity'),{code:'capacity'});
@@ -19,8 +16,8 @@ const endings={
  idle:'Keybash signed you out after 15 minutes without use, so this session ended. Sign in again to reconnect.',
  expired:'Your sign-in reached its 8-hour limit, so this session ended. Sign in again to reconnect.',
  'signed-out':'You were signed out of Keybash, so this session ended.',
- 'access-changed':'This server, this connection or your access to it changed, so this session ended.',
- credentials:'The server did not accept the user name or password saved for this connection.',
+ 'access-changed':'This server, its account or your access to it changed, so this session ended.',
+ credentials:'The server did not accept the account’s name or password. Your administrator can check it on the server’s page.',
  account:'The server refused this account. It may be locked, disabled or expired, or not allowed to sign in remotely.',
  'taken-over':'The same account was opened from another connection, which took this session over.',
  'remote-ended':'The remote computer ended the session: it was signed out or disconnected, or reached its own time limit.',
@@ -85,13 +82,14 @@ export function sessionChrome(){
  reconnect.addEventListener('click',()=>location.reload());
  return {end(){if(ended())return;document.body.classList.add('ended');clearTimeout(noticeTimer);notice.classList.toggle('shown',notice.textContent!=='');reconnect.hidden=!ownedRemote;}};
 }
-// The connection's own name, for the tab title, so several open sessions are
-// told apart. A missing or oversized list keeps the generic title.
+// The server's own name, for the tab title, so several open sessions are told
+// apart: as which account, on which server (ADR 0010). A missing or oversized
+// list keeps the generic title.
 export async function nameSession(kind){
- const record=document.body.dataset.connection;
- try{const rows=await json(sharedRemote?'/api/shared':'/api/connections');const row=Array.isArray(rows)?rows.find(item=>(sharedRemote?item?.server:item?.id)===record):null;
-  if(typeof row?.name!=='string'||!row.name||row.name.length>160)return;
-  document.title=`${row.name} · ${kind}`;document.getElementById('tab-name').textContent=row.name;
+ const account=document.body.dataset.account;
+ try{const rows=await json('/api/access');const row=Array.isArray(rows)?rows.find(item=>item?.account===account):null;
+  if(typeof row?.name!=='string'||!row.name||row.name.length>160||typeof row.username!=='string'||!row.username||row.username.length>128)return;
+  document.title=`${row.name} · ${kind}`;document.getElementById('tab-name').textContent=`${row.username}@${row.name}`;
  }catch{}
 }
 // How this account's desktops open on a scaled screen, kept with the account
@@ -102,8 +100,8 @@ export async function savePicture(picture){
  if(response.status!==204)throw new Error('refused');
 }
 export async function remoteProof(){
- const record=document.body.dataset.connection;if(!/^[a-f0-9]{32}$/.test(record??''))throw new Error('invalid connection');
+ const account=document.body.dataset.account;if(!/^[a-f0-9]{32}$/.test(account??''))throw new Error('invalid account');
  const session=await json('/api/session');if(session.stage!=='ready'||!/^[A-Za-z0-9_-]{43}$/.test(session.csrf??''))throw new Error('session refused');
- const data=sharedRemote?await json('/api/remote/open-shared','POST',{server:record},session.csrf):await json('/api/remote/open','POST',{connection:record},session.csrf);if(!/^[A-Za-z0-9_-]{43}$/.test(data.lease??''))throw new Error('lease refused');
+ const data=await json('/api/remote/open','POST',{account},session.csrf);if(!/^[A-Za-z0-9_-]{43}$/.test(data.lease??''))throw new Error('lease refused');
  return {csrf:session.csrf,lease:data.lease};
 }

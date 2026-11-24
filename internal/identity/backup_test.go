@@ -5,13 +5,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -101,25 +100,24 @@ func TestBackupRestoresEveryRecordAndResetsMFA(t *testing.T) {
 	if _, e := s.CreateAccount("bob", bobPassword); e != nil {
 		t.Fatal("fixture second account refused")
 	}
-	_, userKey, _ := ed25519.GenerateKey(rand.Reader)
-	block, _ := ssh.MarshalPrivateKey(userKey, "synthetic")
-	saved := map[string]Credential{}
-	var passwordID string
-	for _, c := range []Credential{
-		{Name: "Synthetic backup password canary", Kind: "password", Username: "deploy", Secret: "Synthetic remote şifrə 1!"},
-		{Name: "Synthetic backup key canary", Kind: "ssh-key", Username: "deploy", Secret: string(pem.EncodeToMemory(block))},
-	} {
-		if validateCredential(&c) != nil {
-			t.Fatal("fixture credential invalid")
-		}
-		id, e := s.putCredential(alice.ID, c)
-		if e != nil {
-			t.Fatal("fixture credential refused")
-		}
-		if c.Kind == "password" {
-			passwordID = id
-		}
-		saved[id] = c
+	bob, _ := s.lookup("bob")
+	server, e := s.addServer(alice.ID, "Synthetic backup server", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), now)
+	if e != nil {
+		t.Fatal("fixture server refused")
+	}
+	passwordID, e := s.addServerAccount(alice.ID, server, "password", "deploy", "Synthetic remote şifrə 1!", []string{alice.ID}, now)
+	if e != nil {
+		t.Fatal("fixture account refused")
+	}
+	people := []string{alice.ID, bob.ID}
+	slices.Sort(people)
+	keyID, e := s.addServerAccount(alice.ID, server, "ssh-key", "operator-canary", "", people, now)
+	if e != nil {
+		t.Fatal("fixture account refused")
+	}
+	saved := map[string]serverAccount{}
+	for _, id := range []string{passwordID, keyID} {
+		saved[id], _ = s.readServerAccount(server, id)
 	}
 	_, hostKey, _ := ed25519.GenerateKey(rand.Reader)
 	hostSigner, _ := ssh.NewSignerFromKey(hostKey)
@@ -133,14 +131,9 @@ func TestBackupRestoresEveryRecordAndResetsMFA(t *testing.T) {
 		t.Fatal(e)
 	}
 	target := RemoteTarget{strings.Repeat("c", 32), "Synthetic SSH", "ssh", named, hostSigner.PublicKey().Marshal()}
-	connectionName := "Synthetic backup connection canary"
-	connectionID, e := s.putConnection(alice.ID, connection{Name: connectionName, Target: target.ID, Credential: passwordID, Approval: approvalFingerprint(target), Fingerprint: identityFingerprint(target)})
-	if e != nil {
-		t.Fatal("fixture connection refused")
-	}
 
 	data := backupOf(t, s, now)
-	for _, canary := range []string{"alice", "bob", "deploy", "Synthetic", "BEGIN OPENSSH", seed} {
+	for _, canary := range []string{"alice", "bob", "deploy", "operator-canary", "Synthetic", "BEGIN OPENSSH", seed} {
 		if bytes.Contains(data, []byte(canary)) {
 			t.Fatalf("backup carries %q in plaintext", canary)
 		}
@@ -156,7 +149,7 @@ func TestBackupRestoresEveryRecordAndResetsMFA(t *testing.T) {
 		t.Fatal("valid backup was not restored")
 	}
 	defer restored.Close()
-	if summary.Instance != s.instance || summary.Accounts != 2 || summary.Credentials != 2 || summary.Connections != 1 || !summary.Created.Equal(now.UTC().Truncate(time.Second)) || summary.Program == "" {
+	if summary.Instance != s.instance || summary.Accounts != 2 || summary.Servers != 1 || summary.ServerAccounts != 2 || !summary.Created.Equal(now.UTC().Truncate(time.Second)) || summary.Program == "" {
 		t.Fatalf("restore summary %+v", summary)
 	}
 	if len(codes) != 2 || codes[0].Username != "alice" || codes[1].Username != "bob" || codes[0].Code == codes[1].Code {
@@ -179,24 +172,20 @@ func TestBackupRestoresEveryRecordAndResetsMFA(t *testing.T) {
 	if original, _ := s.lookup("alice"); original.Seed != seed {
 		t.Fatal("restore changed the source store")
 	}
-	for id, c := range saved {
-		got, e := restored.readCredential(alice.ID, id)
-		if e != nil || got.Secret != c.Secret || got.Kind != c.Kind || got.Username != c.Username || got.Name != c.Name {
-			t.Fatalf("%s credential did not survive restore", c.Kind)
+	for id, a := range saved {
+		got, e := restored.readServerAccount(server, id)
+		if e != nil || !reflect.DeepEqual(got, a) {
+			t.Fatalf("%s account did not survive restore", a.Current.Kind)
 		}
 	}
-	if got, e := restored.readConnection(alice.ID, connectionID); e != nil || got.Name != connectionName || got.Credential != passwordID {
-		t.Fatal("connection did not survive restore")
-	}
-	// The restored credential still opens a connection: it reaches the worker.
+	// The restored password still opens a session: it reaches the worker.
 	worker := &recordingSSHWorker{}
 	l, e := NewRemoteLab("https://127.0.0.1:8443", restored, []RemoteTarget{target}, worker, nil)
 	if e != nil {
 		t.Fatal("remote lab refused the restored store")
 	}
 	defer l.Close()
-	credential, _ := restored.readCredential(alice.ID, passwordID)
-	_, _ = l.openTerminal(context.Background(), target, credential)
+	_, _ = l.openTerminal(context.Background(), target, saved[passwordID].Current)
 	if _, ok := worker.got.(*sshkey.Password); !ok {
 		t.Fatal("restored password did not reach the SSH worker")
 	}
@@ -261,10 +250,12 @@ func TestRestoreRefusesMalformedOrInconsistentBodies(t *testing.T) {
 	}
 	alice, _ := s.lookup("alice")
 	bob, _ := s.lookup("bob")
-	for _, owner := range []string{alice.ID, bob.ID} {
-		if _, e := s.putCredential(owner, Credential{Name: "fixture", Kind: "password", Secret: "synthetic"}); e != nil {
-			t.Fatal("fixture credential refused")
-		}
+	server, e := s.addServer(alice.ID, "Web", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), time.Now())
+	if e != nil {
+		t.Fatal("fixture server refused")
+	}
+	if _, e := s.addServerAccount(alice.ID, server, "password", "deploy", "synthetic", []string{bob.ID}, time.Now()); e != nil {
+		t.Fatal("fixture account refused")
 	}
 	header, _, entries := openBackup(t, s, backupOf(t, s, time.Now()))
 	find := func(bucket uint8, key []byte) int {
@@ -295,31 +286,30 @@ func TestRestoreRefusesMalformedOrInconsistentBodies(t *testing.T) {
 	}
 	aliceAt, bobAt := find(2, []byte(alice.ID)), find(2, []byte(bob.ID))
 	nameAt := find(3, s.nameIndex("bob"))
-	credentialAt := -1
+	accountAt := -1
 	for i, entry := range entries {
-		if entry.Bucket == 4 && bytes.HasPrefix(entry.Key, []byte(alice.ID)) {
-			credentialAt = i
+		if entry.Bucket == 9 && bytes.HasPrefix(entry.Key, []byte(server)) {
+			accountAt = i
 		}
 	}
-	otherOwner := append([]byte(strings.Repeat("d", 32)), entries[credentialAt].Key[32:]...)
-	orphan := entries[credentialAt]
-	orphan.Key = otherOwner
+	orphan := entries[accountAt]
+	orphan.Key = append([]byte(strings.Repeat("d", 32)), entries[accountAt].Key[32:]...)
 	for name, body := range map[string][]byte{
-		"schema":             encodeBody(2, "keybash", entries),
-		"empty-program":      encodeBody(backupSchema, "", entries),
-		"unknown-bucket":     encodeBody(backupSchema, "keybash", append(append([]backupEntry(nil), entries...), backupEntry{Bucket: 6, Key: []byte("x"), Value: []byte("y")})),
-		"zero-bucket":        encodeBody(backupSchema, "keybash", with(0, backupEntry{Bucket: 0, Key: []byte("x"), Value: []byte("y")})),
-		"duplicate":          encodeBody(backupSchema, "keybash", with(aliceAt, entries[aliceAt])),
-		"unsorted":           encodeBody(backupSchema, "keybash", with(0, entries[aliceAt])),
-		"no-meta":            encodeBody(backupSchema, "keybash", without(0)),
-		"extra-meta":         encodeBody(backupSchema, "keybash", with(1, backupEntry{Bucket: 1, Key: []byte("stats"), Value: entries[0].Value})),
-		"missing-index":      encodeBody(backupSchema, "keybash", without(nameAt)),
-		"extra-index":        encodeBody(backupSchema, "keybash", with(nameAt, backupEntry{Bucket: 3, Key: bytes.Repeat([]byte{0}, 32), Value: []byte(alice.ID)})),
-		"swapped-account":    encodeBody(backupSchema, "keybash", replaced(aliceAt, entries[bobAt].Value)),
-		"broken-credential":  encodeBody(backupSchema, "keybash", replaced(credentialAt, []byte(`{"Version":1}`))),
-		"rebound-credential": encodeBody(backupSchema, "keybash", append(without(credentialAt), orphan)),
-		// Bob's own credential stays valid for him; only his account is gone.
-		"orphan-credential": encodeBody(backupSchema, "keybash", without(bobAt, nameAt)),
+		"schema":          encodeBody(2, "keybash", entries),
+		"empty-program":   encodeBody(backupSchema, "", entries),
+		"unknown-bucket":  encodeBody(backupSchema, "keybash", append(append([]backupEntry(nil), entries...), backupEntry{Bucket: 6, Key: []byte("x"), Value: []byte("y")})),
+		"zero-bucket":     encodeBody(backupSchema, "keybash", with(0, backupEntry{Bucket: 0, Key: []byte("x"), Value: []byte("y")})),
+		"duplicate":       encodeBody(backupSchema, "keybash", with(aliceAt, entries[aliceAt])),
+		"unsorted":        encodeBody(backupSchema, "keybash", with(0, entries[aliceAt])),
+		"no-meta":         encodeBody(backupSchema, "keybash", without(0)),
+		"extra-meta":      encodeBody(backupSchema, "keybash", with(1, backupEntry{Bucket: 1, Key: []byte("stats"), Value: entries[0].Value})),
+		"missing-index":   encodeBody(backupSchema, "keybash", without(nameAt)),
+		"extra-index":     encodeBody(backupSchema, "keybash", with(nameAt, backupEntry{Bucket: 3, Key: bytes.Repeat([]byte{0}, 32), Value: []byte(alice.ID)})),
+		"swapped-account": encodeBody(backupSchema, "keybash", replaced(aliceAt, entries[bobAt].Value)),
+		"broken-account":  encodeBody(backupSchema, "keybash", replaced(accountAt, []byte(`{"Version":1}`))),
+		"rebound-account": encodeBody(backupSchema, "keybash", append(without(accountAt), orphan)),
+		// The server account still reads; only bob, who is on it, is gone.
+		"orphan-person": encodeBody(backupSchema, "keybash", without(bobAt, nameAt)),
 		// The count still matches; bob's entry names alice.
 		"misplaced-index": encodeBody(backupSchema, "keybash", replaced(nameAt, []byte(alice.ID))),
 		"no-accounts":     encodeBody(backupSchema, "keybash", entries[:1]),
@@ -346,9 +336,13 @@ func TestBackupRefusesWhatItCouldNotRestore(t *testing.T) {
 	}
 	s, _, _ := bootstrapped(t)
 	alice, _ := s.lookup("alice")
-	id, e := s.putCredential(alice.ID, Credential{Name: "fixture", Kind: "password", Secret: "synthetic"})
+	server, e := s.addServer(alice.ID, "Web", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), time.Now())
 	if e != nil {
-		t.Fatal("fixture credential refused")
+		t.Fatal("fixture server refused")
+	}
+	id, e := s.addServerAccount(alice.ID, server, "password", "deploy", "synthetic", nil, time.Now())
+	if e != nil {
+		t.Fatal("fixture account refused")
 	}
 	if _, e := s.Backup(failingWriter{}, time.Now()); e == nil {
 		t.Fatal("failed write reported success")
@@ -358,9 +352,13 @@ func TestBackupRefusesWhatItCouldNotRestore(t *testing.T) {
 		"unknown-namespace": func(tx *bolt.Tx) error { _, e := tx.CreateBucket([]byte("audit-v1")); return e },
 		"nested-namespace":  func(tx *bolt.Tx) error { _, e := tx.Bucket(credentialBucket).CreateBucket([]byte("nested")); return e },
 		"broken-record": func(tx *bolt.Tx) error {
-			original = bytes.Clone(tx.Bucket(credentialBucket).Get(credentialKey(alice.ID, id)))
-			return tx.Bucket(credentialBucket).Put(credentialKey(alice.ID, id), []byte(`{"Version":1}`))
+			original = bytes.Clone(tx.Bucket(serverAccountBucket).Get(accountKey(server, id)))
+			return tx.Bucket(serverAccountBucket).Put(accountKey(server, id), []byte(`{"Version":1}`))
 		},
+		"personal-record": func(tx *bolt.Tx) error {
+			return tx.Bucket(credentialBucket).Put([]byte(alice.ID+"/"+id), []byte("sealed"))
+		},
+		"connections": func(tx *bolt.Tx) error { _, e := tx.CreateBucket(connectionBucket); return e },
 	} {
 		if s.update(change) != nil {
 			t.Fatal("fixture change failed")
@@ -374,8 +372,12 @@ func TestBackupRefusesWhatItCouldNotRestore(t *testing.T) {
 				return tx.DeleteBucket([]byte("audit-v1"))
 			case "nested-namespace":
 				return tx.Bucket(credentialBucket).DeleteBucket([]byte("nested"))
+			case "personal-record":
+				return tx.Bucket(credentialBucket).Delete([]byte(alice.ID + "/" + id))
+			case "connections":
+				return tx.DeleteBucket(connectionBucket)
 			}
-			return tx.Bucket(credentialBucket).Put(credentialKey(alice.ID, id), original)
+			return tx.Bucket(serverAccountBucket).Put(accountKey(server, id), original)
 		}) != nil {
 			t.Fatal("fixture restore failed")
 		}
@@ -463,51 +465,62 @@ func TestBackupHoldsTheWriteQuotas(t *testing.T) {
 		}
 		return id, tx.Bucket(nameBucket).Put(s.nameIndex(a.Username), []byte(id))
 	}
-	addRecord := func(s *Store, tx *bolt.Tx, kind, owner string) error {
+	alice := func(s *Store, tx *bolt.Tx) string {
+		return string(tx.Bucket(nameBucket).Get(s.nameIndex("alice")))
+	}
+	addServer := func(s *Store, tx *bolt.Tx, n int) (string, error) {
 		id, e := randomID()
 		if e != nil {
-			return e
+			return "", e
 		}
-		bucket, record := credentialBucket, any(Credential{ID: id, Name: "fixture", Kind: "password", Secret: "synthetic"})
-		if kind == "connection" {
-			bucket, record = connectionBucket, connection{ID: id, Name: "fixture", Target: strings.Repeat("a", 32), Credential: strings.Repeat("b", 32), Approval: strings.Repeat("c", 64)}
-		}
-		plain, e := json.Marshal(record)
-		if e != nil {
-			return e
-		}
-		sealed, e := s.seal(tx, kind, owner, id, 1, plain)
-		if e != nil {
-			return e
-		}
-		b, e := tx.CreateBucketIfNotExists(bucket)
-		if e != nil {
-			return e
-		}
-		return b.Put(credentialKey(owner, id), sealed)
+		w := webServer{ID: id, Name: fmt.Sprintf("Server %d", n), Protocol: "ssh", Address: fmt.Sprintf("10.20.%d.%d", n/250, n%250+1), Port: 22,
+			HostKey: hostKeyFixture(t).Marshal(), AddedBy: alice(s, tx), Added: time.Now().Unix()}
+		return id, s.saveServer(tx, w)
 	}
-	// owners accounts each hold perOwner records of kind: total owners*perOwner.
-	fill := func(kind string, owners, perOwner int) func(*Store, *bolt.Tx) error {
-		return func(s *Store, tx *bolt.Tx) error {
-			alice, e := s.readAccount(tx, string(tx.Bucket(nameBucket).Get(s.nameIndex("alice"))))
+	addAccounts := func(s *Store, tx *bolt.Tx, server string, count int) error {
+		for n := range count {
+			id, e := randomID()
 			if e != nil {
 				return e
 			}
-			for o := range owners {
-				owner := alice.ID
-				if o > 0 {
-					if owner, e = addAccount(s, tx, o); e != nil {
-						return e
-					}
+			a := serverAccount{ID: id, Server: server, Current: Credential{Kind: "password", Username: fmt.Sprintf("user%d", n), Secret: "synthetic"}, Generation: 1, SetBy: alice(s, tx), Set: time.Now().Unix()}
+			if e := s.putServerAccount(tx, a, 0); e != nil {
+				return e
+			}
+		}
+		return nil
+	}
+	// servers servers each hold perServer accounts.
+	fill := func(servers, perServer int) func(*Store, *bolt.Tx) error {
+		return func(s *Store, tx *bolt.Tx) error {
+			for n := range servers {
+				server, e := addServer(s, tx, n)
+				if e != nil {
+					return e
 				}
-				for range perOwner {
-					if e := addRecord(s, tx, kind, owner); e != nil {
-						return e
-					}
+				if e := addAccounts(s, tx, server, perServer); e != nil {
+					return e
 				}
 			}
 			return nil
 		}
+	}
+	onFirstServer := func(s *Store, tx *bolt.Tx) error {
+		var first string
+		if e := tx.Bucket(serverBucket).ForEach(func(k, _ []byte) error {
+			if first == "" {
+				first = string(k)
+			}
+			return nil
+		}); e != nil {
+			return e
+		}
+		id, e := randomID()
+		if e != nil {
+			return e
+		}
+		a := serverAccount{ID: id, Server: first, Current: Credential{Kind: "password", Username: "one-more", Secret: "synthetic"}, Generation: 1, SetBy: alice(s, tx), Set: time.Now().Unix()}
+		return s.putServerAccount(tx, a, 0)
 	}
 	for _, quota := range []struct {
 		name        string
@@ -521,21 +534,13 @@ func TestBackupHoldsTheWriteQuotas(t *testing.T) {
 			}
 			return nil
 		}, func(s *Store, tx *bolt.Tx) error { _, e := addAccount(s, tx, 256); return e }},
-		{"credentials-per-owner", fill("credential", 1, 256), fill("credential", 1, 1)},
-		{"credentials-total", fill("credential", 16, 256), func(s *Store, tx *bolt.Tx) error {
-			owner, e := addAccount(s, tx, 99)
+		{"server-accounts-per-server", fill(1, maxServerAccounts), onFirstServer},
+		{"server-accounts-total", fill(maxAllAccounts/maxServerAccounts, maxServerAccounts), func(s *Store, tx *bolt.Tx) error {
+			server, e := addServer(s, tx, 200)
 			if e != nil {
 				return e
 			}
-			return addRecord(s, tx, "credential", owner)
-		}},
-		{"connections-per-owner", fill("connection", 1, 128), fill("connection", 1, 1)},
-		{"connections-total", fill("connection", 16, 128), func(s *Store, tx *bolt.Tx) error {
-			owner, e := addAccount(s, tx, 99)
-			if e != nil {
-				return e
-			}
-			return addRecord(s, tx, "connection", owner)
+			return addAccounts(s, tx, server, 1)
 		}},
 	} {
 		t.Run(quota.name, func(t *testing.T) {
@@ -580,5 +585,78 @@ func TestBackupNeverBesideItsKey(t *testing.T) {
 	link := filepath.Join(base, "link")
 	if os.Symlink(keys, link) == nil && !sameDirectory(filepath.Join(link, "custody.backup"), key) {
 		t.Fatal("a symlink to the key directory was allowed")
+	}
+}
+
+// A backup an earlier version took still restores: its personal keys,
+// passwords, connections and shared credentials are read past and dropped,
+// and its access lists are erased before the restore is checked.
+func TestEarlierBackupRestoresWithoutItsPersonalRecords(t *testing.T) {
+	s, key, _ := bootstrapped(t)
+	now := time.Now()
+	alice, _ := s.lookup("alice")
+	server, e := s.addServer(alice.ID, "Web", "10.20.0.7", 22, hostKeyFixture(t).Marshal(), now)
+	if e != nil {
+		t.Fatal("fixture server refused")
+	}
+	account, e := s.addServerAccount(alice.ID, server, "password", "deploy", "Synthetic password", []string{alice.ID}, now)
+	if e != nil {
+		t.Fatal("fixture account refused")
+	}
+	header, _, _ := openBackup(t, s, backupOf(t, s, now))
+	writeRetired(t, s, alice.ID, server)
+	// The body as an earlier version wrote it: every namespace, in order.
+	var entries []backupEntry
+	if s.view(func(tx *bolt.Tx) error {
+		for _, bucket := range backupBuckets {
+			b := tx.Bucket(bucket.name)
+			if b == nil {
+				continue
+			}
+			if e := b.ForEach(func(k, v []byte) error {
+				entries = append(entries, backupEntry{Bucket: bucket.id, Key: bytes.Clone(k), Value: bytes.Clone(v)})
+				return nil
+			}); e != nil {
+				return e
+			}
+		}
+		return nil
+	}) != nil {
+		t.Fatal("fixture body failed")
+	}
+	retired := 0
+	for _, entry := range entries {
+		if backupBuckets[entry.Bucket-1].retired {
+			retired++
+		}
+	}
+	if retired != 3 {
+		t.Fatalf("the fixture holds %d personal records", retired)
+	}
+	restored, _, summary, e := restoreStore(emptyDataDir(t), key, sealBackup(t, s, header, encodeBody(backupSchema, "keybash earlier", entries)), now)
+	if e != nil {
+		t.Fatal("an earlier backup was refused")
+	}
+	defer restored.Close()
+	if summary.Accounts != 1 || summary.Servers != 1 || summary.ServerAccounts != 1 {
+		t.Fatalf("restore summary %+v", summary)
+	}
+	if restored.view(func(tx *bolt.Tx) error {
+		if left, e := restored.retiredLeft(tx); e != nil || left {
+			return errRefused
+		}
+		if tx.Bucket(credentialBucket) == nil {
+			return errRefused
+		}
+		w, e := restored.server(tx, server)
+		if e != nil || len(w.Access) != 0 {
+			return errRefused
+		}
+		return nil
+	}) != nil {
+		t.Fatal("the restore kept a personal record or an access list")
+	}
+	if a, e := restored.readServerAccount(server, account); e != nil || a.Current.Secret != "Synthetic password" || !slices.Equal(a.People, []string{alice.ID}) {
+		t.Fatal("the account did not survive the restore")
 	}
 }

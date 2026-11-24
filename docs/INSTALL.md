@@ -181,29 +181,32 @@ only. Production uses the organization's own CA or a public one.
 
 ## Adding people
 
-The account made with the bootstrap code administers Keybash. Its Users page
-invites people, without the terminal:
+The account made with the bootstrap code administers Keybash. Its **People**
+page invites people, without the terminal:
 
 1. **Invite someone:** choose a username and a role.
-   - **User:** connects to servers with their own keys and passwords.
-   - **Auditor:** reads the activity log; reaches no server and holds no key.
-   - **Administrator:** a user who also manages people.
+   - **User:** connects to the servers an administrator puts them on.
+   - **Auditor:** sees the servers and who may use them; reaches no server.
+   - **Administrator:** manages servers and people, and connects where they
+     put themselves.
 2. Keybash shows a one-time code once. Give it to the person apart from their
    username.
 3. On the sign-in page they choose **I have an invite**, enter both and choose
    their own password. Then they set up their phone. The code works once and
    expires after 72 hours.
 
-The same page changes a role, blocks and unblocks, and deletes an account with
-everything it owns. "Reset access" asks what the person lost, and gives a
-one-time code to hand over:
+Each person has their own page (open them from the list). It lists the
+servers they sign in to, and as which account, with **Give access** and
+**Take off**. It also changes their role, blocks and unblocks them, and
+deletes them, which takes them off every server account. "Reset access" asks
+what the person lost, and gives a one-time code to hand over:
 - **Their phone:** they sign in as usual with their own password, and the
   code lets them set up a new phone.
 - **Their password:** on the sign-in page they choose "Forgot password?" and
   enter the code with the current code from their phone (or a recovery code),
   then a new password.
-- **Both:** their keys, passwords and connections are deleted, and they accept
-  a new invite.
+- **Both:** their password and phone stop at once, and they accept a new
+  invite. The servers they sign in to stay.
 
 Neither code alone opens the account, so the administrator who holds it cannot
 become that person.
@@ -240,20 +243,26 @@ server:
    the same" and add it. Keybash reads the key again and adds the server only if
    it is still the one compared. This needs a phone code from the last ten
    minutes.
-3. **Who can use it:** nobody, administrators included, until you choose.
-   Taking someone off ends their open sessions to that server at once.
-4. **How they sign in:** without this, each person on the list signs in with
-   their own key or password, saved under Keys & passwords. Here you can set
-   one for everyone instead; they then find the server ready on their
-   Connections page and connect without ever seeing it.
+3. Keybash opens the server's own page and asks for its first **account**:
+   the name you type to sign in there (for example `deploy` or `root`), which
+   must already exist on the server, and who signs in with it. Until a server
+   has an account with people on it, nobody reaches it, administrators
+   included. People never see the account's key or password, and they find
+   the server ready under **Your servers**.
    - **New key (safer):** Keybash makes a key and keeps it, and nobody ever
      sees it. Run the line the page shows once on the server, as that account.
+     The line begins `restrict,pty`, so the key can open a terminal and
+     nothing else.
    - **Password:** the account's own password, typed once. Anyone who already
      knows it can still sign in without Keybash, so change it when one of them
      leaves, on the server and then here.
 
-   The page offers the account names your own connections to that server use.
-   It cannot list the server's accounts: it would have to sign in first.
+A server may have several accounts, up to 16, each with its own people: for
+example `deploy` for most people and `root` for one. Each account's card
+shows who signs in with it (**Change who**), its key's line (**Key line**,
+**Make a new key**, then **Use the new key** once the new line is on the
+server) or **Change password**, and **Remove**. Taking someone off an
+account, or removing it, ends their open sessions through it at once.
 
 A Windows desktop (**Desktop (RDP)**, on an installation built with
 `--with-rdp`) uses the certificate Windows makes for itself:
@@ -272,15 +281,14 @@ A Windows desktop (**Desktop (RDP)**, on an installation built with
    untick it, Keybash keeps the certificate that answers at that moment and
    marks the server **Not checked**, for you and for everyone who connects to
    it. Anyone between Keybash and the server at that moment would then receive
-   the Windows passwords people send. **Check now** on its row compares it
+   the Windows password Keybash sends. **Check now** on its page compares it
    later, with the same command.
-3. **Who can use it**, as above.
-4. **How they sign in**, as above. A desktop takes a password only.
+3. Its first **account**, as above. A desktop takes a password only.
 
-Each row also has **Rename**, **Check identity** (accept a new host key or
-certificate, for example after a reinstall, in the same way; open sessions end
-and each person accepts it again on their connection) and **Remove** (open
-sessions end; connections to it show as unavailable).
+A server's page also has **Rename**, a picture of what runs on it (click its
+tile), **Check identity** (accept a new host key or certificate, for example
+after a reinstall, in the same way; open sessions end, and new ones use it)
+and **Remove** (open sessions end, and its accounts go with it).
 
 The page adds servers only inside the gateway's target networks
 (`--target-networks`, set at install or with `upgrade.sh`); a server added
@@ -301,10 +309,10 @@ username or password, and never accepts a new one by itself:
   server's own screen and paste the line. This takes about half a minute and
   needs that screen: a hypervisor console, or SSH through Keybash if the server
   has it. You can also untick the check there and accept the certificate as it
-  answers; the server is then marked **Not checked**. Each person then accepts
-  the new identity once on their connection.
+  answers; the server is then marked **Not checked**. People connect again at
+  once: the decision is yours, for everyone on its accounts.
 
-A server's row also says when its certificate ends, two weeks ahead. If a
+A server's page also says when its certificate ends, two weeks ahead. If a
 certificate has ended and Windows has not made a new one, restart Remote Desktop
 Services on the server; Windows then makes one.
 
@@ -327,9 +335,8 @@ The words come from a fixed list and never hold anything from the session
 At the first start of this version, every server in `/etc/keybash/targets.json`
 moves into the Servers page once:
 
-- It keeps its ID, so every connection to it stays approved.
-- Exactly the people who already had a connection to it can use it; nobody
-  else, administrators included.
+- It keeps its ID, and comes with no account, so nobody can use it until an
+  administrator adds one.
 - From then on it is managed on the page like any other. Removing it there is
   remembered, so the file never brings it back. A server added to the file
   later moves in at the next start, open to nobody.
@@ -377,6 +384,12 @@ commands with the running version.
 - Upgrading closes open sessions. One upgrade runs at a time.
 - The backup holds the sealed database, not the instance key. Remove it once
   the new version works.
+- The first start of the version with server accounts (ADR 0010) erases what
+  earlier versions kept for people's own keys, passwords and connections, the
+  one shared key or password per server, and every server's list of who could
+  use it. Nobody reaches a server again until you add its accounts and put
+  people on them. The copy in `/var/backups/keybash` still holds the earlier
+  data, sealed, until you remove it.
 
 Until Keybash publishes signed releases, an update trusts the code GitHub
 serves over HTTPS; signed commits are checked in CI, not on the server.
