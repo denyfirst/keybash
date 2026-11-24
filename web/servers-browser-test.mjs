@@ -271,10 +271,17 @@ try {
   assert.match(await page.locator('#attention-text').textContent(), /^Desk shows a different certificate\. Nobody can connect to it until you check it\.$/);
   assert.equal(await page.locator('#rail-attention').textContent(), '1');
   assert.equal(await row('Desk').locator('.server-state').textContent(), 'Identity changed');
-  // Every page says so, with the way to the Servers page.
+  // Every page says so, with the way to the Servers page, before that page
+  // asks the servers again: held here, as a slow answer would hold it.
+  let releaseServers; const serversHeld = new Promise(resolve => { releaseServers = resolve; });
+  await page.route(config.Origin + '/api/servers', async route => { await serversHeld; await route.continue(); });
   await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users');
   await page.locator('#attention').waitFor({ state: 'visible' }); assert(await page.locator('#attention-open').isVisible(), 'no way from the alarm to the Servers page');
+  const answered = page.waitForResponse(config.Origin + '/api/servers'); releaseServers(); await answered;
+  await page.unroute(config.Origin + '/api/servers'); await settled();
+  assert(await page.locator('#attention-open').isVisible(), 'the way to the Servers page went once the servers were asked again');
   await page.locator('#attention-open').click(); await page.waitForURL(config.Origin + '/servers'); await row('Desk').waitFor(); await settled();
+  assert(await page.locator('#attention').isVisible() && await page.locator('#attention-open').isHidden(), 'the Servers page lost its alarm or offered a way to itself');
 
   stage = 'desktop: accept with the console line';
   await row('Desk').getByRole('button', { name: 'Check identity', exact: true }).click(); await page.locator('#identity-paste').waitFor({ state: 'visible' }); await settled();
