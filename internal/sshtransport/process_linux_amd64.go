@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -194,8 +195,11 @@ func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string,
 		return nil, ErrProcess
 	}
 	s := newProcessStream(ctx, cancel, in, out, done)
-	if finishProcessSetup(s, setup, host, pin, user, method, secret) != nil {
+	if err := finishProcessSetup(s, setup, host, pin, user, method, secret); err != nil {
 		_ = s.Close()
+		if errors.Is(err, ErrRefused) {
+			return nil, ErrRefused
+		}
 		return nil, ErrProcess
 	}
 	return s, nil

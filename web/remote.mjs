@@ -18,6 +18,7 @@ const endings={
  'signed-out':'You were signed out of Keybash, so this session ended.',
  'access-changed':'This server, its account or your access to it changed, so this session ended.',
  credentials:'The server did not accept the account’s name or password. Your administrator can check it on the server’s page.',
+ key:'The server did not accept the account’s key: its line is not on the server yet, or there is no such account there. Your administrator can check it on the server’s page.',
  account:'The server refused this account. It may be locked, disabled or expired, or not allowed to sign in remotely.',
  'taken-over':'The same account was opened from another connection, which took this session over.',
  'remote-ended':'The remote computer ended the session: it was signed out or disconnected, or reached its own time limit.',

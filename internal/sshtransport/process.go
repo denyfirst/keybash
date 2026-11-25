@@ -53,6 +53,9 @@ func (w ProcessWorker) open(ctx context.Context, host string, dial func(context.
 		if stream != nil {
 			_ = stream.Close()
 		}
+		if errors.Is(err, ErrRefused) {
+			return nil, refusedReason(method)
+		}
 		return nil, ErrProcess
 	}
 	return stream, nil

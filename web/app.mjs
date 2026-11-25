@@ -136,7 +136,9 @@ function connect(proof=null) {
   let why = null;
   socket.onopen = () => {if(proof){socket.send(JSON.stringify(proof));proof=null;}else{clearTimeout(timer);activate();}};
   socket.onmessage = event => {
-    if(ownedRemote&&!connected){if(event.data!=='{"type":"ready"}'){socket.close();return;}clearTimeout(timer);activate();return;}
+    // Before it is ready, the socket may say why it will not be: the server
+    // refused the account's key or password.
+    if(ownedRemote&&!connected){if(event.data!=='{"type":"ready"}'){why=endedMessage(event.data);socket.close();return;}clearTimeout(timer);activate();return;}
     if (!connected || retired) return;
     if (typeof event.data === 'string') { why = endedMessage(event.data); socket.close(); return; }
     try {

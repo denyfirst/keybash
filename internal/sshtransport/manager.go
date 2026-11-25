@@ -2,6 +2,7 @@ package sshtransport
 
 import (
 	"context"
+	"errors"
 	"net"
 	"time"
 
@@ -57,7 +58,19 @@ func (w ManagerWorker) open(ctx context.Context, host string, dial func(context.
 		if s != nil {
 			_ = s.Close()
 		}
+		if errors.Is(err, ErrRefused) {
+			return nil, refusedReason(method)
+		}
 		return nil, ErrProcess
 	}
 	return s, nil
+}
+
+// refusedReason is the one word the page gets when the server refused the
+// account's credential: which kind it was, never the server's own text.
+func refusedReason(method string) terminalweb.Reason {
+	if method == methodPassword {
+		return terminalweb.ReasonCredentials
+	}
+	return terminalweb.ReasonKey
 }

@@ -4,6 +4,7 @@ package sshtransport
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -358,8 +359,11 @@ func connectSSHManager(life, setup context.Context, path, host string, dial func
 		}
 	}()
 	owned = false
-	if finishProcessSetup(s, setup, host, pin, user, method, secret) != nil {
+	if err := finishProcessSetup(s, setup, host, pin, user, method, secret); err != nil {
 		_ = s.Close()
+		if errors.Is(err, ErrRefused) {
+			return nil, ErrRefused
+		}
 		return nil, ErrProcess
 	}
 	return s, nil

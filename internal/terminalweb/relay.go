@@ -22,6 +22,7 @@ const (
 	ReasonSignedOut     Reason = "signed-out"     // the sign-in ended for another reason
 	ReasonAccessChanged Reason = "access-changed" // the server, the connection or the access changed
 	ReasonCredentials   Reason = "credentials"    // the server refused the saved user name or password
+	ReasonKey           Reason = "key"            // the server refused the account's key: its line is not there, or no such account
 	ReasonAccount       Reason = "account"        // the server refused the account itself
 	ReasonTakenOver     Reason = "taken-over"     // another connection took over the remote session
 	ReasonRemoteEnded   Reason = "remote-ended"   // the remote computer ended or signed out the session
@@ -32,7 +33,7 @@ const (
 
 var reasons = map[Reason]bool{ReasonIdle: true, ReasonExpired: true, ReasonSignedOut: true, ReasonAccessChanged: true,
 	ReasonCredentials: true, ReasonAccount: true, ReasonTakenOver: true, ReasonRemoteEnded: true,
-	ReasonUnreachable: true, ReasonNotResponding: true, ReasonRefused: true}
+	ReasonUnreachable: true, ReasonNotResponding: true, ReasonRefused: true, ReasonKey: true}
 
 // A Reasoned stream can say why it ended by itself.
 type Reasoned interface{ Reason() Reason }
