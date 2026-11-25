@@ -24,6 +24,9 @@ const (
 	frameOutput      byte = 6
 	frameErrorOutput byte = 7
 	frameFailed      byte = 8
+	// The server took no method the credential offered: the one failure the
+	// page is told about, as a fixed word. Empty, like frameFailed.
+	frameRefused byte = 9
 	// v2: the start frame carries one credential (a key or a password) rather
 	// than an Ed25519 seed. A v1 peer is refused at the greeting.
 	workerHello = "keybash-ssh-worker/v2"
@@ -39,7 +42,7 @@ func frameLimit(kind byte) int {
 		return len(workerHello)
 	case frameStart:
 		return startFrameLimit
-	case frameReady, frameFailed:
+	case frameReady, frameFailed, frameRefused:
 		return 0
 	case frameResize:
 		return 8
@@ -201,6 +204,10 @@ func serveSSHWorker(ctx context.Context, input io.ReadCloser, output io.WriteClo
 	terminal, err := connect(ctx, start.Host, func(context.Context) (net.Conn, error) { return raw, nil }, config)
 	release()
 	if err != nil {
+		if errors.Is(err, ErrRefused) {
+			_ = writeWorkerFrame(output, frameRefused, nil)
+			return ErrRefused
+		}
 		_ = writeWorkerFrame(output, frameFailed, nil)
 		return ErrProcess
 	}

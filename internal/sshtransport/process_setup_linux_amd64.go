@@ -35,6 +35,9 @@ func finishProcessSetup(s *processStream, setup context.Context, host string, pi
 		return ErrProcess
 	}
 	kind, data, err := readWorkerFrame(s.out)
+	if err == nil && kind == frameRefused && len(data) == 0 && setup.Err() == nil && s.ctx.Err() == nil {
+		return ErrRefused
+	}
 	if err != nil || kind != frameReady || len(data) != 0 || setup.Err() != nil || s.ctx.Err() != nil {
 		return ErrProcess
 	}

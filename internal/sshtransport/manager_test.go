@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/denyfirst/keybash/internal/sshkey"
+	"github.com/denyfirst/keybash/internal/terminalweb"
 )
 
 func TestSSHManagerRefusalIsNilBeforeDial(t *testing.T) {
@@ -68,5 +69,12 @@ func TestSSHWorkerIdentityValidation(t *testing.T) {
 		if _, _, ok := workerIdentity(pair[0], pair[1]); ok {
 			t.Fatal("unsafe worker identity accepted")
 		}
+	}
+}
+
+// A refused credential reaches the gateway as the one word for its kind.
+func TestRefusedReasonNamesTheCredential(t *testing.T) {
+	if refusedReason(methodKey) != terminalweb.ReasonKey || refusedReason(methodPassword) != terminalweb.ReasonCredentials {
+		t.Fatal("a refused credential was named as another kind")
 	}
 }

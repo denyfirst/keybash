@@ -28,7 +28,7 @@ const MaxMessage = 64 * 1024
 var closeCodes = map[Reason]websocket.StatusCode{
 	ReasonIdle: 4001, ReasonExpired: 4002, ReasonSignedOut: 4003, ReasonAccessChanged: 4004,
 	ReasonCredentials: 4005, ReasonAccount: 4006, ReasonTakenOver: 4007, ReasonRemoteEnded: 4008,
-	ReasonUnreachable: 4009, ReasonNotResponding: 4010, ReasonRefused: 4011,
+	ReasonUnreachable: 4009, ReasonNotResponding: 4010, ReasonRefused: 4011, ReasonKey: 4012,
 }
 
 // CloseIdentityChanged ends a desktop before it starts: the server showed

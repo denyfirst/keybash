@@ -15,12 +15,27 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/denyfirst/keybash/internal/sessionlimits"
+	"github.com/denyfirst/keybash/internal/sshkey"
+	"github.com/denyfirst/keybash/internal/targetguard"
+	"github.com/denyfirst/keybash/internal/terminalweb"
 	"golang.org/x/crypto/ssh"
 )
+
+// refusingSSHWorker is the echo terminal, except that while refuse is set a
+// key is turned down, as the SSH worker reports a server that does not hold it.
+type refusingSSHWorker struct{ refuse atomic.Bool }
+
+func (w *refusingSSHWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, c sshkey.Credential) (terminalweb.Stream, error) {
+	if _, key := c.(*sshkey.Key); key && w.refuse.Load() {
+		return nil, terminalweb.ReasonKey
+	}
+	return echoSSHWorker{}.OpenSSH(ctx, target, pin, user, c)
+}
 
 // TestBrowserServersPage drives the Servers page as an administrator: add a
 // server after comparing its fingerprint, choose who may use it, see it in
@@ -36,7 +51,8 @@ func TestBrowserServersPage(t *testing.T) {
 	origin := "https://" + server.Listener.Addr().String()
 	catalog := catalogSSHFixture(t)
 	desk := &desktopWorker{}
-	l, e := NewRemoteLabWithLimits(origin, store, []RemoteTarget{catalog}, echoSSHWorker{}, desk, sessionlimits.Default(), TargetNetworks(serverNetworks, serverProtected), WatchCertificates(24*time.Hour))
+	terminals := &refusingSSHWorker{}
+	l, e := NewRemoteLabWithLimits(origin, store, []RemoteTarget{catalog}, terminals, desk, sessionlimits.Default(), TargetNetworks(serverNetworks, serverProtected), WatchCertificates(24*time.Hour))
 	if e != nil {
 		t.Fatal("servers browser fixture refused")
 	}
@@ -61,6 +77,16 @@ func TestBrowserServersPage(t *testing.T) {
 	// ask, and the password itself is never in the answer.
 	sharedPassword := "Synthetic-desk-password-41c9"
 	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The driver turns the servers' refusal of keys on and off.
+		if r.URL.Path == "/__fixture/refuse-keys" {
+			if r.Method != "POST" || r.Header.Get("X-Fixture-Control") != control {
+				w.WriteHeader(403)
+				return
+			}
+			terminals.refuse.Store(r.URL.Query().Get("on") == "1")
+			w.WriteHeader(204)
+			return
+		}
 		if r.URL.Path == "/__fixture/desktop" {
 			if r.Method != "GET" || r.Header.Get("X-Fixture-Control") != control {
 				w.WriteHeader(403)

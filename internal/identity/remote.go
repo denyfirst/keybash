@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -364,6 +365,15 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	if e != nil || stream == nil || ctx.Err() != nil {
 		if stream != nil {
 			_ = stream.Close()
+		}
+		// The server refused the account's key or password: the page is told
+		// so, by its fixed word, before the socket closes. Nothing else that
+		// went wrong is told apart.
+		var reason terminalweb.Reason
+		if errors.As(e, &reason) && (reason == terminalweb.ReasonKey || reason == terminalweb.ReasonCredentials) && ctx.Err() == nil {
+			say, done := context.WithTimeout(ctx, time.Second)
+			_ = socket.Write(say, websocket.MessageText, []byte(`{"type":"ended","reason":"`+string(reason)+`"}`))
+			done()
 		}
 		return
 	}

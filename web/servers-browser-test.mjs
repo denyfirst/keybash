@@ -98,12 +98,15 @@ try {
   page.on('response', listen);
   await page.locator('#account-user').fill('deploy'); await page.locator('#account-submit').click();
   await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
-  const keyLine = /^mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && printf '\\n%s\\n' 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/;
+  // The command first checks that it runs as the account, and writes nothing
+  // otherwise.
+  const keyLine = /^\[ "\$\(id -un\)" = 'deploy' \] \|\| \{ echo 'Sign in as deploy, then run this again\.' >&2; false; \} && mkdir -p ~\/\.ssh && chmod 700 ~\/\.ssh && printf '\\n%s\\n' 'restrict,pty ssh-ed25519 [A-Za-z0-9+/]+={0,2} keybash' >> ~\/\.ssh\/authorized_keys && chmod 600 ~\/\.ssh\/authorized_keys$/;
   // The same line for Windows OpenSSH, spelled out: an administrator's goes in
   // the one file Windows keeps for Administrators and SYSTEM alone, anyone
   // else's in their profile, each after a break of its own.
-  const windowsKey = command => [
+  const windowsKey = (command, who = 'deploy') => [
     `$line = '${command.match(/'(restrict,pty [^']+)'/)[1]}'`,
+    ...who ? [`if ($env:USERNAME -ne '${who}') { throw 'Sign in as ${who}, then run this again.' }`] : [],
     '$groups = whoami /groups',
     "if ($groups -match 'S-1-5-32-544\\b') {",
     "  if (-not ($groups -match 'S-1-16-12288\\b')) { throw 'Open PowerShell with Run as administrator, then run this again.' }",
@@ -169,6 +172,22 @@ try {
   await card('deploy').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#key-command').textContent(), firstKey, 'a choice outlived its sheet');
   await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  // A name that is not plain is never written into a command: the check of
+  // who runs it is left out rather than quoted. The same key, under such a
+  // name, as the list would bring it.
+  const oddName = "o'brien; touch x";
+  await page.route(config.Origin + '/api/servers', async route => {
+    const response = await route.fetch(), body = await response.json();
+    for (const server of body.servers) for (const account of server.accounts ?? []) if (account.username === 'deploy') account.username = oddName;
+    await route.fulfill({ response, body: JSON.stringify(body), contentType: 'application/json; charset=utf-8' });
+  });
+  await page.reload(); await card('o.brien; touch x').waitFor(); await settled();
+  await card('o.brien; touch x').getByRole('button', { name: 'Put the key on the server', exact: true }).click(); await page.locator('#key-dialog').waitFor({ state: 'visible' }); await settled();
+  assert.equal(await page.locator('#key-command').textContent(), firstKey.replace(/^.*?&& (?=mkdir)/, ''), 'a name that is not plain reached the shell command');
+  await page.locator('#key-system [data-system=windows]').click();
+  assert.equal(await page.locator('#key-command').textContent(), windowsKey(firstKey, ''), 'a name that is not plain reached the PowerShell command');
+  await page.locator('#key-close').click(); await page.locator('#key-dialog').waitFor({ state: 'hidden' });
+  await page.unroute(config.Origin + '/api/servers'); await page.reload(); await card('deploy').waitFor(); await settled();
 
   stage = 'this server';
   // The identity card offers only its check; the name, the picture and
@@ -238,6 +257,17 @@ try {
     await page.unroute(config.Origin + '/api/access');
   }
   await page.reload(); await accessCard.waitFor(); await settled();
+
+  stage = 'a refused key';
+  // A server that does not take the key: the session page says why, in words
+  // that point at its line, rather than only that it closed.
+  const refuseKeys = on => page.request.post(`${config.Origin}/__fixture/refuse-keys?on=${on ? 1 : 0}`, { headers: { 'X-Fixture-Control': config.Control } });
+  assert.equal((await refuseKeys(true)).status(), 204);
+  const [refused] = await Promise.all([page.waitForEvent('popup'), connect.click()]);
+  refused.on('pageerror', error => errors.push(error.name));
+  await refused.locator('#notice').filter({ hasText: /^The server did not accept the account’s key: its line is not on the server yet, or there is no such account there. Your administrator can check it on the server’s page.$/ }).waitFor();
+  await refused.close();
+  assert.equal((await refuseKeys(false)).status(), 204);
 
   stage = 'terminal';
   const [terminal] = await Promise.all([page.waitForEvent('popup'), connect.click()]);

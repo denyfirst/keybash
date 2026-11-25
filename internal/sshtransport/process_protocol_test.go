@@ -18,7 +18,7 @@ import (
 )
 
 func TestWorkerFrameBoundsAndSchemas(t *testing.T) {
-	for _, kind := range []byte{frameHello, frameStart, frameReady, frameInput, frameResize, frameOutput, frameErrorOutput, frameFailed} {
+	for _, kind := range []byte{frameHello, frameStart, frameReady, frameInput, frameResize, frameOutput, frameErrorOutput, frameFailed, frameRefused} {
 		data := bytes.Repeat([]byte{42}, frameLimit(kind))
 		var b bytes.Buffer
 		if writeWorkerFrame(&b, kind, data) != nil {
@@ -29,7 +29,7 @@ func TestWorkerFrameBoundsAndSchemas(t *testing.T) {
 			t.Fatal("valid frame changed")
 		}
 	}
-	for _, raw := range [][]byte{nil, {255, 0, 0, 0, 0}, {frameInput, 0xff, 0xff, 0xff, 0xff}, {frameResize, 0, 0, 0, 9}, {frameReady, 0, 0, 0, 1, 42}, {frameInput, 0, 0, 0, 1}} {
+	for _, raw := range [][]byte{nil, {255, 0, 0, 0, 0}, {frameInput, 0xff, 0xff, 0xff, 0xff}, {frameResize, 0, 0, 0, 9}, {frameReady, 0, 0, 0, 1, 42}, {frameRefused, 0, 0, 0, 1, 42}, {frameInput, 0, 0, 0, 1}} {
 		if _, _, err := readWorkerFrame(bytes.NewReader(raw)); err == nil {
 			t.Fatal("malformed or excessive frame accepted")
 		}
@@ -97,6 +97,53 @@ func TestSSHWorkerCorePasswordHandoff(t *testing.T) {
 		cancel()
 		_ = parent.Close()
 		<-done
+	}
+}
+
+// A server that turns the credential down is reported by the one empty
+// refused frame, never the server's own words, and the worker ends. A key
+// the server does not hold is refused the same way.
+func TestSSHWorkerCoreRefusedCredentialSaysSo(t *testing.T) {
+	host := syntheticSigner(t)
+	for name, options := range map[string]fixtureOptions{
+		"wrong password": {host: host, password: "a different synthetic password"},
+		"no such key":    {host: host, user: syntheticSigner(t)},
+	} {
+		fixture := newFixture(t, options)
+		parent, child := net.Pipe()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- serveSSHWorker(ctx, child, child, fixture.client) }()
+		start := &workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)}
+		if name == "no such key" {
+			_, private, err := ed25519.GenerateKey(rand.Reader)
+			key, e := sshkey.New(private)
+			if err != nil || e != nil {
+				t.Fatal("key fixture failed")
+			}
+			material, e := key.Material()
+			key.Close()
+			if e != nil {
+				t.Fatal("key handoff failed")
+			}
+			start.Method, start.Secret = methodKey, material
+		}
+		if writeWorkerFrame(parent, frameStart, ssh.Marshal(start)) != nil {
+			t.Fatal("start write failed")
+		}
+		if kind, data, err := readWorkerFrame(parent); err != nil || kind != frameRefused || len(data) != 0 {
+			t.Fatalf("%s: a refused credential was not reported as refused", name)
+		}
+		select {
+		case err := <-done:
+			if err != ErrRefused {
+				t.Fatalf("%s: the worker ended with %v", name, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: refusal stalled", name)
+		}
+		cancel()
+		_ = parent.Close()
 	}
 }
 

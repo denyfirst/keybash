@@ -330,8 +330,14 @@ func TestSSHPasswordAuthenticationAfterHostVerification(t *testing.T) {
 		"no authentication": {host: host, noAuth: true},
 	} {
 		fixture := newFixture(t, options)
-		if terminal, err := connectOnce(fixture, passwordConfig(host, syntheticRemotePassword)); err == nil || terminal != nil {
+		terminal, err := connectOnce(fixture, passwordConfig(host, syntheticRemotePassword))
+		if err == nil || terminal != nil {
 			t.Fatalf("%s: session opened", name)
+		}
+		// Only a password the server turned down reads as refused; a prompt
+		// Keybash would not answer, or no authentication, is no refusal.
+		if (err == ErrRefused) != (name == "wrong password") {
+			t.Fatalf("%s: ended with %v", name, err)
 		}
 	}
 	// A changed host key stops before any credential is offered.
@@ -422,14 +428,25 @@ func TestSSHUserKeyTypesAndNoSHA1(t *testing.T) {
 	}
 }
 
+// A server that takes none of the credential's methods is told apart, as
+// ErrRefused, from every other failure: that one word is what the page can
+// show. A key the server does not hold is refused the same way.
 func TestSSHRefusesNoneAuthAndAuthenticationOrPTYFailure(t *testing.T) {
-	for _, failure := range []string{"none", "auth", "pty", "shell"} {
+	for _, failure := range []string{"none", "auth", "other key", "pty", "shell"} {
 		t.Run(failure, func(t *testing.T) {
 			host, user := syntheticSigner(t), syntheticSigner(t)
-			fixture := newFixture(t, fixtureOptions{host: host, user: user, noAuth: failure == "none", rejectAuth: failure == "auth", rejectPTY: failure == "pty", rejectShell: failure == "shell"})
+			held := ssh.Signer(user)
+			if failure == "other key" {
+				held = syntheticSigner(t)
+			}
+			fixture := newFixture(t, fixtureOptions{host: host, user: held, noAuth: failure == "none", rejectAuth: failure == "auth", rejectPTY: failure == "pty", rejectShell: failure == "shell"})
 			terminal, err := connect(context.Background(), "server.example", func(context.Context) (net.Conn, error) { return fixture.client, nil }, labConfig(host, user))
-			if terminal != nil || err != ErrUnavailable {
-				t.Fatal("refused remote setup was accepted or exposed diagnostics")
+			want := ErrUnavailable
+			if failure == "auth" || failure == "other key" {
+				want = ErrRefused
+			}
+			if terminal != nil || err != want {
+				t.Fatalf("refused remote setup gave %v, want %v", err, want)
 			}
 			if (failure == "none" || failure == "auth") && len(fixture.events) != 0 {
 				t.Fatal("failed authentication opened a session channel")

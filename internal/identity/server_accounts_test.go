@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -796,10 +797,12 @@ func TestServerAccountDesktopFollowsItsCertificate(t *testing.T) {
 }
 
 // accountSSHWorker opens an echo terminal and remembers what it was given.
+// With refuse set it fails instead, as the SSH worker does.
 type accountSSHWorker struct {
 	mu       sync.Mutex
 	username string
 	key      string
+	refuse   error
 }
 
 func (w *accountSSHWorker) OpenSSH(ctx context.Context, _ *targetguard.NamedTarget, _ []byte, username string, c sshkey.Credential) (terminalweb.Stream, error) {
@@ -808,7 +811,11 @@ func (w *accountSSHWorker) OpenSSH(ctx context.Context, _ *targetguard.NamedTarg
 	if key, ok := c.(*sshkey.Key); ok {
 		w.key = ssh.FingerprintSHA256(key.PublicKey())
 	}
+	refuse := w.refuse
 	w.mu.Unlock()
+	if refuse != nil {
+		return nil, refuse
+	}
 	left, right := net.Pipe()
 	go func() { defer right.Close(); _, _ = io.Copy(right, right) }()
 	context.AfterFunc(ctx, func() { _ = left.Close() })
@@ -867,21 +874,55 @@ func TestServerAccountKeyReachesTheWorkerAndIsMarkedUsed(t *testing.T) {
 	if used() {
 		t.Fatal("a new key was marked used")
 	}
-	var lease struct{ Lease string }
-	if json.Unmarshal(c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": made.ID}), 200).Body.Bytes(), &lease) != nil {
-		t.Fatal("lease missing")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	header := http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}
-	socket, _, e := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: header})
-	if e != nil {
-		t.Fatal("valid socket refused")
+	open := func() *websocket.Conn {
+		t.Helper()
+		var lease struct{ Lease string }
+		if json.Unmarshal(c.expect("POST", "/api/remote/open", inputJSON(map[string]string{"account": made.ID}), 200).Body.Bytes(), &lease) != nil {
+			t.Fatal("lease missing")
+		}
+		header := http.Header{"Origin": []string{origin}, "Cookie": []string{c.cookie.String()}}
+		socket, _, e := websocket.Dial(ctx, strings.Replace(origin, "https:", "wss:", 1)+"/api/remote/socket", &websocket.DialOptions{HTTPClient: server.Client(), HTTPHeader: header})
+		if e != nil {
+			t.Fatal("valid socket refused")
+		}
+		if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(map[string]string{"csrf": c.csrf, "lease": lease.Lease}))) != nil {
+			t.Fatal("proof write failed")
+		}
+		return socket
 	}
+	// The server refusing the key reaches the page as its one word, and the
+	// key is not marked used; any other failure says nothing.
+	for _, refuse := range []error{terminalweb.ReasonKey, terminalweb.ReasonCredentials, terminalweb.ReasonRefused, errors.New("synthetic worker failure")} {
+		worker.mu.Lock()
+		worker.refuse = refuse
+		worker.mu.Unlock()
+		socket := open()
+		_, data, e := socket.Read(ctx)
+		word, said := refuse.(terminalweb.Reason)
+		said = said && (word == terminalweb.ReasonKey || word == terminalweb.ReasonCredentials)
+		if said && (e != nil || string(data) != `{"type":"ended","reason":"`+string(word)+`"}`) {
+			t.Fatalf("%v: the page was not told why: %q", refuse, data)
+		}
+		if !said && e == nil {
+			t.Fatalf("%v: the page was told %q", refuse, data)
+		}
+		if said {
+			if _, _, e := socket.Read(ctx); e == nil {
+				t.Fatal("the socket stayed open after a refusal")
+			}
+		}
+		_ = socket.CloseNow()
+		if used() {
+			t.Fatal("a refused key was marked used")
+		}
+	}
+	worker.mu.Lock()
+	worker.refuse = nil
+	worker.mu.Unlock()
+	socket := open()
 	defer socket.CloseNow()
-	if socket.Write(ctx, websocket.MessageText, []byte(inputJSON(map[string]string{"csrf": c.csrf, "lease": lease.Lease}))) != nil {
-		t.Fatal("proof write failed")
-	}
 	if _, data, e := socket.Read(ctx); e != nil || string(data) != `{"type":"ready"}` {
 		t.Fatal("the terminal did not open")
 	}

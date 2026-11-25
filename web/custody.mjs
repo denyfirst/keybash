@@ -347,7 +347,14 @@ const serversOK = data => Array.isArray(data?.networks) && data.networks.length 
 // as. The line goes after a break of its own: a file whose last line has none,
 // as an editor may leave it, would otherwise run the two lines together. The
 // line itself is checked (lineOK) before it reaches either command.
-const keyCommand = line => `mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s\\n' '${line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
+// Each command first checks that it runs as that account, and writes nothing
+// otherwise: run as someone else, the line would land in their file (as root,
+// root's; on Windows, an administrator's goes in the file that opens every
+// administrator account), and an account that does not exist could not be
+// signed in as at all. A plain name alone is written into a command; any other
+// name leaves the check out rather than quote it.
+const plainName = who => /^[A-Za-z0-9._-]{1,64}$/.test(who);
+const keyCommand = (line, who) => `${plainName(who) ? `[ "$(id -un)" = '${who}' ] || { echo 'Sign in as ${who}, then run this again.' >&2; false; } && ` : ''}mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s\\n' '${line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`;
 // The same in Windows PowerShell 5.1 and later. Windows OpenSSH reads an
 // administrator's keys from one file that every administrator shares, and uses
 // it only while Administrators and SYSTEM alone hold it and own it; anyone
@@ -357,8 +364,9 @@ const keyCommand = line => `mkdir -p ~/.ssh && chmod 700 ~/.ssh && printf '\\n%s
 // token. The empty value first is the break before the line. "} else {" stays
 // on one line: pasted at a prompt, a closed if would run before an else on the
 // next line.
-const windowsKeyCommand = line => [
+const windowsKeyCommand = (line, who) => [
   `$line = '${line}'`,
+  ...plainName(who) ? [`if ($env:USERNAME -ne '${who}') { throw 'Sign in as ${who}, then run this again.' }`] : [],
   '$groups = whoami /groups',
   "if ($groups -match 'S-1-5-32-544\\b') {",
   "  if (-not ($groups -match 'S-1-16-12288\\b')) { throw 'Open PowerShell with Run as administrator, then run this again.' }",
@@ -667,7 +675,7 @@ function paintKeySystem() {
   for (const choice of $('key-system').querySelectorAll('.segment')) choice.setAttribute('aria-pressed', String(choice.dataset.system === system));
   $('key-step-open').textContent = windows ? `On ${server.name}, open PowerShell signed in as ${who}. If ${who} is an administrator there, open it with Run as administrator.` : `On ${server.name}, open a terminal signed in as ${who}.`;
   $('key-command-head').textContent = `${windows ? 'PowerShell' : 'Shell'} on ${server.name}, as ${who}`;
-  $('key-command').textContent = view === 'replace' ? '' : (windows ? windowsKeyCommand : keyCommand)(view === 'next' ? account.next : account.line);
+  $('key-command').textContent = view === 'replace' ? '' : (windows ? windowsKeyCommand : keyCommand)(view === 'next' ? account.next : account.line, who);
 }
 $('key-system')?.addEventListener('click', event => {
   const choice = event.target.closest('.segment');

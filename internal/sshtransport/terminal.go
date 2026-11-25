@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,8 +22,10 @@ var (
 	ErrInvalidConfig = errors.New("invalid SSH configuration")
 	ErrHostKey       = errors.New("SSH server identity rejected")
 	ErrUnavailable   = errors.New("SSH connection unavailable")
-	ErrSession       = errors.New("SSH session unavailable")
-	ErrInvalidInput  = errors.New("invalid terminal input")
+	// ErrRefused: the pinned server took no method the credential offered.
+	ErrRefused      = errors.New("SSH server refused the credential")
+	ErrSession      = errors.New("SSH session unavailable")
+	ErrInvalidInput = errors.New("invalid terminal input")
 )
 
 const (
@@ -112,6 +115,11 @@ func connect(ctx context.Context, identity string, dial func(context.Context) (n
 	}
 	conn, channels, requests, err := ssh.NewClientConn(raw, identity, sshConfig)
 	if err != nil {
+		// Only the pinned server, within the setup's time, can refuse the
+		// credential; x/crypto names that end only by these words.
+		if verified.Load() && setup.Err() == nil && strings.Contains(err.Error(), "ssh: unable to authenticate") {
+			return nil, ErrRefused
+		}
 		return nil, setupError(setup, err)
 	}
 	// x/crypto attempts "none" first. Do not open a PTY on a server that

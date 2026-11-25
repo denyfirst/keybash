@@ -258,10 +258,15 @@ server:
 
      The page gives the command for a shell (**Linux, macOS, BSD**) or for
      PowerShell (**Windows**); it starts with PowerShell when the server is
-     marked Windows, and the other is one click away. Either adds the line
-     after a line break of its own, so a file whose last line has none keeps
-     its keys apart. On Windows OpenSSH, an administrator's keys go in
-     `C:\ProgramData\ssh\administrators_authorized_keys`: open PowerShell
+     marked Windows, and the other is one click away. Either first checks
+     that it runs as the account, and otherwise stops with "Sign in as …"
+     and writes nothing: run as someone else, the line would land in their
+     file, and an account that does not exist cannot be signed in as. (A
+     name with anything but letters, digits, `.`, `_` and `-` is never
+     written into a command, so for it that check is left out.) Either adds
+     the line after a line break of its own, so a file whose last line has
+     none keeps its keys apart. On Windows OpenSSH, an administrator's keys
+     go in `C:\ProgramData\ssh\administrators_authorized_keys`: open PowerShell
      with **Run as administrator** (the command stops and says so otherwise),
      and it leaves that file to Administrators and SYSTEM alone, owned by
      Administrators, as Windows OpenSSH requires. Every administrator shares
@@ -283,7 +288,10 @@ action follows the state: **Put the key on the server** shows the line again;
 it is on the server (or **Discard the new key**). A password account has
 **Change password** instead. **Remove** is at the end of each card. Taking
 someone off an account, or removing it, ends their open sessions through it
-at once.
+at once. When the server refuses an account's key, its session page says so
+("its line is not on the server yet, or there is no such account there")
+rather than only that the session closed; a refused password says the same
+of the name or password.
 
 A Windows desktop (**Desktop (RDP)**, on an installation built with
 `--with-rdp`) uses the certificate Windows makes for itself:
