@@ -60,6 +60,80 @@ func serveWorkspace(w http.ResponseWriter, stage string, look preferences) {
 	_, _ = w.Write(bytes.Replace(data, []byte(workspaceRoot), []byte(root+">"), 1))
 }
 
+// lookCookie carries the scheme an account chose to the pages drawn before
+// anyone signs in, so the sign-in page looks like the workspace it opens. The
+// account keeps the choice; the browser holds only a copy of one fixed word,
+// "light" or "dark", which this server writes when it draws a workspace page
+// or the choice changes. Following the system holds nothing.
+const lookCookie = "keybash-look"
+
+func lookCookieOf(theme string) *http.Cookie {
+	cookie := &http.Cookie{Name: lookCookie, Path: "/", MaxAge: -1, Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode}
+	if theme == "light" || theme == "dark" {
+		cookie.Value, cookie.MaxAge = theme, 400*24*60*60
+	}
+	return cookie
+}
+
+// requestLook reads that copy: exactly one such cookie, holding one of the
+// two words. Anything else is the system's look.
+func requestLook(r *http.Request) string {
+	value, count := "", 0
+	for _, cookie := range r.Cookies() {
+		if cookie.Name == lookCookie {
+			value = cookie.Value
+			count++
+		}
+	}
+	// The words returned are this program's own, never the cookie's bytes.
+	if count == 1 {
+		switch value {
+		case "light":
+			return "light"
+		case "dark":
+			return "dark"
+		}
+	}
+	return ""
+}
+
+// withLook writes a scheme on a page's root tag, so the page is drawn in it
+// from its first paint. Only the two words are written; a page without
+// exactly one root tag is refused rather than drawn in the other scheme.
+func withLook(data []byte, theme string) ([]byte, bool) {
+	if bytes.Count(data, []byte(workspaceRoot)) != 1 {
+		return nil, false
+	}
+	var root string
+	switch theme {
+	case "light":
+		root = `<html lang="en" data-theme="light">`
+	case "dark":
+		root = `<html lang="en" data-theme="dark">`
+	default:
+		return data, true
+	}
+	return bytes.Replace(data, []byte(workspaceRoot), []byte(root), 1), true
+}
+
+// serveLookPage sends one of the pages drawn outside the workspace, the
+// sign-in page or the closed session page, in the given scheme.
+func serveLookPage(w http.ResponseWriter, name, theme string, status int) {
+	data, err := web.Assets.ReadFile(name)
+	if err != nil {
+		refuse(w, http.StatusInternalServerError)
+		return
+	}
+	page, ok := withLook(data, theme)
+	if !ok {
+		refuse(w, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(page)
+}
+
 func readFields(w http.ResponseWriter, r *http.Request, limit int, names ...string) (map[string]string, bool) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		return nil, false
@@ -190,7 +264,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		switch r.URL.Path {
 		case "/login":
-			serveAsset(w, "custody-login.html")
+			serveLookPage(w, "custody-login.html", requestLook(r), http.StatusOK)
 			return
 		case "/custody.mjs":
 			serveAsset(w, "custody.mjs")
@@ -282,7 +356,12 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 	if page {
 		stage, owner := s.stage, s.owner
 		l.mu.Unlock()
-		serveWorkspace(w, stage, l.store.preferencesOf(owner))
+		look := l.store.preferencesOf(owner)
+		// The browser's copy of the scheme follows the account's choice.
+		if look.valid() && requestLook(r) != look.Theme {
+			http.SetCookie(w, lookCookieOf(look.Theme))
+		}
+		serveWorkspace(w, stage, look)
 		return
 	}
 	if r.URL.Path == "/api/session" && r.Method == "GET" {
@@ -425,6 +504,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 503)
 			return
 		}
+		http.SetCookie(w, lookCookieOf(p.Theme))
 		w.WriteHeader(204)
 		return
 	}

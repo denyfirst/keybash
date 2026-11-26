@@ -2,6 +2,9 @@ package identity
 
 import (
 	"bytes"
+	"crypto/tls"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -11,9 +14,10 @@ import (
 )
 
 // An account's chosen look arrives with every page, in its root tag, from a
-// few fixed words. It is kept with the account on the server, never in the
-// browser, and only a ready session of that account, with its request proof,
-// can change it.
+// few fixed words. It is kept with the account on the server; the browser
+// gets only a copy of the scheme for the sign-in page
+// (TestChosenLookReachesEveryPage). Only a ready session of that account, with
+// its request proof, can change it.
 func TestLookIsKeptWithTheAccountAndArrivesWithThePage(t *testing.T) {
 	l, store, c, _, _ := remoteFixture(t, "https://127.0.0.1:8443")
 	rootTag := regexp.MustCompile(`<html[^>]*>`)
@@ -80,6 +84,124 @@ func TestLookIsKeptWithTheAccountAndArrivesWithThePage(t *testing.T) {
 	choose("system", "open", 204)
 	if got := root(c, "/"); got != `<html lang="en">` {
 		t.Fatalf("following the system arrived as %s", got)
+	}
+}
+
+// The sign-in page is drawn before anyone signs in, so it cannot ask the
+// account. It takes the scheme from the browser's copy of the choice: one
+// cookie holding one of two words, written by this server with the
+// workspace's pages and with every change. Session pages and the closed page
+// take the account's choice itself.
+func TestChosenLookReachesEveryPage(t *testing.T) {
+	l, _, c, record, _ := remoteFixture(t, "https://127.0.0.1:8443")
+	rootTag := regexp.MustCompile(`<html[^>]*>`)
+	root := func(w *httptest.ResponseRecorder) string {
+		t.Helper()
+		found := rootTag.FindAllString(w.Body.String(), -1)
+		if len(found) != 1 {
+			t.Fatalf("the page has %d root tags", len(found))
+		}
+		return found[0]
+	}
+	copies := func(w *httptest.ResponseRecorder) []*http.Cookie {
+		var found []*http.Cookie
+		for _, cookie := range w.Result().Cookies() {
+			if cookie.Name == lookCookie {
+				found = append(found, cookie)
+			}
+		}
+		return found
+	}
+	// A request as a browser sends it, with the session's cookie when there
+	// is one and the raw Cookie header it holds besides.
+	get := func(path, held string, session bool, status int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest("GET", l.origin+path, nil)
+		r.RemoteAddr, r.TLS = "127.0.0.1:9876", &tls.ConnectionState{Version: tls.VersionTLS13}
+		if held != "" {
+			r.Header.Add("Cookie", held)
+		}
+		if session {
+			r.AddCookie(c.cookie)
+		}
+		w := httptest.NewRecorder()
+		l.ServeHTTP(w, r)
+		if w.Code != status {
+			t.Fatalf("GET %s with %q: got %d want %d", path, held, w.Code, status)
+		}
+		return w
+	}
+	choose := func(theme string) *http.Cookie {
+		t.Helper()
+		found := copies(c.expect("POST", "/api/preferences", inputJSON(map[string]string{"theme": theme, "menu": "open"}), 204))
+		if len(found) != 1 || !found[0].Secure || !found[0].HttpOnly || found[0].SameSite != http.SameSiteStrictMode || found[0].Path != "/" {
+			t.Fatalf("choosing %s wrote %+v", theme, found)
+		}
+		return found[0]
+	}
+	// Following the system writes nothing, and the sign-in page has no scheme.
+	if found := copies(get("/", "", true, 200)); len(found) != 0 {
+		t.Fatalf("following the system wrote %+v", found)
+	}
+	if got := root(get("/login", "", false, 200)); got != `<html lang="en">` {
+		t.Fatalf("the sign-in page arrived as %s", got)
+	}
+	// A choice writes its copy at once, and the sign-in page takes it.
+	dark := choose("dark")
+	if dark.Value != "dark" || dark.MaxAge <= 0 {
+		t.Fatalf("dark wrote %+v", dark)
+	}
+	if got := root(get("/login", "keybash-look=dark", false, 200)); got != `<html lang="en" data-theme="dark">` {
+		t.Fatalf("the sign-in page arrived as %s", got)
+	}
+	// A workspace page writes the copy when the browser's differs, and only then.
+	for held, want := range map[string]int{"": 1, "keybash-look=light": 1, "keybash-look=Dark": 1, "keybash-look=dark": 0} {
+		found := copies(get("/servers", held, true, 200))
+		if len(found) != want || want == 1 && found[0].Value != "dark" {
+			t.Fatalf("a workspace page with %q wrote %+v", held, found)
+		}
+	}
+	// Only one of the two words, from exactly one cookie, reaches the page.
+	for _, held := range []string{
+		"keybash-look=Dark", "keybash-look=system", "keybash-look=", `keybash-look=dark" onload="x`, "keybash-look=dark%22", "keybash-look=dark; keybash-look=dark",
+		"keybash-look=dark; keybash-look=light", "keybash-looks=dark", "Keybash-Look=dark",
+	} {
+		if got := root(get("/login", held, false, 200)); got != `<html lang="en">` {
+			t.Fatalf("the sign-in page with %q arrived as %s", held, got)
+		}
+	}
+	// Each side holds on its own: the reader takes only the two words, and
+	// the writer writes nothing else, on exactly one root tag.
+	page := []byte("<!doctype html>\n" + workspaceRoot + "<head>")
+	for _, word := range []string{"Dark", "system", "auto", "light%20", `dark" onload="x`, "x"} {
+		r := httptest.NewRequest("GET", l.origin+"/login", nil)
+		r.Header.Set("Cookie", lookCookie+"="+word)
+		if got := requestLook(r); got != "" {
+			t.Fatalf("the copy %q was read as %q", word, got)
+		}
+		if got, ok := withLook(page, word); !ok || !bytes.Equal(got, page) {
+			t.Fatalf("%q was written on the page: %s", word, got)
+		}
+	}
+	for _, bad := range []string{"<html>", workspaceRoot + workspaceRoot, `<html lang="en" data-theme="dark">`} {
+		if _, ok := withLook([]byte(bad), "dark"); ok {
+			t.Fatalf("a page with the root tags %q was drawn", bad)
+		}
+	}
+	// Session pages and the closed page follow the account, whatever the
+	// browser holds.
+	choose("light")
+	for path, status := range map[string]int{"/remote/rdp/" + record: 200, "/remote/ssh/" + record: 404, "/remote/rdp/" + strings.Repeat("d", 32): 404} {
+		if got := root(get(path, "keybash-look=dark", true, status)); got != `<html lang="en" data-theme="light">` {
+			t.Fatalf("%s arrived as %s", path, got)
+		}
+	}
+	// Following the system again takes the copy away.
+	if system := choose("system"); system.Value != "" || system.MaxAge >= 0 {
+		t.Fatalf("following the system wrote %+v", system)
+	}
+	if got := root(get("/remote/rdp/"+record, "keybash-look=dark", true, 200)); got != `<html lang="en">` {
+		t.Fatalf("a session page arrived as %s", got)
 	}
 }
 
