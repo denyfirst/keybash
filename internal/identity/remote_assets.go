@@ -19,16 +19,9 @@ func sessionPage(path string) bool {
 // closedPage answers a session page this person may not open with one page,
 // whatever the reason: not on the account, an account or server that is gone,
 // the other protocol, or none at all. It names nothing and leads back to the
-// servers they can open.
-func closedPage(w http.ResponseWriter) {
-	data, e := web.Assets.ReadFile("remote-closed.html")
-	if e != nil {
-		refuse(w, 404)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(404)
-	_, _ = w.Write(data)
+// servers they can open. It is drawn in the person's chosen scheme.
+func closedPage(w http.ResponseWriter, theme string) {
+	serveLookPage(w, "remote-closed.html", theme, 404)
 }
 
 func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bool {
@@ -59,7 +52,7 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		}
 		l.mu.Unlock()
 		if !allowed {
-			closedPage(w)
+			closedPage(w, l.store.preferencesOf(s.owner).Theme)
 			return true
 		}
 		file = "index.html"
@@ -100,16 +93,19 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		// Mark the body tag whatever else it carries. A page that cannot be
 		// marked would fall back to the lab login, so it is refused instead.
 		mark := `<body data-owned-remote="` + html.EscapeString(protocol) + `" data-account="` + html.EscapeString(account) + `"`
-		// A desktop opens with the account's chosen picture, one fixed word.
-		if picture := l.store.preferencesOf(s.owner).Picture; protocol == "rdp" && (picture == "smooth" || picture == "sharp") {
+		// A desktop opens with the account's chosen picture, one fixed word,
+		// and every session page in the account's chosen scheme.
+		look := l.store.preferencesOf(s.owner)
+		if picture := look.Picture; protocol == "rdp" && (picture == "smooth" || picture == "sharp") {
 			mark += ` data-picture="` + picture + `"`
 		}
 		marked := bytes.Replace(data, []byte("<body"), []byte(mark), 1)
-		if bytes.Equal(marked, data) {
+		themed, ok := withLook(marked, look.Theme)
+		if bytes.Equal(marked, data) || !ok {
 			refuse(w, 503)
 			return true
 		}
-		data = marked
+		data = themed
 	}
 	w.Header().Set("Content-Type", mime)
 	_, _ = w.Write(data)

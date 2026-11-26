@@ -72,11 +72,15 @@ try {
   await page.locator('.rail-item[data-page=account]').click(); await page.waitForURL(config.Origin + '/account'); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
   assert(!(await page.locator('#users-panel').isVisible())); assert.equal(await page.locator('h1').textContent(), 'Account'); assert.equal(await page.title(), 'Keybash · Account'); assert(!(await page.locator('#invite-person').isVisible()));
   // The look is the account's: a chosen scheme and a collapsed menu come back
-  // with the page from the server, and nothing is kept in the browser.
+  // with the page from the server, and nothing is kept in the browser's
+  // storage. The browser holds only the server's copy of the scheme.
   assert.equal(await page.evaluate(() => document.documentElement.outerHTML.match(/^<html[^>]*>/)[0]), '<html lang="en">');
   const lookSaved = () => page.waitForResponse(r => r.url() === config.Origin + '/api/preferences' && r.request().method() === 'POST' && r.status() === 204);
   let looked = lookSaved(); await page.locator('.topbar .theme-toggle').click(); await looked;
   const chosen = await page.evaluate(() => document.documentElement.dataset.theme); assert(['light', 'dark'].includes(chosen), 'the scheme button chose nothing');
+  // The sign-in page, drawn before anyone signs in, takes the same scheme.
+  const signIn = await page.context().newPage(); await signIn.goto(config.Origin + '/login');
+  assert.equal(await signIn.evaluate(() => document.documentElement.dataset.theme), chosen, 'the sign-in page did not take the chosen scheme'); await signIn.close();
   looked = lookSaved(); await page.locator('#rail-collapse').click(); await looked;
   await page.reload(); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
   assert.deepEqual(await page.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.menu]), [chosen, 'collapsed'], 'the look did not come back with the page');

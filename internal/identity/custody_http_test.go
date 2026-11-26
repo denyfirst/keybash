@@ -35,8 +35,11 @@ func (c *custodyClient) call(method, path, body string) *httptest.ResponseRecord
 	}
 	w := httptest.NewRecorder()
 	c.l.ServeHTTP(w, r)
+	// The session's cookie; the copy of the look is not the session.
 	for _, cookie := range w.Result().Cookies() {
-		c.cookie = cookie
+		if cookie.Name == cookieName {
+			c.cookie = cookie
+		}
 	}
 	return w
 }
