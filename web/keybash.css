@@ -8,9 +8,11 @@
   or not yet checked, and no control is drawn in a colour that means a verdict.
 
   The scheme follows the system until a person chooses light or dark. The
-  choice is kept with their account on this server, never in the browser,
-  and arrives as data-theme on the page's root, so the page is right from its
-  first paint. Every dark rule is written twice, for the system's dark unless
+  choice is kept with their account on this server and arrives as data-theme
+  on the page's root, so the page is right from its first paint: the
+  workspace, the session pages and the closed page. The sign-in page comes
+  before the account, so this server leaves the browser a cookie holding only
+  the word, and draws the sign-in page from it. Every dark rule is written twice, for the system's dark unless
   light was chosen and for a chosen dark, the same (web/assets_test.go).
 
   Every colour text is set in is checked for contrast against every surface in
