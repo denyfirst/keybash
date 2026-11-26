@@ -419,3 +419,47 @@ func TestTheIronRDPModuleIsEmbeddedAsItsManifestRecords(t *testing.T) {
 		t.Fatal("the vendored module is not WebAssembly version 1")
 	}
 }
+
+// Each page links to its own section of docs/GUIDE.md, where the reasons the
+// page leaves out are written. Every section it names must be one of the
+// guide's headings, as GitHub writes their anchors, so no page links to
+// nothing.
+func TestEveryPageGuideSectionExists(t *testing.T) {
+	script, err := Assets.ReadFile("custody.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide, err := os.ReadFile("../docs/GUIDE.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchors := map[string]bool{}
+	for _, line := range strings.Split(string(guide), "\n") {
+		heading, ok := strings.CutPrefix(strings.TrimSpace(line), "## ")
+		if !ok {
+			continue
+		}
+		var anchor strings.Builder
+		for _, r := range strings.ToLower(heading) {
+			switch {
+			case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+				anchor.WriteRune(r)
+			case r == ' ':
+				anchor.WriteRune('-')
+			}
+		}
+		anchors[anchor.String()] = true
+	}
+	named := regexp.MustCompile(`guide: '([a-z0-9-]+)'`).FindAllStringSubmatch(string(script), -1)
+	if len(named) != 7 {
+		t.Fatalf("%d pages name a guide section, want 7", len(named))
+	}
+	for _, section := range named {
+		if !anchors[section[1]] {
+			t.Errorf("a page links to #%s, which docs/GUIDE.md does not have", section[1])
+		}
+	}
+	if !strings.Contains(string(script), "const guideHome = 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md';") {
+		t.Error("the guide link does not lead to docs/GUIDE.md")
+	}
+}

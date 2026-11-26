@@ -316,9 +316,7 @@ async function loadAccess() {
   $('access-foot').textContent = accessFoot[role] ?? '';
 }
 const accessFoot = {
-  admin: 'You are here for each account you are on. Who signs in with an account, you included, is chosen on its server’s page under Servers.',
-  user: 'Your administrator chooses which servers and accounts you may use.',
-  auditor: 'Auditors connect to no server. Servers shows every server and who signs in with each.',
+  auditor: 'Auditors connect to no server. Servers shows who signs in where.',
 };
 
 // ── Servers, their accounts and the people on each ───────────────────────
@@ -449,13 +447,12 @@ function stateOf(server) {
   return pill;
 }
 function serverNote(server) {
-  const whoChecks = role === 'admin' ? 'you check it' : 'an administrator checks it';
+  // The state says the rest; docs/GUIDE.md says why.
   const said = {
-    changed: `It shows a different certificate, usually because Windows renewed its own. Nobody can connect until ${whoChecks}.`,
-    expired: `Its certificate ended on ${dayOf(server.expires ?? 0)}. Nobody can connect until ${whoChecks}.`,
-    soon: `Its certificate ends on ${dayOf(server.expires ?? 0)}. Windows renews it by itself; Keybash then asks ${role === 'admin' ? 'you' : 'an administrator'} to check the new one.`,
-  }[server.certificate] ?? (server.available ? '' : 'Nobody can connect to it now: it is outside the networks this Keybash may reach, or its identity cannot be used.');
-  const unchecked = server.unchecked && !needsChecking(server) ? `Added without comparing it on the server’s own screen, so Keybash cannot be sure it is your server. ${role === 'admin' ? 'Check it now to be sure.' : 'An administrator can check it.'}` : '';
+    expired: `Ended on ${dayOf(server.expires ?? 0)}.`,
+    soon: `Ends on ${dayOf(server.expires ?? 0)}; Windows renews it by itself.`,
+  }[server.certificate] ?? (server.available || needsChecking(server) ? '' : 'Outside the networks Keybash may reach, or its identity cannot be used.');
+  const unchecked = server.unchecked && !needsChecking(server) ? 'Not compared on the server’s own screen.' : '';
   return [said, unchecked].filter(Boolean).join(' ');
 }
 // The Servers page: one row per server, with what matters at a glance.
@@ -480,9 +477,11 @@ async function loadServers() {
   $('add-server').hidden = !adding;
   const code = text => make('code', '', text);
   const option = code('upgrade.sh --target-networks=…');
-  if (networks.length) $('server-networks').replaceChildren('Servers can be added inside ', ...networks.flatMap((n, i) => i ? [', ', code(n)] : [code(n)]), '. To allow other networks, run ', option, ' on the Keybash server.');
-  else $('server-networks').replaceChildren('This installation names no networks for servers, so none can be added here. On the Keybash server, run ', option, ' (see Installation).');
-  $('server-networks').hidden = role !== 'admin';
+  // Where servers may be is said where one is added; the page speaks only
+  // when nothing can be.
+  $('server-inside').replaceChildren(...networks.length ? ['Inside ', ...networks.flatMap((n, i) => i ? [', ', code(n)] : [code(n)]), '.'] : []);
+  $('server-networks').replaceChildren('This installation names no networks for servers, so none can be added. On the Keybash server, run ', option, ' (see Installation).');
+  $('server-networks').hidden = role !== 'admin' || networks.length > 0;
   $('servers').replaceChildren(...servers.map(serverRow));
   if (!servers.length) $('servers').append(emptyState('No servers yet', role === 'admin' ? 'Add one, then the account people sign in as.' : 'An administrator adds servers here.', 'terminal'));
   return servers;
@@ -496,7 +495,6 @@ function serverHead(server) {
   const where = server.addresses.length === 1 && server.addresses[0] === server.hostname ? '' : ` (${server.addresses.join(', ')})`;
   titles.append(make('h2', 'record-name', 'Server identity'), make('p', 'record-meta', `${kindWords(server.protocol)} · ${hostPort(server.hostname, server.port)}${where}`));
   const print = make('p', 'record-print'), code = make('code', 'fingerprint', server.fingerprint); code.title = 'Identity (fingerprint)'; print.append(code); titles.append(print);
-  titles.append(make('p', 'server-access identity-why', 'Keybash connects only while the server shows this identity.'));
   const facts = [server.certificate === 'current' ? `Certificate until ${dayOf(server.expires)}` : '', server.added_by ? `Added by ${nameOf(server.added_by)} on ${dayOf(server.added)}` : `From the server file, ${dayOf(server.added)}`];
   titles.append(make('p', 'server-access', facts.filter(Boolean).join(' · ')));
   const actions = make('div', 'record-actions');
@@ -514,8 +512,8 @@ function serverHead(server) {
 function paintSettings(server) {
   $('server-settings').hidden = !server || role !== 'admin';
   if ($('server-settings').hidden) return;
-  $('server-name-now').textContent = `${server.name}. Everyone who signs in to it sees this name.`;
-  $('server-system-now').textContent = `${systems[server.system]?.title ?? 'Not chosen'}. Only the picture on its cards; Keybash connects the same way.`;
+  $('server-name-now').textContent = server.name;
+  $('server-system-now').textContent = systems[server.system]?.title ?? 'Not chosen';
   $('server-system').textContent = systems[server.system] ? 'Change' : 'Choose';
 }
 $('server-rename')?.addEventListener('click', () => { if (shownServer) openRename(shownServer); });
@@ -784,10 +782,30 @@ $('server-verify')?.addEventListener('change', () => { serverVerify(); if ($('se
 $('identity-verify')?.addEventListener('change', () => { identityVerify(); if ($('identity-verify').checked) $('identity-answer').focus(); });
 // SSH or a desktop: the words and the usual port follow the choice, and a port
 // someone typed themselves stays.
+// The picture on a new server's cards, chosen beside its name. Until one is
+// chosen it follows the kind: Windows for a desktop, none for a terminal.
+let serverMark = null, serverMarkChosen = false;
+function paintServerMark() {
+  const tile = $('server-mark-tile'); tile.replaceChildren(); delete tile.dataset.system; delete tile.dataset.tone; tile.style.removeProperty('--mark');
+  if (systems[serverMark]) { paintTile(tile, serverMark); tile.append(systemMark(serverMark)); }
+  else tile.append(glyph(serverProtocol === 'rdp' ? 'rdp' : 'ssh', 'server-glyph'));
+  $('server-mark-name').textContent = `Picture on its cards: ${systems[serverMark]?.title ?? 'none'}. Choose`;
+}
+function showServerMarks(open) {
+  $('server-marks').hidden = !open; $('server-mark').setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  systemGrid($('server-marks'), serverMark, name => {
+    serverMark = name; serverMarkChosen = true; paintServerMark(); showServerMarks(false); $('server-mark').focus();
+  });
+  $('server-marks').querySelector('[aria-pressed=true]')?.focus();
+}
+$('server-mark')?.addEventListener('click', () => { if (!busy) showServerMarks($('server-marks').hidden); });
 function chooseServerKind(protocol) {
   serverProtocol = protocol; const rdp = protocol === 'rdp';
+  if (!serverMarkChosen) serverMark = rdp ? 'windows' : null;
+  paintServerMark();
   document.querySelectorAll('#server-kind .segment').forEach(segment => segment.setAttribute('aria-pressed', String(segment.dataset.protocol === protocol)));
-  $('server-lead').textContent = rdp ? 'Keybash compares the server’s certificate with a line you bring from the server’s own screen, so nobody in between can pass for it. Next you add the account people sign in as.' : 'Keybash reads the server’s SSH identity, and you compare it on the server’s own console before it is added. Next you add the account people sign in as.';
+  $('server-lead').textContent = rdp ? 'You compare its certificate with a line from the server’s own screen before it is added.' : 'Keybash reads its identity, and you compare it on the server’s own console before it is added.';
   $('server-port-label').textContent = rdp ? 'RDP port' : 'SSH port';
   if (['', '22', '3389'].includes($('server-port').value)) $('server-port').value = rdp ? '3389' : '22';
   serverStep(false);
@@ -834,6 +852,7 @@ async function openIdentity(server) {
 $('add-server')?.addEventListener('click', () => {
   if (busy) return;
   $('server-form').reset(); dialogNotice('');
+  serverMark = null; serverMarkChosen = false; showServerMarks(false);
   $('server-kind').hidden = !(serverKinds.ssh && serverKinds.rdp); $('server-no-rdp').hidden = serverKinds.rdp;
   chooseServerKind(serverKinds.ssh ? 'ssh' : 'rdp');
   $('server-dialog').showModal(); $('server-name').focus();
@@ -861,12 +880,16 @@ bind('server-form', async () => {
   try { made = await request('/api/servers', 'POST', { protocol, name, address, port, fingerprint }); }
   catch (error) { if (error.status === 409 && !rdp) serverStep(false); throw serverError(error, !unchecked, protocol); }
   if (!idOK(made?.id)) throw new Error('invalid server');
+  // Its picture next. It changes nothing about how Keybash connects, so a
+  // refusal leaves the server added without one, to choose on its page.
+  let marked = true;
+  if (systems[serverMark]) { try { await request(`/api/servers/${made.id}/system`, 'POST', { system: serverMark }); } catch { marked = false; } }
   $('server-dialog').close();
   // Straight on to the server's own page and its first account.
   await go(`/servers/${made.id}`);
   const added = serverById(made.id);
   if (added) { busy = false; openAccountForm(added, true); busy = true; }
-  notice(`${name} was added${unchecked ? ', not checked' : ''}.`);
+  notice(`${name} was added${unchecked ? ', not checked' : ''}.${marked ? '' : ' Its picture was not saved; choose it under This server.'}`);
 });
 $('rename-cancel')?.addEventListener('click', () => $('rename-dialog').close());
 $('rename-dialog')?.addEventListener('close', () => { pendingServer = null; });
@@ -985,7 +1008,7 @@ function paintPerson(person) {
   const card = make('article', 'record person person-detail'); card.dataset.person = person.id;
   const tile = make('span', 'record-icon', person.username[0]); tile.setAttribute('aria-hidden', 'true');
   const titles = make('div', 'record-titles');
-  titles.append(make('h2', 'record-name', 'Access to Keybash'), make('p', 'record-meta', person.id === self ? 'This is you: your own password and phone are on Account.' : 'Their own password and the authenticator on their phone. Nobody else ever sees either.'));
+  titles.append(make('h2', 'record-name', 'Access to Keybash'), make('p', 'record-meta', person.id === self ? 'This is you: your own password and phone are on Account.' : 'Their own password and phone authenticator.'));
   const state = make('span', 'pill person-state', stateWords[person.state]); state.dataset.state = person.state;
   const actions = make('div', 'record-actions');
   card.append(tile, titles, state, actions);
@@ -1114,16 +1137,19 @@ async function loadInstallation() {
 }
 
 // ── Pages ────────────────────────────────────────────────────────────────
+// What each page leaves unsaid is in docs/GUIDE.md; the bar links to the
+// page's own section.
+const guideHome = 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md';
 // One document, a page per path: the path picks what a ready session sees.
 // A server's and a person's own pages sit under their lists.
 const pages = {
-  access: { path: '/', panel: 'access-panel', title: 'Your servers', lead: 'Open one, and Keybash signs you in. You never see its key or password.' },
-  servers: { path: '/servers', panel: 'servers-panel', title: 'Servers', lead: 'Each server, the accounts on it, and who signs in with each.' },
-  server: { under: 'servers', panel: 'server-panel', title: 'Server', lead: '' },
-  users: { path: '/users', panel: 'users-panel', title: 'People', lead: 'Who signs in to Keybash, what each may do, and where.' },
-  person: { under: 'users', panel: 'person-panel', title: 'Person', lead: '' },
-  account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, your phone authenticator and your recovery codes.' },
-  installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy of Keybash runs, and how to update it.' },
+  access: { path: '/', panel: 'access-panel', title: 'Your servers', lead: 'Open one, and Keybash signs you in.', guide: 'your-servers' },
+  servers: { path: '/servers', panel: 'servers-panel', title: 'Servers', lead: 'Each server and its accounts.', guide: 'servers' },
+  server: { under: 'servers', panel: 'server-panel', title: 'Server', lead: '', guide: 'a-servers-page' },
+  users: { path: '/users', panel: 'users-panel', title: 'People', lead: 'Who signs in to Keybash, and where.', guide: 'people' },
+  person: { under: 'users', panel: 'person-panel', title: 'Person', lead: '', guide: 'people' },
+  account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, phone authenticator and recovery codes.', guide: 'account' },
+  installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy runs, and how to update it.', guide: 'installation' },
 };
 // Which pages each role sees; the first is where a role lands. The server
 // refuses the rest whatever the page shows.
@@ -1156,6 +1182,8 @@ function showPage(ready) {
   if (page.under) { back.replaceChildren(glyph('back', 'button-glyph'), pages[page.under].title); back.href = pages[page.under].path; back.dataset.page = ''; }
   $('topbar-page').textContent = $('rail-page').textContent = ready ? pages[rail].title : 'Sign-in';
   $('lead').textContent = ready ? page.lead : ''; $('lead').hidden = !ready || !page.lead && !page.under;
+  // The guide's section for this page: the reasons the page leaves out.
+  $('guide').href = `${guideHome}#${ready ? page.guide : 'your-servers'}`; $('guide').hidden = !ready;
   if (ready) { $('heading').textContent = page.title; document.title = `Keybash · ${page.title}`; }
   return name;
 }

@@ -16,7 +16,8 @@ it. [What exists and what remains before a release](docs/STATUS.md). In short:
   lets the gateway reach only the networks its servers are in
   ([installing](docs/INSTALL.md), [LAN ingress](docs/LAN-INGRESS.md)).
 - Accounts with Argon2id passwords, mandatory TOTP and recovery codes, roles
-  and invitations, all managed on the web pages.
+  and invitations, all managed on the web pages. What each page is for is in
+  [the guide](docs/GUIDE.md), which every page links to.
 - Servers are added on the Servers page; their host key or certificate is
   checked on the server's console and pinned
   ([server trust](docs/SERVER-TRUST-LAB.md)). Each server has accounts: a key

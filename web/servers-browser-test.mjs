@@ -45,7 +45,13 @@ try {
   // reaches it, and it is managed here like any other.
   assert.equal(await row('Catalog box').locator('.server-accounts').textContent(), 'No accounts yet: nobody can connect.', 'a server from the file came open to people');
   assert.equal(await row('Catalog box').getByRole('link', { name: 'Open', exact: true }).count(), 1, 'a server from the file cannot be managed here');
-  assert.match(await page.locator('#server-networks').textContent(), /inside 10\.20\.0\.0\/24/);
+  // Where a server may be is said under the address it is added at; the page
+  // says nothing while servers can be added.
+  assert(await page.locator('#server-networks').isHidden(), 'the page spoke of networks while servers can be added');
+  assert.equal(await page.locator('#server-inside').textContent(), 'Inside 10.20.0.0/24.');
+  // The guide holds what the page leaves unsaid, in a new tab, telling it nothing.
+  assert.equal(await page.locator('#guide').getAttribute('href'), 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md#servers');
+  assert.deepEqual([await page.locator('#guide').getAttribute('target'), await page.locator('#guide').getAttribute('rel')], ['_blank', 'noopener noreferrer']);
   assert(await page.locator('#add-server').isVisible(), 'no Add server button');
   assert.equal(await page.locator('.rail-item[href="/keys"], #new-connection, #add-record').count(), 0, 'the personal path is back');
 
@@ -58,6 +64,12 @@ try {
   await sheetNotice('server-dialog').filter({ hasText: /No SSH server with an Ed25519 key answered/ }).waitFor(); await settled();
 
   stage = 'compare and add';
+  // The picture on its cards sits beside the name: none for a terminal until
+  // one is chosen, from the same pictures as on its page.
+  assert.equal(await page.locator('#server-mark-name').textContent(), 'Picture on its cards: none. Choose');
+  await page.locator('#server-mark').click(); assert.equal(await page.locator('#server-mark').getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('#server-marks .system-option').count(), 20); assert.equal(await page.locator('#server-marks [aria-pressed=true]').count(), 0);
+  await page.locator('#server-mark').click(); assert(await page.locator('#server-marks').isHidden(), 'the pictures stayed open');
   await page.locator('#server-name').fill('Build box'); await page.locator('#server-address').fill('10.20.0.7'); await page.locator('#server-submit').click();
   await page.locator('#server-check').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#server-print').textContent(), config.Fingerprint);
@@ -194,7 +206,9 @@ try {
   // removing the server sit under This server.
   assert.deepEqual(await page.locator('#server-card button').allTextContents(), ['Check identity'], 'the identity card offered more than its check');
   assert.equal(await page.locator('#server-card .record-name').textContent(), 'Server identity');
-  assert.equal(await page.locator('#server-name-now').textContent(), 'Build box. Everyone who signs in to it sees this name.');
+  assert.equal(await page.locator('#server-name-now').textContent(), 'Build box');
+  assert.equal(await page.locator('#server-system-now').textContent(), 'Not chosen');
+  assert.equal(await page.locator('#guide').getAttribute('href'), 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md#a-servers-page');
   assert.deepEqual(await page.locator('#server-settings button').allTextContents(), ['Rename', 'Choose', 'Remove server']);
   await page.locator('#server-rename').click(); await page.locator('#rename-dialog').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#rename-name').inputValue(), 'Build box');
@@ -233,7 +247,12 @@ try {
   assert.match(await accessCard.locator('.server-screen').textContent(), /^deploy@Build box ~ \$ /);
   assert.equal(await accessCard.getByRole('button').count(), 0, 'a card offered to change its account');
   const deployID = await accessCard.getAttribute('data-account'); assert.match(deployID, /^[a-f0-9]{32}$/);
-  assert.equal(await page.locator('#access-foot').textContent(), 'You are here for each account you are on. Who signs in with an account, you included, is chosen on its server’s page under Servers.', 'an administrator was told an administrator chooses');
+  assert.equal(await page.locator('#access-foot').textContent(), '', 'an administrator was told what the guide says');
+  // The line sits in the card's own scheme, not on a dark patch.
+  assert(await accessCard.locator('.server-screen').evaluate(line => {
+    const probe = document.createElement('div'); probe.style.background = 'var(--paper-sunk)'; document.body.append(probe);
+    const sunk = getComputedStyle(probe).backgroundColor; probe.remove(); return getComputedStyle(line).backgroundColor === sunk;
+  }), 'the card line is not on the page’s sunken surface');
   const connect = accessCard.getByRole('link', { name: 'Connect', exact: true });
   assert.equal(await connect.getAttribute('href'), `/remote/ssh/${deployID}`);
 
@@ -367,6 +386,13 @@ try {
   await page.locator('#server-kind [data-protocol=rdp]').click();
   assert.equal(await page.locator('#server-port').inputValue(), '3389', 'choosing a desktop did not offer its port');
   assert.equal(await page.locator('#server-port-label').textContent(), 'RDP port');
+  // A desktop starts as Windows; a chosen picture outlasts changing the kind.
+  assert.equal(await page.locator('#server-mark-name').textContent(), 'Picture on its cards: Windows. Choose', 'a desktop did not start as Windows');
+  await page.locator('#server-mark').click(); assert.equal(await page.locator('#server-marks [aria-pressed=true]').getAttribute('title'), 'Windows');
+  await page.locator('#server-marks').getByRole('button', { name: 'Server', exact: true }).click();
+  assert(await page.locator('#server-marks').isHidden(), 'choosing a picture left the pictures open');
+  await page.locator('#server-kind [data-protocol=ssh]').click(); await page.locator('#server-kind [data-protocol=rdp]').click();
+  assert.equal(await page.locator('#server-mark-name').textContent(), 'Picture on its cards: Server. Choose', 'changing the kind undid a chosen picture');
   await page.locator('#server-name').fill('Desk'); await page.locator('#server-address').fill('10.20.0.9'); await page.locator('#server-submit').click();
   await sheetNotice('server-dialog').filter({ hasText: /No RDP server answered there/ }).waitFor(); await settled();
   assert(await page.locator('#server-paste').isHidden(), 'a server that did not answer moved on to comparing');
@@ -396,6 +422,7 @@ try {
   assert.match(await page.locator('#account-kind-hint').textContent(), /^A desktop signs in with a password\. Typed once here/);
   assert.equal(await page.locator('#account-submit').textContent(), 'Save the password');
   await page.locator('#account-cancel').click(); await page.locator('#account-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#server-system-now').textContent(), 'Server', 'the picture chosen when adding was not saved');
   assert.match(await page.locator('#server-card').textContent(), /Certificate until/);
   assert.equal(await page.locator('#server-card .server-state').textContent(), 'Ready');
   assert(await page.locator('#attention').isHidden(), 'a new desktop raised an alarm');
@@ -482,7 +509,7 @@ try {
   await page.locator('.rail-item[data-page=access]').click(); await page.waitForURL(config.Origin + '/'); await settled();
   const deskCard = page.locator('#access .server-card'); await deskCard.waitFor();
   assert.equal(await deskCard.count(), 1);
-  assert.equal(await deskCard.locator('.server-kind').textContent(), 'Desktop (RDP)');
+  assert.equal(await deskCard.locator('.server-kind').textContent(), 'Desktop (RDP) · Server');
   assert.equal(await deskCard.locator('.server-screen').textContent(), 'kbtest@Desk · desktop');
   const deskID = await deskCard.getAttribute('data-account');
   assert.equal(await deskCard.getByRole('link', { name: 'Connect', exact: true }).getAttribute('href'), `/remote/rdp/${deskID}`);
