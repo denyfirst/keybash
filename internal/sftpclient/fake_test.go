@@ -142,9 +142,9 @@ func newFake(t *testing.T) *fakeServer {
 		t:     t,
 		batch: 64,
 		tree: map[string]*fakeNode{
-			"/":       {dir: true},
-			"/home":   {dir: true},
-			"/home/u": {dir: true},
+			"/":      {dir: true},
+			"/home":  {dir: true},
+			"/srv/u": {dir: true},
 		},
 		handles: map[string]*fakeHandle{},
 		seen:    map[byte]int{},
@@ -378,7 +378,7 @@ func (f *fakeServer) do(typ byte, id uint32, r *reader) []byte {
 			return status(id, StatusBadMessage)
 		}
 		if p == "." {
-			p = "/home/u"
+			p = "/srv/u"
 		}
 		return pkt(typeName, id, uint32(1), p, "", noAttrs)
 

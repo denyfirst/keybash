@@ -97,7 +97,7 @@ func TestRoundTripSizes(t *testing.T) {
 	sizes := []int{0, 1, 32767, 32768, 32769, 8*32768 + 5, 3<<20 + 7}
 	for _, size := range sizes {
 		data := pattern(size)
-		p := fmt.Sprintf("/home/u/f%d", size)
+		p := fmt.Sprintf("/srv/u/f%d", size)
 		if err := c.Upload(ctx, p, int64(size), int64(size), chunker(data)); err != nil {
 			t.Fatalf("upload %d: %v", size, err)
 		}
@@ -131,10 +131,10 @@ func TestUploadUnevenChunks(t *testing.T) {
 	f := newFake(t)
 	c := f.client()
 	data := pattern(200_000)
-	if err := c.Upload(f.ctx(), "/home/u/u", int64(len(data)), 1<<20, chunker(data, 1, 1000, ChunkSize, 7, 32767)); err != nil {
+	if err := c.Upload(f.ctx(), "/srv/u/u", int64(len(data)), 1<<20, chunker(data, 1, 1000, ChunkSize, 7, 32767)); err != nil {
 		t.Fatal(err)
 	}
-	if stored, _ := f.content("/home/u/u"); !bytes.Equal(stored, data) {
+	if stored, _ := f.content("/srv/u/u"); !bytes.Equal(stored, data) {
 		t.Fatal("uneven chunks stored different bytes")
 	}
 }
@@ -156,7 +156,7 @@ func TestShortAndReorderedReplies(t *testing.T) {
 			ctx := f.ctx()
 			for _, size := range []int{1, 32769, 8*32768 + 5, 1<<20 + 3} {
 				data := pattern(size)
-				p := fmt.Sprintf("/home/u/s%d", size)
+				p := fmt.Sprintf("/srv/u/s%d", size)
 				f.file(p, data)
 				g := fetch(t, ctx, c, p, 1<<30)
 				if g.err != nil || g.n != int64(size) || !bytes.Equal(g.data, data) {
@@ -189,9 +189,9 @@ func TestInFlightBound(t *testing.T) {
 	t.Run("download", func(t *testing.T) {
 		f := newFake(t)
 		f.hold = 100 * time.Millisecond
-		f.file("/home/u/big", data)
+		f.file("/srv/u/big", data)
 		c := f.client()
-		g := fetch(t, f.ctx(), c, "/home/u/big", 1<<30)
+		g := fetch(t, f.ctx(), c, "/srv/u/big", 1<<30)
 		if g.err != nil || !bytes.Equal(g.data, data) {
 			t.Fatalf("download: %v", g.err)
 		}
@@ -203,7 +203,7 @@ func TestInFlightBound(t *testing.T) {
 		f := newFake(t)
 		f.hold = 100 * time.Millisecond
 		c := f.client()
-		if err := c.Upload(f.ctx(), "/home/u/big", int64(len(data)), 1<<30, chunker(data)); err != nil {
+		if err := c.Upload(f.ctx(), "/srv/u/big", int64(len(data)), 1<<30, chunker(data)); err != nil {
 			t.Fatal(err)
 		}
 		if h := f.held(); h != wantInFlight {
@@ -350,7 +350,7 @@ func TestDownloadReadFailure(t *testing.T) {
 
 func TestUploadLimitAndExclusive(t *testing.T) {
 	f := newFake(t)
-	f.file("/home/u/exists", []byte("keep"))
+	f.file("/srv/u/exists", []byte("keep"))
 	c := f.client()
 	ctx := f.ctx()
 	never := func() ([]byte, error) {
@@ -358,24 +358,24 @@ func TestUploadLimitAndExclusive(t *testing.T) {
 		return nil, io.EOF
 	}
 
-	if err := c.Upload(ctx, "/home/u/x", 11, 10, never); !errors.Is(err, ErrTooLarge) {
+	if err := c.Upload(ctx, "/srv/u/x", 11, 10, never); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("size over limit: %v", err)
 	}
-	if err := c.Upload(ctx, "/home/u/x", -1, 10, never); err == nil {
+	if err := c.Upload(ctx, "/srv/u/x", -1, 10, never); err == nil {
 		t.Fatal("negative size accepted")
 	}
 	if f.count() != 0 {
 		t.Fatal("refused uploads sent requests")
 	}
-	if err := c.Upload(ctx, "/home/u/x", 10, 10, chunker(pattern(10))); err != nil {
+	if err := c.Upload(ctx, "/srv/u/x", 10, 10, chunker(pattern(10))); err != nil {
 		t.Fatalf("size at limit: %v", err)
 	}
 
-	err := c.Upload(ctx, "/home/u/exists", 3, 10, never)
+	err := c.Upload(ctx, "/srv/u/exists", 3, 10, never)
 	if !isStatus(err, StatusFailure) {
 		t.Fatalf("exclusive create over an existing file: %v", err)
 	}
-	if stored, _ := f.content("/home/u/exists"); string(stored) != "keep" {
+	if stored, _ := f.content("/srv/u/exists"); string(stored) != "keep" {
 		t.Fatal("existing file changed")
 	}
 	for _, fl := range f.flags() {
@@ -383,7 +383,7 @@ func TestUploadLimitAndExclusive(t *testing.T) {
 			t.Fatalf("upload OPEN flags %#x", fl)
 		}
 	}
-	if err := c.Upload(ctx, "/home/u/nodir/x", 1, 10, never); !isStatus(err, StatusNoSuchFile) {
+	if err := c.Upload(ctx, "/srv/u/nodir/x", 1, 10, never); !isStatus(err, StatusNoSuchFile) {
 		t.Fatalf("missing folder: %v", err)
 	}
 }
@@ -415,7 +415,7 @@ func TestUploadSourceErrors(t *testing.T) {
 		{"past-size", chunker(append(data, 1)), errChunk},
 	}
 	for i, tc := range cases {
-		p := fmt.Sprintf("/home/u/src%d", i)
+		p := fmt.Sprintf("/srv/u/src%d", i)
 		size := int64(len(data))
 		if tc.name == "past-size" {
 			size = int64(len(data)) - 1
@@ -431,7 +431,7 @@ func TestUploadSourceErrors(t *testing.T) {
 			t.Fatalf("%s: partial file removed", tc.name)
 		}
 	}
-	if err := c.Upload(ctx, "/home/u/after", 5, 5, chunker(pattern(5))); err != nil {
+	if err := c.Upload(ctx, "/srv/u/after", 5, 5, chunker(pattern(5))); err != nil {
 		t.Fatalf("session not usable after source errors: %v", err)
 	}
 }
@@ -446,13 +446,13 @@ func TestUploadWriteFailure(t *testing.T) {
 	}
 	c := f.client()
 	data := pattern(10 * ChunkSize)
-	if err := c.Upload(f.ctx(), "/home/u/w", int64(len(data)), 1<<30, chunker(data)); !isStatus(err, StatusPermissionDenied) {
+	if err := c.Upload(f.ctx(), "/srv/u/w", int64(len(data)), 1<<30, chunker(data)); !isStatus(err, StatusPermissionDenied) {
 		t.Fatalf("WRITE failure: %v", err)
 	}
 	if f.openHandles() != 0 {
 		t.Fatal("handle left open")
 	}
-	if _, err := c.Stat("/home/u/w"); err != nil {
+	if _, err := c.Stat("/srv/u/w"); err != nil {
 		t.Fatalf("session not usable after a WRITE failure: %v", err)
 	}
 }
@@ -498,7 +498,7 @@ func TestCancelKeepsSession(t *testing.T) {
 		defer cancel()
 		src := chunker(data)
 		calls := 0
-		err := c.Upload(ctx, "/home/u/up", int64(len(data)), 1<<30, func() ([]byte, error) {
+		err := c.Upload(ctx, "/srv/u/up", int64(len(data)), 1<<30, func() ([]byte, error) {
 			if calls++; calls == 4 {
 				cancel()
 			}
@@ -508,7 +508,7 @@ func TestCancelKeepsSession(t *testing.T) {
 		if !errors.Is(err, context.Canceled) || calls != 4 || f.seenType(typeWrite) != 3 || f.openHandles() != 0 {
 			t.Fatalf("err=%v calls=%d writes=%d", err, calls, f.seenType(typeWrite))
 		}
-		if _, err := c.Stat("/home/u/up"); err != nil {
+		if _, err := c.Stat("/srv/u/up"); err != nil {
 			t.Fatalf("session not usable after cancel: %v", err)
 		}
 	})
@@ -803,7 +803,7 @@ func TestReplyMatching(t *testing.T) {
 		}
 		c := f.client()
 		data := pattern(3 * ChunkSize)
-		if err := c.Upload(f.ctx(), "/home/u/d", int64(len(data)), 1<<30, chunker(data)); !errors.Is(err, ErrProtocol) {
+		if err := c.Upload(f.ctx(), "/srv/u/d", int64(len(data)), 1<<30, chunker(data)); !errors.Is(err, ErrProtocol) {
 			t.Fatalf("duplicate WRITE ack accepted: %v", err)
 		}
 	})
@@ -1237,10 +1237,10 @@ func TestRealPath(t *testing.T) {
 	t.Run("home", func(t *testing.T) {
 		f := newFake(t)
 		c := f.client()
-		if p, err := c.RealPath("."); err != nil || p != "/home/u" {
+		if p, err := c.RealPath("."); err != nil || p != "/srv/u" {
 			t.Fatalf("RealPath(.) = %q, %v", p, err)
 		}
-		if p, err := c.RealPath("/home/u/x"); err != nil || p != "/home/u/x" {
+		if p, err := c.RealPath("/srv/u/x"); err != nil || p != "/srv/u/x" {
 			t.Fatalf("RealPath(absolute) = %q, %v", p, err)
 		}
 	})
@@ -1310,7 +1310,7 @@ func TestStatusCodes(t *testing.T) {
 	seen := map[string]bool{}
 	for i, code := range codes {
 		next = i
-		err := c.Mkdir("/home/u/x")
+		err := c.Mkdir("/srv/u/x")
 		if !isStatus(err, code) {
 			t.Fatalf("code %d: %v", code, err)
 		}
@@ -1319,7 +1319,7 @@ func TestStatusCodes(t *testing.T) {
 		} else {
 			seen[msg] = true
 		}
-		if _, err := c.Stat("/home/u"); !isStatus(err, code) {
+		if _, err := c.Stat("/srv/u"); !isStatus(err, code) {
 			t.Fatalf("STAT code %d: %v", code, err)
 		}
 	}
@@ -1329,7 +1329,7 @@ func TestOperations(t *testing.T) {
 	f := newFake(t)
 	c := f.client()
 	home, err := c.RealPath(".")
-	if err != nil || home != "/home/u" {
+	if err != nil || home != "/srv/u" {
 		t.Fatalf("home %q, %v", home, err)
 	}
 	d := home + "/d"
@@ -1386,18 +1386,18 @@ func TestOnlyAllowedRequests(t *testing.T) {
 	ctx := f.ctx()
 	data := pattern(3*ChunkSize + 1)
 	steps := []error{
-		c.Mkdir("/home/u/d"),
-		c.Upload(ctx, "/home/u/d/a", int64(len(data)), 1<<20, chunker(data)),
-		c.Rename("/home/u/d/a", "/home/u/d/b"),
-		c.List("/home/u/d", 10, func(Entry) error { return nil }),
-		c.Remove("/home/u/d/b"),
-		c.Rmdir("/home/u/d"),
+		c.Mkdir("/srv/u/d"),
+		c.Upload(ctx, "/srv/u/d/a", int64(len(data)), 1<<20, chunker(data)),
+		c.Rename("/srv/u/d/a", "/srv/u/d/b"),
+		c.List("/srv/u/d", 10, func(Entry) error { return nil }),
+		c.Remove("/srv/u/d/b"),
+		c.Rmdir("/srv/u/d"),
 	}
 	_, e1 := c.RealPath(".")
-	_, e2 := c.Stat("/home/u")
-	_, e3 := c.Lstat("/home/u")
-	f.file("/home/u/r", data)
-	g := fetch(t, ctx, c, "/home/u/r", 1<<20)
+	_, e2 := c.Stat("/srv/u")
+	_, e3 := c.Lstat("/srv/u")
+	f.file("/srv/u/r", data)
+	g := fetch(t, ctx, c, "/srv/u/r", 1<<20)
 	for i, err := range append(steps, e1, e2, e3, g.err) {
 		if err != nil {
 			t.Fatalf("step %d: %v", i, err)
@@ -1414,17 +1414,17 @@ func TestSpentClient(t *testing.T) {
 	f := newFake(t)
 	replaceStat(f, func(id uint32) [][]byte { return [][]byte{pkt(typeAttrs, id+7, noAttrs)} })
 	c := f.client()
-	if _, err := c.Stat("/home/u"); !errors.Is(err, ErrProtocol) {
+	if _, err := c.Stat("/srv/u"); !errors.Is(err, ErrProtocol) {
 		t.Fatal(err)
 	}
 	sent := f.count()
 	ctx := f.ctx()
 	_, e1 := c.RealPath(".")
-	_, e2 := c.Stat("/home/u")
-	_, e3 := c.Lstat("/home/u")
+	_, e2 := c.Stat("/srv/u")
+	_, e3 := c.Lstat("/srv/u")
 	_, e4 := c.Download(ctx, "/f", 10, func(int64) error { return nil }, func([]byte) error { return nil })
 	for i, err := range []error{e1, e2, e3, e4,
-		c.List("/home/u", 10, func(Entry) error { return nil }),
+		c.List("/srv/u", 10, func(Entry) error { return nil }),
 		c.Mkdir("/a"), c.Rmdir("/a"), c.Remove("/a"), c.Rename("/a", "/b"),
 		c.Upload(ctx, "/a", 0, 0, func() ([]byte, error) { return nil, io.EOF }),
 	} {

@@ -58,7 +58,7 @@ func FuzzSFTPReply(f *testing.F) {
 	f.Add(byte(3), cat(pkt(typeHandle, uint32(1), "h"), status(3, statusOK), status(2, statusOK),
 		status(4, statusOK), status(5, statusOK), status(6, statusOK)))
 	// RealPath.
-	f.Add(byte(4), pkt(typeName, uint32(1), uint32(1), "/home/u", "", noAttrs))
+	f.Add(byte(4), pkt(typeName, uint32(1), uint32(1), "/srv/u", "", noAttrs))
 	// Bounds.
 	f.Add(byte(1), []byte{0xff, 0xff, 0xff, 0xff, typeAttrs})
 	f.Add(byte(0), cat(pkt(typeHandle, uint32(1), "h"), binary.BigEndian.AppendUint32(nil, MaxPacket)))

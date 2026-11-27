@@ -142,12 +142,12 @@ func TestFilesWorkerRefusesWritesWhenDownloadOnly(t *testing.T) {
 	parent, _, done := filesWorkerFixture(t, kindFiles, "download", recorder.serve)
 	readFrameWithin(t, parent)
 	for i, r := range []terminalweb.FileRequest{
-		{Op: terminalweb.OpMkdir, Path: "/home/kb/new"},
-		{Op: terminalweb.OpRename, Path: "/home/kb/a", To: "/home/kb/b"},
-		{Op: terminalweb.OpRemove, Path: "/home/kb/a"},
-		{Op: terminalweb.OpRmdir, Path: "/home/kb/a"},
-		{Op: terminalweb.OpPut, Path: "/home/kb/a", Size: 3},
-		{Op: terminalweb.OpReplace, Path: "/home/kb/a", Size: 3},
+		{Op: terminalweb.OpMkdir, Path: "/srv/kb/new"},
+		{Op: terminalweb.OpRename, Path: "/srv/kb/a", To: "/srv/kb/b"},
+		{Op: terminalweb.OpRemove, Path: "/srv/kb/a"},
+		{Op: terminalweb.OpRmdir, Path: "/srv/kb/a"},
+		{Op: terminalweb.OpPut, Path: "/srv/kb/a", Size: 3},
+		{Op: terminalweb.OpReplace, Path: "/srv/kb/a", Size: 3},
 	} {
 		r.ID = uint32(i + 1)
 		data, ok := encodeFileRequest(r)
@@ -216,7 +216,7 @@ func TestWorkerKindsKeepTheirOwnFrames(t *testing.T) {
 }
 
 func TestFilesFramesRoundTripAndRefuseMalformed(t *testing.T) {
-	request := terminalweb.FileRequest{ID: 7, Op: terminalweb.OpRename, Path: "/home/kb/a", To: "/home/kb/b"}
+	request := terminalweb.FileRequest{ID: 7, Op: terminalweb.OpRename, Path: "/srv/kb/a", To: "/srv/kb/b"}
 	data, ok := encodeFileRequest(request)
 	if back, ok2 := decodeFileRequest(data); !ok || !ok2 || back != request {
 		t.Fatalf("request round trip: %+v", back)
@@ -224,7 +224,7 @@ func TestFilesFramesRoundTripAndRefuseMalformed(t *testing.T) {
 	if _, ok := encodeFileRequest(terminalweb.FileRequest{ID: 1, Op: "exec", Path: "/bin/sh"}); ok {
 		t.Fatal("an unknown operation was encoded")
 	}
-	forged := ssh.Marshal(&fileRequestWire{ID: 1, Op: "list", Path: "/home/../etc"})
+	forged := ssh.Marshal(&fileRequestWire{ID: 1, Op: "list", Path: "/srv/../etc"})
 	if _, ok := decodeFileRequest(forged); ok {
 		t.Fatal("the worker took a path the gateway never sends")
 	}
@@ -259,12 +259,12 @@ func TestFilesFramesRoundTripAndRefuseMalformed(t *testing.T) {
 			t.Errorf("%s decoded", name)
 		}
 	}
-	if done, ok := encodeDone(3, 10, "/home/kb"); !ok {
+	if done, ok := encodeDone(3, 10, "/srv/kb"); !ok {
 		t.Fatal("done refused")
-	} else if id, size, where, ok := decodeDone(done); !ok || id != 3 || size != 10 || where != "/home/kb" {
+	} else if id, size, where, ok := decodeDone(done); !ok || id != 3 || size != 10 || where != "/srv/kb" {
 		t.Fatal("done round trip")
 	}
-	if _, ok := encodeDone(3, 0, "/home/../etc"); ok {
+	if _, ok := encodeDone(3, 0, "/srv/../etc"); ok {
 		t.Fatal("done took a path that is not canonical")
 	}
 	if _, _, _, ok := decodeDone(append(binary.BigEndian.AppendUint64(encodeID(1), terminalweb.MaxFileSize+1), 0, 0)); ok {
@@ -290,7 +290,7 @@ func TestFilesFramesRoundTripAndRefuseMalformed(t *testing.T) {
 func FuzzFilesFrames(f *testing.F) {
 	batch := newEntryBatch(2)
 	batch.add(terminalweb.FileEntry{Name: []byte("notes"), Kind: terminalweb.KindFile, Size: 3})
-	done, _ := encodeDone(2, 3, "/home/kb")
+	done, _ := encodeDone(2, 3, "/srv/kb")
 	f.Add(byte(frameFileEntries), batch.data)
 	f.Add(byte(frameFileDone), done)
 	f.Add(byte(frameFileAccept), encodeAccept(2, 9))
@@ -356,7 +356,7 @@ func TestFilesProcessStreamPassesOnlyWhatDecodes(t *testing.T) {
 	// Sending sets a write deadline, which only Linux pipes support; the
 	// gateway runs there.
 	if runtime.GOOS == "linux" {
-		request := terminalweb.FileRequest{ID: 3, Op: terminalweb.OpGet, Path: "/home/kb/a"}
+		request := terminalweb.FileRequest{ID: 3, Op: terminalweb.OpGet, Path: "/srv/kb/a"}
 		if s.Send(request) != nil || s.Upload([]byte("chunk")) != nil || s.Cancel(3) != nil {
 			t.Fatal("a valid frame was not sent")
 		}

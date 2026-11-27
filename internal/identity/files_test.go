@@ -57,7 +57,7 @@ func (s *folderStream) Send(r terminalweb.FileRequest) error {
 	}
 	if r.Op == terminalweb.OpList {
 		s.replies <- terminalweb.FileReply{Kind: terminalweb.ReplyEntries, ID: r.ID, Entries: []terminalweb.FileEntry{{Name: []byte("notes.txt"), Kind: terminalweb.KindFile, Size: 5}}}
-		s.replies <- terminalweb.FileReply{Kind: terminalweb.ReplyDone, ID: r.ID, Path: "/home/deploy"}
+		s.replies <- terminalweb.FileReply{Kind: terminalweb.ReplyDone, ID: r.ID, Path: "/srv/deploy"}
 		return nil
 	}
 	s.replies <- terminalweb.FileReply{Kind: terminalweb.ReplyDone, ID: r.ID}

@@ -49,7 +49,7 @@ func (f *fakeFiles) Send(r FileRequest) error {
 	switch r.Op {
 	case OpList:
 		f.replies <- FileReply{Kind: ReplyEntries, ID: r.ID, Entries: []FileEntry{{Name: []byte("notes.txt"), Kind: KindFile, Size: 5}, {Name: []byte{0xff, 0xfe}, Kind: KindFile}}}
-		f.replies <- FileReply{Kind: ReplyDone, ID: r.ID, Path: "/home/kb"}
+		f.replies <- FileReply{Kind: ReplyDone, ID: r.ID, Path: "/srv/kb"}
 	case OpGet:
 		f.replies <- FileReply{Kind: ReplyAccept, ID: r.ID, Size: uint64(len(f.file))}
 		for rest := f.file; len(rest) > 0; {
@@ -194,11 +194,11 @@ func TestFilesRelayListsDownloadsAndUploads(t *testing.T) {
 	if m.Entries[1].Readable || m.Entries[1].Name != "" {
 		t.Fatalf("a name that is not text reached the page: %+v", m.Entries[1])
 	}
-	if m, _ = next(t, conn); m.Type != "done" || m.Path != "/home/kb" {
+	if m, _ = next(t, conn); m.Type != "done" || m.Path != "/srv/kb" {
 		t.Fatalf("done = %+v", m)
 	}
 
-	sendJSON(t, conn, `{"type":"get","id":2,"path":"/home/kb/notes.txt"}`)
+	sendJSON(t, conn, `{"type":"get","id":2,"path":"/srv/kb/notes.txt"}`)
 	if m, _ = next(t, conn); m.Type != "file" || m.Size != uint64(len(stream.file)) {
 		t.Fatalf("file = %+v", m)
 	}
@@ -222,7 +222,7 @@ func TestFilesRelayListsDownloadsAndUploads(t *testing.T) {
 	}
 
 	body := bytes.Repeat([]byte("u"), FileChunk+10)
-	sendJSON(t, conn, `{"type":"put","id":3,"path":"/home/kb/new.bin","size":`+itoa(uint32(len(body)))+`}`)
+	sendJSON(t, conn, `{"type":"put","id":3,"path":"/srv/kb/new.bin","size":`+itoa(uint32(len(body)))+`}`)
 	if m, _ = next(t, conn); m.Type != "accept" || m.ID != 3 {
 		t.Fatalf("accept = %+v", m)
 	}
@@ -260,12 +260,12 @@ func uintString(n uint32) string {
 // Download only: every write is refused here, and never reaches the worker.
 func TestFilesRelayRefusesWritesWhenDownloadOnly(t *testing.T) {
 	for _, request := range []string{
-		`{"type":"mkdir","id":1,"path":"/home/kb/new"}`,
-		`{"type":"rename","id":1,"path":"/home/kb/a","to":"/home/kb/b"}`,
-		`{"type":"remove","id":1,"path":"/home/kb/a"}`,
-		`{"type":"rmdir","id":1,"path":"/home/kb/a"}`,
-		`{"type":"put","id":1,"path":"/home/kb/a","size":1}`,
-		`{"type":"replace","id":1,"path":"/home/kb/a","size":1}`,
+		`{"type":"mkdir","id":1,"path":"/srv/kb/new"}`,
+		`{"type":"rename","id":1,"path":"/srv/kb/a","to":"/srv/kb/b"}`,
+		`{"type":"remove","id":1,"path":"/srv/kb/a"}`,
+		`{"type":"rmdir","id":1,"path":"/srv/kb/a"}`,
+		`{"type":"put","id":1,"path":"/srv/kb/a","size":1}`,
+		`{"type":"replace","id":1,"path":"/srv/kb/a","size":1}`,
 	} {
 		stream := newFakeFiles()
 		conn := filesClient(t, stream, FilesDownload, live)
@@ -277,7 +277,7 @@ func TestFilesRelayRefusesWritesWhenDownloadOnly(t *testing.T) {
 			t.Fatalf("%s reached the worker: %+v", request, got)
 		}
 		// The session goes on: a listing still works.
-		sendJSON(t, conn, `{"type":"list","id":2,"path":"/home/kb"}`)
+		sendJSON(t, conn, `{"type":"list","id":2,"path":"/srv/kb"}`)
 		if m, _ := next(t, conn); m.Type != "entries" {
 			t.Fatalf("%s: the session did not go on: %+v", request, m)
 		}
@@ -288,16 +288,16 @@ func TestFilesRelayRefusesWritesWhenDownloadOnly(t *testing.T) {
 func TestFilesRelayEndsOnWhatThePageNeverSends(t *testing.T) {
 	for _, message := range []string{
 		`{"type":"exec","id":1,"path":"/bin/sh"}`,
-		`{"type":"list","id":1,"path":"/home/../etc"}`,
+		`{"type":"list","id":1,"path":"/srv/../etc"}`,
 		`{"type":"list","id":1,"path":"relative"}`,
 		`{"type":"list","id":0,"path":"/"}`,
 		`{"type":"list","id":1,"path":"/","path":"/etc"}`,
 		`{"type":"list","id":1,"path":"/","extra":1}`,
 		`{"type":"get","id":1,"path":"/"}`,
-		`{"type":"mkdir","id":1,"path":"/home/kb/a\u202ebc"}`,
-		`{"type":"rename","id":1,"path":"/home/kb/a","to":"/tmp/a"}`,
-		`{"type":"put","id":1,"path":"/home/kb/a"}`,
-		`{"type":"put","id":1,"path":"/home/kb/a","size":2147483649}`,
+		`{"type":"mkdir","id":1,"path":"/srv/kb/a\u202ebc"}`,
+		`{"type":"rename","id":1,"path":"/srv/kb/a","to":"/tmp/a"}`,
+		`{"type":"put","id":1,"path":"/srv/kb/a"}`,
+		`{"type":"put","id":1,"path":"/srv/kb/a","size":2147483649}`,
 		`{"type":"ack","sequence":1}`,
 		`not json`,
 	} {
@@ -348,7 +348,7 @@ func TestFilesRelayRefusesWorkerRepliesOutOfPlace(t *testing.T) {
 		stream := newFakeFiles()
 		stream.setScript(script)
 		conn := filesClient(t, stream, FilesBoth, live)
-		sendJSON(t, conn, `{"type":"get","id":1,"path":"/home/kb/a"}`)
+		sendJSON(t, conn, `{"type":"get","id":1,"path":"/srv/kb/a"}`)
 		if word := ended(t, conn); word != string(ReasonRefused) {
 			t.Fatalf("%s ended with %q", name, word)
 		}
@@ -361,7 +361,7 @@ func TestFilesRelayDropsAFailedUploadsBytes(t *testing.T) {
 	stream := newFakeFiles()
 	stream.failUpload = 10
 	conn := filesClient(t, stream, FilesBoth, live)
-	sendJSON(t, conn, `{"type":"put","id":1,"path":"/home/kb/a","size":30}`)
+	sendJSON(t, conn, `{"type":"put","id":1,"path":"/srv/kb/a","size":30}`)
 	if m, _ := next(t, conn); m.Type != "accept" {
 		t.Fatalf("accept = %+v", m)
 	}
@@ -372,7 +372,7 @@ func TestFilesRelayDropsAFailedUploadsBytes(t *testing.T) {
 		t.Fatalf("failed = %+v", m)
 	}
 	_ = conn.Write(ctx, websocket.MessageBinary, bytes.Repeat([]byte("b"), 20))
-	sendJSON(t, conn, `{"type":"list","id":2,"path":"/home/kb"}`)
+	sendJSON(t, conn, `{"type":"list","id":2,"path":"/srv/kb"}`)
 	if m, _ := next(t, conn); m.Type != "entries" {
 		t.Fatalf("the session did not go on after the dropped bytes: %+v", m)
 	}
@@ -383,7 +383,7 @@ func TestFilesRelayDropsAFailedUploadsBytes(t *testing.T) {
 	stream = newFakeFiles()
 	stream.failUpload = 10
 	conn = filesClient(t, stream, FilesBoth, live)
-	sendJSON(t, conn, `{"type":"put","id":1,"path":"/home/kb/a","size":30}`)
+	sendJSON(t, conn, `{"type":"put","id":1,"path":"/srv/kb/a","size":30}`)
 	next(t, conn)
 	_ = conn.Write(ctx, websocket.MessageBinary, bytes.Repeat([]byte("a"), 10))
 	next(t, conn)
@@ -397,7 +397,7 @@ func TestFilesRelayDropsAFailedUploadsBytes(t *testing.T) {
 func TestFilesRelayRefusesCreditOutOfOrder(t *testing.T) {
 	stream := newFakeFiles()
 	conn := filesClient(t, stream, FilesBoth, live)
-	sendJSON(t, conn, `{"type":"get","id":1,"path":"/home/kb/a"}`)
+	sendJSON(t, conn, `{"type":"get","id":1,"path":"/srv/kb/a"}`)
 	next(t, conn)
 	next(t, conn)
 	sendJSON(t, conn, `{"type":"ack","sequence":2}`)
@@ -430,12 +430,12 @@ func TestFileNamesAndPaths(t *testing.T) {
 			t.Errorf("%q accepted", name)
 		}
 	}
-	for _, p := range []string{"/", "/home", "/home/kb/a b"} {
+	for _, p := range []string{"/", "/home", "/srv/kb/a b"} {
 		if !ValidFilePath(p) {
 			t.Errorf("%q refused", p)
 		}
 	}
-	for _, p := range []string{"", "home", "/home/", "/home//kb", "/home/./kb", "/home/../etc", "/a\x00", "/" + strings.Repeat("a", MaxFilePath)} {
+	for _, p := range []string{"", "home", "/srv/", "/srv//kb", "/srv/./kb", "/srv/../etc", "/a\x00", "/" + strings.Repeat("a", MaxFilePath)} {
 		if ValidFilePath(p) {
 			t.Errorf("%q accepted", p)
 		}
@@ -465,8 +465,8 @@ func TestFilePageEntries(t *testing.T) {
 // an operation passes the same checks the worker applies.
 func FuzzFilesRequest(f *testing.F) {
 	for _, seed := range []string{
-		`{"type":"list","id":1,"path":""}`, `{"type":"get","id":2,"path":"/home/kb/a"}`,
-		`{"type":"put","id":3,"path":"/home/kb/a","size":10}`, `{"type":"rename","id":4,"path":"/a/b","to":"/a/c"}`,
+		`{"type":"list","id":1,"path":""}`, `{"type":"get","id":2,"path":"/srv/kb/a"}`,
+		`{"type":"put","id":3,"path":"/srv/kb/a","size":10}`, `{"type":"rename","id":4,"path":"/a/b","to":"/a/c"}`,
 		`{"type":"ack","sequence":1}`, `{"type":"cancel","id":9}`, `{"type":"list","id":1,"path":"/a","path":"/b"}`, `[]`, `{}`,
 	} {
 		f.Add([]byte(seed))

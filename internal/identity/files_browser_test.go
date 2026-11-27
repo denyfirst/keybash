@@ -42,12 +42,12 @@ type memoryNode struct {
 func newMemoryFolder() *memoryFolder {
 	now := uint32(time.Now().Unix())
 	return &memoryFolder{nodes: map[string]*memoryNode{
-		"/home/deploy":                 {dir: true, time: now},
-		"/home/deploy/docs":            {dir: true, time: now},
-		"/home/deploy/docs/readme.md":  {data: []byte("# docs\n"), time: now},
-		"/home/deploy/notes.txt":       {data: []byte("synthetic notes\n"), time: now},
-		"/home/deploy/invoice‮txt.exe": {data: []byte("MZ"), time: now},
-		"/home/deploy/\xff\xfe":        {data: []byte("?"), time: now},
+		"/srv/deploy":                 {dir: true, time: now},
+		"/srv/deploy/docs":            {dir: true, time: now},
+		"/srv/deploy/docs/readme.md":  {data: []byte("# docs\n"), time: now},
+		"/srv/deploy/notes.txt":       {data: []byte("synthetic notes\n"), time: now},
+		"/srv/deploy/invoice‮txt.exe": {data: []byte("MZ"), time: now},
+		"/srv/deploy/\xff\xfe":        {data: []byte("?"), time: now},
 	}}
 }
 
@@ -105,7 +105,7 @@ func (s *memoryFiles) Send(r terminalweb.FileRequest) error {
 	case terminalweb.OpList:
 		where := r.Path
 		if where == "" {
-			where = "/home/deploy"
+			where = "/srv/deploy"
 		}
 		if folder, ok := m.nodes[where]; !ok || !folder.dir {
 			s.fail(r.ID, terminalweb.FailMissing)
@@ -300,10 +300,10 @@ func TestBrowserFilesPage(t *testing.T) {
 	if command.Run() != nil {
 		t.Fatal("files page browser checks failed")
 	}
-	if data, ok := folder.file("/home/deploy/reports/greeting.txt"); ok || data != nil {
+	if data, ok := folder.file("/srv/deploy/reports/greeting.txt"); ok || data != nil {
 		t.Fatal("the deleted file is still on the server")
 	}
-	if data, ok := folder.file("/home/deploy/reports/hello.txt"); ok || data != nil {
+	if data, ok := folder.file("/srv/deploy/reports/hello.txt"); ok || data != nil {
 		t.Fatal("the renamed file kept its old name")
 	}
 	folder.mu.Lock()
