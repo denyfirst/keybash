@@ -272,7 +272,7 @@ func (s *Store) mayHoldAccess(tx *bolt.Tx, person string) error {
 
 // addServerAccount gives a server a new account, with the people ticked. Its
 // name must differ from every other account's on the server, ignoring case.
-func (s *Store) addServerAccount(actor, server, kind, username, secret string, people []string, now time.Time) (string, error) {
+func (s *Store) addServerAccount(actor, server, kind, username, secret string, people []string, now time.Time, notes ...activityEntry) (string, error) {
 	id, e := randomID()
 	if e != nil {
 		return "", e
@@ -302,8 +302,11 @@ func (s *Store) addServerAccount(actor, server, kind, username, secret string, p
 		if e != nil {
 			return e
 		}
+		for i := range notes {
+			notes[i].Server, notes[i].Account, notes[i].AccountName = server, id, username
+		}
 		return s.putServerAccount(tx, serverAccount{ID: id, Server: server, Current: c, Generation: 1, People: people, SetBy: actor, Set: now.Unix()}, 0)
-	})
+	}, notes...)
 	if e != nil {
 		return "", e
 	}
@@ -312,7 +315,7 @@ func (s *Store) addServerAccount(actor, server, kind, username, secret string, p
 
 // changeServerAccount applies one change to an existing account. stamp says
 // the change is to its secret, which records who made it and when.
-func (s *Store) changeServerAccount(actor, server, id string, now time.Time, stamp bool, change func(tx *bolt.Tx, w webServer, a *serverAccount) error) error {
+func (s *Store) changeServerAccount(actor, server, id string, now time.Time, stamp bool, change func(tx *bolt.Tx, w webServer, a *serverAccount) error, notes ...activityEntry) error {
 	return s.changeServers(actor, func(tx *bolt.Tx) error {
 		w, e := s.server(tx, server)
 		if e != nil || w.Removed {
@@ -329,11 +332,11 @@ func (s *Store) changeServerAccount(actor, server, id string, now time.Time, sta
 			a.SetBy, a.Set = actor, now.Unix()
 		}
 		return s.putServerAccount(tx, a, revision)
-	})
+	}, notes...)
 }
 
 // setAccountPerson puts a person on an account, or takes them off.
-func (s *Store) setAccountPerson(actor, server, id, person string, allowed bool, now time.Time) error {
+func (s *Store) setAccountPerson(actor, server, id, person string, allowed bool, now time.Time, notes ...activityEntry) error {
 	if !validID(person) {
 		return errRefused
 	}
@@ -352,12 +355,12 @@ func (s *Store) setAccountPerson(actor, server, id, person string, allowed bool,
 			a.People = slices.Delete(a.People, at, at+1)
 		}
 		return nil
-	})
+	}, notes...)
 }
 
 // replaceAccountPassword takes a new password at once: the administrator
 // changed it on the server first.
-func (s *Store) replaceAccountPassword(actor, server, id, secret string, now time.Time) error {
+func (s *Store) replaceAccountPassword(actor, server, id, secret string, now time.Time, notes ...activityEntry) error {
 	return s.changeServerAccount(actor, server, id, now, true, func(_ *bolt.Tx, w webServer, a *serverAccount) error {
 		if a.Current.Kind != "password" {
 			return errRefused
@@ -368,13 +371,13 @@ func (s *Store) replaceAccountPassword(actor, server, id, secret string, now tim
 		}
 		a.Current, a.Generation = next, a.Generation+1
 		return nil
-	})
+	}, notes...)
 }
 
 // nextAccountKey makes the key that will replace the current one, which keeps
 // working until the switch. A key made earlier and not switched to is
 // replaced.
-func (s *Store) nextAccountKey(actor, server, id string, now time.Time) error {
+func (s *Store) nextAccountKey(actor, server, id string, now time.Time, notes ...activityEntry) error {
 	return s.changeServerAccount(actor, server, id, now, true, func(_ *bolt.Tx, w webServer, a *serverAccount) error {
 		if a.Current.Kind != "ssh-key" {
 			return errRefused
@@ -385,13 +388,13 @@ func (s *Store) nextAccountKey(actor, server, id string, now time.Time) error {
 		}
 		a.Next = &next
 		return nil
-	})
+	}, notes...)
 }
 
 // switchAccountKey makes the waiting key the one used, and destroys the old
 // one. The fingerprint is the one the administrator saw, so a key made again
 // meanwhile is not switched to unseen.
-func (s *Store) switchAccountKey(actor, server, id, fingerprint string, now time.Time) error {
+func (s *Store) switchAccountKey(actor, server, id, fingerprint string, now time.Time, notes ...activityEntry) error {
 	return s.changeServerAccount(actor, server, id, now, true, func(_ *bolt.Tx, _ webServer, a *serverAccount) error {
 		if a.Next == nil {
 			return errMissing
@@ -401,23 +404,23 @@ func (s *Store) switchAccountKey(actor, server, id, fingerprint string, now time
 		}
 		a.Current, a.Next, a.Generation = *a.Next, nil, a.Generation+1
 		return nil
-	})
+	}, notes...)
 }
 
 // dropNextAccountKey destroys a waiting key; the current one stays.
-func (s *Store) dropNextAccountKey(actor, server, id string, now time.Time) error {
+func (s *Store) dropNextAccountKey(actor, server, id string, now time.Time, notes ...activityEntry) error {
 	return s.changeServerAccount(actor, server, id, now, true, func(_ *bolt.Tx, _ webServer, a *serverAccount) error {
 		if a.Next == nil {
 			return errMissing
 		}
 		a.Next = nil
 		return nil
-	})
+	}, notes...)
 }
 
 // removeServerAccount destroys an account, even one that no longer reads:
 // removing it can only take access away.
-func (s *Store) removeServerAccount(actor, server, id string) error {
+func (s *Store) removeServerAccount(actor, server, id string, notes ...activityEntry) error {
 	return s.changeServers(actor, func(tx *bolt.Tx) error {
 		w, e := s.server(tx, server)
 		b := tx.Bucket(serverAccountBucket)
@@ -425,7 +428,7 @@ func (s *Store) removeServerAccount(actor, server, id string) error {
 			return errMissing
 		}
 		return b.Delete(accountKey(server, id))
-	})
+	}, notes...)
 }
 
 // dropServerAccounts removes a server's accounts, in the transaction that
@@ -476,17 +479,22 @@ func (s *Store) dropPerson(tx *bolt.Tx, person string) error {
 // markAccountUsed records, once, that the account's key with this fingerprint
 // has opened a session on its server. Its secret and generation stay as they
 // are.
-func (s *Store) markAccountUsed(server, id, fingerprint string) error {
+func (s *Store) markAccountUsed(server, id, fingerprint string, notes ...activityEntry) error {
 	return s.update(func(tx *bolt.Tx) error {
 		a, revision, e := s.serverAccount(tx, server, id)
 		if e != nil || a.Current.Kind != "ssh-key" || a.Current.Fingerprint != fingerprint {
 			return errRefused
 		}
+		// Only the first use is recorded: two sessions starting together
+		// mark it once.
 		if a.Current.Used {
 			return nil
 		}
 		a.Current.Used = true
-		return s.putServerAccount(tx, a, revision)
+		if e = s.putServerAccount(tx, a, revision); e != nil {
+			return e
+		}
+		return s.appendActivity(tx, time.Now(), notes...)
 	})
 }
 

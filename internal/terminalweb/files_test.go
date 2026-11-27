@@ -112,7 +112,7 @@ func filesClient(t *testing.T, stream FilesStream, mode FilesMode, activity func
 		if err != nil {
 			return
 		}
-		FilesRelay(r.Context(), conn, stream, mode, activity)
+		FilesRelay(r.Context(), conn, stream, mode, activity, nil)
 	}))
 	t.Cleanup(server.Close)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

@@ -483,8 +483,8 @@ func TestEveryPageGuideSectionExists(t *testing.T) {
 		anchors[anchor.String()] = true
 	}
 	named := regexp.MustCompile(`guide: '([a-z0-9-]+)'`).FindAllStringSubmatch(string(script), -1)
-	if len(named) != 7 {
-		t.Fatalf("%d pages name a guide section, want 7", len(named))
+	if len(named) != 8 {
+		t.Fatalf("%d pages name a guide section, want 8", len(named))
 	}
 	for _, section := range named {
 		if !anchors[section[1]] {

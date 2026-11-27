@@ -96,10 +96,12 @@ func (l *Lab) finishFactorLocked(id [32]byte, code string) (string, error) {
 	if s == nil || s.stage != "challenge" || !l.attemptLocked("mfa:"+s.username, factorAttempts) {
 		return "", errRefused
 	}
-	if l.store.consumeFactor(s.owner, s.revision, code, l.now()) != nil {
+	refused := l.noteLocked(s, "sign-in-refused")
+	refused.Detail = map[string]string{"count": "1", "step": "code"}
+	if l.store.consumeFactor(s.owner, s.revision, code, l.now(), l.noteLocked(s, "signed-in"), refused) != nil {
 		return "", errRefused
 	}
-	name, passwordProof := s.username, s.created
+	name, passwordProof, source := s.username, s.created, s.source
 	l.forgetLocked(id)
 	raw, e := l.issueLocked(name, "")
 	if e != nil {
@@ -107,6 +109,7 @@ func (l *Lab) finishFactorLocked(id [32]byte, code string) (string, error) {
 	}
 	newID, _ := tokenID(raw)
 	l.sessions[newID].stage = "ready"
+	l.sessions[newID].source = source
 	// Sign-in just proved both factors: it counts as fresh proof until the
 	// password check (the challenge session's creation) is freshProof old.
 	l.sessions[newID].reauthUntil = passwordProof.Add(freshProof)
@@ -124,10 +127,19 @@ func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recover
 	if s.replacing {
 		proofUntil = s.reauthUntil
 	}
-	codes, e := l.store.enroll(s.owner, s.revision, s.pendingSeed, code, l.now(), s.replacing)
+	// A first phone is also the person's first full sign-in; a replaced one
+	// happens inside a sign-in.
+	notes := []activityEntry{l.noteLocked(s, "phone-replaced")}
+	if !s.replacing {
+		signedIn := l.noteLocked(s, "signed-in")
+		signedIn.Detail = map[string]string{"factor": "phone"}
+		notes = []activityEntry{l.noteLocked(s, "phone-set"), signedIn}
+	}
+	codes, e := l.store.enroll(s.owner, s.revision, s.pendingSeed, code, l.now(), s.replacing, notes...)
 	if e != nil {
 		return "", nil, e
 	}
+	source := s.source
 	l.refreshLocked(name) // revokes all old generations, including setup cookies
 	raw, e := l.issueLocked(name, "")
 	if e != nil {
@@ -136,6 +148,7 @@ func (l *Lab) confirmEnrollmentLocked(id [32]byte, code string) (string, recover
 	newID, _ := tokenID(raw)
 	l.sessions[newID].stage = "ready"
 	l.sessions[newID].reauthUntil = proofUntil
+	l.sessions[newID].source = source
 	return raw, codes, nil
 }
 
@@ -154,7 +167,7 @@ func (l *Lab) stepUp(ctx context.Context, id [32]byte, code string) error {
 	if !l.attemptLocked("reauth:"+s.username, reauthAttempts) {
 		return errLimited
 	}
-	if l.store.consumeFactor(s.owner, s.revision, code, l.now()) != nil {
+	if l.store.consumeFactor(s.owner, s.revision, code, l.now(), l.noteLocked(s, "confirmed"), l.noteLocked(s, "confirm-refused")) != nil {
 		if s.stepFailures++; s.stepFailures >= stepUpFailures {
 			l.forgetLocked(id)
 		}

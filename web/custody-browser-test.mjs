@@ -156,7 +156,8 @@ try {
   assert.equal(await page.locator('#factor-code').inputValue(), codes[0]); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#account').textContent(), config.Username, 'the restart lost the account');
   // The administrator invites someone, who chooses their own password with the
-  // one-time code and lands where their role allows: an auditor sees Account alone.
+  // one-time code and lands where their role allows: without servers, an
+  // auditor sees Activity and Account, and lands on Activity.
   await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users'); await page.locator('#users-panel').waitFor({ state: 'visible' }); await settled();
   const me = page.locator('.person', { hasText: config.Username });
   assert.equal(await me.locator('.record-badge').textContent(), 'You'); assert.equal(await me.getByRole('button').count(), 0, 'an administrator could change their own account');
@@ -192,7 +193,9 @@ try {
   await page.locator('#begin-enroll').click(); await page.locator('#seed-panel').waitFor({ state: 'visible' }); inviteSeed = await page.locator('#seed').textContent(); assert.match(inviteSeed, /^[A-Z2-7]{32}$/); await settled();
   await page.locator('#enrollment-code').fill(otp(Math.floor(seconds / 30), inviteSeed)); await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); await settled();
   await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
-  assert.equal(await page.locator('h1').textContent(), 'Account'); assert.deepEqual(await page.locator('.rail-item:visible').evaluateAll(items => items.map(item => item.dataset.page)), ['account']);
+  assert.equal(await page.locator('h1').textContent(), 'Activity'); assert.deepEqual(await page.locator('.rail-item:visible').evaluateAll(items => items.map(item => item.dataset.page)), ['activity', 'account']);
+  await page.locator('.activity-entry').first().waitFor(); assert(await page.locator('#activity-broken').isHidden(), 'the record says it broke');
+  assert.match((await page.locator('.activity-sentence').allTextContents()).join('\n'), /invited invitee/, 'the auditor could not read who was invited');
   assert.equal((await page.request.get(config.Origin + '/api/access')).status(), 403, 'an auditor reached servers');
   assert.equal((await page.request.get(config.Origin + '/api/users')).status(), 403, 'an auditor listed accounts');
   // A reset of an active account: its dialog says to sign in as usual, and the
@@ -232,7 +235,7 @@ try {
   const recover = async factor => { await page.locator('#recover-user').fill('invitee'); await page.locator('#recover-code').fill(' ' + passwordCode + ' '); await page.locator('#recover-phone-code').fill(factor); await page.locator('#recover-password').fill(inviteeNewPassword); await page.locator('#recover-confirm').fill(inviteeNewPassword); await page.locator('#recover button').click(); };
   await recover('not-a-code'); await page.locator('#notice').filter({ hasText: 'did not match' }).waitFor(); await settled();
   await fixture('tick'); await recover(otp(Math.floor(seconds / 30), resetSeed));
-  await page.waitForURL(config.Origin + '/'); await page.locator('#vault').waitFor({ state: 'visible' }); await settled(); assert.equal(await page.locator('h1').textContent(), 'Account');
+  await page.waitForURL(config.Origin + '/'); await page.locator('#vault').waitFor({ state: 'visible' }); await settled(); assert.equal(await page.locator('h1').textContent(), 'Activity');
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
   assert.equal((await page.request.post(config.Origin + '/api/session', { headers: { Origin: config.Origin, 'X-Keybash-Request': '1', 'Content-Type': 'application/json' }, data: { username: 'invitee', password: inviteePassword } })).status(), 401, 'the forgotten password still signs in');
   // The switch under the boxes asks for a recovery code, and back again.

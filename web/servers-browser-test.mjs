@@ -549,6 +549,22 @@ try {
   assert.equal(await page.locator('#delete-title').textContent(), 'Take them off this account?'); assert.equal(await page.locator('#delete-name').textContent(), 'bob as kbtest on Desk');
   await page.locator('#confirm-delete').click(); await page.locator('#notice').filter({ hasText: /^Taken off: bob as kbtest on Desk\.$/ }).waitFor(); await settled();
   assert.equal(await bobAccess.count(), 0);
+
+  stage = 'activity';
+  // Everything above is in the record, newest first, as plain sentences.
+  await page.locator('.rail-item[data-page=activity]').click(); await page.waitForURL(config.Origin + '/activity'); await page.locator('#activity-panel').waitFor({ state: 'visible' }); await settled();
+  await page.locator('.activity-entry').first().waitFor();
+  const sentences = await page.locator('.activity-sentence').allTextContents();
+  assert.equal(sentences[0], 'alice took bob off kbtest on Desk', 'the newest entry is not the last change');
+  assert(sentences.includes('alice added Build box (terminal at 10.20.0.7:22)'), 'the added server is not in the record');
+  assert(sentences.some(text => /^alice signed in/.test(text)), 'the sign-in is not in the record');
+  assert(await page.locator('#activity-broken').isHidden(), 'the record says it broke');
+  assert.equal(await page.locator('.activity-day').first().textContent(), 'Today');
+  // Filters narrow it; Show everything takes them away.
+  await page.locator('#activity-what').selectOption('people'); await settled();
+  for (const text of await page.locator('.activity-sentence').allTextContents()) assert.match(text, /invited|made|blocked|unblocked|reset|started|deleted|gave/, `the people filter showed: ${text}`);
+  await page.locator('#activity-clear').click(); await settled();
+  assert(await page.locator('#activity-clear').isHidden());
   page.off('response', listen);
   // Nothing the page holds, or any answer it got, carries a secret.
   assert.doesNotMatch(await page.content(), new RegExp(sharedPassword));

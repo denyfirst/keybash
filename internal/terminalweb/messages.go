@@ -29,7 +29,12 @@ var closeCodes = map[Reason]websocket.StatusCode{
 	ReasonIdle: 4001, ReasonExpired: 4002, ReasonSignedOut: 4003, ReasonAccessChanged: 4004,
 	ReasonCredentials: 4005, ReasonAccount: 4006, ReasonTakenOver: 4007, ReasonRemoteEnded: 4008,
 	ReasonUnreachable: 4009, ReasonNotResponding: 4010, ReasonRefused: 4011, ReasonKey: 4012,
+	ReasonUnrecorded: CloseUnrecorded,
 }
+
+// CloseUnrecorded ends a desktop whose activity record could not be written
+// (ADR 0012); the close text is "unrecorded".
+const CloseUnrecorded websocket.StatusCode = 4013
 
 // CloseIdentityChanged ends a desktop before it starts: the server showed
 // another certificate than the approved one, which only an administrator can

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -45,6 +46,8 @@ const (
 	// MaxBackupFile bounds what restore reads.
 	MaxBackupFile   = maxBackupBody + 4096
 	maxBackupRecord = 160 * 1024
+	// The records the quotas allow, and the activity record's blocks.
+	maxBackupEntries = 8192 + 1024 + 64
 )
 
 // backupBuckets is every namespace a backup carries, in file order. A store
@@ -61,7 +64,8 @@ type backupBucket struct {
 }
 
 var backupBuckets = []backupBucket{{1, metaBucket, false, false}, {2, accountBucket, false, false}, {3, nameBucket, false, false}, {4, credentialBucket, false, true},
-	{5, connectionBucket, true, true}, {6, serverBucket, true, false}, {7, preferenceBucket, true, false}, {8, sharedBucket, true, true}, {9, serverAccountBucket, true, false}}
+	{5, connectionBucket, true, true}, {6, serverBucket, true, false}, {7, preferenceBucket, true, false}, {8, sharedBucket, true, true}, {9, serverAccountBucket, true, false},
+	{10, activityBucket, true, false}}
 
 type backupFile struct {
 	Header, Sealed []byte // Header is also the sealed body's associated data
@@ -87,6 +91,10 @@ type BackupSummary struct {
 	Created                           time.Time
 	Program                           string
 	Accounts, Servers, ServerAccounts int
+	// The activity record (ADR 0012): its entries, and whether its chain
+	// holds. A broken chain does not stop a backup: the copy shows it too.
+	ActivityEntries uint64
+	ActivityBroken  bool
 }
 
 // SetupCode is one account's fresh one-time enrollment code after a restore.
@@ -287,6 +295,23 @@ func (s *Store) verifyAll(tx *bolt.Tx) (BackupSummary, error) {
 		here[a.Server] = append(here[a.Server], name)
 	}
 	summary.ServerAccounts = len(list)
+	// Every block of the activity record reads, within its count; whether the
+	// chain holds is reported, not required.
+	if b := tx.Bucket(activityBucket); b != nil {
+		blocks := uint64(0)
+		if b.ForEach(func(k, _ []byte) error {
+			blocks++
+			if len(k) != 8 || blocks > activityMaxBlocks+1 {
+				return errRefused
+			}
+			_, _, e := s.readBlock(b, binary.BigEndian.Uint64(k))
+			return e
+		}) != nil {
+			return BackupSummary{}, errRefused
+		}
+	}
+	check := s.checkActivity(tx)
+	summary.ActivityEntries, summary.ActivityBroken = check.Entries, check.Broken
 	return summary, nil
 }
 
@@ -320,7 +345,7 @@ func parseBackupBody(body []byte) ([]backupEntry, string, error) {
 			return nil, "", errRefused
 		}
 		rest, entry.Rest = entry.Rest, nil
-		if entry.Bucket < 1 || int(entry.Bucket) > len(backupBuckets) || len(entry.Key) == 0 || len(entry.Key) > 128 || len(entry.Value) == 0 || len(entry.Value) > maxBackupRecord || len(entries) >= 8192 {
+		if entry.Bucket < 1 || int(entry.Bucket) > len(backupBuckets) || len(entry.Key) == 0 || len(entry.Key) > 128 || len(entry.Value) == 0 || len(entry.Value) > maxBackupRecord || len(entries) >= maxBackupEntries {
 			return nil, "", errRefused
 		}
 		if n := len(entries); n > 0 {
@@ -423,8 +448,10 @@ func restoreStore(dir string, key, data []byte, now time.Time) (*Store, []SetupC
 		if summary, e = s.verifyAll(tx); e != nil {
 			return e
 		}
-		codes, e = s.resetFactors(tx, now)
-		return e
+		if codes, e = s.resetFactors(tx, now); e != nil {
+			return e
+		}
+		return s.appendActivity(tx, now, activityEntry{Kind: "restored"})
 	})
 	if e != nil {
 		return nil, nil, BackupSummary{}, errRefused

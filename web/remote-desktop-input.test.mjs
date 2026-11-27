@@ -103,6 +103,8 @@ test('an ending says why only when its code and word agree', () => {
   assert.equal(closeReason(4001, 'idle'), 'idle');
   assert.equal(closeReason(4011, 'refused'), 'refused');
   assert.equal(closeReason(4020, 'identity-changed'), 'identity-changed');
+  assert.equal(closeReason(4013, 'unrecorded'), 'unrecorded');
+  assert.equal(closeReason(4013, 'refused'), null);
   assert.equal(closeReason(4005, 'idle'), null);
   assert.equal(closeReason(4012, 'refused'), null);
   assert.equal(closeReason(1000, ''), null);

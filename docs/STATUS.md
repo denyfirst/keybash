@@ -111,17 +111,14 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   the code GitHub serves over HTTPS (KB-10).
 - **An independent security audit of an exact release candidate.** CI and the
   maintainer's own review do not count as one.
-- **The audit record** for auditors: administrator actions, who connected where
-  and when, and a readable log of typed command lines.
-- **Shared keys** a user connects with without seeing them.
+- **Typed command lines in the activity record.** The record itself (ADR 0012)
+  holds sign-ins, every change, sessions and file transfers; the command lines
+  typed in a terminal come next.
 - **Mail or other notice outside Keybash:** an administrator learns of a renewed
   certificate only at their next sign-in. A certificate renewed with the same key
   is treated like any other: it has not been seen, and each one is checked.
 - **Adding RDP to an installation built without it:** `upgrade.sh` keeps the mode
   it finds, so this needs a reinstall.
-- **A record of file transfers.** Files (ADR 0011) moves files on SSH servers
-  whose administrator allows it, but nothing records who moved which file
-  until the audit record exists.
 - An SSH bastion or jump host, and an RDP domain field.
 - **Online or scheduled backups**, a passphrase on the backup file, and instance
   key rotation.

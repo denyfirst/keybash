@@ -29,11 +29,12 @@ const (
 	ReasonUnreachable   Reason = "unreachable"    // the server could not be reached or refused the connection
 	ReasonNotResponding Reason = "not-responding" // the remote side stopped responding
 	ReasonRefused       Reason = "refused"        // Keybash ended a stream that sent what it does not accept
+	ReasonUnrecorded    Reason = "unrecorded"     // Keybash could not write its activity record (ADR 0012)
 )
 
 var reasons = map[Reason]bool{ReasonIdle: true, ReasonExpired: true, ReasonSignedOut: true, ReasonAccessChanged: true,
 	ReasonCredentials: true, ReasonAccount: true, ReasonTakenOver: true, ReasonRemoteEnded: true,
-	ReasonUnreachable: true, ReasonNotResponding: true, ReasonRefused: true, ReasonKey: true}
+	ReasonUnreachable: true, ReasonNotResponding: true, ReasonRefused: true, ReasonKey: true, ReasonUnrecorded: true}
 
 // A Reasoned stream can say why it ended by itself.
 type Reasoned interface{ Reason() Reason }

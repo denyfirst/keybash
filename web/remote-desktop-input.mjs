@@ -130,7 +130,7 @@ export function pointerPNG(url) {
 const reasons = new Map([
   [4001, 'idle'], [4002, 'expired'], [4003, 'signed-out'], [4004, 'access-changed'], [4005, 'credentials'],
   [4006, 'account'], [4007, 'taken-over'], [4008, 'remote-ended'], [4009, 'unreachable'], [4010, 'not-responding'],
-  [4011, 'refused'], [4020, 'identity-changed']
+  [4011, 'refused'], [4013, 'unrecorded'], [4020, 'identity-changed']
 ]);
 export function closeReason(code, text) {
   const word = reasons.get(code);

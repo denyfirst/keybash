@@ -175,11 +175,9 @@ Following `ENGINEERING.md`, with sabotage both ways:
 
 ## Limits
 
-- **No record yet.** Until the audit record is built, nothing records who
-  moved which file. The server page says so next to the switch, and it is why
-  the switch starts Off. Each transfer will be written to the audit record as
-  soon as it exists: person, server, account, direction, path, size and
-  outcome.
+- **The record.** ADR 0012 writes each operation that moves or changes a
+  file, with its person, server, account, path, size and outcome. Opening a
+  folder is not recorded.
 - **The server decides the rest.** Keybash does not inspect what is moved.
   The account's rights on the server decide what can be read or written.
 - **Large downloads use the browser's memory**, up to the 2 GiB limit.

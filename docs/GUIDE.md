@@ -100,7 +100,7 @@ off, or removing the account, ends their open sessions through it at once.
 - **File transfer** (SSH servers): **Off**, the default; **Download only**; or
   **Upload and download**. Everyone on the server's accounts then gets
   **Files** on their card. A change ends the server's open Files pages, not its
-  terminals. Keybash does not keep a record of transfers yet.
+  terminals. Every file moved or changed is in [Activity](#activity).
 - **Remove server:** open sessions to it end at once, and its accounts go with
   it: their keys are destroyed and their passwords forgotten.
 
@@ -136,6 +136,39 @@ offers no action.
 
 **Download only** shows only opening folders and downloading. The account's
 own rights on the server still decide what can be read or changed.
+
+## Activity
+
+Administrators and auditors read here who did what, where and when, newest
+first. Nobody can change or remove an entry here, and there is no other way to
+in Keybash.
+
+What is in it:
+- **Signing in and out:** each sign-in and from which address, a recovery code
+  used, a change confirmed, signing out, and being signed out when idle or
+  after 8 hours. Wrong passwords are counted, at most two entries per person
+  and address every ten minutes. A name that is no account is never written:
+  people sometimes type their password there.
+- **Changes:** to people, roles, servers, their accounts and who is on them,
+  and to one's own password, authenticator and recovery codes.
+- **Sessions:** a terminal, desktop or Files page opened, on which server and
+  account, and how long it lasted and why it ended.
+- **Files:** each download, upload, replace, new folder, rename and delete,
+  with its path and size.
+- **The server's console:** an account added or recovered there, a new setup
+  code, a restore.
+
+Never in it: passwords, keys, codes, what a file holds, what a terminal shows,
+or what is typed. Recording the command lines typed in a terminal comes later;
+the terminal page will say so.
+
+**Show only** narrows it to one person, one server, one kind of entry or one
+day; **Show older** goes further back.
+
+The record keeps a year and about 90,000 entries; when older ones leave, an
+entry says how many and up to when. Each entry is chained to the one before
+it. If the file was changed outside Keybash, this page says so in red: whoever
+administers the server should find out what happened.
 
 ## People
 

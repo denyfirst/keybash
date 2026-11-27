@@ -152,7 +152,12 @@ func factorBudget(a *durableAccount, now time.Time) bool {
 	a.FactorCount++
 	return true
 }
-func (s *Store) consumeFactor(id string, revision uint64, code string, now time.Time) error {
+
+// consumeFactor checks a code and spends it. notes, when given, are the
+// entry for a taken code and the entry for a refused one (factorNotes): a
+// refused code commits its budget, so its entry is chosen in the same
+// transaction.
+func (s *Store) consumeFactor(id string, revision uint64, code string, now time.Time, notes ...activityEntry) error {
 	accepted := false
 	e := s.update(func(tx *bolt.Tx) error {
 		a, e := s.readAccount(tx, id)
@@ -165,7 +170,10 @@ func (s *Store) consumeFactor(id string, revision uint64, code string, now time.
 		accepted = s.spendFactor(&a, code, now)
 		// Invalid attempts also commit their durable budget; returning the
 		// refusal from inside this transaction would roll that budget back.
-		return s.saveAccount(tx, a)
+		if e := s.saveAccount(tx, a); e != nil {
+			return e
+		}
+		return s.appendActivity(tx, now, factorNotes(notes, accepted, code, a.ID)...)
 	})
 	if e != nil || !accepted {
 		return errRefused
@@ -192,10 +200,10 @@ func (s *Store) spendFactor(a *durableAccount, code string, now time.Time) bool 
 	}
 	return false
 }
-func (s *Store) enroll(id string, revision uint64, seed, code string, now time.Time, replace bool) (recoveryCodes, error) {
+func (s *Store) enroll(id string, revision uint64, seed, code string, now time.Time, replace bool, notes ...activityEntry) (recoveryCodes, error) {
 	accepted := false
 	var codes recoveryCodes
-	e := s.update(func(tx *bolt.Tx) error {
+	e := s.updateRecorded(notes, func(tx *bolt.Tx) error {
 		a, e := s.readAccount(tx, id)
 		if e != nil || a.Revision != revision || (a.Seed != "") != replace || !validSeed(seed) {
 			return errRefused
@@ -221,8 +229,8 @@ func (s *Store) enroll(id string, revision uint64, seed, code string, now time.T
 	}
 	return codes, nil
 }
-func (s *Store) replacePassword(id string, revision uint64, next PasswordHash) error {
-	return s.update(func(tx *bolt.Tx) error {
+func (s *Store) replacePassword(id string, revision uint64, next PasswordHash, notes ...activityEntry) error {
+	return s.updateRecorded(notes, func(tx *bolt.Tx) error {
 		a, e := s.readAccount(tx, id)
 		if e != nil || a.Revision != revision || !next.valid() {
 			return errRefused
@@ -233,9 +241,9 @@ func (s *Store) replacePassword(id string, revision uint64, next PasswordHash) e
 		return s.saveAccount(tx, a)
 	})
 }
-func (s *Store) regenerateRecovery(id string, revision uint64) (recoveryCodes, error) {
+func (s *Store) regenerateRecovery(id string, revision uint64, notes ...activityEntry) (recoveryCodes, error) {
 	var codes recoveryCodes
-	e := s.update(func(tx *bolt.Tx) error {
+	e := s.updateRecorded(notes, func(tx *bolt.Tx) error {
 		a, e := s.readAccount(tx, id)
 		if e != nil || a.Revision != revision || a.Seed == "" {
 			return errRefused
@@ -251,4 +259,27 @@ func (s *Store) regenerateRecovery(id string, revision uint64) (recoveryCodes, e
 		return nil, errRefused
 	}
 	return codes, nil
+}
+
+// factorNotes picks the entry for a code that was taken (notes[0]) or refused
+// (notes[1]), for account id, and says whether the phone or a recovery code
+// was used: a recovery code is the only one of 22 characters.
+func factorNotes(notes []activityEntry, accepted bool, code, id string) []activityEntry {
+	at := 1
+	if accepted {
+		at = 0
+	}
+	if at >= len(notes) {
+		return nil
+	}
+	n := notes[at]
+	n.Actor = id
+	if accepted && contains(activityKinds[n.Kind], "factor") {
+		factor := "phone"
+		if len(code) == 22 {
+			factor = "recovery"
+		}
+		n.Detail = map[string]string{"factor": factor}
+	}
+	return []activityEntry{n}
 }
