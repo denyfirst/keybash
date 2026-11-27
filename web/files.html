@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Keybash · Files</title>
+  <link rel="preload" href="/schibsted-grotesk.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/keybash.css">
+  <link rel="stylesheet" href="/files.css">
+  <script type="module" src="/files.mjs"></script>
+</head>
+<body class="files-page" data-stage="connecting">
+  <div class="workspace-main files-shell">
+    <header class="files-bar">
+      <span class="wordmark files-wordmark" aria-hidden="true">keybash<span class="wordmark-stop">.</span></span>
+      <div class="files-where">
+        <span class="files-server-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="7" rx="1.6"/><rect x="3.5" y="13" width="17" height="7" rx="1.6"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg></span>
+        <div class="files-where-text"><h1 id="server-name">Files</h1><p id="server-account" class="files-account"></p></div>
+      </div>
+      <span id="mode" class="files-mode" hidden></span>
+      <p id="status" class="files-status" role="status">Connecting…</p>
+    </header>
+
+    <main class="files-main">
+      <section class="files-card" aria-labelledby="server-name">
+        <div class="files-toolbar">
+          <nav id="crumbs" class="crumbs" aria-label="Folder path"></nav>
+          <div class="files-actions">
+            <label class="files-filter"><span class="visually-hidden">Filter this folder</span><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><input id="filter" type="search" placeholder="Filter" autocomplete="off" spellcheck="false" maxlength="255"></label>
+            <button id="refresh" type="button" class="ghost icon-button" title="Refresh" aria-label="Refresh"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+            <button id="new-folder" type="button" class="secondary write-only"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/></svg><span>New folder</span></button>
+            <button id="upload" type="button" class="write-only"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></svg><span>Upload</span></button>
+            <input id="upload-input" type="file" multiple hidden>
+          </div>
+        </div>
+
+        <p id="readonly-note" class="files-note" hidden><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>This server allows downloads only. An administrator can change that on the server's page.</p>
+
+        <p id="message" class="files-note files-message" role="status" hidden></p>
+
+        <div id="selection" class="files-selection" hidden>
+          <p><strong id="selection-count">0</strong> selected</p>
+          <button id="selection-download" type="button" class="ghost"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></svg>Download</button>
+          <button id="selection-delete" type="button" class="ghost destructive write-only"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-12M9.5 7V4.5h5V7"/></svg>Delete</button>
+          <button id="selection-clear" type="button" class="ghost">Clear</button>
+        </div>
+
+        <div class="files-table-wrap" id="drop-zone">
+          <table class="files-table" aria-describedby="files-summary">
+            <thead>
+              <tr>
+                <th class="col-pick" scope="col"><input id="pick-all" type="checkbox" aria-label="Select everything in this folder"></th>
+                <th class="col-name" scope="col" aria-sort="ascending"><button type="button" class="sort" data-sort="name">Name<svg class="sort-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m8 10 4-4 4 4M8 14l4 4 4-4"/></svg></button></th>
+                <th class="col-size" scope="col" aria-sort="none"><button type="button" class="sort" data-sort="size">Size<svg class="sort-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m8 10 4-4 4 4M8 14l4 4 4-4"/></svg></button></th>
+                <th class="col-time" scope="col" aria-sort="none"><button type="button" class="sort" data-sort="time">Modified<svg class="sort-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m8 10 4-4 4 4M8 14l4 4 4-4"/></svg></button></th>
+                <th class="col-acts" scope="col"><span class="visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <div id="empty" class="files-empty" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>
+            <p id="empty-title" class="files-empty-title">This folder is empty</p>
+            <p id="empty-hint" class="hint">Drop files here, or press Upload.</p>
+          </div>
+          <div id="drop" class="files-drop" hidden aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></svg>
+            <p>Drop to upload to <strong id="drop-path"></strong></p>
+          </div>
+        </div>
+        <p id="files-summary" class="files-summary"></p>
+      </section>
+      <div class="files-ended" id="ended" hidden><p id="notice" class="notice" role="status"></p><button id="reconnect" type="button">Connect again</button></div>
+    </main>
+  </div>
+
+  <aside id="transfers" class="transfers" aria-label="Transfers" hidden>
+    <header class="transfers-head">
+      <p id="transfers-title">Transfers</p>
+      <button id="transfers-fold" type="button" class="ghost icon-button" aria-expanded="true" aria-label="Fold the transfers"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg></button>
+      <button id="transfers-clear" type="button" class="ghost icon-button" aria-label="Clear finished transfers"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </header>
+    <ol id="transfer-list" class="transfer-list"></ol>
+  </aside>
+
+  <dialog id="name-dialog">
+    <form id="name-form" method="dialog">
+      <h2 id="name-title">New folder</h2>
+      <label for="name-input" id="name-label">Name</label>
+      <input id="name-input" autocomplete="off" spellcheck="false" maxlength="255" required>
+      <p id="name-hint" class="hint"></p>
+      <div class="dialog-actions"><button value="cancel" class="secondary" formnovalidate>Cancel</button><button id="name-save" value="save">Create</button></div>
+    </form>
+  </dialog>
+  <dialog id="delete-dialog">
+    <form method="dialog">
+      <h2 id="delete-title">Delete this file?</h2>
+      <p id="delete-hint" class="hint">It is removed from the server. This cannot be undone.</p>
+      <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="delete-confirm" value="delete" class="danger">Delete</button></div>
+    </form>
+  </dialog>
+  <dialog id="replace-dialog">
+    <form method="dialog">
+      <h2 id="replace-title">Replace this file?</h2>
+      <p id="replace-hint" class="hint">A file with this name is already in the folder. Replacing it overwrites it on the server.</p>
+      <label class="files-check"><input id="replace-all" type="checkbox"> Do the same for the other files in this upload</label>
+      <div class="dialog-actions"><button value="skip" class="secondary">Keep it</button><button id="replace-confirm" value="replace">Replace</button></div>
+    </form>
+  </dialog>
+
+  <template id="glyph-folder"><svg class="row-glyph glyph-folder" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg></template>
+  <template id="glyph-file"><svg class="row-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.5V9H19"/></svg></template>
+  <template id="glyph-text"><svg class="row-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.5V9H19M8.5 13h7M8.5 16.5h5"/></svg></template>
+  <template id="glyph-code"><svg class="row-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M13.5 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.5V9H19M10 12.5l-2 2 2 2M14 12.5l2 2-2 2"/></svg></template>
+  <template id="glyph-archive"><svg class="row-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v2M12 8v2M12 12v2"/><rect x="10.5" y="14" width="3" height="3.5" rx="0.8"/></svg></template>
+  <template id="glyph-image"><svg class="row-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4" y="4.5" width="16" height="15" rx="2"/><circle cx="9.5" cy="10" r="1.6"/><path d="m20 16-4.5-4.5L6 19.5"/></svg></template>
+  <template id="glyph-link"><svg class="row-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></template>
+  <template id="glyph-other"><svg class="row-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="7.5"/><path d="M12 8.5v4M12 15.5h.01"/></svg></template>
+  <template id="glyph-home"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 11 12 4.5l8 6.5"/><path d="M6.5 9.5V19h11V9.5"/></svg></template>
+  <template id="glyph-edit"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/></svg></template>
+  <template id="glyph-cancel"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg></template>
+  <template id="row-actions">
+    <button type="button" class="ghost icon-button act-download" aria-label="Download"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></svg></button>
+    <button type="button" class="ghost icon-button act-rename write-only" aria-label="Rename"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14 8l3 3"/></svg></button>
+    <button type="button" class="ghost icon-button destructive act-delete write-only" aria-label="Delete"><svg class="button-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-12M9.5 7V4.5h5V7"/></svg></button>
+  </template>
+</body>
+</html>

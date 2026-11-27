@@ -48,7 +48,7 @@ func (w ProcessWorker) open(ctx context.Context, host string, dial func(context.
 	defer clear(secret)
 	setup, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
-	stream, err := launchSSHProcess(ctx, setup, w, host, dial, pin, user, method, secret)
+	stream, err := launchSSHProcess(ctx, setup, w, host, dial, pin, user, method, secret, workerKind{})
 	if err != nil || stream == nil {
 		if stream != nil {
 			_ = stream.Close()
@@ -68,6 +68,8 @@ type processStream struct {
 	done           <-chan struct{}
 	writeMu        sync.Mutex
 	stdout, stderr processOutput
+	// A Files session's replies, in order; closed when the worker ends.
+	replies chan terminalweb.FileReply
 }
 type processOutput struct {
 	mu    sync.Mutex
@@ -168,6 +170,78 @@ func (s *processStream) demux() {
 		}
 		select {
 		case queue <- data:
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+// Send asks a Files worker for one operation.
+func (s *processStream) Send(r terminalweb.FileRequest) error {
+	data, ok := encodeFileRequest(r)
+	if !ok {
+		return ErrInvalidInput
+	}
+	return s.send(frameFileRequest, data)
+}
+
+// Upload passes the current upload's next bytes.
+func (s *processStream) Upload(data []byte) error {
+	if len(data) == 0 || len(data) > terminalweb.FileChunk {
+		return ErrInvalidInput
+	}
+	return s.send(frameFileData, data)
+}
+
+func (s *processStream) Cancel(id uint32) error {
+	if id == 0 {
+		return ErrInvalidInput
+	}
+	return s.send(frameFileCancel, encodeID(id))
+}
+
+func (s *processStream) Replies() <-chan terminalweb.FileReply { return s.replies }
+
+// filesDemux reads a Files worker's frames. Each is decoded and checked
+// here; a frame that does not decode, or that a Files worker never sends,
+// ends the session.
+func (s *processStream) filesDemux() {
+	defer close(s.replies)
+	for {
+		kind, data, err := readWorkerFrame(s.out)
+		if errors.Is(err, io.EOF) {
+			_ = s.in.Close()
+			_ = s.out.Close()
+			return
+		}
+		if err != nil {
+			s.cancel()
+			return
+		}
+		var reply terminalweb.FileReply
+		ok := false
+		switch kind {
+		case frameFileEntries:
+			reply.Kind = terminalweb.ReplyEntries
+			reply.ID, reply.Entries, ok = decodeEntries(data)
+		case frameFileData:
+			reply.Kind, reply.Data, ok = terminalweb.ReplyData, data, len(data) > 0
+		case frameFileAccept:
+			reply.Kind = terminalweb.ReplyAccept
+			reply.ID, reply.Size, ok = decodeAccept(data)
+		case frameFileDone:
+			reply.Kind = terminalweb.ReplyDone
+			reply.ID, reply.Size, reply.Path, ok = decodeDone(data)
+		case frameFileFailed:
+			reply.Kind = terminalweb.ReplyFailed
+			reply.ID, reply.Failure, ok = decodeFailed(data)
+		}
+		if !ok {
+			s.cancel()
+			return
+		}
+		select {
+		case s.replies <- reply:
 		case <-s.ctx.Done():
 			return
 		}

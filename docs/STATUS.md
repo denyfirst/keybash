@@ -119,7 +119,10 @@ keep only test data on it. The plan is `PRODUCT-PLAN.md`; the stages are
   is treated like any other: it has not been seen, and each one is checked.
 - **Adding RDP to an installation built without it:** `upgrade.sh` keeps the mode
   it finds, so this needs a reinstall.
-- **SFTP**, an SSH bastion or jump host, and an RDP domain field.
+- **A record of file transfers.** Files (ADR 0011) moves files on SSH servers
+  whose administrator allows it, but nothing records who moved which file
+  until the audit record exists.
+- An SSH bastion or jump host, and an RDP domain field.
 - **Online or scheduled backups**, a passphrase on the backup file, and instance
   key rotation.
 - **Public internet ingress**, measured server sizing, long-session and load

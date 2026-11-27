@@ -11,6 +11,7 @@ import (
 type accountInfo struct {
 	server, name, protocol string // the server's ID, name and protocol
 	system                 string // the mark its cards show
+	files                  string // what the server allows of file transfer, "" when off
 	username, kind         string
 	people                 map[string]bool
 }
@@ -93,6 +94,9 @@ type accessRow struct {
 	// Unchecked: an administrator pinned this desktop's certificate without
 	// comparing it on the server's own screen.
 	Unchecked bool `json:"unchecked,omitempty"`
+	// Files is what the server allows of file transfer: "download" or
+	// "both", and absent when off (ADR 0011).
+	Files string `json:"files,omitempty"`
 	// System is the mark the server's card shows, chosen by an administrator.
 	System string `json:"system,omitempty"`
 }
@@ -114,7 +118,7 @@ func (l *Lab) accessLocked(s *session) []accessRow {
 				trust = "stopped"
 			}
 		}
-		rows = append(rows, accessRow{Account: account, Server: info.server, Name: info.name, Protocol: info.protocol, Username: info.username, Trust: trust, Unchecked: l.remote.unchecked[info.server], System: info.system})
+		rows = append(rows, accessRow{Account: account, Server: info.server, Name: info.name, Protocol: info.protocol, Username: info.username, Trust: trust, Unchecked: l.remote.unchecked[info.server], System: info.system, Files: string(l.filesModeLocked(account))})
 	}
 	slices.SortFunc(rows, func(a, b accessRow) int {
 		for _, order := range []int{strings.Compare(a.Name, b.Name), strings.Compare(a.Server, b.Server), strings.Compare(strings.ToLower(a.Username), strings.ToLower(b.Username))} {

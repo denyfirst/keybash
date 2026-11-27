@@ -41,8 +41,31 @@ func (w ManagerWorker) OpenSSH(ctx context.Context, target *targetguard.NamedTar
 	return w.open(ctx, target.Hostname(), target.DialContext, pin, user, auth)
 }
 
+// OpenFiles opens a Files session (ADR 0011): the same admission, pin and
+// credential as a terminal, but the worker asks the server for SFTP only and
+// allows only what mode says.
+func (w ManagerWorker) OpenFiles(ctx context.Context, target *targetguard.NamedTarget, pin []byte, user string, auth sshkey.Credential, mode terminalweb.FilesMode) (terminalweb.FilesStream, error) {
+	if target == nil || target.Hostname() == "" || !terminalweb.ValidFilesMode(mode) {
+		return nil, ErrProcess
+	}
+	s, err := w.openKind(ctx, target.Hostname(), target.DialContext, pin, user, auth, workerKind{files: true, mode: mode})
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
 // Only _test.go callers substitute the guarded TCP dial for synthetic peers.
 func (w ManagerWorker) open(ctx context.Context, host string, dial func(context.Context) (net.Conn, error), pin []byte, user string, auth sshkey.Credential) (terminalweb.Stream, error) {
+	s, err := w.openKind(ctx, host, dial, pin, user, auth, workerKind{})
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// openKind opens a worker for a terminal or a Files session.
+func (w ManagerWorker) openKind(ctx context.Context, host string, dial func(context.Context) (net.Conn, error), pin []byte, user string, auth sshkey.Credential, session workerKind) (*processStream, error) {
 	if ctx == nil || ctx.Err() != nil || dial == nil {
 		return nil, ErrProcess
 	}
@@ -53,7 +76,7 @@ func (w ManagerWorker) open(ctx context.Context, host string, dial func(context.
 	defer clear(secret)
 	setup, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
-	s, err := connectSSHManager(ctx, setup, w.SocketPath, host, dial, validated, user, method, secret)
+	s, err := connectSSHManager(ctx, setup, w.SocketPath, host, dial, validated, user, method, secret, session)
 	if err != nil || s == nil {
 		if s != nil {
 			_ = s.Close()

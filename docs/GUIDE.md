@@ -16,7 +16,8 @@ servers may be in, and the commands for each server are in `INSTALL.md`.
 
 One card for each server account you are on. **Connect** opens it in its own
 tab, and Keybash signs you in as that account. You never see its key or
-password.
+password. Where an administrator allows file transfer, **Files** beside it
+opens the server's folders (see [Files](#files)).
 
 Who signs in with an account, administrators included, is chosen on its
 server's page under **Servers**. An administrator sees a server here only
@@ -96,8 +97,45 @@ off, or removing the account, ends their open sessions through it at once.
 - **Name:** everyone who signs in to it sees it.
 - **What runs on it:** only the picture on its cards. Keybash connects the
   same way whatever it is.
+- **File transfer** (SSH servers): **Off**, the default; **Download only**; or
+  **Upload and download**. Everyone on the server's accounts then gets
+  **Files** on their card. A change ends the server's open Files pages, not its
+  terminals. Keybash does not keep a record of transfers yet.
 - **Remove server:** open sessions to it end at once, and its accounts go with
   it: their keys are destroyed and their passwords forgotten.
+
+## Files
+
+**Files** opens one folder of the server at a time, as the account, starting
+in its home folder. Keybash signs in exactly as for a terminal, and asks the
+server for file transfer only: no shell is opened.
+
+- **Move around:** open a folder by its name; each part of the path at the top
+  goes back to it, and the pencil beside it takes a typed path. Enter opens,
+  Backspace goes up.
+- **Download:** the arrow on a row, or a selection's **Download**. Each file is
+  saved as it is: Keybash never opens or previews it.
+- **Upload:** the **Upload** button, or drop files from your computer onto
+  the folder. A name already there asks before it is replaced. An upload goes
+  to a hidden name first and takes its real name only when complete, so a
+  cancelled one leaves nothing behind.
+- **New folder**, **Rename** (F2) and **Delete** (only files and empty
+  folders).
+- **Transfers** shows each file's progress, speed and a cancel. One thing moves
+  at a time; opening a folder waits for it.
+- A file is at most 2 GB each way, and a folder shows at most 10,000 names.
+
+Your computer's side is your own: the browser's file chooser, the files you
+drop, and your downloads folder. A page cannot look through your computer's
+folders, and Keybash does not ask it to.
+
+A name with hidden characters, such as one that reverses the text after it,
+shows each of them as a small mark (for example `U+202E`), so a name cannot
+pretend to be another kind of file. A name that is not text is listed but
+offers no action.
+
+**Download only** shows only opening folders and downloading. The account's
+own rights on the server still decide what can be read or changed.
 
 ## People
 

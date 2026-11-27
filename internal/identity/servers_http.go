@@ -141,7 +141,7 @@ func (l *Lab) reloadServersLocked() error {
 		for _, person := range a.People {
 			people[person] = true
 		}
-		infos[a.ID] = accountInfo{server: w.ID, name: w.Name, protocol: w.Protocol, system: w.System, username: a.Current.Username, kind: a.Current.Kind, people: people}
+		infos[a.ID] = accountInfo{server: w.ID, name: w.Name, protocol: w.Protocol, system: w.System, files: w.Files, username: a.Current.Username, kind: a.Current.Kind, people: people}
 	}
 	l.remote.targets, l.remote.unchecked, l.remote.accounts = targets, unchecked, infos
 	for id := range l.remote.seen {
@@ -150,7 +150,8 @@ func (l *Lab) reloadServersLocked() error {
 		}
 	}
 	for key, lease := range l.remote.leases {
-		if t, ok := l.mayUseLocked(lease.owner, lease.account); !ok || t.ID != lease.target || approvalFingerprint(t) != lease.approval {
+		// A Files session also ends when its server no longer allows what it was granted.
+		if t, ok := l.mayUseLocked(lease.owner, lease.account); !ok || t.ID != lease.target || approvalFingerprint(t) != lease.approval || lease.files != "" && l.filesModeLocked(lease.account) != lease.files {
 			if lease.cancel != nil {
 				lease.cancel(terminalweb.ReasonAccessChanged)
 			}
@@ -174,6 +175,7 @@ type serverView struct {
 	Expires     int64    `json:"expires,omitempty"`     // RDP: when the pinned certificate ends
 	Unchecked   bool     `json:"unchecked,omitempty"`   // RDP: pinned without the console check
 	System      string   `json:"system,omitempty"`      // the mark its cards show
+	Files       string   `json:"files,omitempty"`       // SSH: what it allows of file transfer, absent when off
 	AddedBy     string   `json:"added_by,omitempty"`    // empty when it came from the server file
 	Added       int64    `json:"added"`
 	// Accounts are the server's accounts as an administrator or auditor may
@@ -221,7 +223,7 @@ func (l *Lab) serversViewLocked(admin bool) (serversView, error) {
 		_, reachable := l.remote.targets[w.ID]
 		row := serverView{ID: w.ID, Name: w.Name, Protocol: w.Protocol, Hostname: w.Hostname, Port: w.Port, Addresses: slices.Clone(w.Pins),
 			Fingerprint: identityFingerprint(RemoteTarget{Protocol: w.Protocol, Identity: w.identity()}), Available: reachable && usableTarget(l.remote.targets[w.ID], l.now()),
-			Unchecked: w.Unchecked, System: w.System, Accounts: make([]accountView, 0), AddedBy: w.AddedBy, Added: w.Added}
+			Unchecked: w.Unchecked, System: w.System, Files: w.Files, Accounts: make([]accountView, 0), AddedBy: w.AddedBy, Added: w.Added}
 		row.Certificate, row.Expires = l.certificateStateLocked(w)
 		if w.Hostname == "" {
 			row.Hostname, row.Addresses = w.Address, []string{w.Address}
@@ -538,6 +540,16 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			return
 		}
 		e = l.store.markServer(actor, server, fields["system"])
+	case action == "files" && r.Method == "POST":
+		// File transfer: off, download only, or upload and download (ADR 0011).
+		fields, ok := readFields(w, r, 256, "files")
+		setting := map[string]string{"off": "", "download": "download", "both": "both"}
+		mode, known := setting[fields["files"]]
+		if !ok || !known {
+			status = 400
+			return
+		}
+		e = l.store.setServerFiles(actor, server, mode)
 	case action == "scan" && r.Method == "POST":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400

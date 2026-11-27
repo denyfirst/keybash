@@ -40,7 +40,9 @@ jobs:
       - name: Verify source service units and actual aggregate kernel limits
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends bubblewrap
+          # OpenSSH's own sftp-server is the real server the Files tests meet (ADR 0011).
+          sudo apt-get install -y --no-install-recommends bubblewrap openssh-sftp-server
+          test -x /usr/lib/openssh/sftp-server
           sh scripts/service-lab.sh
 
       - name: Verify local browser assets and test dependencies
@@ -126,6 +128,9 @@ jobs:
           go test ./internal/sshtransport -run='^$' -fuzz='^FuzzSSHHostKeyConfig$' -fuzztime=2000000x -timeout=3m
           go test ./internal/sshtransport -run='^$' -fuzz='^FuzzSSHWorkerFrames$' -fuzztime=2000000x -timeout=3m
           go test ./internal/terminalweb -run='^$' -fuzz='^FuzzTerminalControl$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/terminalweb -run='^$' -fuzz='^FuzzFilesRequest$' -fuzztime=2000000x -timeout=3m
+          go test ./internal/sftpclient -run='^$' -fuzz='^FuzzSFTPReply$' -fuzztime=2000000x -timeout=5m
+          go test ./internal/sshtransport -run='^$' -fuzz='^FuzzFilesFrames$' -fuzztime=2000000x -timeout=3m
           go test ./internal/rdpcert -run='^$' -fuzz='^FuzzConfirmation$' -fuzztime=2000000x -timeout=3m
           go test ./internal/identity -run='^$' -fuzz='^FuzzIdentityJSON$' -fuzztime=2000000x -timeout=3m
           go test ./internal/identity -run='^$' -fuzz='^FuzzCustodyFields$' -fuzztime=2000000x -timeout=3m
@@ -138,6 +143,7 @@ jobs:
           go test -tags=browserlab -race -run='^TestBrowserServerTrustWorkflow$' -timeout=3m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserCapacityWorkflow$' -timeout=3m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserServersPage$' -timeout=2m ./internal/identity
+          go test -tags=browserlab -race -run='^TestBrowserFilesPage$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestDemoInputBoundary$|^TestDemoWorkerCancellation$|^TestInteractiveDemoBrowser$' -timeout=2m ./internal/identity
           go test -tags=browserlab -race -run='^TestBrowserTerminalLab$' -timeout=3m ./internal/sshtransport
           go test -tags=browserlab -race -run='^TestBrowserTerminalOnTheGPU$' -timeout=3m ./internal/sshtransport

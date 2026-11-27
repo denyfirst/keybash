@@ -60,6 +60,8 @@ type fixtureOptions struct {
 	openUnsolicited               string
 	shellFixture                  func(ssh.Channel)
 	resizeFixture                 func([]byte)
+	// sftpFixture serves the sftp subsystem; without it the request is refused.
+	sftpFixture func(ssh.Channel)
 	// password enables password authentication, or with prompts set,
 	// keyboard-interactive with those prompts (echo per prompt).
 	password     string
@@ -180,6 +182,13 @@ func newFixture(t *testing.T, options fixtureOptions) *sshFixture {
 									_, _ = io.Copy(channel, channel)
 								}
 							})
+						}
+					case "subsystem":
+						var name struct{ Name string }
+						ok := options.sftpFixture != nil && ssh.Unmarshal(request.Payload, &name) == nil && name.Name == "sftp"
+						_ = request.Reply(ok, nil)
+						if ok {
+							group.Go(func() { options.sftpFixture(channel) })
 						}
 					case "window-change":
 						if options.resizeFixture != nil {

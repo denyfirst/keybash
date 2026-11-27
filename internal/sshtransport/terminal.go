@@ -48,6 +48,9 @@ type Config struct {
 	Password []byte
 	Columns  uint32
 	Rows     uint32
+	// Files asks for the sftp subsystem instead of a PTY and a shell (ADR
+	// 0011). Nothing else changes: the same pin, credential and checks.
+	Files bool
 }
 
 // Terminal owns one SSH connection and one remote PTY. Read and ReadStderr
@@ -142,16 +145,24 @@ func connect(ctx context.Context, identity string, dial func(context.Context) (n
 		}
 	}()
 	go terminal.handleRequests(channelRequests)
-	pty := struct {
-		Term                         string
-		Columns, Rows, Width, Height uint32
-		Modes                        string
-	}{"xterm-256color", config.Columns, config.Rows, 0, 0, "\x00"}
-	if ok, err := channel.SendRequest("pty-req", true, ssh.Marshal(pty)); err != nil || !ok {
-		return nil, setupError(setup, err)
-	}
-	if ok, err := channel.SendRequest("shell", true, nil); err != nil || !ok {
-		return nil, setupError(setup, err)
+	if config.Files {
+		// A Files session asks for SFTP and nothing else: no PTY, no shell, no exec.
+		subsystem := struct{ Name string }{"sftp"}
+		if ok, err := channel.SendRequest("subsystem", true, ssh.Marshal(subsystem)); err != nil || !ok {
+			return nil, setupError(setup, err)
+		}
+	} else {
+		pty := struct {
+			Term                         string
+			Columns, Rows, Width, Height uint32
+			Modes                        string
+		}{"xterm-256color", config.Columns, config.Rows, 0, 0, "\x00"}
+		if ok, err := channel.SendRequest("pty-req", true, ssh.Marshal(pty)); err != nil || !ok {
+			return nil, setupError(setup, err)
+		}
+		if ok, err := channel.SendRequest("shell", true, nil); err != nil || !ok {
+			return nil, setupError(setup, err)
+		}
 	}
 	if !stopSetup() {
 		return nil, setupError(setup, nil)

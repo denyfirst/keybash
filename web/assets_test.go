@@ -18,7 +18,7 @@ import (
 // somebody writes down here, never a side effect.
 const fontSHA256 = "4c8b93f431d462c696e12b9d6a033feb3394d36e66e781357c496b95d8a75e05"
 
-var sheets = []string{"keybash.css", "auth.css", "custody.css", "style.css", "desktop.css"}
+var sheets = []string{"keybash.css", "auth.css", "custody.css", "style.css", "desktop.css", "files.css"}
 
 func sheet(t *testing.T, name string) string {
 	t.Helper()
@@ -67,7 +67,7 @@ func TestTheTypefaceIsTheOneChosenAndCarriesItsLicence(t *testing.T) {
 // Every page that is drawn loads the shared sheet and the typeface preload,
 // so no page falls back to whatever the system draws.
 func TestEveryPageLoadsTheSharedDesign(t *testing.T) {
-	for _, page := range []string{"index.html", "remote-desktop.html", "remote-closed.html", "auth-login.html", "auth-workspace.html", "custody-login.html", "custody-workspace.html"} {
+	for _, page := range []string{"index.html", "remote-desktop.html", "remote-closed.html", "auth-login.html", "auth-workspace.html", "custody-login.html", "custody-workspace.html", "files.html"} {
 		html := sheet(t, page)
 		if !strings.Contains(html, `href="/keybash.css"`) || !strings.Contains(html, `href="`+FontPath+`" as="font"`) {
 			t.Errorf("%s does not load the shared design", page)
@@ -262,7 +262,7 @@ func TestNoRestingStateIsFadedOut(t *testing.T) {
 // reads from is drawn with a gradient: tiles, avatars and buttons are flat. The
 // only gradients light the page itself, behind everything.
 func TestIconsTilesAndButtonsAreFlat(t *testing.T) {
-	for _, name := range []string{"custody-workspace.html", "custody-login.html", "index.html", "remote-desktop.html", "remote-closed.html", "custody.mjs", "app.mjs", "remote-desktop.mjs"} {
+	for _, name := range []string{"custody-workspace.html", "custody-login.html", "index.html", "remote-desktop.html", "remote-closed.html", "files.html", "custody.mjs", "app.mjs", "remote-desktop.mjs", "files.mjs", "files-socket.mjs"} {
 		if text := sheet(t, name); strings.Contains(text, "g-soft") || strings.Contains(text, "'soft:") {
 			t.Errorf("%s draws an icon with a shaded body", name)
 		}
@@ -493,5 +493,23 @@ func TestEveryPageGuideSectionExists(t *testing.T) {
 	}
 	if !strings.Contains(string(script), "const guideHome = 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md';") {
 		t.Error("the guide link does not lead to docs/GUIDE.md")
+	}
+}
+
+// The Files page shows names a server chose, so its scripts never parse
+// markup or evaluate code, and never open what they download: a file is only
+// ever saved (ADR 0011).
+func TestTheFilesPageNeverParsesMarkupOrOpensAFile(t *testing.T) {
+	for _, name := range []string{"files.mjs", "files-socket.mjs"} {
+		text := sheet(t, name)
+		for _, banned := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "DOMParser", "createContextualFragment", "srcdoc", "eval(", "new Function", "window.open", "location.href =", "location.assign", "setAttribute('href'", ".src ="} {
+			if strings.Contains(text, banned) {
+				t.Errorf("%s uses %s", name, banned)
+			}
+		}
+	}
+	files := sheet(t, "files.mjs")
+	if !strings.Contains(files, "type: 'application/octet-stream'") || !strings.Contains(files, "link.download = saveName(") {
+		t.Error("a download is not saved as an opaque file under a cleaned name")
 	}
 }

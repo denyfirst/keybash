@@ -50,6 +50,9 @@ type webServer struct {
 	// System is the mark its cards show (systemNames), a label only: it
 	// changes no target, identity or access.
 	System string `json:"system,omitempty"`
+	// Files is what an administrator allows of file transfer on an SSH
+	// server (ADR 0011): "" (off, the default), "download" or "both".
+	Files string `json:"files,omitempty"`
 	// Access is an earlier version's access list, read only to be erased
 	// (eraseRetired): a record is never written with one.
 	Access   []string `json:"access,omitempty"`
@@ -97,7 +100,7 @@ func (w webServer) endpoints() []netip.AddrPort {
 }
 
 func (w webServer) valid() bool {
-	if !validID(w.ID) || !serverName(w.Name) || w.Port == 0 || w.Added <= 0 || len(w.Access) > 256 || w.System != "" && !systemNames[w.System] ||
+	if !validID(w.ID) || !serverName(w.Name) || w.Port == 0 || w.Added <= 0 || len(w.Access) > 256 || w.System != "" && !systemNames[w.System] || !validFilesSetting(w.Protocol, w.Files) ||
 		w.FromFile != (w.AddedBy == "") || w.AddedBy != "" && !validID(w.AddedBy) || w.Removed && (!w.FromFile || len(w.Access) != 0) {
 		return false
 	}
