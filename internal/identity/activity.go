@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -100,13 +101,13 @@ var activityKinds = map[string][]string{
 	// Sessions and files.
 	"session-started": {"session", "mode"},
 	"session-ended":   {"session", "seconds", "why"},
-	"file-downloaded": {"path", "size", "outcome"},
-	"file-uploaded":   {"path", "size", "outcome"},
-	"file-replaced":   {"path", "size", "outcome"},
-	"folder-made":     {"path", "outcome"},
-	"renamed":         {"path", "to", "outcome"},
-	"file-deleted":    {"path", "outcome"},
-	"folder-deleted":  {"path", "outcome"},
+	"file-downloaded": {"path", "size", "outcome", "cut"},
+	"file-uploaded":   {"path", "size", "outcome", "cut"},
+	"file-replaced":   {"path", "size", "outcome", "cut"},
+	"folder-made":     {"path", "outcome", "cut"},
+	"renamed":         {"path", "to", "outcome", "cut"},
+	"file-deleted":    {"path", "outcome", "cut"},
+	"folder-deleted":  {"path", "outcome", "cut"},
 	// The server's console, and the record itself.
 	"console-account-added":     nil,
 	"console-account-recovered": {"what"},
@@ -252,6 +253,55 @@ func (s *Store) named(tx *bolt.Tx, e activityEntry, now time.Time) activityEntry
 	return e
 }
 
+// cuttable are the details that may be long: a path and a new name.
+// Escaping can make text up to six times longer, so a path of control
+// characters would otherwise not fit an entry, and its operation would go
+// unrecorded.
+var cuttable = []string{"path", "to"}
+
+// fitted chains an entry onto previous and encodes it. An entry too long to
+// keep has its longest cuttable detail shortened, on a whole character, and
+// says so with "cut"; any other entry too long is refused.
+func (s *Store) fitted(previous []byte, entry activityEntry) (activityEntry, []byte, error) {
+	for range 8 {
+		entry.MAC = nil
+		if !entry.valid() {
+			return entry, nil, errRefused
+		}
+		entry.MAC = s.chain(previous, entry)
+		data, e := json.Marshal(entry)
+		if e != nil {
+			return entry, nil, errRefused
+		}
+		over := len(data) - activityEntryBytes
+		if over <= 0 {
+			return entry, data, nil
+		}
+		key := ""
+		for _, k := range cuttable {
+			if len(entry.Detail[k]) > len(entry.Detail[key]) {
+				key = k
+			}
+		}
+		if key == "" || !contains(activityKinds[entry.Kind], "cut") {
+			return entry, nil, errRefused
+		}
+		value := entry.Detail[key]
+		_, first := utf8.DecodeRuneInString(value)
+		keep := max(first, len(value)-over-len(`,"cut":"yes"`))
+		for keep > first && !utf8.RuneStart(value[keep]) {
+			keep--
+		}
+		if keep >= len(value) {
+			return entry, nil, errRefused
+		}
+		detail := maps.Clone(entry.Detail)
+		detail[key], detail["cut"] = value[:keep], "yes"
+		entry.Detail = detail
+	}
+	return entry, nil, errRefused
+}
+
 func (s *Store) chainEntry(tx *bolt.Tx, b *bolt.Bucket, entry activityEntry) error {
 	m, e := s.meta(tx)
 	if e != nil {
@@ -261,14 +311,9 @@ func (s *Store) chainEntry(tx *bolt.Tx, b *bolt.Bucket, entry activityEntry) err
 	if entry.Seq == 0 {
 		entry.Seq = 1
 	}
-	entry.MAC = nil
-	if !entry.valid() {
-		return errRefused
-	}
-	entry.MAC = s.chain(m.ActivityMAC, entry)
-	size, e := json.Marshal(entry)
-	if e != nil || len(size) > activityEntryBytes {
-		return errRefused
+	entry, size, e := s.fitted(m.ActivityMAC, entry)
+	if e != nil {
+		return e
 	}
 	// The newest block takes the entry while it has room; otherwise a new
 	// block starts. A newest block that does not read is left as it is and a

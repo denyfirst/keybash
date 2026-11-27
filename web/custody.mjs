@@ -1213,8 +1213,8 @@ function sentence(e) {
   const d = e.detail ?? {}, who = { b: e.actor_name || 'someone' }, person = { b: e.person_name || 'someone' };
   const server = { b: e.server_name || 'a server' }, at = e.account_name ? [{ b: e.account_name }, ' on ', server] : [server];
   const recovery = d.factor === 'recovery' ? ' with a recovery code' : '';
-  const out = d.outcome && d.outcome !== 'done' ? ` (${outcomeWords[d.outcome] ?? d.outcome})` : '';
   const path = { code: d.path ?? '' }, size = d.size ? ` (${bytesWord(d.size)})` : '';
+  const out = (d.outcome && d.outcome !== 'done' ? ` (${outcomeWords[d.outcome] ?? d.outcome})` : '') + (d.cut ? ' (shortened: too long to keep whole)' : '');
   switch (e.kind) {
     case 'first-admin': return [who, ' set up Keybash and became its first administrator'];
     case 'signed-in': return [who, ` signed in${recovery}`];
@@ -1298,6 +1298,27 @@ function dayTitle(date) {
   return activityDay.format(date);
 }
 const activityState = { more: '', lastDay: '', loaded: false };
+// A control or direction character in a path is shown as a visible mark, as
+// on the Files page, so that one path cannot read as another.
+function hiddenPoint(point) {
+  return point < 0x20 || (point >= 0x7f && point <= 0x9f) || point === 0x061c || point === 0x180e ||
+    (point >= 0x200b && point <= 0x200f) || (point >= 0x202a && point <= 0x202e) ||
+    (point >= 0x2060 && point <= 0x2064) || (point >= 0x2066 && point <= 0x2069) || point === 0xfeff;
+}
+function codeWithMarks(text) {
+  const code = make('code', '');
+  let run = '';
+  for (const char of text) {
+    const point = char.codePointAt(0);
+    if (!hiddenPoint(point)) { run += char; continue; }
+    if (run) { code.append(run); run = ''; }
+    const mark = make('span', 'ctl', `U+${point.toString(16).toUpperCase().padStart(4, '0')}`);
+    mark.title = 'A hidden character';
+    code.append(mark);
+  }
+  if (run) code.append(run);
+  return code;
+}
 function activityRow(e) {
   const when = new Date(e.time * 1000), day = when.toDateString();
   const items = [];
@@ -1312,7 +1333,7 @@ function activityRow(e) {
   for (const part of sentence(e)) {
     if (typeof part === 'string') line.append(part);
     else if (part.b !== undefined) line.append(make('strong', '', part.b));
-    else if (part.code !== undefined) line.append(make('code', '', part.code));
+    else if (part.code !== undefined) line.append(codeWithMarks(part.code));
   }
   const meta = make('p', 'activity-meta', [activityClock.format(when), e.source ? `from ${e.source}` : ''].filter(Boolean).join(' · '));
   text.append(line, meta);

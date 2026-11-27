@@ -107,6 +107,11 @@ keystrokes, the clipboard, names typed that are not an account.
   kept for a year. The oldest whole blocks leave first, and an
   entry says how many and up to when. Refused sign-ins are grouped so that
   someone who cannot sign in cannot push the record's history out.
+- **Long paths.** An entry holds at most 6 KiB once encoded, and escaping can
+  make a path of control characters six times longer. Such a path is
+  shortened, on a whole character, and the entry says "cut"; its operation is
+  still recorded. Nothing else is cut. The page shows a control or direction
+  character in a path as a visible mark, as the Files page does.
 - **Backups** carry the record, and a restore keeps it, with an entry for the
   restore.
 

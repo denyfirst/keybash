@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -106,6 +107,45 @@ func TestActivityRefusesWhatItDoesNotKnow(t *testing.T) {
 	}
 	if c := check(t, s); c.Broken || c.Entries != 1 {
 		t.Fatalf("after refusals: %+v", c)
+	}
+}
+
+// A path too long to keep once escaped is shortened on a whole character and
+// marked cut, so its operation is still recorded; nothing else is cut.
+func TestActivityFitsLongPaths(t *testing.T) {
+	s, alice := activityStore(t)
+	now := time.Now()
+	controls := "/" + strings.Repeat("\x01", 2000) + strings.Repeat("é", 1000)
+	markup := "/" + strings.Repeat("<&>", 1365)
+	if s.record(now,
+		activityEntry{Kind: "renamed", Actor: alice, Detail: map[string]string{"path": controls, "to": markup, "outcome": "done"}},
+		activityEntry{Kind: "file-downloaded", Actor: alice, Detail: map[string]string{"path": markup, "size": "1", "outcome": "done"}},
+		activityEntry{Kind: "file-deleted", Actor: alice, Detail: map[string]string{"path": "/short", "outcome": "done"}},
+	) != nil {
+		t.Fatal("a long path went unrecorded")
+	}
+	all := entries(t, s, activityFilter{})
+	if len(all) != 3 {
+		t.Fatalf("read %d entries", len(all))
+	}
+	short, download, rename := all[0], all[1], all[2]
+	if short.Detail["cut"] != "" || short.Detail["path"] != "/short" {
+		t.Fatalf("a short path reads %+v", short.Detail)
+	}
+	if download.Detail["cut"] != "yes" || rename.Detail["cut"] != "yes" {
+		t.Fatal("a shortened path was not marked cut")
+	}
+	for _, c := range []struct{ got, whole string }{{download.Detail["path"], markup}, {rename.Detail["path"], controls}, {rename.Detail["to"], markup}} {
+		if c.got == "" || !utf8.ValidString(c.got) || !strings.HasPrefix(c.whole, c.got) {
+			t.Fatalf("a shortened path reads %q…", c.got[:min(len(c.got), 20)])
+		}
+	}
+	if c := check(t, s); c.Broken || c.Entries != 3 {
+		t.Fatalf("check = %+v", c)
+	}
+	// Only paths are cut: an entry otherwise too long is still refused.
+	if s.record(now, activityEntry{Kind: "server-renamed", Actor: alice, Detail: map[string]string{"to": strings.Repeat("\x01", 4096)}}) == nil {
+		t.Fatal("an entry with no path to cut was shortened")
 	}
 }
 
