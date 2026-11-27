@@ -209,7 +209,9 @@ try {
   assert.equal(await page.locator('#server-name-now').textContent(), 'Build box');
   assert.equal(await page.locator('#server-system-now').textContent(), 'Not chosen');
   assert.equal(await page.locator('#guide').getAttribute('href'), 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md#a-servers-page');
-  assert.deepEqual(await page.locator('#server-settings button').allTextContents(), ['Rename', 'Choose', 'Remove server']);
+  assert.deepEqual(await page.locator('#server-settings button').allTextContents(), ['Rename', 'Choose', 'Change', 'Remove server']);
+  // File transfer starts off on every server (ADR 0011).
+  assert.equal(await page.locator('#server-files-now').textContent(), 'Off');
   await page.locator('#server-rename').click(); await page.locator('#rename-dialog').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#rename-name').inputValue(), 'Build box');
   await page.locator('#rename-cancel').click(); await page.locator('#rename-dialog').waitFor({ state: 'hidden' });
