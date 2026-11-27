@@ -1162,6 +1162,207 @@ async function reloadPersonOrList(id) { if (route.name === 'person') await loadP
 // ── Installation ─────────────────────────────────────────────────────────
 // What this copy runs and serves comes from the server; the commands on the
 // page are fixed text, the same for every installation.
+// ── Activity: the record of who did what, where and when (ADR 0012) ─────
+// Every entry is one sentence built here from fixed words; names and paths
+// are written as text. An entry of a kind this page does not know is shown
+// by its kind's word alone.
+const activityKinds = new Set(['first-admin', 'signed-in', 'sign-in-refused', 'confirmed', 'confirm-refused', 'signed-out', 'invite-taken', 'reset-taken',
+  'phone-set', 'phone-replaced', 'password-changed', 'recovery-renewed', 'person-invited', 'role-changed', 'person-blocked', 'person-unblocked', 'phone-reset',
+  'password-reset', 'person-restarted', 'person-deleted', 'server-added', 'server-renamed', 'server-picture', 'server-files', 'server-identity', 'server-removed',
+  'account-added', 'account-person-added', 'account-person-removed', 'account-password', 'account-key-made', 'account-key-dropped', 'account-key-switched',
+  'account-key-used', 'account-removed', 'session-started', 'session-ended', 'file-downloaded', 'file-uploaded', 'file-replaced', 'folder-made', 'renamed',
+  'file-deleted', 'folder-deleted', 'console-account-added', 'console-account-recovered', 'console-setup-code', 'restored', 'record-trimmed']);
+const textOK = (value, limit) => value === undefined || typeof value === 'string' && value.length <= limit;
+const activityOK = e => typeof e === 'object' && e !== null && Number.isSafeInteger(e.seq) && e.seq > 0 && Number.isSafeInteger(e.time) && e.time > 0 &&
+  typeof e.kind === 'string' && e.kind.length <= 40 && ['actor', 'person', 'server', 'account'].every(key => e[key] === undefined || idOK(e[key])) &&
+  ['actor_name', 'person_name', 'server_name', 'account_name'].every(key => textOK(e[key], 160)) && textOK(e.source, 64) &&
+  (e.detail === undefined || typeof e.detail === 'object' && e.detail !== null && Object.entries(e.detail).length <= 4 &&
+    Object.entries(e.detail).every(([key, value]) => typeof key === 'string' && key.length <= 16 && textOK(value, 4096)));
+const nameListOK = list => Array.isArray(list) && list.length <= 4096 && list.every(item => idOK(item?.id) && typeof item.name === 'string' && item.name.length >= 1 && item.name.length <= 160);
+const activityPageOK = data => typeof data === 'object' && data !== null && Array.isArray(data.entries) && data.entries.length <= 50 && data.entries.every(activityOK) &&
+  typeof data.more === 'string' && /^(|[0-9]{1,19})$/.test(data.more) && typeof data.broken === 'boolean' && (data.at === undefined || /^[0-9]{1,19}$/.test(data.at)) &&
+  nameListOK(data.people) && nameListOK(data.servers);
+const sessionWords = { terminal: 'a terminal', desktop: 'a desktop', files: 'Files' };
+const roleNames = { user: 'a user', admin: 'an administrator', auditor: 'an auditor' };
+const filesWordsLong = { off: 'off', download: 'download only', both: 'upload and download' };
+const endWords = {
+  closed: '', idle: ', when Keybash signed them out after 15 minutes without use', expired: ', at the end of their 8-hour sign-in',
+  'signed-out': ', when they were signed out', 'access-changed': ', because the server or their access changed', credentials: ': the server refused the password',
+  key: ': the server refused the key', account: ': the server refused the account', 'taken-over': ': another connection took it over',
+  'remote-ended': ': the remote computer ended it', unreachable: ': the server could not be reached', 'not-responding': ': the remote side stopped responding',
+  refused: ': the server sent something Keybash does not accept', unrecorded: ': Keybash could not write its record', 'identity-changed': ': the server showed another certificate',
+};
+const outcomeWords = { cancelled: 'cancelled', exists: 'refused: the name is taken', missing: 'refused: it is not there', denied: 'refused: the server account may not', 'not-empty': 'refused: the folder is not empty', 'too-large': 'refused: too large', 'not-allowed': 'refused: the server allows downloads only', failed: 'failed' };
+function duration(seconds) {
+  const s = Number(seconds);
+  if (!Number.isSafeInteger(s) || s < 0) return '';
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+}
+function bytesWord(size) {
+  const n = Number(size);
+  if (!Number.isSafeInteger(n) || n < 0) return '';
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB']; let value = n / 1024, unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+// sentence returns the entry as parts: strings, and names to set in bold.
+function sentence(e) {
+  const d = e.detail ?? {}, who = { b: e.actor_name || 'someone' }, person = { b: e.person_name || 'someone' };
+  const server = { b: e.server_name || 'a server' }, at = e.account_name ? [{ b: e.account_name }, ' on ', server] : [server];
+  const recovery = d.factor === 'recovery' ? ' with a recovery code' : '';
+  const out = d.outcome && d.outcome !== 'done' ? ` (${outcomeWords[d.outcome] ?? d.outcome})` : '';
+  const path = { code: d.path ?? '' }, size = d.size ? ` (${bytesWord(d.size)})` : '';
+  switch (e.kind) {
+    case 'first-admin': return [who, ' set up Keybash and became its first administrator'];
+    case 'signed-in': return [who, ` signed in${recovery}`];
+    case 'sign-in-refused': {
+      const n = Number(d.count) || 1, times = n === 1 ? 'once' : `${n} times`;
+      if (d.step === 'code') return ['A wrong authenticator code for ', who, ` (${times})`];
+      if (d.step === 'reset') return ['A password reset for ', who, ` was refused (${times})`];
+      return e.actor ? ['A wrong password for ', who, ` (${times})`] : [`A sign-in with a name that is no account (${times})`];
+    }
+    case 'confirmed': return [who, ` confirmed a change with their authenticator${recovery}`];
+    case 'confirm-refused': return ['A wrong confirmation code for ', who];
+    case 'signed-out': return d.why === 'idle' ? [who, ' was signed out after 15 minutes without use'] : d.why === 'expired' ? [who, ' was signed out at the end of their 8-hour sign-in'] : [who, ' signed out'];
+    case 'invite-taken': return [who, ' took up their invitation and chose a password'];
+    case 'reset-taken': return [who, ' set a new password with a reset code'];
+    case 'phone-set': return [who, ' set up their authenticator'];
+    case 'phone-replaced': return [who, ' replaced their authenticator'];
+    case 'password-changed': return [who, ' changed their password'];
+    case 'recovery-renewed': return [who, ' made new recovery codes'];
+    case 'person-invited': return [who, ' invited ', person, ` as ${roleNames[d.role] ?? d.role ?? 'a user'}`];
+    case 'role-changed': return [who, ' made ', person, ` ${roleNames[d.role] ?? d.role ?? ''}`];
+    case 'person-blocked': return [who, ' blocked ', person];
+    case 'person-unblocked': return [who, ' unblocked ', person];
+    case 'phone-reset': return [who, ' reset the authenticator of ', person];
+    case 'password-reset': return [who, ' gave ', person, ' a password reset code'];
+    case 'person-restarted': return [who, ' started ', person, ' over with a new invitation'];
+    case 'person-deleted': return [who, ' deleted ', person];
+    case 'server-added': return [who, ' added ', server, ` (${d.protocol === 'rdp' ? 'desktop' : 'terminal'} at ${d.address ?? '?'})${d.unchecked ? ', without checking it on its own screen' : ''}`];
+    case 'server-renamed': return [who, ' renamed ', server, ' to ', { b: d.to ?? '' }];
+    case 'server-picture': return [who, ' set what runs on ', server, `: ${systems[d.system]?.title ?? 'none'}`];
+    case 'server-files': return [who, ' set file transfer on ', server, ` to ${filesWordsLong[d.files] ?? d.files}`];
+    case 'server-identity': return [who, ' accepted a new identity for ', server];
+    case 'server-removed': return [who, ' removed ', server];
+    case 'account-added': return [who, ' added the account ', ...at, d.kind === 'password' ? ' with a password' : ' with a key made by Keybash'];
+    case 'account-person-added': return [who, ' put ', person, ' on ', ...at];
+    case 'account-person-removed': return [who, ' took ', person, ' off ', ...at];
+    case 'account-password': return [who, ' replaced the password of ', ...at];
+    case 'account-key-made': return [who, ' made a new key for ', ...at];
+    case 'account-key-dropped': return [who, ' dropped the waiting new key of ', ...at];
+    case 'account-key-switched': return [who, ' switched ', ...at, ' to its new key'];
+    case 'account-key-used': return ['The key of ', ...at, ' opened its first session'];
+    case 'account-removed': return [who, ' removed the account ', ...at];
+    case 'session-started': return [who, ` opened ${sessionWords[d.session] ?? 'a session'} on `, ...at, d.mode === 'download' ? ' (download only)' : ''];
+    case 'session-ended': return [who, `’s ${d.session === 'files' ? 'Files page' : d.session ?? 'session'} on `, ...at, ` ended after ${duration(d.seconds)}${endWords[d.why] ?? ''}`];
+    case 'file-downloaded': return [who, ' downloaded ', path, `${size} from `, server, out];
+    case 'file-uploaded': return [who, ' uploaded ', path, `${size} to `, server, out];
+    case 'file-replaced': return [who, ' replaced ', path, `${size} on `, server, out];
+    case 'folder-made': return [who, ' made the folder ', path, ' on ', server, out];
+    case 'renamed': return [who, ' renamed ', path, ' to ', { code: d.to ?? '' }, ' on ', server, out];
+    case 'file-deleted': return [who, ' deleted ', path, ' on ', server, out];
+    case 'folder-deleted': return [who, ' deleted the folder ', path, ' on ', server, out];
+    case 'console-account-added': return ['On the server’s console, the account ', person, ' was added'];
+    case 'console-account-recovered': return ['On the server’s console, ', person, `’s password was replaced${(d.what ?? '').includes('phone') ? ' and their authenticator reset' : ''}${(d.what ?? '').includes('admin') ? ', and they were made an administrator' : ''}`];
+    case 'console-setup-code': return ['On the server’s console, a new setup code was made'];
+    case 'restored': return ['Keybash was restored from a backup'];
+    case 'record-trimmed': return [`${d.count ?? 'Some'} older entries, up to ${d.until ? new Date(Number(d.until) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'then'}, left the record: it keeps a year and about 90,000 entries`];
+  }
+  return [e.kind];
+}
+const activityGroupOf = kind => kind.startsWith('session') ? 'session' : /^(file|folder|renamed)/.test(kind) ? 'files' : /^(server|account)/.test(kind) ? 'server'
+  : /^(person|role|phone-reset|password-reset)/.test(kind) ? 'people' : /^(console|restored|record)/.test(kind) ? 'console' : 'sign';
+const activityIcons = {
+  sign: ['M10 7.5 14.5 12 10 16.5', 'M14.5 12H4', 'M14 4h4.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H14'],
+  session: ['M4 5.5h16v11H4z', 'M8 20h8', 'M7.5 9.5l2 1.5-2 1.5'],
+  files: ['M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z'],
+  server: ['M4 4.5h16v6H4z', 'M4 13.5h16v6H4z', 'M8 7.5h.01', 'M8 16.5h.01'],
+  people: ['M9 8.5a3.2 3.2 0 1 0 0 .01', 'M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6', 'M16 11.5h5M18.5 9v5'],
+  console: ['M4 5h16v14H4z', 'M7.5 9l3 3-3 3', 'M12.5 15h4'],
+};
+function activityIcon(group) {
+  const svg = document.createElementNS(svgNS, 'svg');
+  for (const [key, value] of [['viewBox', '0 0 24 24'], ['aria-hidden', 'true'], ['focusable', 'false'], ['class', 'activity-glyph']]) svg.setAttribute(key, value);
+  for (const d of activityIcons[group]) { const path = document.createElementNS(svgNS, 'path'); path.setAttribute('d', d); svg.append(path); }
+  return svg;
+}
+const activityDay = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const activityClock = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+function dayTitle(date) {
+  const today = new Date(), yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return activityDay.format(date);
+}
+const activityState = { more: '', lastDay: '', loaded: false };
+function activityRow(e) {
+  const when = new Date(e.time * 1000), day = when.toDateString();
+  const items = [];
+  if (day !== activityState.lastDay) {
+    activityState.lastDay = day;
+    items.push(make('li', 'activity-day', dayTitle(when)));
+  }
+  const li = make('li', 'activity-entry'), group = activityGroupOf(e.kind);
+  li.dataset.group = group; li.dataset.kind = e.kind;
+  if (e.kind === 'sign-in-refused' || e.kind === 'confirm-refused' || (e.detail?.outcome && e.detail.outcome !== 'done')) li.dataset.tone = 'refused';
+  const text = make('div', 'activity-text'), line = make('p', 'activity-sentence');
+  for (const part of sentence(e)) {
+    if (typeof part === 'string') line.append(part);
+    else if (part.b !== undefined) line.append(make('strong', '', part.b));
+    else if (part.code !== undefined) line.append(make('code', '', part.code));
+  }
+  const meta = make('p', 'activity-meta', [activityClock.format(when), e.source ? `from ${e.source}` : ''].filter(Boolean).join(' · '));
+  text.append(line, meta);
+  li.append(activityIcon(group), text);
+  items.push(li);
+  return items;
+}
+function activityFields(before = '') {
+  const day = $('activity-day').value;
+  let from = '', to = '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    const start = new Date(`${day}T00:00:00`);
+    from = String(Math.floor(start.getTime() / 1000)); to = String(Math.floor(start.getTime() / 1000) + 86399);
+  }
+  return { before, person: $('activity-person').value, server: $('activity-server').value, what: $('activity-what').value, from, to };
+}
+function fillChoice(select, list, everyone) {
+  const chosen = select.value;
+  select.replaceChildren(make('option', '', everyone));
+  select.firstChild.value = '';
+  for (const item of list) { const option = make('option', '', item.name); option.value = item.id; select.append(option); }
+  select.value = list.some(item => item.id === chosen) ? chosen : '';
+}
+async function loadActivity(older = false) {
+  const data = await request('/api/activity', 'POST', activityFields(older ? activityState.more : ''));
+  if (!activityPageOK(data)) throw new Error('invalid activity');
+  if (!older) {
+    activityState.lastDay = '';
+    $('activity-list').replaceChildren();
+    fillChoice($('activity-person'), data.people, 'Everyone');
+    fillChoice($('activity-server'), data.servers, 'Every server');
+  }
+  $('activity-list').append(...data.entries.flatMap(e => activityRow(e)));
+  activityState.more = data.more;
+  $('activity-older').hidden = !data.more;
+  $('activity-empty').hidden = $('activity-list').children.length > 0;
+  $('activity-empty').textContent = Object.values(activityFields()).some(Boolean) ? 'Nothing matches these choices.' : 'Nothing here yet.';
+  $('activity-clear').hidden = !Object.values(activityFields()).some(Boolean);
+  // A chain that does not hold is said plainly, where it stops following.
+  $('activity-broken').hidden = !data.broken;
+  $('activity-broken').textContent = data.broken ? `This record was changed outside Keybash${data.at ? `: entries from number ${data.at} on do not follow the ones before them` : ''}. Keybash goes on recording; whoever administers this server should find out what happened.` : '';
+}
+for (const id of ['activity-person', 'activity-server', 'activity-what', 'activity-day']) $(id)?.addEventListener('change', () => { void run(() => loadActivity()); });
+$('activity-filters')?.addEventListener('submit', event => event.preventDefault());
+$('activity-clear')?.addEventListener('click', () => {
+  for (const id of ['activity-person', 'activity-server', 'activity-what', 'activity-day']) $(id).value = '';
+  void run(() => loadActivity());
+});
+$('activity-older')?.addEventListener('click', () => { void run(() => loadActivity(true)); });
+
 async function loadInstallation() {
   const data = await request('/api/installation');
   if (typeof data?.revision !== 'string' || !/^(?:[0-9a-f]{40})?$/.test(data.revision) || typeof data.built !== 'string' || data.built !== '' && Number.isNaN(Date.parse(data.built)) ||
@@ -1187,17 +1388,18 @@ const guideHome = 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md'
 // One document, a page per path: the path picks what a ready session sees.
 // A server's and a person's own pages sit under their lists.
 const pages = {
-  access: { path: '/', panel: 'access-panel', title: 'Your servers', lead: 'Open one, and Keybash signs you in.', guide: 'your-servers' },
+  access: { path: '/', panel: 'access-panel', title: 'Your servers', lead: 'Open one, and Keybash signs you in. Keybash records who connects where and when, and what is changed.', guide: 'your-servers' },
   servers: { path: '/servers', panel: 'servers-panel', title: 'Servers', lead: 'Each server and its accounts.', guide: 'servers' },
   server: { under: 'servers', panel: 'server-panel', title: 'Server', lead: '', guide: 'a-servers-page' },
   users: { path: '/users', panel: 'users-panel', title: 'People', lead: 'Who signs in to Keybash, and where.', guide: 'people' },
   person: { under: 'users', panel: 'person-panel', title: 'Person', lead: '', guide: 'people' },
   account: { path: '/account', panel: 'account-panel', title: 'Account', lead: 'Your password, phone authenticator and recovery codes.', guide: 'account' },
   installation: { path: '/installation', panel: 'installation-panel', title: 'Installation', lead: 'What this copy runs, and how to update it.', guide: 'installation' },
+  activity: { path: '/activity', panel: 'activity-panel', title: 'Activity', lead: 'Who did what, where and when. Nobody can change or remove it here.', guide: 'activity' },
 };
 // Which pages each role sees; the first is where a role lands. The server
 // refuses the rest whatever the page shows.
-const access = { user: ['access', 'account'], admin: ['access', 'servers', 'server', 'users', 'person', 'installation', 'account'], auditor: ['servers', 'server', 'account'] };
+const access = { user: ['access', 'account'], admin: ['access', 'servers', 'server', 'users', 'person', 'activity', 'installation', 'account'], auditor: ['servers', 'server', 'activity', 'account'] };
 const route = { name: '', id: '' };
 function pageOf(path) {
   for (const [name, page] of Object.entries(pages)) if (page.path === path) return { name, id: '' };
@@ -1240,6 +1442,7 @@ async function loadPage() {
   else if (page === 'users') await loadUsers();
   else if (page === 'person') await loadPersonPage(route.id);
   else if (page === 'installation') await loadInstallation();
+  else if (page === 'activity') await loadActivity();
   if (!['servers', 'server'].includes(page) && role === 'admin' && remoteEnabled) void checkAttention();
 }
 // Moving between pages keeps the document: the address changes, the page

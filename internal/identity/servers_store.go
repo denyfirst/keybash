@@ -225,8 +225,8 @@ func (s *Store) listServers() ([]webServer, error) {
 
 // changeServers runs one change by an administrator who is active when it
 // commits, and keeps the reason fn refused with.
-func (s *Store) changeServers(actor string, fn func(*bolt.Tx) error) error {
-	return s.updateWhy(func(tx *bolt.Tx) error {
+func (s *Store) changeServers(actor string, fn func(*bolt.Tx) error, notes ...activityEntry) error {
+	return s.updateWhyRecorded(notes, func(tx *bolt.Tx) error {
 		if by, e := s.readAccount(tx, actor); e != nil || !activeAdmin(by) {
 			return errRefused
 		}
@@ -243,18 +243,18 @@ func overlaps(list []webServer, w webServer) bool {
 
 // addServer stores a new SSH server at a literal address, with no accounts. A
 // listed server at the same address and port is refused.
-func (s *Store) addServer(actor, name, address string, port uint16, hostKey []byte, now time.Time) (string, error) {
-	return s.addWebServer(actor, webServer{Name: name, Protocol: "ssh", Address: address, Port: port, HostKey: bytes.Clone(hostKey)}, now)
+func (s *Store) addServer(actor, name, address string, port uint16, hostKey []byte, now time.Time, notes ...activityEntry) (string, error) {
+	return s.addWebServer(actor, webServer{Name: name, Protocol: "ssh", Address: address, Port: port, HostKey: bytes.Clone(hostKey)}, now, notes...)
 }
 
 // addRDPServer stores a new RDP server at a literal address, identified by its
 // exact certificate, with no accounts. Unchecked records that the
 // administrator chose not to compare it on the server's own screen.
-func (s *Store) addRDPServer(actor, name, address string, port uint16, certificate []byte, unchecked bool, now time.Time) (string, error) {
-	return s.addWebServer(actor, webServer{Name: name, Protocol: "rdp", Address: address, Port: port, Certificate: bytes.Clone(certificate), Unchecked: unchecked}, now)
+func (s *Store) addRDPServer(actor, name, address string, port uint16, certificate []byte, unchecked bool, now time.Time, notes ...activityEntry) (string, error) {
+	return s.addWebServer(actor, webServer{Name: name, Protocol: "rdp", Address: address, Port: port, Certificate: bytes.Clone(certificate), Unchecked: unchecked}, now, notes...)
 }
 
-func (s *Store) addWebServer(actor string, w webServer, now time.Time) (string, error) {
+func (s *Store) addWebServer(actor string, w webServer, now time.Time, notes ...activityEntry) (string, error) {
 	id, e := randomID()
 	if e != nil {
 		return "", e
@@ -271,8 +271,11 @@ func (s *Store) addWebServer(actor string, w webServer, now time.Time) (string, 
 		if overlaps(list, w) {
 			return errDuplicate
 		}
+		for i := range notes {
+			notes[i].Server, notes[i].ServerName = id, w.Name
+		}
 		return s.saveServer(tx, w)
-	})
+	}, notes...)
 	if e != nil {
 		return "", e
 	}
@@ -280,7 +283,7 @@ func (s *Store) addWebServer(actor string, w webServer, now time.Time) (string, 
 }
 
 // editServer changes one listed server; change refuses with a reason.
-func (s *Store) editServer(actor, id string, change func(*bolt.Tx, *webServer) error) error {
+func (s *Store) editServer(actor, id string, change func(*bolt.Tx, *webServer) error, notes ...activityEntry) error {
 	return s.changeServers(actor, func(tx *bolt.Tx) error {
 		w, e := s.server(tx, id)
 		if e != nil {
@@ -293,27 +296,27 @@ func (s *Store) editServer(actor, id string, change func(*bolt.Tx, *webServer) e
 			return e
 		}
 		return s.saveServer(tx, w)
-	})
+	}, notes...)
 }
 
 // markServer sets the mark a server's cards show; "" takes it away.
-func (s *Store) markServer(actor, id, system string) error {
+func (s *Store) markServer(actor, id, system string, notes ...activityEntry) error {
 	if system != "" && !systemNames[system] {
 		return errRefused
 	}
-	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error { w.System = system; return nil })
+	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error { w.System = system; return nil }, notes...)
 }
 
-func (s *Store) renameServer(actor, id, name string) error {
+func (s *Store) renameServer(actor, id, name string, notes ...activityEntry) error {
 	if !serverName(name) {
 		return errRefused
 	}
-	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error { w.Name = name; return nil })
+	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error { w.Name = name; return nil }, notes...)
 }
 
 // repinServer replaces an SSH server's pinned host key. Sessions through its
 // accounts end, and new ones are checked against the new key.
-func (s *Store) repinServer(actor, id string, hostKey []byte) error {
+func (s *Store) repinServer(actor, id string, hostKey []byte, notes ...activityEntry) error {
 	if _, ok := ed25519HostKey(hostKey); !ok {
 		return errRefused
 	}
@@ -323,7 +326,7 @@ func (s *Store) repinServer(actor, id string, hostKey []byte) error {
 		}
 		w.HostKey = bytes.Clone(hostKey)
 		return nil
-	})
+	}, notes...)
 }
 
 // repinCertificate replaces an RDP server's pinned certificate. Sessions
@@ -331,7 +334,7 @@ func (s *Store) repinServer(actor, id string, hostKey []byte) error {
 // Checked on the console, the server is checked from then on; pinned without
 // that check,
 // a new certificate leaves it unchecked, and the same one leaves it as it was.
-func (s *Store) repinCertificate(actor, id string, certificate []byte, unchecked bool) error {
+func (s *Store) repinCertificate(actor, id string, certificate []byte, unchecked bool, notes ...activityEntry) error {
 	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error {
 		if w.Protocol != "rdp" {
 			return errRefused
@@ -339,12 +342,12 @@ func (s *Store) repinCertificate(actor, id string, certificate []byte, unchecked
 		w.Unchecked = unchecked && (w.Unchecked || !bytes.Equal(w.Certificate, certificate))
 		w.Certificate = bytes.Clone(certificate)
 		return nil
-	})
+	}, notes...)
 }
 
 // deleteServer removes a server. One that came from the file stays as a
 // removed marker, so the file does not bring it back at the next start.
-func (s *Store) deleteServer(actor, id string) error {
+func (s *Store) deleteServer(actor, id string, notes ...activityEntry) error {
 	return s.changeServers(actor, func(tx *bolt.Tx) error {
 		w, e := s.server(tx, id)
 		if e != nil {
@@ -362,7 +365,7 @@ func (s *Store) deleteServer(actor, id string) error {
 		}
 		w.Removed, w.Access = true, nil
 		return s.saveServer(tx, w)
-	})
+	}, notes...)
 }
 
 // importServers moves the servers in the operator's file into the list, once

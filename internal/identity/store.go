@@ -34,7 +34,14 @@ type storeMeta struct {
 	BootstrapEnd int64
 	Initialized  bool
 	Seals        uint64
-	MAC          []byte
+	// The activity record's chain (ADR 0012): the next entry's number, the
+	// last entry's HMAC, and where the record now starts with the HMAC before
+	// it. Absent until the first entry, so earlier metadata reads the same.
+	ActivityNext   uint64 `json:",omitempty"`
+	ActivityMAC    []byte `json:",omitempty"`
+	ActivityFirst  uint64 `json:",omitempty"`
+	ActivityAnchor []byte `json:",omitempty"`
+	MAC            []byte
 }
 
 // Store uses an exclusive, fsynced bbolt file. Only authenticated encrypted
@@ -49,6 +56,7 @@ type Store struct {
 	indexKey, checkKey [32]byte
 	recoveryKey        [32]byte
 	backupKey          [32]byte
+	activityKey        [32]byte // chains the activity record (ADR 0012)
 	closed             bool
 }
 
@@ -385,7 +393,7 @@ func openDB(dir string, key []byte, instance string) (*Store, error) {
 	for _, item := range []struct {
 		name   string
 		target *[32]byte
-	}{{"index", &s.indexKey}, {"check", &s.checkKey}, {"recovery", &s.recoveryKey}, {"backup", &s.backupKey}} {
+	}{{"index", &s.indexKey}, {"check", &s.checkKey}, {"recovery", &s.recoveryKey}, {"backup", &s.backupKey}, {"activity", &s.activityKey}} {
 		b, e := instanceSubkey(key, s.instance, item.name)
 		if e != nil {
 			return nil, errRefused
@@ -592,7 +600,7 @@ func (s *Store) enrollmentValid(id, code string, now time.Time) bool {
 		return nil
 	}) == nil
 }
-func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time) error {
+func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time, notes ...activityEntry) error {
 	digest, ok := tokenID(code)
 	if !ok {
 		return errRefused
@@ -604,7 +612,8 @@ func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time) e
 		}
 		// Whoever holds the bootstrap code set this copy up: the first account
 		// administers it.
-		if _, _, e = s.createAccount(tx, name, hash, now, newAccount{role: roleAdmin}); e != nil {
+		admin, _, e := s.createAccount(tx, name, hash, now, newAccount{role: roleAdmin})
+		if e != nil {
 			return e
 		}
 		m, e = s.meta(tx)
@@ -614,7 +623,13 @@ func (s *Store) bootstrap(code, name string, hash PasswordHash, now time.Time) e
 		m.Initialized = true
 		clear(m.Bootstrap[:])
 		m.BootstrapEnd = 0
-		return s.putMeta(tx, m)
+		if e = s.putMeta(tx, m); e != nil {
+			return e
+		}
+		for i := range notes {
+			notes[i].Actor = admin.ID
+		}
+		return s.appendActivity(tx, now, notes...)
 	})
 }
 
@@ -633,8 +648,12 @@ func (s *Store) CreateAccount(name, password string) (string, error) {
 		if e != nil || !m.Initialized {
 			return errRefused
 		}
-		_, setup, e = s.createAccount(tx, name, h, time.Now(), newAccount{setup: true})
-		return e
+		made, code, e := s.createAccount(tx, name, h, time.Now(), newAccount{setup: true})
+		if e != nil {
+			return e
+		}
+		setup = code
+		return s.appendActivity(tx, time.Now(), activityEntry{Kind: "console-account-added", Person: made.ID})
 	})
 	if e != nil {
 		return "", errRefused
@@ -656,7 +675,10 @@ func (s *Store) RenewBootstrap() (string, error) {
 			return errRefused
 		}
 		m.Bootstrap, m.BootstrapEnd = digest, time.Now().Add(15*time.Minute).Unix()
-		return s.putMeta(tx, m)
+		if e = s.putMeta(tx, m); e != nil {
+			return e
+		}
+		return s.appendActivity(tx, time.Now(), activityEntry{Kind: "console-setup-code"})
 	})
 	if e != nil {
 		return "", errRefused
@@ -704,7 +726,17 @@ func (s *Store) RecoverAccount(name, password string, lostFactor, admin bool) (s
 				return e
 			}
 		}
-		return s.saveAccount(tx, a)
+		if e = s.saveAccount(tx, a); e != nil {
+			return e
+		}
+		what := "password"
+		if lostFactor {
+			what += "-phone"
+		}
+		if admin {
+			what += "-admin"
+		}
+		return s.appendActivity(tx, time.Now(), activityEntry{Kind: "console-account-recovered", Person: a.ID, Detail: map[string]string{"what": what}})
 	})
 	if e != nil {
 		return "", errRefused

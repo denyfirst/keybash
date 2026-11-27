@@ -25,7 +25,7 @@ const (
 // server's own page by its ID.
 func workspacePage(path string) bool {
 	switch path {
-	case "/", "/account", "/installation", "/users", "/servers":
+	case "/", "/account", "/installation", "/users", "/servers", "/activity":
 		return true
 	}
 	for _, prefix := range []string{"/users/", "/servers/"} {
@@ -216,7 +216,8 @@ func (l *Lab) bootstrapHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.closed || r.Context().Err() != nil || l.store.bootstrap(fields["code"], fields["username"], hash, l.now()) != nil {
+	first := activityEntry{Time: l.now().Unix(), Kind: "first-admin", Source: l.source(r)}
+	if l.closed || r.Context().Err() != nil || l.store.bootstrap(fields["code"], fields["username"], hash, l.now(), first) != nil {
 		refuse(w, 401)
 		return
 	}
@@ -547,6 +548,11 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		refuse(w, 403)
 		return
 	}
+	// The activity record: administrators and auditors read it (ADR 0012).
+	if r.URL.Path == "/api/activity" {
+		l.activityHTTP(w, r, s)
+		return
+	}
 	if r.URL.Path == "/api/installation" && r.Method == "GET" {
 		data := l.installationLocked()
 		l.mu.Unlock()
@@ -623,7 +629,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name := s.username
-		codes, e := l.store.regenerateRecovery(s.owner, s.revision)
+		codes, e := l.store.regenerateRecovery(s.owner, s.revision, l.noteLocked(s, "recovery-renewed"))
 		if e != nil {
 			l.mu.Unlock()
 			refuse(w, 503)

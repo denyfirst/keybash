@@ -265,6 +265,7 @@ button.name-open:hover:not(:disabled) { color: var(--link); background: none; bo
 .files-summary { margin: 0; padding: 0.65rem 1.1rem; font-size: 0.8rem; color: var(--ink-faint); border-top: 1px solid var(--rule); }
 .files-summary:empty { display: none; }
 
+.files-recorded { max-width: none; margin: 0.8rem 0 0; text-align: center; color: var(--ink-faint); }
 .files-ended { display: grid; justify-items: center; gap: 0.2rem; margin-top: 1.5rem; text-align: center; }
 .files-ended .notice { margin: 0; }
 .files-ended button { margin-top: 0.6rem; }

@@ -24,7 +24,8 @@ const endings={
  'remote-ended':'The remote computer ended the session: it was signed out or disconnected, or reached its own time limit.',
  unreachable:'The server could not be reached, or it refused the connection.',
  'not-responding':'The remote side stopped responding, so this session ended.',
- refused:'Keybash ended this session because the server sent something it does not accept.'
+ refused:'Keybash ended this session because the server sent something it does not accept.',
+ unrecorded:'Keybash could not write its activity record, so it did not go on with this session. Your administrator can see this.'
 };
 export function endingMessage(word){return typeof word==='string'&&Object.hasOwn(endings,word)?endings[word]:null;}
 export function endedMessage(data){

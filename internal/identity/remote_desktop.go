@@ -129,6 +129,14 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	if target.Protocol != "rdp" {
 		return // a desktop lease only
 	}
+	// The session is in the activity record before anything opens.
+	started, recorded := l.sessionStarted(lease, "desktop")
+	if !recorded {
+		_ = socket.Close(terminalweb.CloseUnrecorded, string(terminalweb.ReasonUnrecorded))
+		return
+	}
+	why := ""
+	defer func() { l.sessionEnded(ctx, started, why) }()
 	stopRequest := context.AfterFunc(r.Context(), func() { lease.cancel(nil) })
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
@@ -190,7 +198,10 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 			_ = stream.Close()
 		}
 		if other {
+			why = "identity-changed"
 			_ = socket.Close(terminalweb.CloseIdentityChanged, "identity-changed")
+		} else if ctx.Err() == nil {
+			why = "unreachable"
 		}
 		return
 	}
@@ -217,4 +228,5 @@ func (l *Lab) remoteDesktop(w http.ResponseWriter, r *http.Request) {
 	if reason == terminalweb.ReasonRefused {
 		l.noteRefusal(refusal)
 	}
+	why = string(reason)
 }

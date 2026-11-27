@@ -2,6 +2,7 @@ package identity
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/x509"
 	"errors"
@@ -507,7 +508,12 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 				status = 422
 				return
 			}
-			made, e = l.store.addRDPServer(actor, fields["name"], endpoint.Addr().String(), endpoint.Port(), cert.Raw, unchecked, l.now())
+			note := l.noteLocked(s, "server-added")
+			note.Detail = map[string]string{"protocol": "rdp", "fingerprint": certificatePrint(cert), "address": endpoint.String()}
+			if unchecked {
+				note.Detail["unchecked"] = "yes"
+			}
+			made, e = l.store.addRDPServer(actor, fields["name"], endpoint.Addr().String(), endpoint.Port(), cert.Raw, unchecked, l.now(), note)
 		} else {
 			key, refused := l.scanLocked(r.Context(), id, s, target)
 			if refused != 0 {
@@ -518,7 +524,9 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 				status = 409
 				return
 			}
-			made, e = l.store.addServer(actor, fields["name"], endpoint.Addr().String(), endpoint.Port(), key.Marshal(), l.now())
+			note := l.noteLocked(s, "server-added")
+			note.Detail = map[string]string{"protocol": "ssh", "fingerprint": ssh.FingerprintSHA256(key), "address": endpoint.String()}
+			made, e = l.store.addServer(actor, fields["name"], endpoint.Addr().String(), endpoint.Port(), key.Marshal(), l.now(), note)
 		}
 		if e == nil {
 			result = struct {
@@ -531,7 +539,9 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 400
 			return
 		}
-		e = l.store.renameServer(actor, server, fields["name"])
+		note := l.serverNoteLocked(s, "server-renamed", server, "")
+		note.Detail = map[string]string{"to": fields["name"]}
+		e = l.store.renameServer(actor, server, fields["name"], note)
 	case action == "system" && r.Method == "POST":
 		// A label only: which mark the server's cards show.
 		fields, ok := readFields(w, r, 256, "system")
@@ -539,7 +549,9 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 400
 			return
 		}
-		e = l.store.markServer(actor, server, fields["system"])
+		note := l.serverNoteLocked(s, "server-picture", server, "")
+		note.Detail = map[string]string{"system": cmp.Or(fields["system"], "none")}
+		e = l.store.markServer(actor, server, fields["system"], note)
 	case action == "files" && r.Method == "POST":
 		// File transfer: off, download only, or upload and download (ADR 0011).
 		fields, ok := readFields(w, r, 256, "files")
@@ -549,7 +561,9 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 400
 			return
 		}
-		e = l.store.setServerFiles(actor, server, mode)
+		note := l.serverNoteLocked(s, "server-files", server, "")
+		note.Detail = map[string]string{"files": fields["files"]}
+		e = l.store.setServerFiles(actor, server, mode, note)
 	case action == "scan" && r.Method == "POST":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
@@ -594,7 +608,9 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 422
 			return
 		}
-		e = l.store.repinCertificate(actor, server, cert.Raw, unchecked)
+		note := l.serverNoteLocked(s, "server-identity", server, "")
+		note.Detail = map[string]string{"fingerprint": certificatePrint(cert)}
+		e = l.store.repinCertificate(actor, server, cert.Raw, unchecked, note)
 	case action == "key" && r.Method == "POST":
 		fields, ok := readFields(w, r, 1024, "fingerprint")
 		if !ok || !validFingerprint(fields["fingerprint"]) {
@@ -610,7 +626,9 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 409
 			return
 		}
-		e = l.store.repinServer(actor, server, key.Marshal())
+		note := l.serverNoteLocked(s, "server-identity", server, "")
+		note.Detail = map[string]string{"fingerprint": ssh.FingerprintSHA256(key)}
+		e = l.store.repinServer(actor, server, key.Marshal(), note)
 	// The accounts (ADR 0010). Nothing here answers with a secret; the page
 	// reads the list again.
 	case action == "accounts" && r.Method == "POST":
@@ -622,7 +640,9 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			return
 		}
 		var made string
-		if made, e = l.store.addServerAccount(actor, server, fields["kind"], fields["username"], fields["secret"], people, l.now()); e == nil {
+		note := l.serverNoteLocked(s, "account-added", server, "")
+		note.Detail = map[string]string{"kind": fields["kind"]}
+		if made, e = l.store.addServerAccount(actor, server, fields["kind"], fields["username"], fields["secret"], people, l.now(), note); e == nil {
 			result = struct {
 				ID string `json:"id"`
 			}{made}
@@ -634,7 +654,14 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			return
 		}
 		// Taking someone off ends their sessions through it, at the reload below.
-		e = l.store.setAccountPerson(actor, server, account, fields["person"], action == "account-grant", l.now())
+		note := l.serverNoteLocked(s, "account-person-removed", server, account)
+		if action == "account-grant" {
+			note.Kind = "account-person-added"
+		}
+		if validID(fields["person"]) {
+			note.Person = fields["person"]
+		}
+		e = l.store.setAccountPerson(actor, server, account, fields["person"], action == "account-grant", l.now(), note)
 	case action == "account-password" && r.Method == "POST":
 		fields, ok := readFields(w, r, 8192, "secret")
 		defer clear(fields)
@@ -642,16 +669,16 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 400
 			return
 		}
-		e = l.store.replaceAccountPassword(actor, server, account, fields["secret"], l.now())
+		e = l.store.replaceAccountPassword(actor, server, account, fields["secret"], l.now(), l.serverNoteLocked(s, "account-password", server, account))
 	case action == "account-next" && (r.Method == "POST" || r.Method == "DELETE"):
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
 			return
 		}
 		if r.Method == "POST" {
-			e = l.store.nextAccountKey(actor, server, account, l.now())
+			e = l.store.nextAccountKey(actor, server, account, l.now(), l.serverNoteLocked(s, "account-key-made", server, account))
 		} else {
-			e = l.store.dropNextAccountKey(actor, server, account, l.now())
+			e = l.store.dropNextAccountKey(actor, server, account, l.now(), l.serverNoteLocked(s, "account-key-dropped", server, account))
 		}
 	case action == "account-switch" && r.Method == "POST":
 		fields, ok := readFields(w, r, 1024, "fingerprint")
@@ -659,20 +686,20 @@ func (l *Lab) serversHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s
 			status = 400
 			return
 		}
-		e = l.store.switchAccountKey(actor, server, account, fields["fingerprint"], l.now())
+		e = l.store.switchAccountKey(actor, server, account, fields["fingerprint"], l.now(), l.serverNoteLocked(s, "account-key-switched", server, account))
 	case action == "account" && r.Method == "DELETE":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
 			return
 		}
 		// Nobody connects through it any more, from the reload below.
-		e = l.store.removeServerAccount(actor, server, account)
+		e = l.store.removeServerAccount(actor, server, account, l.serverNoteLocked(s, "account-removed", server, account))
 	case action == "" && r.Method == "DELETE":
 		if _, ok := readFields(w, r, 1024); !ok {
 			status = 400
 			return
 		}
-		e = l.store.deleteServer(actor, server)
+		e = l.store.deleteServer(actor, server, l.serverNoteLocked(s, "server-removed", server, ""))
 	default:
 		status = 404
 		return

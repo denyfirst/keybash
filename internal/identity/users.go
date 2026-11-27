@@ -123,9 +123,9 @@ func (s *Store) listAccounts(now time.Time) ([]accountSummary, error) {
 // of a random secret nobody keeps, and the returned code is the invite. Only
 // the code and the password the holder then chooses open it. The actor must
 // be an active administrator when it commits.
-func (s *Store) inviteAccount(actor, name, role string, hash PasswordHash, now time.Time) (string, string, error) {
+func (s *Store) inviteAccount(actor, name, role string, hash PasswordHash, now time.Time, notes ...activityEntry) (string, string, error) {
 	var id, code string
-	e := s.updateWhy(func(tx *bolt.Tx) error {
+	e := s.updateWhyRecorded(notes, func(tx *bolt.Tx) error {
 		if by, e := s.readAccount(tx, actor); e != nil || !activeAdmin(by) {
 			return errRefused
 		}
@@ -134,6 +134,9 @@ func (s *Store) inviteAccount(actor, name, role string, hash PasswordHash, now t
 		}
 		a, setup, e := s.createAccount(tx, name, hash, now, newAccount{role: role, setup: true, invited: true})
 		id, code = a.ID, setup
+		for i := range notes {
+			notes[i].Person = a.ID
+		}
 		return e
 	})
 	if e != nil {
@@ -145,12 +148,12 @@ func (s *Store) inviteAccount(actor, name, role string, hash PasswordHash, now t
 // claimInvite sets the password an invited holder chose, once, with the
 // invite code. The code stays the account's setup code until the phone is
 // enrolled, so a holder who stops before that can sign in and finish later.
-func (s *Store) claimInvite(name, code string, hash PasswordHash, now time.Time) error {
+func (s *Store) claimInvite(name, code string, hash PasswordHash, now time.Time, notes ...activityEntry) error {
 	digest, ok := tokenID(code)
 	if !ok || !hash.valid() {
 		return errRefused
 	}
-	return s.update(func(tx *bolt.Tx) error {
+	return s.updateRecorded(notes, func(tx *bolt.Tx) error {
 		if _, e := s.meta(tx); e != nil {
 			return e
 		}
@@ -164,6 +167,9 @@ func (s *Store) claimInvite(name, code string, hash PasswordHash, now time.Time)
 		}
 		a.Hash, a.Invited = storedPassword(hash), false
 		a.Revision++
+		for i := range notes {
+			notes[i].Actor = a.ID
+		}
 		return s.saveAccount(tx, a)
 	})
 }
@@ -174,8 +180,8 @@ func (s *Store) claimInvite(name, code string, hash PasswordHash, now time.Time)
 // and the result must leave at least one active administrator. An auditor
 // reaches no server, so one is taken off every server account in the same
 // transaction.
-func (s *Store) changeAccount(actor, target string, change func(*durableAccount) error) error {
-	return s.updateWhy(func(tx *bolt.Tx) error {
+func (s *Store) changeAccount(actor, target string, change func(*durableAccount) error, notes ...activityEntry) error {
+	return s.updateWhyRecorded(notes, func(tx *bolt.Tx) error {
 		if actor == target {
 			return errRefused
 		}
@@ -203,8 +209,8 @@ func (s *Store) changeAccount(actor, target string, change func(*durableAccount)
 
 // deleteAccount removes another account, takes it off every server account,
 // and removes how its pages look, in the same transaction.
-func (s *Store) deleteAccount(actor, target string) error {
-	return s.updateWhy(func(tx *bolt.Tx) error {
+func (s *Store) deleteAccount(actor, target string, notes ...activityEntry) error {
+	return s.updateWhyRecorded(notes, func(tx *bolt.Tx) error {
 		if actor == target {
 			return errRefused
 		}
@@ -338,7 +344,7 @@ func passwordReset(now time.Time) (func(*durableAccount) error, *string) {
 // before the factor is looked at, so nobody without the code can spend the
 // holder's factor budget; a wrong factor after a right code spends it, as at
 // sign-in. The code is spent, and every session ends, when it succeeds.
-func (s *Store) resetPassword(name, code, factor string, hash PasswordHash, now time.Time) error {
+func (s *Store) resetPassword(name, code, factor string, hash PasswordHash, now time.Time, notes ...activityEntry) error {
 	digest, ok := tokenID(code)
 	if !ok || !hash.valid() {
 		return errRefused
@@ -361,7 +367,10 @@ func (s *Store) resetPassword(name, code, factor string, hash PasswordHash, now 
 			a.Hash, a.PasswordReset, a.PasswordResetEnd = storedPassword(hash), nil, 0
 			a.Revision++
 		}
-		return s.saveAccount(tx, a)
+		if e := s.saveAccount(tx, a); e != nil {
+			return e
+		}
+		return s.appendActivity(tx, now, factorNotes(notes, accepted, factor, a.ID)...)
 	})
 	if e != nil || !accepted {
 		return errRefused
@@ -375,9 +384,9 @@ func (s *Store) resetPassword(name, code, factor string, hash PasswordHash, now 
 // it is on: they belong to the servers, and an administrator manages them
 // anyway. A blocked account stays blocked. hash is of a random secret nobody
 // keeps.
-func (s *Store) startOverAccount(actor, target string, hash PasswordHash, now time.Time) (string, error) {
+func (s *Store) startOverAccount(actor, target string, hash PasswordHash, now time.Time, notes ...activityEntry) (string, error) {
 	var code string
-	e := s.updateWhy(func(tx *bolt.Tx) error {
+	e := s.updateWhyRecorded(notes, func(tx *bolt.Tx) error {
 		if actor == target {
 			return errRefused
 		}

@@ -358,6 +358,16 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	if target.Protocol != "ssh" || lease.files != "" {
 		return
 	}
+	// The session is in the activity record before anything opens.
+	started, recorded := l.sessionStarted(lease, "terminal")
+	if !recorded {
+		say, done := context.WithTimeout(ctx, time.Second)
+		_ = socket.Write(say, websocket.MessageText, []byte(`{"type":"ended","reason":"unrecorded"}`))
+		done()
+		return
+	}
+	why := ""
+	defer func() { l.sessionEnded(ctx, started, why) }()
 	stopRequest := context.AfterFunc(r.Context(), func() { lease.cancel(nil) })
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
@@ -368,6 +378,13 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	if e != nil || stream == nil || ctx.Err() != nil {
 		if stream != nil {
 			_ = stream.Close()
+		}
+		if ctx.Err() == nil {
+			why = "unreachable"
+			var refused terminalweb.Reason
+			if errors.As(e, &refused) && refused != "" {
+				why = string(refused)
+			}
 		}
 		// The server refused the account's key or password: the page is told
 		// so, by its fixed word, before the socket closes. Nothing else that
@@ -383,7 +400,7 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 	// An SSH stream exists only after the server took the key and opened a
 	// terminal, so a key made here is now known to be on a server.
 	if credential.Generated && !credential.Used {
-		_ = l.store.markAccountUsed(lease.target, lease.account, credential.Fingerprint)
+		_ = l.store.markAccountUsed(lease.target, lease.account, credential.Fingerprint, l.keyUsedNote(lease.owner, lease.target, lease.account))
 	}
 	if socket.Write(ctx, websocket.MessageText, []byte(`{"type":"ready"}`)) != nil {
 		_ = stream.Close()

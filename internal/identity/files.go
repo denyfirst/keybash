@@ -29,14 +29,14 @@ func validFilesSetting(protocol, files string) bool {
 }
 
 // setServerFiles turns file transfer off ("") or to download or both.
-func (s *Store) setServerFiles(actor, id, files string) error {
+func (s *Store) setServerFiles(actor, id, files string, notes ...activityEntry) error {
 	return s.editServer(actor, id, func(_ *bolt.Tx, w *webServer) error {
 		if !validFilesSetting(w.Protocol, files) {
 			return errRefused
 		}
 		w.Files = files
 		return nil
-	})
+	}, notes...)
 }
 
 // filesModeLocked is what the account's server allows now, or "".
@@ -171,6 +171,17 @@ func (l *Lab) remoteFilesSocket(w http.ResponseWriter, r *http.Request) {
 	if target.Protocol != "ssh" || lease.files == "" || mode != lease.files {
 		return
 	}
+	// The session is in the activity record before anything opens, and so
+	// is every file it moves or changes.
+	started, recorded := l.sessionStarted(lease, "files")
+	if !recorded {
+		say, done := context.WithTimeout(ctx, time.Second)
+		_ = socket.Write(say, websocket.MessageText, []byte(`{"type":"ended","reason":"unrecorded"}`))
+		done()
+		return
+	}
+	why := ""
+	defer func() { l.sessionEnded(ctx, started, why) }()
 	stopRequest := context.AfterFunc(r.Context(), func() { lease.cancel(nil) })
 	defer stopRequest()
 	stopSocket := context.AfterFunc(ctx, func() { _ = socket.CloseNow() })
@@ -182,6 +193,13 @@ func (l *Lab) remoteFilesSocket(w http.ResponseWriter, r *http.Request) {
 		if stream != nil {
 			_ = stream.Close()
 		}
+		if ctx.Err() == nil {
+			why = "unreachable"
+			var refused terminalweb.Reason
+			if errors.As(e, &refused) && refused != "" {
+				why = string(refused)
+			}
+		}
 		var reason terminalweb.Reason
 		if errors.As(e, &reason) && (reason == terminalweb.ReasonKey || reason == terminalweb.ReasonCredentials) && ctx.Err() == nil {
 			say, done := context.WithTimeout(ctx, time.Second)
@@ -191,7 +209,7 @@ func (l *Lab) remoteFilesSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if credential.Generated && !credential.Used {
-		_ = l.store.markAccountUsed(lease.target, lease.account, credential.Fingerprint)
+		_ = l.store.markAccountUsed(lease.target, lease.account, credential.Fingerprint, l.keyUsedNote(lease.owner, lease.target, lease.account))
 	}
 	l.mu.Lock()
 	info := l.remote.accounts[lease.account]
@@ -214,5 +232,8 @@ func (l *Lab) remoteFilesSocket(w http.ResponseWriter, r *http.Request) {
 		l.sessions[id].last = l.now()
 		return nil
 	}
-	terminalweb.FilesRelay(ctx, socket, stream, mode, activity)
+	observe := func(r terminalweb.FileRequest, failure terminalweb.FileFailure, size uint64) error {
+		return l.fileRecorded(started, r, failure, size)
+	}
+	terminalweb.FilesRelay(ctx, socket, stream, mode, activity, observe)
 }

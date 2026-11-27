@@ -323,7 +323,21 @@ type fileOperation struct {
 	// A failed upload's bytes still on their way from the page, which are
 	// dropped rather than ending the session.
 	discard uint64
+	request FileRequest // the operation as asked, for the observer
 }
+
+// finish ends the operation id and returns what was asked.
+func (f *fileOperation) finish(id uint32) (FileRequest, bool) {
+	f.mu.Lock()
+	request := f.request
+	f.mu.Unlock()
+	return request, f.end(id)
+}
+
+// FileObserver is told how each operation that moves or changes a file
+// ended: its request, the failure word ("" when done) and the bytes it moved.
+// An error ends the session, as one whose record cannot be written.
+type FileObserver func(r FileRequest, failure FileFailure, size uint64) error
 
 func (f *fileOperation) begin(r FileRequest) bool {
 	f.mu.Lock()
@@ -331,7 +345,7 @@ func (f *fileOperation) begin(r FileRequest) bool {
 	if f.id != 0 {
 		return false
 	}
-	f.id, f.op, f.accepted, f.left, f.received, f.discard = r.ID, r.Op, false, r.Size, 0, 0
+	f.id, f.op, f.accepted, f.left, f.received, f.discard, f.request = r.ID, r.Op, false, r.Size, 0, 0, r
 	return true
 }
 func (f *fileOperation) end(id uint32) bool {
@@ -354,7 +368,7 @@ func (f *fileOperation) current() uint32 {
 // runs before each operation and upload chunk and ends the session when it
 // fails (a sign-in that is no longer ready). Mode is enforced here again for
 // every operation, and the worker enforces it a third time.
-func FilesRelay(ctx context.Context, conn *websocket.Conn, stream FilesStream, mode FilesMode, activity func() error) {
+func FilesRelay(ctx context.Context, conn *websocket.Conn, stream FilesStream, mode FilesMode, activity func() error, observe FileObserver) {
 	if ctx == nil || conn == nil || stream == nil || activity == nil || !ValidFilesMode(mode) {
 		if conn != nil {
 			_ = conn.CloseNow()
@@ -389,7 +403,7 @@ func FilesRelay(ctx context.Context, conn *websocket.Conn, stream FilesStream, m
 		}
 		_ = conn.CloseNow()
 	})
-	runFiles(ctx, cancel, conn, stream, mode, activity, creditTimeout)
+	runFiles(ctx, cancel, conn, stream, mode, activity, observe, creditTimeout)
 	cancel(nil)
 	<-closed
 }
@@ -399,8 +413,17 @@ func FilesRelay(ctx context.Context, conn *websocket.Conn, stream FilesStream, m
 // which is what stops a read or write in progress. The socket is never read
 // or written with a context the ending cancels: that would close it before
 // the page heard why.
-func runFiles(ctx context.Context, end context.CancelCauseFunc, conn *websocket.Conn, stream FilesStream, mode FilesMode, activity func() error, wait time.Duration) {
+func runFiles(ctx context.Context, end context.CancelCauseFunc, conn *websocket.Conn, stream FilesStream, mode FilesMode, activity func() error, observe FileObserver, wait time.Duration) {
 	var op fileOperation
+	// record tells the observer how an operation ended; a record that cannot
+	// be written ends the session with its own word.
+	record := func(r FileRequest, failure FileFailure, size uint64) bool {
+		if observe == nil || r.Op == OpList || observe(r, failure, size) == nil {
+			return true
+		}
+		end(ReasonUnrecorded)
+		return false
+	}
 	window := &flow{credit: make(chan struct{}, 1)}
 	socket := context.WithoutCancel(ctx)
 	refuse := func() { end(ReasonRefused) }
@@ -430,7 +453,7 @@ func runFiles(ctx context.Context, end context.CancelCauseFunc, conn *websocket.
 				if !open {
 					return
 				}
-				if !forwardReply(ctx, socket, conn, &op, window, reply, send, wait) {
+				if !forwardReply(ctx, socket, conn, &op, window, reply, send, record, wait) {
 					refuse()
 					return
 				}
@@ -477,6 +500,9 @@ func runFiles(ctx context.Context, end context.CancelCauseFunc, conn *websocket.
 				}
 				if request.Op.Writes() && mode != FilesBoth {
 					op.end(request.ID)
+					if !record(request, FailNotAllowed, 0) {
+						return
+					}
 					reply, _ := json.Marshal(map[string]any{"type": "failed", "id": request.ID, "reason": FailNotAllowed})
 					select {
 					case local <- reply:
@@ -520,7 +546,7 @@ func acceptChunk(op *fileOperation, data []byte) (forward, ok bool) {
 
 // forwardReply checks a worker reply against the operation in flight and
 // passes it to the page. A reply that does not fit ends the session.
-func forwardReply(ctx, socket context.Context, conn *websocket.Conn, op *fileOperation, window *flow, reply FileReply, send func(any) bool, wait time.Duration) bool {
+func forwardReply(ctx, socket context.Context, conn *websocket.Conn, op *fileOperation, window *flow, reply FileReply, send func(any) bool, record func(FileRequest, FileFailure, uint64) bool, wait time.Duration) bool {
 	op.mu.Lock()
 	id, kind, accepted := op.id, op.op, op.accepted
 	op.mu.Unlock()
@@ -579,7 +605,8 @@ func forwardReply(ctx, socket context.Context, conn *websocket.Conn, op *fileOpe
 		if kind == OpGet || kind == OpPut || kind == OpReplace {
 			message["size"] = reply.Size
 		}
-		return op.end(id) && send(message)
+		request, ok := op.finish(id)
+		return ok && record(request, "", reply.Size) && send(message)
 	case ReplyFailed:
 		if !ValidFailure(reply.Failure) {
 			return false
@@ -589,7 +616,8 @@ func forwardReply(ctx, socket context.Context, conn *websocket.Conn, op *fileOpe
 			op.discard = op.left
 		}
 		op.mu.Unlock()
-		return op.end(id) && send(map[string]any{"type": "failed", "id": id, "reason": reply.Failure})
+		request, ok := op.finish(id)
+		return ok && record(request, reply.Failure, 0) && send(map[string]any{"type": "failed", "id": id, "reason": reply.Failure})
 	}
 	return false
 }

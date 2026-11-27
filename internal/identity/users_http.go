@@ -100,7 +100,9 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 			return
 		}
 		var made, code string
-		if made, code, e = l.store.inviteAccount(actor, fields["username"], role, hash, now); e == nil {
+		note := l.noteLocked(s, "person-invited")
+		note.Detail = map[string]string{"role": fields["role"]}
+		if made, code, e = l.store.inviteAccount(actor, fields["username"], role, hash, now, note); e == nil {
 			reply = struct {
 				ID   string `json:"id"`
 				Code string `json:"code"`
@@ -113,21 +115,27 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 			refuse(w, 400)
 			return
 		}
-		e = l.store.changeAccount(actor, target, func(a *durableAccount) error { a.Role = role; return nil })
+		note := l.personNoteLocked(s, "role-changed", target)
+		note.Detail = map[string]string{"role": fields["role"]}
+		e = l.store.changeAccount(actor, target, func(a *durableAccount) error { a.Role = role; return nil }, note)
 	case (action == "block" || action == "unblock") && r.Method == "POST":
 		if _, ok := readFields(w, r, 1024); !ok {
 			refuse(w, 400)
 			return
 		}
 		blocked := action == "block"
-		e = l.store.changeAccount(actor, target, func(a *durableAccount) error { a.Disabled = blocked; return nil })
+		kind := "person-unblocked"
+		if blocked {
+			kind = "person-blocked"
+		}
+		e = l.store.changeAccount(actor, target, func(a *durableAccount) error { a.Disabled = blocked; return nil }, l.personNoteLocked(s, kind, target))
 	case action == "reset" && r.Method == "POST":
 		if _, ok := readFields(w, r, 1024); !ok {
 			refuse(w, 400)
 			return
 		}
 		change, code := resetAccess(now)
-		if e = l.store.changeAccount(actor, target, change); e == nil {
+		if e = l.store.changeAccount(actor, target, change, l.personNoteLocked(s, "phone-reset", target)); e == nil {
 			reply = struct {
 				Code string `json:"code"`
 			}{*code}
@@ -138,7 +146,7 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 			return
 		}
 		change, code := passwordReset(now)
-		if e = l.store.changeAccount(actor, target, change); e == nil {
+		if e = l.store.changeAccount(actor, target, change, l.personNoteLocked(s, "password-reset", target)); e == nil {
 			reply = struct {
 				Code string `json:"code"`
 			}{*code}
@@ -159,7 +167,7 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 			return
 		}
 		var code string
-		if code, e = l.store.startOverAccount(actor, target, hash, now); e == nil {
+		if code, e = l.store.startOverAccount(actor, target, hash, now, l.personNoteLocked(s, "person-restarted", target)); e == nil {
 			reply = struct {
 				Code string `json:"code"`
 			}{code}
@@ -169,7 +177,7 @@ func (l *Lab) usersHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s *
 			refuse(w, 400)
 			return
 		}
-		e = l.store.deleteAccount(actor, target)
+		e = l.store.deleteAccount(actor, target, l.personNoteLocked(s, "person-deleted", target))
 	default:
 		refuse(w, 404)
 		return
@@ -233,7 +241,8 @@ func (l *Lab) inviteHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.closed || r.Context().Err() != nil || l.store.claimInvite(fields["username"], fields["code"], hash, l.now()) != nil {
+	taken := activityEntry{Time: l.now().Unix(), Kind: "invite-taken", Source: l.source(r)}
+	if l.closed || r.Context().Err() != nil || l.store.claimInvite(fields["username"], fields["code"], hash, l.now(), taken) != nil {
 		refuse(w, 401)
 		return
 	}
@@ -286,7 +295,10 @@ func (l *Lab) passwordResetHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.closed || r.Context().Err() != nil || l.store.resetPassword(fields["username"], fields["code"], fields["factor"], hash, l.now()) != nil {
+	// The reset taken, or the code beside it refused.
+	taken := activityEntry{Time: l.now().Unix(), Kind: "reset-taken", Source: l.source(r)}
+	refused := activityEntry{Time: l.now().Unix(), Kind: "sign-in-refused", Source: l.source(r), Detail: map[string]string{"count": "1", "step": "reset"}}
+	if l.closed || r.Context().Err() != nil || l.store.resetPassword(fields["username"], fields["code"], fields["factor"], hash, l.now(), taken, refused) != nil {
 		refuse(w, 401)
 		return
 	}

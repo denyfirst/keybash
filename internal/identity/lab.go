@@ -67,7 +67,8 @@ type session struct {
 	replacing     bool
 	setupProved   bool // bootstrap or operator setup code shown for first enrollment
 	reauthUntil   time.Time
-	stepFailures  int // wrong step-up codes in this session; see stepUpFailures
+	stepFailures  int    // wrong step-up codes in this session; see stepUpFailures
+	source        string // where the sign-in came from (Lab.source), for the activity record
 }
 
 // Lab is a single-process, loopback HTTPS identity boundary. NewLab is memory-
@@ -80,14 +81,18 @@ type Lab struct {
 	dummy        PasswordHash
 	sessions     map[[32]byte]*session
 	csrfKey      [32]byte
-	attempts     map[string]*window // purpose:account keys; see attemptLocked
-	derive       chan struct{}
-	now          func() time.Time
-	closed       bool
-	stop, done   chan struct{}
-	store        *Store
-	remote       *remoteConfig
-	sources      []netip.Prefix // nil: loopback clients only
+	attempts     map[string]*window           // purpose:account keys; see attemptLocked
+	refusals     map[refusalKey]*refusalCount // refused sign-ins waiting to be recorded
+	// The activity record's chain as last walked, and when (activityHTTP).
+	activity        activityCheck
+	activityChecked time.Time
+	derive          chan struct{}
+	now             func() time.Time
+	closed          bool
+	stop, done      chan struct{}
+	store           *Store
+	remote          *remoteConfig
+	sources         []netip.Prefix // nil: loopback clients only
 	// Where web servers may be added; see TargetNetworks. nil: nowhere.
 	networks, protected []netip.Prefix
 	watchEvery          time.Duration // see WatchCertificates; 0: never
@@ -159,7 +164,7 @@ func originHost(origin string, exposed bool) (string, bool) {
 }
 
 func NewLab(origin string, accounts []Account, options ...Option) (*Lab, error) {
-	l := &Lab{origin: origin, accounts: make(map[string]*account), sessions: make(map[[32]byte]*session), attempts: make(map[string]*window),
+	l := &Lab{origin: origin, accounts: make(map[string]*account), sessions: make(map[[32]byte]*session), attempts: make(map[string]*window), refusals: make(map[refusalKey]*refusalCount),
 		derive: make(chan struct{}, 2), now: time.Now, stop: make(chan struct{}), done: make(chan struct{})}
 	for _, option := range options {
 		if option == nil || option(l) != nil {
@@ -205,6 +210,7 @@ func (l *Lab) expirer() {
 				}
 			}
 			l.sweepLocked()
+			l.flushRefusalsLocked(false)
 			l.mu.Unlock()
 		}
 	}
@@ -218,6 +224,7 @@ func (l *Lab) Close() error {
 		for id := range l.sessions {
 			l.endLocked(id, nil) // the gateway is stopping: no reason to give
 		}
+		l.flushRefusalsLocked(true)
 	}
 	l.mu.Unlock()
 	<-l.done
@@ -231,6 +238,7 @@ func (l *Lab) forgetLocked(id [32]byte) { l.endLocked(id, terminalweb.ReasonSign
 // pages why.
 func (l *Lab) endLocked(id [32]byte, cause error) {
 	if s := l.sessions[id]; s != nil {
+		l.endedLocked(s, cause)
 		s.cancel(cause)
 		delete(l.sessions, id)
 	}
@@ -396,9 +404,27 @@ func (l *Lab) loginFrom(ctx context.Context, source, username, password, previou
 	}
 	if !valid || a == nil || a.disabled || a.invited || a.revision != revision || l.closed || ctx.Err() != nil ||
 		oldValid && oldSession != nil && l.sessions[oldID] != oldSession {
+		// A refusal for an account is counted for the activity record; a name
+		// that is no account is counted without it, since it may be a password.
+		owner := ""
+		if a != nil && l.store != nil {
+			owner = a.id
+		}
+		l.refusedLocked(owner, source, "password")
 		return "", errRefused
 	}
-	return l.issueLocked(username, previous)
+	raw, e := l.issueLocked(username, previous)
+	if e == nil {
+		if id, ok := tokenID(raw); ok && l.sessions[id] != nil {
+			l.sessions[id].source = source
+		}
+	}
+	return raw, e
+}
+
+// noteLocked starts an entry for what s's person did, from where they signed in.
+func (l *Lab) noteLocked(s *session, kind string) activityEntry {
+	return activityEntry{Time: l.now().Unix(), Kind: kind, Actor: s.owner, Source: s.source}
 }
 
 func (l *Lab) issueLocked(username, previous string) (string, error) {
@@ -482,7 +508,7 @@ func (l *Lab) change(ctx context.Context, id [32]byte, current, replacement stri
 		return errRefused
 	}
 	if l.store != nil {
-		if l.store.replacePassword(a.id, revision, next) != nil {
+		if l.store.replacePassword(a.id, revision, next, l.noteLocked(s, "password-changed")) != nil {
 			return errRefused
 		}
 		l.refreshLocked(s.username)
