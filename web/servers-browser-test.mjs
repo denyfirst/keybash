@@ -45,10 +45,10 @@ try {
   // reaches it, and it is managed here like any other.
   assert.equal(await row('Catalog box').locator('.server-accounts').textContent(), 'No accounts yet: nobody can connect.', 'a server from the file came open to people');
   assert.equal(await row('Catalog box').getByRole('link', { name: 'Open', exact: true }).count(), 1, 'a server from the file cannot be managed here');
-  // Where a server may be is said under the address it is added at; the page
-  // says nothing while servers can be added.
+  // Where a server may be is said only when an address falls outside it; the
+  // page and the sheet say nothing of it while servers can be added.
   assert(await page.locator('#server-networks').isHidden(), 'the page spoke of networks while servers can be added');
-  assert.equal(await page.locator('#server-inside').textContent(), 'Inside 10.20.0.0/24.');
+  assert.equal(await page.locator('#server-inside').count(), 0, 'the networks are listed under the address again');
   // The guide holds what the page leaves unsaid, in a new tab, telling it nothing.
   assert.equal(await page.locator('#guide').getAttribute('href'), 'https://github.com/denyfirst/keybash/blob/main/docs/GUIDE.md#servers');
   assert.deepEqual([await page.locator('#guide').getAttribute('target'), await page.locator('#guide').getAttribute('rel')], ['_blank', 'noopener noreferrer']);
@@ -58,7 +58,7 @@ try {
   stage = 'refused addresses';
   await page.locator('#add-server').click(); await page.locator('#server-dialog').waitFor({ state: 'visible' });
   await page.locator('#server-name').fill('Elsewhere'); await page.locator('#server-address').fill('10.21.0.7'); await page.locator('#server-submit').click();
-  await sheetNotice('server-dialog').filter({ hasText: /outside the networks this Keybash may reach/ }).waitFor(); await settled();
+  await sheetNotice('server-dialog').filter({ hasText: /outside the networks this Keybash may reach: 10\.20\.0\.0\/24\. To allow it/ }).waitFor(); await settled();
   assert(await page.locator('#server-check').isHidden(), 'a refused address moved on to comparing');
   await page.locator('#server-address').fill('10.20.0.9'); await page.locator('#server-submit').click();
   await sheetNotice('server-dialog').filter({ hasText: /No SSH server with an Ed25519 key answered/ }).waitFor(); await settled();

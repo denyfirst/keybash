@@ -16,12 +16,29 @@ function clearInputs() {
   document.querySelectorAll('input[type=password], input[autocomplete=one-time-code]').forEach(el => { el.value = ''; });
   document.querySelectorAll('.code-boxes').forEach(box => { box.dataset.filled = '0'; });
 }
-// The six boxes follow the one field: digits only, the next box lit.
-$('enrollment-code')?.addEventListener('input', event => {
-  const field = event.target, digits = field.value.replace(/[^0-9]/g, '').slice(0, 6);
+// The six boxes follow the one field: digits only, the next box lit. Where the
+// code is asked for to sign in or confirm a change ([data-code]), the form goes
+// as the sixth digit arrives, typed, pasted or filled in, and a letter turns
+// the boxes into one plain field for a recovery code, as the switch under them
+// does. Setting up a phone keeps its own button.
+function codeMode(holder, mode) {
+  const field = holder.querySelector('.code-boxes > input');
+  holder.dataset.code = mode; field.inputMode = mode === 'recovery' ? 'text' : 'numeric';
+  field.value = ''; field.parentElement.dataset.filled = '0';
+}
+document.querySelectorAll('.code-boxes > input').forEach(field => field.addEventListener('input', event => {
+  const holder = field.closest('[data-code]');
+  if (holder?.dataset.code === 'recovery') return;
+  if (holder && /[A-Za-z_]/.test(field.value)) { const typed = field.value.trim(); codeMode(holder, 'recovery'); field.value = typed; return; }
+  const digits = field.value.replace(/[^0-9]/g, '').slice(0, 6);
   if (field.value !== digits) field.value = digits;
   field.parentElement.dataset.filled = String(digits.length);
-});
+  if (holder && digits.length === 6 && !event.inputType?.startsWith('delete')) field.form?.requestSubmit();
+}));
+document.querySelectorAll('.code-switch').forEach(button => button.addEventListener('click', () => {
+  const holder = button.closest('[data-code]');
+  codeMode(holder, holder.dataset.code === 'recovery' ? 'phone' : 'recovery'); holder.querySelector('.code-boxes > input').focus();
+}));
 // The MFA seed, as a QR code and as text, is on screen only while it is
 // needed and the page is in view.
 const qrOK = rows => Array.isArray(rows) && rows.length >= 21 && rows.length <= 57 && (rows.length - 17) % 4 === 0 && rows.every(row => typeof row === 'string' && row.length === rows.length && /^[01]+$/.test(row));
@@ -42,6 +59,7 @@ function showSeed(secret, rows) {
 function clearAll() {
   clearInputs(); hideSeed(); csrf = ''; pendingPerson = null; pendingServer = null; scanned = null; pendingDelete = null;
   for (const id of ['account', 'account-name', 'focus-account', 'access', 'people', 'person-code', 'servers', 'server-networks', 'server-card', 'accounts', 'person-card', 'person-access', 'key-command', 'server-name-now', 'server-system-now']) if ($(id)) $(id).textContent = '';
+  document.querySelectorAll('.avatar').forEach(avatar => { avatar.textContent = ''; });
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   if ($('recovery-codes')) $('recovery-codes').value = '';
   for (const id of sections) if ($(id)) $(id).hidden = true;
@@ -83,12 +101,12 @@ function stepUp() {
     let sending = false;
     const finish = error => {
       $('stepup-form').removeEventListener('submit', send); $('stepup-cancel').removeEventListener('click', cancel); dialog.removeEventListener('cancel', cancel);
-      input.value = ''; $('stepup-error').textContent = ''; if (dialog.open) dialog.close(); stepping = null;
+      input.value = ''; input.parentElement.dataset.filled = '0'; $('stepup-error').textContent = ''; if (dialog.open) dialog.close(); stepping = null;
       if (error) reject(error); else resolve();
     };
     async function send(event) {
       event.preventDefault();
-      const code = input.value.trim(); input.value = '';
+      const code = input.value.trim(); input.value = ''; input.parentElement.dataset.filled = '0';
       if (sending || !code) return;
       sending = true; submit.disabled = true; $('stepup-error').textContent = '';
       try { await request('/api/reauth', 'POST', { code }); finish(); return; }
@@ -103,7 +121,7 @@ function stepUp() {
     }
     function cancel(event) { event?.preventDefault(); finish(Object.assign(new Error('cancelled'), { status: 'cancelled' })); }
     $('stepup-form').addEventListener('submit', send); $('stepup-cancel').addEventListener('click', cancel); dialog.addEventListener('cancel', cancel);
-    input.value = ''; $('stepup-error').textContent = ''; submit.disabled = false; dialog.showModal(); input.focus();
+    codeMode(dialog, 'phone'); $('stepup-error').textContent = ''; submit.disabled = false; dialog.showModal(); input.focus();
   });
   return stepping;
 }
@@ -117,7 +135,8 @@ function errorMessage(error) {
   if (error.status === 'invite') return 'The username or code was not accepted. Check both, and use the newest code: a new code replaces the old one, a code works once and expires after 72 hours. If you already chose your password with it, sign in instead.';
   if (error.status === 'taken') return 'That username is already taken. Choose another.';
   if (error.status === 'server-input') return 'Check the address and port: an IP address such as 192.168.1.20, and a port from 1 to 65535.';
-  if (error.status === 'outside') return 'That address is outside the networks this Keybash may reach. To allow it, run upgrade.sh with --target-networks on the Keybash server.';
+  // The networks are named here, where they matter, rather than under the field.
+  if (error.status === 'outside') return `That address is outside the networks this Keybash may reach${networks.length ? `: ${networks.join(', ')}` : ''}. To allow it, run upgrade.sh with --target-networks on the Keybash server.`;
   if (error.status === 'listed') return 'A server at that address and port is already listed.';
   if (error.status === 'changed') return 'The server shows another identity than the one you compared, or it is already listed. Read it again and compare.';
   if (error.status === 'unreachable') return 'No SSH server with an Ed25519 key answered there. Check the address and port, and that the server is on.';
@@ -182,13 +201,13 @@ function showCodes(data) {
 // ── Pictures ─────────────────────────────────────────────────────────────
 // Icons are drawn with DOM calls, like everything else the page builds.
 const svgNS = 'http://www.w3.org/2000/svg';
-// Two tones, as on the menu: a soft body ('soft:'), solid marks ('dot:') and lines.
-const keyIcon = ['soft:M8 11.4a4.6 4.6 0 1 1 0 9.2a4.6 4.6 0 1 1 0-9.2z', 'dot:M8 14.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'M11.3 12.7L20 4', 'M16.6 7.4l2.4 2.4', 'M14.3 9.7l1.8 1.8'];
+// Lines of one weight, as on the menu, and the odd solid mark ('dot:').
+const keyIcon = ['M8 11.4a4.6 4.6 0 1 1 0 9.2a4.6 4.6 0 1 1 0-9.2z', 'dot:M8 14.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'M11.3 12.7L20 4', 'M16.6 7.4l2.4 2.4', 'M14.3 9.7l1.8 1.8'];
 const icons = {
-  ssh: ['soft:M5.6 4.5h12.8a2.6 2.6 0 0 1 2.6 2.6v9.8a2.6 2.6 0 0 1-2.6 2.6H5.6A2.6 2.6 0 0 1 3 16.9V7.1a2.6 2.6 0 0 1 2.6-2.6z', 'M3 8.6h18', 'M7 12.2l2.4 2-2.4 2', 'dot:M12.2 15.2h3.4a.6.6 0 0 1 .6.6v.7a.6.6 0 0 1-.6.6h-3.4a.6.6 0 0 1-.6-.6v-.7a.6.6 0 0 1 .6-.6z'],
-  rdp: ['soft:M5.4 4h13.2A2.4 2.4 0 0 1 21 6.4v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 14.6V6.4A2.4 2.4 0 0 1 5.4 4z', 'M9 20.5h6', 'M12 17v3.5', 'dot:M9.8 7.4l5.6 2.3-2.4.9-.9 2.4z'],
+  ssh: ['M5.6 4.5h12.8a2.6 2.6 0 0 1 2.6 2.6v9.8a2.6 2.6 0 0 1-2.6 2.6H5.6A2.6 2.6 0 0 1 3 16.9V7.1a2.6 2.6 0 0 1 2.6-2.6z', 'M3 8.6h18', 'M7 12.2l2.4 2-2.4 2', 'dot:M12.2 15.2h3.4a.6.6 0 0 1 .6.6v.7a.6.6 0 0 1-.6.6h-3.4a.6.6 0 0 1-.6-.6v-.7a.6.6 0 0 1 .6-.6z'],
+  rdp: ['M5.4 4h13.2A2.4 2.4 0 0 1 21 6.4v8.2a2.4 2.4 0 0 1-2.4 2.4H5.4A2.4 2.4 0 0 1 3 14.6V6.4A2.4 2.4 0 0 1 5.4 4z', 'M9 20.5h6', 'M12 17v3.5', 'dot:M9.8 7.4l5.6 2.3-2.4.9-.9 2.4z'],
   play: ['dot:M8 6.3v11.4a1.2 1.2 0 0 0 1.8 1l9-5.7a1.2 1.2 0 0 0 0-2L9.8 5.3A1.2 1.2 0 0 0 8 6.3z'],
-  password: ['soft:M5 7h14a2.5 2.5 0 0 1 2.5 2.5v5A2.5 2.5 0 0 1 19 17H5a2.5 2.5 0 0 1-2.5-2.5v-5A2.5 2.5 0 0 1 5 7z', 'dot:M7.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M12 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M16.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z'],
+  password: ['M5 7h14a2.5 2.5 0 0 1 2.5 2.5v5A2.5 2.5 0 0 1 19 17H5a2.5 2.5 0 0 1-2.5-2.5v-5A2.5 2.5 0 0 1 5 7z', 'dot:M7.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M12 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z', 'dot:M16.5 10.7a1.3 1.3 0 1 1 0 2.6a1.3 1.3 0 1 1 0-2.6z'],
   'ssh-key': keyIcon,
   // A key made here, with a spark: it waits to be put on its server.
   made: [...keyIcon, 'dot:M6 2.4l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z'],
@@ -200,7 +219,7 @@ function glyph(name, className) {
   const svg = document.createElementNS(svgNS, 'svg');
   for (const [key, value] of [['viewBox', '0 0 24 24'], ['aria-hidden', 'true'], ['focusable', 'false'], ['class', className]]) svg.setAttribute(key, value);
   for (const part of icons[name]) {
-    const [, tone, d] = part.match(/^(?:(soft|dot):)?(.*)$/);
+    const [, tone, d] = part.match(/^(?:(dot):)?(.*)$/);
     const path = document.createElementNS(svgNS, 'path'); path.setAttribute('d', d);
     if (tone) path.setAttribute('class', `g-${tone}`);
     svg.append(path);
@@ -477,9 +496,8 @@ async function loadServers() {
   $('add-server').hidden = !adding;
   const code = text => make('code', '', text);
   const option = code('upgrade.sh --target-networks=…');
-  // Where servers may be is said where one is added; the page speaks only
-  // when nothing can be.
-  $('server-inside').replaceChildren(...networks.length ? ['Inside ', ...networks.flatMap((n, i) => i ? [', ', code(n)] : [code(n)]), '.'] : []);
+  // Where servers may be is said when an address falls outside it; the page
+  // speaks only when nothing can be added at all.
   $('server-networks').replaceChildren('This installation names no networks for servers, so none can be added. On the Keybash server, run ', option, ' (see Installation).');
   $('server-networks').hidden = role !== 'admin' || networks.length > 0;
   $('servers').replaceChildren(...servers.map(serverRow));
@@ -1219,12 +1237,15 @@ async function loadAccount() {
   const data = await request('/api/session');
   if (typeof data?.username !== 'string' || !/^[a-z0-9._-]{1,64}$/.test(data.username) || typeof data.csrf !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf) || !['enroll', 'challenge', 'ready'].includes(data.stage) || !Object.hasOwn(access, data.role)) throw new Error('invalid session');
   csrf = data.csrf; role = data.role; for (const id of ['account', 'account-name', 'focus-account']) $(id).textContent = data.username; document.body.dataset.stage = data.stage;
+  document.querySelectorAll('.avatar').forEach(avatar => { avatar.textContent = data.username[0]; });
   remoteEnabled = data.remote === true;
   setupRequired = data.stage === 'enroll' && data.setup === true; $('setup-proof').hidden = !setupRequired;
   sections.forEach(id => { $(id).hidden = true; });
   $('heading').textContent = data.stage === 'enroll' ? 'Set up your phone' : 'Confirm it’s you';
   showPage(data.stage === 'ready');
   $(data.stage === 'ready' ? 'vault' : data.stage).hidden = false; document.body.dataset.loaded = '';
+  // The code is typed at once, with no click into the field first.
+  if (data.stage === 'challenge') { codeMode($('challenge'), 'phone'); $('factor-code').focus(); }
   if (data.stage !== 'ready') return;
   // Who "you" is, to mark yourself among people.
   if (role === 'admin') { try { self = (await loadPeople()).self; } catch { self = ''; } }
@@ -1361,9 +1382,12 @@ click('begin-enroll', async () => {
   if (typeof data?.secret !== 'string' || !/^[A-Z2-7]{32}$/.test(data.secret) || !qrOK(data.qr)) throw new Error('invalid seed');
   if (document.visibilityState !== 'visible') return;
   showSeed(data.secret, data.qr);
+  // With a mouse, the code from the app can be typed straight away; a phone's
+  // keyboard would cover the QR code, so a finger taps the boxes itself.
+  if (matchMedia('(pointer: fine)').matches) $('enrollment-code').focus({ preventScroll: true });
 });
 bind('enrollment', async () => { const code = $('enrollment-code').value; clearInputs(); showCodes(await request('/api/mfa/confirm', 'POST', { code })); });
-bind('factor', async () => { const code = $('factor-code').value; clearInputs(); await request('/api/mfa/verify', 'POST', { code }); await loadAccount(); });
+bind('factor', async () => { const code = $('factor-code').value.trim(); clearInputs(); await request('/api/mfa/verify', 'POST', { code }); await loadAccount(); });
 $('change-password')?.addEventListener('click', () => { if (busy) return; clearInputs(); dialogNotice(''); $('password-dialog').showModal(); $('current-password').focus(); });
 $('password-cancel')?.addEventListener('click', () => $('password-dialog').close());
 $('password-dialog')?.addEventListener('close', clearInputs);

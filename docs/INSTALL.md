@@ -234,7 +234,7 @@ Administrators add servers on the **Servers** page, with no restart. For an SSH
 server:
 
 1. **Add server:** a name, the server's IP address and its SSH port, and if
-   you like the picture on its cards (the tile beside the name). The
+   you like the picture on its cards (at the start of the name field). The
    gateway reads the server's Ed25519 host key, through the target guard and
    inside the target networks only. The handshake stops at the key and never
    authenticates.

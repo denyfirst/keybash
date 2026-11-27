@@ -258,6 +258,38 @@ func TestNoRestingStateIsFadedOut(t *testing.T) {
 	}
 }
 
+// Icons are single lines with no shaded body, and nothing a person acts on or
+// reads from is drawn with a gradient: tiles, avatars and buttons are flat. The
+// only gradients light the page itself, behind everything.
+func TestIconsTilesAndButtonsAreFlat(t *testing.T) {
+	for _, name := range []string{"custody-workspace.html", "custody-login.html", "index.html", "remote-desktop.html", "remote-closed.html", "custody.mjs", "app.mjs", "remote-desktop.mjs"} {
+		if text := sheet(t, name); strings.Contains(text, "g-soft") || strings.Contains(text, "'soft:") {
+			t.Errorf("%s draws an icon with a shaded body", name)
+		}
+	}
+	rule := regexp.MustCompile(`(?s)([^{};]+)\{([^{}]*)\}`)
+	lit := map[string]bool{".workspace-main": true, ".workspace-main::before": true, "body.signin-page": true, "body.workspace:not([data-stage=\"ready\"])": true, ".server-card::before": true}
+	for _, name := range sheets {
+		for _, m := range rule.FindAllStringSubmatch(sheet(t, name), -1) {
+			if !strings.Contains(m[2], "gradient(") {
+				continue
+			}
+			// A selector after a comment or inside a media query keeps only its last line.
+			lines := strings.Split(strings.TrimSpace(m[1]), "\n")
+			selector := strings.TrimSpace(lines[len(lines)-1])
+			if i := strings.LastIndex(selector, "*/"); i >= 0 {
+				selector = strings.TrimSpace(selector[i+2:])
+			}
+			for _, prefix := range []string{`:root:not([data-theme="light"]) `, `:root[data-theme="dark"] `} {
+				selector = strings.TrimPrefix(selector, prefix)
+			}
+			if !lit[selector] {
+				t.Errorf("%s draws %q with a gradient", name, selector)
+			}
+		}
+	}
+}
+
 func TestTheContrastArithmeticIsRight(t *testing.T) {
 	for _, c := range []struct {
 		a, b string
