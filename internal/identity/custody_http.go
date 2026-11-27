@@ -245,6 +245,10 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		l.remoteDesktop(w, r)
 		return
 	}
+	if r.URL.Path == "/api/remote/files-socket" {
+		l.remoteFilesSocket(w, r)
+		return
+	}
 	// Read bounded bodies before taking the account/session mutex. A slow
 	// client must not hold logout, expiry or another user's authentication.
 	if r.Method != "GET" {
@@ -549,7 +553,7 @@ func (l *Lab) serveDurable(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, data)
 		return
 	}
-	if r.URL.Path == "/api/access" || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/capacity" {
+	if r.URL.Path == "/api/access" || r.URL.Path == "/api/remote/open" || r.URL.Path == "/api/remote/files" || r.URL.Path == "/api/remote/capacity" {
 		l.remoteHTTP(w, r, id, s)
 		return
 	}

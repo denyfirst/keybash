@@ -43,7 +43,7 @@ func TestProcessSetupTellsRefusalApart(t *testing.T) {
 			}()
 			setup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 			defer stop()
-			err = finishProcessSetup(s, setup, "ssh.invalid", syntheticSigner(t).PublicKey().Marshal(), "lab-user", methodPassword, []byte(syntheticRemotePassword))
+			err = finishProcessSetup(s, setup, "ssh.invalid", syntheticSigner(t).PublicKey().Marshal(), "lab-user", methodPassword, []byte(syntheticRemotePassword), workerKind{})
 			want := ErrProcess
 			if name == "refused" {
 				want = ErrRefused

@@ -213,6 +213,7 @@ const icons = {
   made: [...keyIcon, 'dot:M6 2.4l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z'],
   key: keyIcon,
   back: ['M14.5 6l-6 6 6 6'],
+  folder: ['M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z'],
   close: ['M7 7l10 10', 'M17 7L7 17'],
 };
 function glyph(name, className) {
@@ -298,10 +299,13 @@ const hostPort = (host, port) => `${host.includes(':') ? `[${host}]` : host}:${p
 // ── Your servers: one card per account the person is on ─────────────────
 // A row as the page gets it: the account, its server and whether it opens.
 // Nothing else, and never a secret, so a row with any other field is refused.
-const accessKeys = ['account', 'server', 'name', 'protocol', 'username', 'trust', 'unchecked', 'system'];
+const accessKeys = ['account', 'server', 'name', 'protocol', 'username', 'trust', 'unchecked', 'system', 'files'];
+// What a server allows of file transfer (ADR 0011): only SSH, and absent when off.
+const filesOK = (files, protocol) => files === undefined || protocol === 'ssh' && (files === 'download' || files === 'both');
+const filesWords = { download: 'Download only', both: 'Upload and download' };
 const accessRowOK = x => typeof x === 'object' && x !== null && Object.keys(x).every(key => accessKeys.includes(key)) && idOK(x.account) && idOK(x.server) &&
   typeof x.name === 'string' && x.name.length >= 1 && x.name.length <= 160 && ['ssh', 'rdp'].includes(x.protocol) && typeof x.username === 'string' && x.username.length >= 1 && x.username.length <= 128 &&
-  ['verified', 'stopped', 'unavailable'].includes(x.trust) && (x.unchecked === undefined || x.unchecked === true && x.protocol === 'rdp') && (x.system === undefined || Object.hasOwn(systems, x.system));
+  ['verified', 'stopped', 'unavailable'].includes(x.trust) && (x.unchecked === undefined || x.unchecked === true && x.protocol === 'rdp') && (x.system === undefined || Object.hasOwn(systems, x.system)) && filesOK(x.files, x.protocol);
 const trustWords = { verified: 'Ready', stopped: 'Server changed', unavailable: 'Unavailable' };
 const trustHelp = {
   stopped: 'This server now shows a different certificate, so Keybash will not connect and sends it no password. Your administrator can see this and has to check it.',
@@ -319,7 +323,13 @@ function accessCard(row) {
     const actions = make('div', 'server-actions');
     // Each session opens in its own tab.
     const link = make('a', 'connect'); link.href = `/remote/${row.protocol}/${row.account}`; link.target = '_blank'; link.rel = 'noopener';
-    link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link); card.append(actions);
+    link.append(glyph('play', 'button-glyph'), 'Connect'); actions.append(link);
+    // Files, where the server allows it, opens in its own tab too.
+    if (row.files) {
+      const files = make('a', 'connect files-link'); files.href = `/remote/files/${row.account}`; files.target = '_blank'; files.rel = 'noopener';
+      files.title = filesWords[row.files]; files.append(glyph('folder', 'button-glyph'), 'Files'); actions.append(files);
+    }
+    card.append(actions);
   }
   return card;
 }
@@ -354,7 +364,7 @@ const serverOK = s => idOK(s?.id) && typeof s.name === 'string' && s.name.length
   Number.isInteger(s.port) && s.port >= 1 && s.port <= 65535 && Array.isArray(s.addresses) && s.addresses.length >= 1 && s.addresses.length <= 16 && s.addresses.every(ip => typeof ip === 'string' && /^[a-f0-9:.]{1,45}$/.test(ip)) &&
   fingerprintOK(s.fingerprint) && (s.protocol === 'rdp' || sshPrintOK(s.fingerprint)) && typeof s.available === 'boolean' &&
   (s.certificate === undefined || ['current', 'soon', 'expired', 'changed'].includes(s.certificate)) && (s.expires === undefined || Number.isInteger(s.expires)) &&
-  (s.unchecked === undefined || s.unchecked === true && s.protocol === 'rdp') && (s.system === undefined || Object.hasOwn(systems, s.system)) &&
+  (s.unchecked === undefined || s.unchecked === true && s.protocol === 'rdp') && (s.system === undefined || Object.hasOwn(systems, s.system)) && filesOK(s.files, s.protocol) &&
   Array.isArray(s.accounts) && s.accounts.length <= 16 && s.accounts.every(a => accountOK(a, s.protocol)) && new Set(s.accounts.map(a => a.id)).size === s.accounts.length &&
   (s.added_by === undefined || idOK(s.added_by)) && Number.isInteger(s.added);
 const serversOK = data => Array.isArray(data?.networks) && data.networks.length <= 64 && data.networks.every(n => typeof n === 'string' && /^[a-f0-9:.]{2,45}\/[0-9]{1,3}$/.test(n)) && typeof data.adding === 'boolean' && typeof data.ssh === 'boolean' && typeof data.rdp === 'boolean' &&
@@ -533,9 +543,25 @@ function paintSettings(server) {
   $('server-name-now').textContent = server.name;
   $('server-system-now').textContent = systems[server.system]?.title ?? 'Not chosen';
   $('server-system').textContent = systems[server.system] ? 'Change' : 'Choose';
+  // File transfer is an SSH server's (ADR 0011).
+  $('server-files-setting').hidden = server.protocol !== 'ssh';
+  $('server-files-now').textContent = filesWords[server.files] ?? 'Off';
 }
 $('server-rename')?.addEventListener('click', () => { if (shownServer) openRename(shownServer); });
 $('server-system')?.addEventListener('click', () => { if (shownServer) openSystemPicker(shownServer); });
+$('server-files')?.addEventListener('click', () => {
+  if (busy || !shownServer || shownServer.protocol !== 'ssh') return;
+  for (const input of document.querySelectorAll('input[name=files-mode]')) input.checked = input.value === (shownServer.files ?? 'off');
+  dialogNotice(''); $('files-dialog').showModal();
+});
+$('files-cancel')?.addEventListener('click', () => $('files-dialog').close());
+bind('files-form', async () => {
+  const server = shownServer, chosen = document.querySelector('input[name=files-mode]:checked')?.value;
+  if (!server || !['off', 'download', 'both'].includes(chosen)) return;
+  if (chosen !== (server.files ?? 'off')) await request(`/api/servers/${server.id}/files`, 'POST', { files: chosen });
+  $('files-dialog').close(); await refreshServer(server.id);
+  notice(chosen === 'off' ? `File transfer is off on ${server.name}.` : `${server.name} now allows ${chosen === 'both' ? 'uploads and downloads' : 'downloads only'} on its Files page.`);
+});
 $('server-remove')?.addEventListener('click', () => { if (shownServer) askConfirm('server', { id: shownServer.id, name: shownServer.name }); });
 // One account: its name on the server, how Keybash signs in as it, and the
 // people who may.

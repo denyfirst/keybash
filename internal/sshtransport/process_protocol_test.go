@@ -67,7 +67,7 @@ func workerCoreFixture(t *testing.T, pinCorrect bool) (net.Conn, *sshFixture, <-
 		t.Fatal("key handoff failed")
 	}
 	key.Close()
-	start := ssh.Marshal(&workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: pin, Method: methodKey, Secret: material})
+	start := ssh.Marshal(&workerStart{Version: workerVersion, Kind: kindTerminal, Host: "ssh.invalid", User: "lab-user", Pin: pin, Method: methodKey, Secret: material})
 	if writeWorkerFrame(parent, frameStart, start) != nil {
 		t.Fatal("start write failed")
 	}
@@ -87,7 +87,7 @@ func TestSSHWorkerCorePasswordHandoff(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- serveSSHWorker(ctx, child, child, fixture.client) }()
-		start := ssh.Marshal(&workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)})
+		start := ssh.Marshal(&workerStart{Version: workerVersion, Kind: kindTerminal, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)})
 		if writeWorkerFrame(parent, frameStart, start) != nil {
 			t.Fatal("start write failed")
 		}
@@ -114,7 +114,7 @@ func TestSSHWorkerCoreRefusedCredentialSaysSo(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
 		go func() { done <- serveSSHWorker(ctx, child, child, fixture.client) }()
-		start := &workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)}
+		start := &workerStart{Version: workerVersion, Kind: kindTerminal, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)}
 		if name == "no such key" {
 			_, private, err := ed25519.GenerateKey(rand.Reader)
 			key, e := sshkey.New(private)
@@ -167,7 +167,7 @@ func TestSessionHandoffRoundTrip(t *testing.T) {
 		if err != nil || !bytes.Equal(validated, pin) {
 			t.Fatal("valid credential handoff refused")
 		}
-		config, release, err := workerConfig(workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: validated, Method: method, Secret: secret})
+		config, release, err := workerConfig(workerStart{Version: workerVersion, Kind: kindTerminal, Host: "ssh.invalid", User: "lab-user", Pin: validated, Method: method, Secret: secret})
 		if err != nil {
 			t.Fatalf("%s handoff did not decode", method)
 		}
@@ -282,8 +282,8 @@ func TestSSHWorkerCoreUnexpectedInputCloses(t *testing.T) {
 
 func TestSSHWorkerCoreMalformedStartupNeverAuthenticates(t *testing.T) {
 	host, user := syntheticSigner(t), syntheticSigner(t)
-	valid := workerStart{Version: 2, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)}
-	for _, variant := range []string{"version", "version0", "version3", "host", "secret", "method", "user", "pin", "trailing"} {
+	valid := workerStart{Version: workerVersion, Kind: kindTerminal, Host: "ssh.invalid", User: "lab-user", Pin: host.PublicKey().Marshal(), Method: methodPassword, Secret: []byte(syntheticRemotePassword)}
+	for _, variant := range []string{"version", "version0", "version2", "version4", "kind", "terminal-mode", "files-mode", "host", "secret", "method", "user", "pin", "trailing"} {
 		t.Run(variant, func(t *testing.T) {
 			start := valid
 			switch variant {
@@ -291,8 +291,16 @@ func TestSSHWorkerCoreMalformedStartupNeverAuthenticates(t *testing.T) {
 				start.Version = 1
 			case "version0":
 				start.Version = 0
-			case "version3":
-				start.Version = 3
+			case "version2":
+				start.Version = 2
+			case "version4":
+				start.Version = 4
+			case "kind":
+				start.Kind = "shell"
+			case "terminal-mode":
+				start.Mode = "both"
+			case "files-mode":
+				start.Kind, start.Mode = kindFiles, "all"
 			case "host":
 				start.Host = ""
 			case "secret":

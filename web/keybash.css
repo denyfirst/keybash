@@ -275,6 +275,10 @@ button.secondary {
   box-shadow: var(--shadow);
 }
 button.secondary:hover:not(:disabled) { background: var(--paper-sunk); border-color: var(--ink-faint); }
+/* Deleting is the one action drawn in red; the same red in both schemes
+   keeps white text readable on it. */
+button.danger { background: #b3202e; border-color: #b3202e; }
+button.danger:hover:not(:disabled) { background: #931a25; border-color: #931a25; }
 /* A state is said in colour that stays legible, never faded out. While a
    page waits on a request its buttons keep their faces, so it does not flash. */
 :where(body:not([data-busy])) button:disabled, :where(body:not([data-busy])) button.secondary:disabled {
@@ -411,12 +415,13 @@ body.workspace {
   background: var(--paper-sunk);
   border-right: 1px solid var(--rule);
 }
+/* The mark and the edition sit together in the middle of the menu. */
 .rail-identity {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-  margin: 0 0.6rem 2.2rem;
+  justify-content: center;
+  gap: 0.7rem;
+  margin: 0 0 2.2rem;
 }
 /* The pages and the person, below the mark; on a phone, behind one button. */
 .rail-menu { display: flex; flex: 1; flex-direction: column; }
@@ -564,7 +569,7 @@ button.link-button:hover:not(:disabled) { color: var(--link); background: none; 
     border-right: 0;
     border-bottom: 1px solid var(--rule);
   }
-  .rail-identity { margin: 0; }
+  .rail-identity { justify-content: flex-start; margin: 0; }
   .rail-identity .wordmark { font-size: 1.4rem; }
   .rail-identity .tag { display: none; }
   .menu-toggle { display: inline-flex; max-width: 100%; margin: 0; padding: 0.5rem 0.8rem; }

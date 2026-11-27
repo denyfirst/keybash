@@ -154,6 +154,10 @@ a.connect {
   box-shadow: 0 1px 2px rgba(15, 18, 24, 0.14);
 }
 a.connect:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* Files sits beside Connect, drawn as the card's second action. */
+a.connect.files-link { color: var(--ink); background: var(--card); border-color: color-mix(in srgb, var(--ink-faint) 25%, var(--rule)); box-shadow: var(--shadow); }
+a.connect.files-link:hover { background: var(--paper-sunk); border-color: var(--ink-faint); box-shadow: var(--shadow); }
+a.connect.files-link .button-glyph { color: var(--tool); }
 /* Its play mark is large enough to read at a glance, and steps forward when
    pointed at. */
 a.connect .button-glyph { width: 1.15rem; height: 1.15rem; margin-left: -0.15rem; transition: transform 0.2s ease; }
@@ -569,10 +573,6 @@ button.mark-pick[aria-expanded=true] .mark-chevron { transform: rotate(180deg); 
 /* What a sheet says back stays in the sheet. */
 .dialog-notice { min-height: 0; margin: 0.8rem 0 0; font-size: 0.88rem; font-weight: 500; color: var(--ink); text-align: right; }
 .dialog-notice:empty { display: none; }
-/* Deleting is the one action drawn in red; the same red in both schemes
-   keeps white text readable on it. */
-button.danger { background: #b3202e; border-color: #b3202e; }
-button.danger:hover:not(:disabled) { background: #931a25; border-color: #931a25; }
 .delete-name { margin: 0.6rem 0; font-weight: 650; overflow-wrap: anywhere; }
 /* An empty keys page shows a key, waiting. */
 .empty-key {
@@ -828,6 +828,7 @@ button.secondary[data-copied], .command-head button.copy-chip[data-copied] { col
   button.server-icon { width: 2.75rem; height: 2.75rem; }
 }
 /* A role is chosen from three described choices, never a bare word. */
+.role-choice + .hint { margin-top: 0.9rem; }
 .role-choice { display: grid; gap: 0.5rem; min-width: 0; margin: 1.1rem 0 0; padding: 0; border: 0; }
 .role-choice legend { margin: 0 0 0.4rem; padding: 0; font-size: 0.86rem; font-weight: 600; color: var(--ink-soft); }
 .role-option {

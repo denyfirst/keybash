@@ -64,6 +64,7 @@
 <section id="server-settings" aria-labelledby="server-settings-title" hidden><div class="section-head"><h2 id="server-settings-title">This server</h2></div><div class="settings">
 <article class="setting"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg></span><div class="setting-text"><h3>Name</h3><p id="server-name-now" class="hint"></p></div><button id="server-rename" type="button" class="secondary">Rename</button></article>
 <article class="setting"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><path d="M4 16l4.5-4.5 4 4 2.5-2.5L20 18"/><path d="M15.5 9.5h.01"/></svg></span><div class="setting-text"><h3>What runs on it</h3><p id="server-system-now" class="hint"></p></div><button id="server-system" type="button" class="secondary">Choose</button></article>
+<article class="setting" id="server-files-setting"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9.5 15.5v-4M7.8 13.2l1.7-1.7 1.7 1.7M14.5 11.5v4M12.8 13.8l1.7 1.7 1.7-1.7"/></svg></span><div class="setting-text"><h3>File transfer</h3><p id="server-files-now" class="hint"></p></div><button id="server-files" type="button" class="secondary">Change</button></article>
 <article class="setting setting-danger"><span class="setting-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M5 7h14"/><path d="M10 7V5h4v2"/><path d="M7 7l1 12h8l1-12"/><path d="M10.5 11v5M13.5 11v5"/></svg></span><div class="setting-text"><h3>Remove this server</h3><p class="hint">Ends its sessions and destroys its accounts’ keys and passwords.</p></div><button id="server-remove" type="button" class="secondary destructive">Remove server</button></article>
 </div></section>
 </section>
@@ -116,6 +117,14 @@
 <label class="role-option"><input type="radio" name="person-role" value="admin"><span class="role-text"><strong>Administrator</strong><span>Manages servers and the people here, and connects where they put themselves.</span></span></label>
 </fieldset>
 <div class="dialog-actions"><button id="role-cancel" type="button" class="secondary">Cancel</button><button type="submit">Change role</button></div></form><p class="dialog-notice" role="status" aria-live="polite"></p></dialog>
+<dialog id="files-dialog" class="sheet" aria-labelledby="files-title"><form id="files-form"><h2 id="files-title">File transfer</h2><p class="hint">Everyone on this server’s accounts can then move files in the browser, on a Files page beside Connect. A change ends this server’s open Files pages.</p>
+<fieldset class="role-choice"><legend>File transfer</legend>
+<label class="role-option"><input type="radio" name="files-mode" value="off"><span class="role-text"><strong>Off</strong><span>No Files page for this server.</span></span></label>
+<label class="role-option"><input type="radio" name="files-mode" value="download"><span class="role-text"><strong>Download only</strong><span>Open folders and download files.</span></span></label>
+<label class="role-option"><input type="radio" name="files-mode" value="both"><span class="role-text"><strong>Upload and download</strong><span>Also upload, make folders, rename and delete.</span></span></label>
+</fieldset>
+<p class="hint">Keybash does not keep a record of file transfers yet. The account’s own rights on the server still decide what can be read or changed.</p>
+<div class="dialog-actions"><button id="files-cancel" type="button" class="secondary">Cancel</button><button type="submit">Save</button></div></form><p class="dialog-notice" role="status" aria-live="polite"></p></dialog>
 <dialog id="reset-dialog" class="sheet" aria-labelledby="reset-title"><form id="reset-form"><h2 id="reset-title">Reset access</h2><p class="hint">Choose what they lost. You get a one-time code to give them, and they are signed out at once.</p>
 <fieldset class="role-choice"><legend>What they lost</legend>
 <label class="role-option"><input type="radio" name="reset-kind" value="phone" checked><span class="role-text"><strong>Their phone</strong><span>They keep their password and set up a new phone with the code. Their servers stay.</span></span></label>

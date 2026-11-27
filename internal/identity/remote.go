@@ -113,6 +113,9 @@ type remoteLease struct {
 	expires                          time.Time
 	active                           bool
 	cancel                           context.CancelCauseFunc // the cause is a terminalweb.Reason the page can show
+	// files makes a Files lease (ADR 0011): what the server allowed when it
+	// was granted. A terminal's lease has none.
+	files terminalweb.FilesMode
 }
 
 // NewRemoteLab adds ownership authorization to the existing loopback TLS lab.
@@ -349,10 +352,10 @@ func (l *Lab) remoteSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, _ := tokenID(raw)
-	// This socket is for terminals. A desktop's lease is used up here without
-	// starting anything; a desktop opens only on its own socket.
+	// This socket is for terminals. A desktop's or a Files lease is used up
+	// here without starting anything; each opens only on its own socket.
 	defer func() { lease.cancel(nil); l.mu.Lock(); delete(l.remote.leases, key); l.mu.Unlock() }()
-	if target.Protocol != "ssh" {
+	if target.Protocol != "ssh" || lease.files != "" {
 		return
 	}
 	stopRequest := context.AfterFunc(r.Context(), func() { lease.cancel(nil) })
@@ -493,6 +496,32 @@ func (l *Lab) remoteHTTP(w http.ResponseWriter, r *http.Request, id [32]byte, s 
 		result = struct {
 			Lease string `json:"lease"`
 		}{raw}
+		return
+	}
+	// A Files session's lease: the same checks, while the server allows files.
+	if r.Method == "POST" && r.URL.Path == "/api/remote/files" {
+		fields, ok := readFields(w, r, 1024, "account")
+		if !ok {
+			status = 400
+			return
+		}
+		raw, mode, e := l.grantFilesLocked(id, fields["account"])
+		clear(fields)
+		if e != nil {
+			status = 401
+			if e == errRemoteCapacity {
+				markRemoteCapacity(w)
+				status = 503
+			}
+			if e == errLimited {
+				status = 429
+			}
+			return
+		}
+		result = struct {
+			Lease string `json:"lease"`
+			Mode  string `json:"mode"`
+		}{raw, string(mode)}
 		return
 	}
 	status = 404

@@ -19,8 +19,12 @@ worker accepts only these two kinds: there is no SSH agent or reusable signing
 RPC/oracle.
 
 The process worker receives that one credential (a PKCS#8 key of at most 8 KiB,
-or a password of at most 4096 bytes) in a version 2 start frame through a
-bounded private startup pipe, after its sandbox hello. It receives no DB path,
+or a password of at most 4096 bytes) in a version 3 start frame through a
+bounded private startup pipe, after its sandbox hello. The start frame also
+names the session's kind: a terminal, or Files with what it may do (ADR 0011).
+A Files worker asks the server for the `sftp` subsystem instead of a PTY and a
+shell, and refuses every terminal frame; a terminal worker refuses every file
+frame. It receives no DB path,
 instance key, login password, MFA seed, passphrase or other vault records. The
 gateway has already parsed/decrypted an encrypted imported key within its two-slot
 budget. Neither startup bytes nor native diagnostics are logged, written to a

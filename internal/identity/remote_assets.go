@@ -10,10 +10,11 @@ import (
 )
 
 // sessionPage reports whether path names a session page by its shape alone:
-// /remote/{ssh|rdp}/{account} (ADR 0010). Whether it opens is decided later.
+// /remote/{ssh|rdp|files}/{account} (ADR 0010, 0011). Whether it opens is
+// decided later.
 func sessionPage(path string) bool {
 	parts := strings.Split(strings.TrimPrefix(path, "/remote/"), "/")
-	return strings.HasPrefix(path, "/remote/") && len(parts) == 2 && validID(parts[1]) && (parts[0] == "ssh" || parts[0] == "rdp")
+	return strings.HasPrefix(path, "/remote/") && len(parts) == 2 && validID(parts[1]) && (parts[0] == "ssh" || parts[0] == "rdp" || parts[0] == "files")
 }
 
 // closedPage answers a session page this person may not open with one page,
@@ -30,7 +31,9 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		// browser client exactly as vendored and checked against CI's build
 		// (scripts/vendor-ironrdp-web.py).
 		"/remote-desktop.mjs": "remote-desktop.mjs", "/remote-desktop-input.mjs": "remote-desktop-input.mjs", "/remote-desktop-gfx.mjs": "remote-desktop-gfx.mjs",
-		"/vendor/ironrdp/ironrdp_web.js": "vendor/ironrdp/ironrdp_web.js", "/vendor/ironrdp/ironrdp_web_bg.wasm": "vendor/ironrdp/ironrdp_web_bg.wasm"}
+		"/vendor/ironrdp/ironrdp_web.js": "vendor/ironrdp/ironrdp_web.js", "/vendor/ironrdp/ironrdp_web_bg.wasm": "vendor/ironrdp/ironrdp_web_bg.wasm",
+		// The Files page (ADR 0011).
+		"/files.mjs": "files.mjs", "/files-socket.mjs": "files-socket.mjs", "/files.css": "files.css"}
 	file := assets[r.URL.Path]
 	protocol := ""
 	account := ""
@@ -48,7 +51,12 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		allowed := !l.closed && s.ctx.Err() == nil && l.remote != nil
 		if allowed {
 			target, _, ok := l.accountLocked(s, account)
-			allowed = ok && target.Protocol == protocol
+			if protocol == "files" {
+				// Files is an SSH server's, and only while the server allows it.
+				allowed = ok && target.Protocol == "ssh" && l.filesModeLocked(account) != ""
+			} else {
+				allowed = ok && target.Protocol == protocol
+			}
 		}
 		l.mu.Unlock()
 		if !allowed {
@@ -58,6 +66,9 @@ func (l *Lab) remoteAsset(w http.ResponseWriter, r *http.Request, s *session) bo
 		file = "index.html"
 		if protocol == "rdp" {
 			file = "remote-desktop.html"
+		}
+		if protocol == "files" {
+			file = "files.html"
 		}
 	}
 	if file == "" {

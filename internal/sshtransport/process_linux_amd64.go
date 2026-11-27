@@ -137,7 +137,7 @@ func openWorkerBinary(w ProcessWorker) (*os.File, error) {
 	return f, nil
 }
 
-func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string, dial func(context.Context) (net.Conn, error), pin []byte, user, method string, secret []byte) (*processStream, error) {
+func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string, dial func(context.Context) (net.Conn, error), pin []byte, user, method string, secret []byte, session workerKind) (*processStream, error) {
 	if os.Geteuid() != 0 {
 		return nil, ErrProcess
 	}
@@ -195,7 +195,7 @@ func launchSSHProcess(life, setup context.Context, w ProcessWorker, host string,
 		return nil, ErrProcess
 	}
 	s := newProcessStream(ctx, cancel, in, out, done)
-	if err := finishProcessSetup(s, setup, host, pin, user, method, secret); err != nil {
+	if err := finishProcessSetup(s, setup, host, pin, user, method, secret, session); err != nil {
 		_ = s.Close()
 		if errors.Is(err, ErrRefused) {
 			return nil, ErrRefused

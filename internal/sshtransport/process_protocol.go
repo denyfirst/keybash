@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/denyfirst/keybash/internal/sshkey"
+	"github.com/denyfirst/keybash/internal/terminalweb"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -27,9 +28,14 @@ const (
 	// The server took no method the credential offered: the one failure the
 	// page is told about, as a fixed word. Empty, like frameFailed.
 	frameRefused byte = 9
-	// v2: the start frame carries one credential (a key or a password) rather
-	// than an Ed25519 seed. A v1 peer is refused at the greeting.
-	workerHello = "keybash-ssh-worker/v2"
+	// v3: the start frame also says which kind of session this is: a
+	// terminal, or Files with what it may do (ADR 0011). v2 carried one
+	// credential (a key or a password) rather than an Ed25519 seed. An older
+	// peer is refused at the greeting.
+	workerHello   = "keybash-ssh-worker/v3"
+	workerVersion = 3
+	kindTerminal  = "terminal"
+	kindFiles     = "files"
 	// Host, user and pin are small; the secret is at most sshkey.MaxMaterial.
 	startFrameLimit = 12 * 1024
 	methodKey       = "key"
@@ -51,7 +57,7 @@ func frameLimit(kind byte) int {
 	case frameOutput, frameErrorOutput:
 		return 8192
 	default:
-		return -1
+		return filesFrameLimit(kind)
 	}
 }
 func readWorkerFrame(r io.Reader) (byte, []byte, error) {
@@ -105,6 +111,33 @@ type workerStart struct {
 	Pin        []byte
 	Method     string // methodKey (PKCS#8) or methodPassword
 	Secret     []byte
+	Kind       string // kindTerminal or kindFiles
+	Mode       string // for Files: what it may do; empty for a terminal
+}
+
+// workerKind is the session a worker serves, chosen by the gateway from the
+// lease and checked again by the worker.
+type workerKind struct {
+	files bool
+	mode  terminalweb.FilesMode
+}
+
+func (k workerKind) wire() (string, string) {
+	if k.files {
+		return kindFiles, string(k.mode)
+	}
+	return kindTerminal, ""
+}
+
+func startKind(start workerStart) (workerKind, bool) {
+	switch start.Kind {
+	case kindTerminal:
+		return workerKind{}, start.Mode == ""
+	case kindFiles:
+		mode := terminalweb.FilesMode(start.Mode)
+		return workerKind{files: true, mode: mode}, terminalweb.ValidFilesMode(mode)
+	}
+	return workerKind{}, false
 }
 
 // sessionHandoff validates one session credential against the connection
@@ -190,12 +223,14 @@ func serveSSHWorker(ctx context.Context, input io.ReadCloser, output io.WriteClo
 	}
 	var start workerStart
 	err = ssh.Unmarshal(data, &start)
-	if err != nil || start.Version != 2 || len(start.Host) == 0 || len(start.Host) > 253 {
+	session, known := startKind(start)
+	if err != nil || start.Version != workerVersion || len(start.Host) == 0 || len(start.Host) > 253 || !known {
 		clear(start.Secret)
 		clear(data)
 		return ErrProcess
 	}
 	config, release, err := workerConfig(start)
+	config.Files = session.files
 	clear(start.Secret)
 	clear(data)
 	if err != nil {
@@ -214,6 +249,9 @@ func serveSSHWorker(ctx context.Context, input io.ReadCloser, output io.WriteClo
 	defer terminal.Close()
 	if writeWorkerFrame(output, frameReady, nil) != nil {
 		return ErrProcess
+	}
+	if session.files {
+		return serveFiles(ctx, cancel, terminal, input, output, session.mode)
 	}
 	var workers, readers sync.WaitGroup
 	var outMu sync.Mutex

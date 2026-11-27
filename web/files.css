@@ -1,0 +1,344 @@
+/*
+  The Files page: one folder of a server at a time, in the workspace's light
+  and dark. Remote names are untrusted, so the page writes them as text and
+  shows a control or direction character as a visible mark (files.mjs).
+  Tiles and icons are flat lines, like everywhere else (web/assets_test.go).
+*/
+
+body.files-page { min-height: 100vh; }
+.files-shell { min-height: 100vh; }
+
+/* ── The bar: which server, which account, what is allowed ──────────────── */
+.files-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 3.75rem;
+  padding: 0.6rem max(2rem, calc((100% - 80rem) / 2 + 2rem));
+  border-bottom: 1px solid var(--rule);
+}
+.files-wordmark { font-size: 1.05rem; padding-right: 1rem; border-right: 1px solid var(--rule); }
+.files-where { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.files-server-glyph {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  color: var(--tool);
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+.files-server-glyph svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.files-where-text { min-width: 0; }
+.files-where h1 { margin: 0; font-size: 1rem; line-height: 1.25; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-account { margin: 0; font-family: var(--mono); font-size: 0.78rem; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-mode {
+  flex: none;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--tool);
+  border: 1px solid color-mix(in srgb, var(--tool) 40%, var(--rule));
+  border-radius: 999px;
+}
+.files-status { display: inline-flex; align-items: center; gap: 0.45rem; margin: 0 0 0 auto; font-size: 0.84rem; color: var(--ink-soft); white-space: nowrap; }
+.files-status::before { content: ""; width: 0.5rem; height: 0.5rem; background: var(--ink-faint); border-radius: 50%; }
+body[data-stage="ready"] .files-status::before { background: var(--strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 20%, transparent); }
+body[data-stage="ended"] .files-status::before { background: var(--insecure); }
+
+/* ── The card that holds the folder ─────────────────────────────────────── */
+.files-main { width: 100%; max-width: 80rem; margin-inline: auto; padding: 1.75rem 2rem 7rem; }
+.files-card {
+  overflow: clip;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.files-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 0.85rem 1rem 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--rule);
+}
+.files-actions { display: flex; align-items: center; gap: 0.5rem; }
+.files-actions button { margin: 0; min-height: 2.35rem; padding: 0 0.9rem; }
+button.icon-button { flex: none; width: 2.1rem; height: 2.1rem; min-height: 0; margin: 0; padding: 0; }
+.files-actions button.icon-button { width: 2.35rem; padding: 0; }
+body[data-mode="download"] .write-only { display: none !important; }
+/* Until the folder is there, and once the session ended, there is nothing to act on. */
+body:not([data-stage="ready"]) :is(.files-actions, .crumb-edit) { visibility: hidden; }
+body[data-stage="ended"]:not([data-mode]) .files-card { display: none; }
+
+/* Each part of the path goes back to that folder; the last one is where you are. */
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; gap: 0.1rem; font-size: 0.95rem; }
+.crumbs button {
+  margin: 0;
+  padding: 0.25rem 0.45rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  box-shadow: none;
+}
+.crumbs button:hover:not(:disabled) { color: var(--ink); background: var(--paper-sunk); border-color: var(--rule); box-shadow: none; }
+.crumbs .crumb-here { padding: 0.25rem 0.45rem; font-weight: 650; color: var(--ink); }
+.crumbs .crumb-sep { color: var(--ink-faint); user-select: none; }
+.crumbs .crumb-home { display: inline-flex; align-items: center; gap: 0.4rem; }
+.crumbs .crumb-home svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.crumbs button.crumb-edit { width: 1.9rem; height: 1.9rem; padding: 0; color: var(--ink-faint); }
+.crumbs input { width: min(32rem, 70vw); padding: 0.4rem 0.6rem; font-family: var(--mono); font-size: 0.88rem; }
+
+.files-filter { position: relative; display: block; margin: 0; }
+.files-filter .button-glyph { position: absolute; top: 50%; left: 0.7rem; color: var(--ink-faint); transform: translateY(-50%); pointer-events: none; }
+.files-filter input { width: 12rem; height: 2.35rem; padding: 0 0.75rem 0 2.1rem; font-size: 0.9rem; }
+
+.files-note {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.65rem 1.1rem;
+  font-size: 0.86rem;
+  color: var(--ink-soft);
+  background: color-mix(in srgb, var(--tool) 6%, var(--card));
+  border-bottom: 1px solid var(--rule);
+}
+.files-note .button-glyph { color: var(--tool); }
+
+.files-selection {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem 0.75rem 0.4rem 1.1rem;
+  background: color-mix(in srgb, var(--tool) 8%, var(--card));
+  border-bottom: 1px solid var(--rule);
+}
+.files-selection p { margin: 0 0.75rem 0 0; font-size: 0.88rem; color: var(--ink-soft); }
+.files-selection p strong { color: var(--ink); }
+.files-selection button { margin: 0; min-height: 2rem; padding: 0 0.7rem; font-size: 0.86rem; }
+.files-selection #selection-clear { margin-left: auto; }
+
+/* ── The folder ─────────────────────────────────────────────────────────── */
+.files-table-wrap { position: relative; min-height: 14rem; }
+.files-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 0.92rem; }
+.files-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: var(--card);
+  border-bottom: 1px solid var(--rule);
+}
+.files-table th button.sort {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.files-table th button.sort:hover:not(:disabled) { color: var(--ink); background: none; box-shadow: none; }
+.sort-glyph { width: 0.85rem; height: 0.85rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--ink-faint); }
+th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--ink); }
+th[aria-sort="ascending"] .sort-glyph, th[aria-sort="descending"] .sort-glyph { color: var(--tool); }
+th[aria-sort="ascending"] .sort-glyph path { d: path("m8 14 4-4 4 4"); }
+th[aria-sort="descending"] .sort-glyph path { d: path("m8 10 4 4 4-4"); }
+
+.col-pick { width: 2.9rem; }
+.col-size { width: 7.5rem; }
+.col-time { width: 12rem; }
+.col-acts { width: 7.6rem; }
+th.col-size, td.col-size { text-align: right; }
+.files-table th.col-pick, .files-table td.col-pick { padding-left: 1.1rem; padding-right: 0; }
+.files-table input[type="checkbox"] { display: inline-block; width: 1rem; height: 1rem; margin: 0; vertical-align: middle; accent-color: var(--tool); cursor: pointer; }
+
+.files-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--rule) 70%, transparent);
+  vertical-align: middle;
+}
+.files-table tbody tr:last-child td { border-bottom: 0; }
+.files-table tbody tr { transition: background-color 0.12s; }
+.files-table tbody tr:hover { background: color-mix(in srgb, var(--ink) 3%, var(--card)); }
+.files-table tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--tool) 9%, var(--card)); }
+.files-table tbody tr:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.files-table td.col-size, .files-table td.col-time { font-size: 0.86rem; color: var(--ink-soft); white-space: nowrap; }
+
+.name-cell { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
+.row-glyph { flex: none; width: 1.3rem; height: 1.3rem; fill: none; stroke: var(--ink-faint); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.row-glyph.glyph-folder { stroke: var(--tool); fill: color-mix(in srgb, var(--tool) 14%, transparent); }
+.name-text { min-width: 0; }
+.name-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 500; }
+.name-meta { display: none; font-size: 0.78rem; color: var(--ink-faint); }
+button.name-open {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  box-shadow: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.name-open:hover:not(:disabled) { color: var(--link); background: none; box-shadow: none; text-decoration: underline; text-underline-offset: 0.2em; }
+.link-mark {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  vertical-align: 0.1em;
+}
+.name-unreadable { font-style: italic; color: var(--ink-faint); }
+/* A control or direction character in a remote name, shown for what it is. */
+.ctl {
+  display: inline-block;
+  margin: 0 0.1rem;
+  padding: 0 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--weak);
+  border: 1px solid color-mix(in srgb, var(--weak) 55%, var(--rule));
+  border-radius: 3px;
+  vertical-align: 0.05em;
+}
+
+/* A row's actions are always there, as quiet lines that come forward when pointed at. */
+.row-acts { display: flex; justify-content: flex-end; gap: 0.15rem; }
+.row-acts button.ghost { color: var(--ink-faint); }
+.row-acts button.ghost:hover:not(:disabled) { color: var(--ink); }
+
+.files-empty { display: grid; justify-items: center; padding: 3.5rem 1rem 3rem; text-align: center; }
+.files-empty svg { width: 2.6rem; height: 2.6rem; margin-bottom: 0.8rem; fill: color-mix(in srgb, var(--tool) 12%, transparent); stroke: var(--tool); stroke-width: 1.4; stroke-linejoin: round; }
+.files-empty-title { margin: 0 0 0.3rem; font-weight: 600; }
+.files-empty .hint { margin: 0; }
+
+/* Dropping files: the whole folder becomes the target. */
+.files-drop {
+  position: absolute;
+  inset: 0.6rem;
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.6rem;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--tool) 9%, var(--card));
+  border: 2px dashed color-mix(in srgb, var(--tool) 70%, var(--rule));
+  border-radius: 12px;
+  pointer-events: none;
+}
+.files-drop svg { width: 2.4rem; height: 2.4rem; fill: none; stroke: var(--tool); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.files-drop p { margin: 0; font-size: 0.95rem; }
+.files-drop strong { font-family: var(--mono); font-size: 0.88rem; }
+
+.files-summary { margin: 0; padding: 0.65rem 1.1rem; font-size: 0.8rem; color: var(--ink-faint); border-top: 1px solid var(--rule); }
+.files-summary:empty { display: none; }
+
+.files-ended { display: grid; justify-items: center; gap: 0.2rem; margin-top: 1.5rem; text-align: center; }
+.files-ended .notice { margin: 0; }
+.files-ended button { margin-top: 0.6rem; }
+
+/* ── Transfers, in a tray that stays out of the way ─────────────────────── */
+.transfers {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 10;
+  width: min(24rem, calc(100vw - 1.5rem));
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.transfers-head { display: flex; align-items: center; gap: 0.2rem; padding: 0.55rem 0.5rem 0.55rem 1rem; border-bottom: 1px solid var(--rule); }
+.transfers-head p { flex: 1; margin: 0; font-size: 0.9rem; font-weight: 600; }
+.transfers[data-folded] .transfer-list { display: none; }
+.transfers[data-folded] .transfers-head { border-bottom: 0; }
+.transfers[data-folded] #transfers-fold .button-glyph { transform: rotate(180deg); }
+.transfer-list { max-height: 18rem; margin: 0; padding: 0.35rem 0; overflow-y: auto; list-style: none; }
+.transfer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.15rem 0.7rem;
+  padding: 0.5rem 0.5rem 0.55rem 1rem;
+}
+.transfer .row-glyph { width: 1.15rem; height: 1.15rem; stroke: var(--tool); }
+.transfer-name { margin: 0; overflow: hidden; font-size: 0.88rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.transfer-detail { grid-column: 2; margin: 0; font-size: 0.76rem; color: var(--ink-faint); }
+.transfer .icon-button { grid-row: 1 / span 2; grid-column: 3; width: 1.9rem; height: 1.9rem; }
+.transfer progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 4px;
+  margin-top: 0.3rem;
+  appearance: none;
+  overflow: hidden;
+  background: var(--paper-sunk);
+  border: 0;
+  border-radius: 2px;
+}
+.transfer progress::-webkit-progress-bar { background: var(--paper-sunk); }
+.transfer progress::-webkit-progress-value { background: var(--tool); border-radius: 2px; transition: width 0.2s; }
+.transfer progress::-moz-progress-bar { background: var(--tool); }
+.transfer[data-state="done"] progress::-webkit-progress-value { background: var(--strong); }
+.transfer[data-state="done"] progress::-moz-progress-bar { background: var(--strong); }
+.transfer[data-state="failed"] progress::-webkit-progress-value { background: var(--insecure); }
+.transfer[data-state="failed"] progress::-moz-progress-bar { background: var(--insecure); }
+.transfer[data-state="failed"] .transfer-detail { color: var(--insecure); }
+
+dialog:is(#name-dialog, #delete-dialog, #replace-dialog) { width: min(28rem, 92vw); }
+dialog h2 { margin-bottom: 0.4rem; }
+.files-check { display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0 0; font-weight: 500; }
+.files-check input { width: auto; margin: 0; accent-color: var(--tool); }
+
+/* ── Phones: the name carries size and time under it ───────────────────── */
+@media (max-width: 44rem) {
+  .files-bar { gap: 0.7rem; padding: 0.6rem 1rem; }
+  .files-wordmark { display: none; }
+  .files-status { font-size: 0; gap: 0; }
+  .files-main { padding: 1rem 0.6rem 7rem; }
+  .files-toolbar { padding: 0.75rem; }
+  .files-actions { width: 100%; }
+  .files-filter { flex: 1; }
+  .files-filter input { width: 100%; }
+  #new-folder span { display: none; }
+  #new-folder { width: 2.35rem; padding: 0; }
+  .col-size, .col-time { display: none; }
+  .name-meta { display: block; }
+  .col-acts { width: 6.6rem; }
+  .files-table td { padding: 0.5rem 0.45rem; }
+  .transfers { right: 0.75rem; bottom: 0.75rem; }
+}
