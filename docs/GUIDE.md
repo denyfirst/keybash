@@ -46,9 +46,10 @@ added. If it changes, Keybash refuses the server until an administrator
 compares the new one on the server's own screen and accepts it.
 
 **Adding a server.** Choose Terminal (SSH) or Desktop (RDP), a name and, with
-the tile beside it, the picture on its cards (a desktop starts as Windows),
-then its IP address and port. The address must be inside the networks shown
-under it. Keybash reads the server's identity, and you compare it on the
+the picture at the start of the name field, the picture on its cards (a
+desktop starts as Windows), then its IP address and port. The address must be
+inside the networks this Keybash may reach; if it is not, Keybash says so and
+names them. Keybash reads the server's identity, and you compare it on the
 server's own console before it is added; `INSTALL.md` has the commands. Next
 you add the account people sign in as.
 
@@ -136,6 +137,9 @@ GitHub serves over HTTPS. `INSTALL.md` has the steps, under "Upgrading".
   your open sessions.
 - **Authenticator:** the 6-digit code on your phone. Replace it when you
   change phones: the old one keeps working until the new one is confirmed.
+  When Keybash asks for the code, type it at once: it goes by itself as the
+  sixth digit arrives. **Use a recovery code** under the boxes takes one of
+  those instead.
 - **Recovery codes:** one-time codes for signing in when your phone is lost.
   Making new ones stops the old ones at once.
 
@@ -145,3 +149,6 @@ The sun or moon button switches between light and dark. The choice is kept
 with your account on the Keybash server and reaches every page: the
 workspace, the terminal and desktop pages, and the sign-in page, which takes
 it from a copy the server leaves in your browser.
+
+The button at the end of the menu's **Workspace** caption folds the menu to
+its icons, and opens it again. That choice is kept with your account too.

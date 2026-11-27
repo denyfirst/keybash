@@ -96,7 +96,6 @@ body.session-page main { padding: 0; }
   font-weight: 600;
   color: var(--term-ink);
   background: transparent;
-  background-image: none;
   border: 1px solid transparent;
   border-radius: 6px;
   box-shadow: none;
@@ -197,7 +196,6 @@ body.ended .ended-card #notice { padding: 1rem 1.3rem; font-size: 0.95rem; visib
   padding: 0;
   cursor: pointer;
   background: color-mix(in srgb, var(--term-bar) 88%, transparent);
-  background-image: none;
   border: 1px solid var(--term-rule);
   border-top: 0;
   border-radius: 0 0 0.6rem 0.6rem;

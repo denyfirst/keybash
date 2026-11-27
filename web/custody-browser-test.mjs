@@ -28,7 +28,8 @@ async function session() { return (await page.request.get(config.Origin + '/api/
 async function api(path, data, method = 'POST') { const state = await session(); return page.request.fetch(config.Origin + path, { method, headers: { Origin: config.Origin, 'X-Keybash-Request': '1', 'X-Keybash-CSRF': state.csrf, 'Content-Type': 'application/json' }, data }); }
 async function login() { await page.locator('#username').fill(config.Username); await page.locator('#password').fill(config.Password); await page.locator('#signin button').click(); await page.waitForURL(config.Origin + '/'); await settled(); }
 async function lapse() { for (let i = 0; i < 10; i++) await fixture('tick'); } // past the ten-minute fresh window
-async function stepUp(code) { await page.locator('#stepup-dialog').waitFor({ state: 'visible' }); await page.locator('#stepup-code').fill(code); await page.locator('#stepup-submit').click(); }
+// The code goes by itself as its sixth digit arrives; the field takes it with no click first.
+async function stepUp(code) { await page.locator('#stepup-dialog').waitFor({ state: 'visible' }); assert.equal(await page.evaluate(() => document.activeElement.id), 'stepup-code', 'the step-up code needs a click first'); await page.keyboard.type(code); }
 try {
   await page.goto(config.Origin + '/'); await page.waitForURL(config.Origin + '/login');
   await page.locator('#bootstrap').waitFor({ state: 'visible' });
@@ -55,7 +56,7 @@ try {
   // Typed digit by digit, the six boxes stay where they are: the first box is
   // not scrolled out of sight after the sixth digit.
   await page.locator('#enrollment-code').pressSequentially(otp(Math.floor(seconds / 30) - 1));
-  assert.deepEqual(await page.locator('.code-boxes').evaluate(box => [box.scrollLeft, box.querySelector('span').getBoundingClientRect().left >= box.getBoundingClientRect().left]), [0, true], 'the code boxes scrolled');
+  assert.deepEqual(await page.locator('#enrollment .code-boxes').evaluate(box => [box.scrollLeft, box.querySelector('span').getBoundingClientRect().left >= box.getBoundingClientRect().left]), [0, true], 'the code boxes scrolled');
   await page.locator('#enrollment button').click(); await page.locator('#recovery').waitFor({ state: 'visible' }); codes = (await page.locator('#recovery-codes').inputValue()).split('\n'); assert.equal(codes.length, 10); await settled();
   await alone(); await page.locator('#saved-recovery').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert(await page.locator('.rail').isVisible() && !(await page.locator('#focus-logout').isVisible()), 'the ready workspace has no menu');
@@ -81,6 +82,9 @@ try {
   // The sign-in page, drawn before anyone signs in, takes the same scheme.
   const signIn = await page.context().newPage(); await signIn.goto(config.Origin + '/login');
   assert.equal(await signIn.evaluate(() => document.documentElement.dataset.theme), chosen, 'the sign-in page did not take the chosen scheme'); await signIn.close();
+  // The button that folds the menu is inside it, and the person shows by initial.
+  assert.equal(await page.locator('.rail .rail-head #rail-collapse').count(), 1, 'the menu button is outside the menu'); assert.equal(await page.locator('.topbar .rail-collapse').count(), 0);
+  assert.equal(await page.locator('.rail-user .avatar').textContent(), config.Username[0], 'the menu shows no initial');
   looked = lookSaved(); await page.locator('#rail-collapse').click(); await looked;
   await page.reload(); await page.locator('#account-panel').waitFor({ state: 'visible' }); await settled();
   assert.deepEqual(await page.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.menu]), [chosen, 'collapsed'], 'the look did not come back with the page');
@@ -140,10 +144,16 @@ try {
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#challenge').waitFor({ state: 'visible' }); await settled();
   await alone(); await page.locator('#focus-logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await page.locator('#challenge').waitFor({ state: 'visible' });
   assert.equal((await page.request.get(config.Origin + '/api/access')).status(), 403);
-  await fixture('tick'); await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  // The code is typed straight into the six boxes, with no click into them, and
+  // goes by itself as the sixth digit arrives.
+  await fixture('tick'); assert.equal(await page.evaluate(() => document.activeElement.id), 'factor-code', 'the code needs a click first');
+  await page.keyboard.type(otp()); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   await fixture('restart'); assert.equal((await page.request.get(config.Origin + '/api/session')).status(), 401, 'restart retained session');
-  await page.goto(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor(); await settled();
-  await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  await page.goto(config.Origin + '/login'); await login(); await page.locator('#factor-code').fill(otp()); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor(); await settled();
+  // A recovery code pasted into the boxes turns them into one plain field, and
+  // waits for Continue.
+  await page.locator('#factor-code').fill(codes[0]); assert.equal(await page.locator('#challenge').getAttribute('data-code'), 'recovery', 'a recovery code stayed in the boxes');
+  assert.equal(await page.locator('#factor-code').inputValue(), codes[0]); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   assert.equal(await page.locator('#account').textContent(), config.Username, 'the restart lost the account');
   // The administrator invites someone, who chooses their own password with the
   // one-time code and lands where their role allows: an auditor sees Account alone.
@@ -189,7 +199,7 @@ try {
   // person does so with their own password, then sets up a new phone with the
   // code, pasted with spaces around it.
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await fixture('tick');
-  await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#factor-code').fill(otp()); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users'); await page.locator('#users-panel').waitFor({ state: 'visible' }); await settled();
   await page.locator('.person', { hasText: 'invitee' }).getByRole('link', { name: 'invitee', exact: true }).click(); await page.locator('#person-panel').waitFor({ state: 'visible' }); await settled();
   await page.locator('#person-card').getByRole('button', { name: 'Reset access…', exact: true }).click(); await page.locator('#reset-dialog').waitFor({ state: 'visible' });
@@ -209,7 +219,7 @@ try {
   // the current code from the person's phone it sets a new password and signs
   // them in; the old password no longer works.
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login'); await login(); await fixture('tick');
-  await page.locator('#factor-code').fill(otp()); await page.locator('#factor button').click(); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
+  await page.locator('#factor-code').fill(otp()); await page.locator('#vault').waitFor({ state: 'visible' }); await settled();
   await page.locator('.rail-item[data-page=users]').click(); await page.waitForURL(config.Origin + '/users'); await page.locator('#users-panel').waitFor({ state: 'visible' }); await settled();
   await page.locator('.person', { hasText: 'invitee' }).getByRole('link', { name: 'invitee', exact: true }).click(); await page.locator('#person-panel').waitFor({ state: 'visible' }); await settled();
   await page.locator('#person-card').getByRole('button', { name: 'Reset access…', exact: true }).click(); await page.locator('#reset-dialog').waitFor({ state: 'visible' });
@@ -225,7 +235,11 @@ try {
   await page.waitForURL(config.Origin + '/'); await page.locator('#vault').waitFor({ state: 'visible' }); await settled(); assert.equal(await page.locator('h1').textContent(), 'Account');
   await page.locator('#logout').click(); await page.waitForURL(config.Origin + '/login');
   assert.equal((await page.request.post(config.Origin + '/api/session', { headers: { Origin: config.Origin, 'X-Keybash-Request': '1', 'Content-Type': 'application/json' }, data: { username: 'invitee', password: inviteePassword } })).status(), 401, 'the forgotten password still signs in');
-  await login(); await page.locator('#factor-code').fill(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor();
+  // The switch under the boxes asks for a recovery code, and back again.
+  await login(); const challenge = page.locator('#challenge'); await challenge.locator('.code-switch').click();
+  assert.deepEqual(await challenge.evaluate(card => [card.dataset.code, document.activeElement.id, document.getElementById('factor-code').inputMode]), ['recovery', 'factor-code', 'text']);
+  await page.keyboard.type(codes[0]); await page.locator('#factor button').click(); await page.locator('#notice').filter({ hasText: 'Not accepted' }).waitFor(); await settled();
+  await challenge.locator('.code-switch').click(); assert.deepEqual(await challenge.evaluate(card => [card.dataset.code, document.getElementById('factor-code').inputMode]), ['phone', 'numeric']);
   assert.deepEqual(errors, []); assert.deepEqual(external, []); assert.deepEqual(secretURLs, []);
   console.log('Browser custody: bootstrap, mandatory MFA, phone navigation, code-only step-up, invites and each person\'s own page, roles and resets, forgotten password, restart, replay refusal and failure handling passed');
 } catch (error) { console.log(error.code === 'ERR_ASSERTION' ? error.message : error.name); throw new Error('browser custody checks failed'); }
